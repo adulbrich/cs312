@@ -1,0 +1,128 @@
+---
+title: 'Observability and Incident Response'
+description: 'Add monitoring, alerting, and incident response practices to your Kubernetes-hosted Minecraft server.'
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO5: Describe how to plan major and minor tasks and time so that services are stable and effective, and meet a Service Level Agreement.
+- LO6: Produce written documentation of system problems, solutions, processes, and procedures.
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+- LO8: Participate effectively in a team environment.
+*/}
+
+The Minecraft server went down at 2 AM on a Tuesday. Nobody noticed until the 9 AM standup, when the CEO asked why his nether portal was not loading. The incident retrospective was brief: "We did not know it was down." The CEO's only feedback, delivered without blinking: "How do we not know things?"
+
+Your service runs on Kubernetes, but you have no visibility into its health. When something breaks, you find out from the CEO, not from your tools. This assignment adds the operational visibility and response practices that ensure you know about problems before leadership does.
+
+## Learning Objectives
+
+- Deploy and configure a monitoring stack (Prometheus + Grafana) on Kubernetes.
+- Design actionable alerts tied to runbooks that reduce mean time to recovery.
+- Execute a structured incident drill with detection, recovery, and postmortem.
+- Demonstrate log access and interpretation for troubleshooting.
+
+## Constraints (AWS Academy)
+
+- Build on your existing k3s deployment from Assignment 4 (single-node is expected).
+- Monitoring tools run alongside Minecraft on the same cluster.
+- Keep cloud spend predictable; document how to tear down the monitoring stack.
+- Images sourced from ECR. Backups remain in S3.
+
+## Requirements
+
+### A. Monitoring Stack
+
+- Deploy Prometheus and Grafana (or instructor-approved equivalent) on your k3s cluster.
+- Collect and visualize:
+  - Node health metrics (CPU, memory, disk usage)
+  - Pod health metrics (restarts, readiness, resource consumption)
+  - At least one Minecraft-specific signal (e.g., player count via RCON exporter, JVM heap usage, or service response time)
+- Build a dashboard that answers: "Is my service healthy right now?"
+
+### B. Actionable Alerts
+
+Define at least **three** alerts. Each alert must be:
+
+- Tied to a clear symptom (not just a raw metric threshold)
+- Linked to a runbook section with first-response steps
+- Justified: explain why this alert matters and why the threshold was chosen
+
+Examples: pod crash looping, sustained high memory usage approaching limits, disk usage above 80%, service probe failures.
+
+### C. Incident Drill
+
+Pick **one** failure scenario and execute it end-to-end:
+
+- **Bad deploy**: push a deployment with a broken image, detect via alerts/dashboard, recover via rollback
+- **Resource exhaustion**: set artificially low resource limits, detect via metrics, recover via adjustment
+- **Service misconfiguration**: introduce a bad ConfigMap change, detect via probes/logs, recover via config fix
+
+Document the drill:
+
+- What failure was introduced
+- How it was detected (which dashboard panel, alert, or log query)
+- How it was recovered
+- What you would improve next time (brief postmortem)
+
+### D. Log Access
+
+- Demonstrate that you can find and interpret container logs using `kubectl logs`
+- Show how to search for a specific error or event from your incident drill
+- Document where logs are stored and how an operator would search them during an incident
+
+### E. Documentation Updates
+
+- Updated architecture diagram showing monitoring components (Prometheus, Grafana, exporters)
+- On-call quickstart: what an operator should check first when paged
+- One runbook per alert (at least 3 runbooks)
+- Cost controls: how to tear down monitoring components, any scheduling considerations
+
+## What You'll Submit
+
+1. Kubernetes manifests or Helm values for the monitoring stack
+2. Alert definitions (as code or exported configuration)
+3. Narrated screen recording (max 3 minutes) with timestamps for 4 checkpoints:
+   1. Show Grafana dashboard with live metrics (node health, pod health, and Minecraft-specific signal)
+   2. Show alert definitions and walk through one alert's threshold and linked runbook
+   3. Execute incident drill: introduce failure, show detection in dashboard/alerts, recover
+   4. Show `kubectl logs` finding a specific event from the drill
+4. Incident drill report with postmortem
+5. Documentation package (architecture diagram, on-call quickstart, alert runbooks, cost controls)
+
+Server MOTD must include your name or student ID. Submit timestamps alongside the video.
+
+## Minimal Contract (Acceptance)
+
+A TA/operator must be able to:
+
+- See a working Grafana dashboard showing current cluster and service health.
+- Identify which alerts are defined and what each one means.
+- Follow your incident drill report and understand what happened and how you recovered.
+- Use your on-call quickstart to begin diagnosing a problem.
+
+<Aside type="note" title="Question 1">
+Pick one alert you defined and explain why it is actionable and not noise. What is the operator's first response?
+</Aside>
+<Aside type="note" title="Question 2">
+What is the most important metric missing from your dashboard? How would you add it?
+</Aside>
+<Aside type="note" title="Question 3">
+If your monitoring stack itself goes down, how would you detect it? What is your fallback?
+</Aside>
+## Rubric (100 points)
+
+- **Monitoring stack quality (30)**: Prometheus + Grafana running; meaningful dashboard panels; at least one service-specific metric collected and visualized.
+- **Alerts + runbooks (25)**: 3+ actionable alerts with clear symptoms, justified thresholds, and linked runbook steps.
+- **Incident drill + postmortem (25)**: realistic scenario executed; clear evidence of detection and recovery; postmortem identifies lessons and improvements.
+- **Log access + documentation (20)**: logs are accessible and searchable; architecture diagram updated; on-call quickstart is usable by another operator.
+
+## Extra Credit (up to +10)
+
+- **Log aggregation (+5)**: deploy Loki, Promtail, or equivalent on the cluster. Show searchable, centralized logs in Grafana or a dedicated UI. Document the retention policy.
+- **SLO definition (+5)**: define a measurable SLO for your Minecraft service (e.g., "service available 99% of the time as measured by probe success rate"). Configure a corresponding alert or recording rule. Document how you would measure and report on this SLO over a week.
+
+Extra credit must stay within this assignment's observability scope.

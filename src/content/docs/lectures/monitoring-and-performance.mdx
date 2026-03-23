@@ -1,0 +1,402 @@
+---
+title: Monitoring and Performance Management
+description: "Metrics, dashboards, and alerts: use Prometheus/Grafana patterns and local tools like htop to spot and fix issues."
+sidebar:
+  order: 15
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Every system feels healthy until a user tells you it is not. The goal of monitoring and performance management is to reverse that dynamic: you should know about problems before users do, understand what "normal" looks like so that "abnormal" is obvious, and have the data to diagnose issues quickly. This chapter covers the concepts, tools, and practices that make that possible.
+
+To keep things concrete, imagine you are responsible for a three-tier web application: an Nginx load balancer in front of two Node.js application servers, backed by a PostgreSQL database. Somewhere in the application code a memory leak is slowly consuming RAM on one of the app servers. Our objective throughout this chapter is to set up monitoring that catches that leak before it causes an outage.
+
+## Monitoring vs. observability
+
+The terms "monitoring" and "observability" are sometimes used interchangeably, but they describe different levels of insight.
+
+**Monitoring** answers predefined questions. You decide in advance what to measure (CPU usage, request latency, error count), set thresholds, and get alerted when those thresholds are crossed. Monitoring is essential, but it can only tell you about failure modes you anticipated.
+
+**Observability** is the ability to ask new questions of your system without deploying new code. It rests on three pillars:
+
+- **Metrics**: numeric measurements collected over time (for example, request count, memory usage, queue depth). Metrics are cheap to store and fast to query, making them the backbone of dashboards and alerts.
+- **Logs**: timestamped records of discrete events. Logs carry rich context (stack traces, request IDs, user identifiers) but are expensive to store and slow to search at scale.
+- **Traces**: records that follow a single request as it passes through multiple services. A trace shows you that a particular API call spent 12 ms in the load balancer, 80 ms in the app server, and 400 ms waiting on a database query.
+
+A well-instrumented system uses all three. Metrics tell you *that* something is wrong. Logs and traces help you understand *why*.
+
+### Metrics vs. logs: a closer comparison
+
+Although metrics and logs are complementary, they have fundamentally different collection models that affect how you use each one.
+
+**Metrics** are collected at regular, predetermined intervals (typically every 15 to 60 seconds). Each data point is a numeric measurement — CPU utilization, memory usage, request count — stored in a time-series database. Because they are numeric and uniformly sampled, metrics are cheap to store, fast to query, and easy to aggregate across many instances.
+
+**Logs** are event-driven: a log entry is created when something happens (a request completes, an error is thrown, a configuration changes), not on a fixed schedule. This means logs have **high cardinality** — a single log line might contain a unique user ID, a specific IP address, an error message that appears once in a thousand requests. That richness is what makes logs indispensable for diagnosis, but it also makes them expensive to store and slow to search at scale compared to metrics.
+
+In practice: use metrics to detect that something is wrong and to quantify the scope. Use logs to understand what specifically happened and why.
+
+<Aside type="tip">
+Start with metrics and structured logs. Add distributed tracing when your architecture grows to the point where a single request touches more than two or three services.
+</Aside>
+
+## Key methodologies: USE and RED
+
+With hundreds of possible metrics available, deciding what to measure can feel overwhelming. Two frameworks cut through the noise.
+
+### The USE method (for resources)
+
+Brendan Gregg's USE method applies to every physical or logical resource in your system (CPU, memory, disk, network interfaces, file descriptors). For each resource, ask three questions:
+
+- **Utilization**: what fraction of the resource's capacity is currently in use? For our app server, this might be the percentage of available RAM consumed by the Node.js process.
+- **Saturation**: is work queuing because the resource is full? A saturated CPU shows a high run-queue length; a saturated disk shows I/O wait.
+- **Errors**: is the resource producing errors? Disk read errors, network packet drops, and out-of-memory kills all fall here.
+
+The USE method is particularly good at catching our memory leak. If we track memory utilization on both app servers, we will see one climbing steadily while the other stays flat.
+
+### The RED method (for services)
+
+Tom Wilkie's RED method applies to request-driven services (APIs, web servers, microservices). For each service, measure:
+
+- **Rate**: how many requests per second is the service handling?
+- **Errors**: how many of those requests are failing?
+- **Duration**: how long do requests take? (Typically measured as a distribution: median, p95, p99.)
+
+For our three-tier app, RED metrics on the Nginx layer tell us what users actually experience, while RED metrics on the app servers tell us where bottlenecks form. As the memory leak worsens, you would expect to see duration climb on the affected server (garbage collection pauses get longer) and eventually error rate spike when the process runs out of memory.
+
+## SLIs, SLOs, and error budgets
+
+Knowing what to measure is only half the problem. You also need to know what "good enough" looks like. That is where Service Level Indicators (SLIs), Service Level Objectives (SLOs), and error budgets come in.
+
+An **SLI** is a carefully chosen metric that reflects user experience. For a web application, typical SLIs are the proportion of requests that return a successful response (availability) and the proportion of requests served faster than a threshold (latency). An SLI is always expressed as a ratio: good events divided by total events.
+
+An **SLO** is a target for an SLI over a rolling window. For example: "99.9% of requests will return a non-error response over any 30-day window." That sounds generous, but 99.9% availability over 30 days allows only about 43 minutes of downtime.
+
+The **error budget** is the gap between perfection and your SLO. If your SLO is 99.9%, your error budget is 0.1% of requests. When the budget is healthy, teams can ship features aggressively. When the budget is nearly exhausted, teams should slow down and invest in reliability. This creates a data-driven conversation between product velocity and operational stability.
+
+<Aside type="note">
+Error budgets work best when they have organizational buy-in. An SLO that nobody enforces is just a number on a dashboard.
+</Aside>
+
+For our three-tier application, a reasonable starting point might be two SLOs: an availability SLO (99.9% of requests return HTTP 2xx or 3xx) and a latency SLO (95% of requests complete in under 500 ms). A memory leak that triggers garbage collection pauses will erode the latency SLO first, giving you a warning before availability collapses.
+
+## Prometheus: architecture and the pull model
+
+Prometheus is the most widely adopted open-source metrics system, and it anchors the monitoring stack described in this chapter. Understanding its architecture helps you reason about what it can (and cannot) do.
+
+### How Prometheus works
+
+Prometheus operates on a **pull model**: instead of applications pushing metrics to a central server, Prometheus periodically fetches (scrapes) metrics from HTTP endpoints exposed by your services. A typical setup looks like this:
+
+<Steps>
+1. **Instrument your code** or deploy an exporter. Node Exporter exposes Linux system metrics; the PostgreSQL exporter exposes database metrics; application frameworks often have built-in Prometheus client libraries.
+2. **Configure scrape targets** in `prometheus.yml`. Each target specifies a host, port, and scrape interval (commonly 15 or 30 seconds).
+3. **Prometheus scrapes, stores, and indexes** the metrics in its local time-series database (TSDB).
+4. **Query with PromQL** through the Prometheus web UI, HTTP API, or Grafana.
+</Steps>
+
+A minimal scrape configuration for our three-tier app might look like this:
+
+```yaml
+scrape_configs:
+  - job_name: 'node'
+    static_configs:
+      - targets:
+          - 'lb01:9100'
+          - 'app01:9100'
+          - 'app02:9100'
+          - 'db01:9100'
+
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['lb01:9113']
+
+  - job_name: 'app'
+    static_configs:
+      - targets: ['app01:3000', 'app02:3000']
+
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['db01:9187']
+```
+
+The pull model has a subtle advantage: if Prometheus cannot reach a target, the absence of data is itself a signal. A push-based system might silently lose data if the application crashes before sending its final batch.
+
+### Metric types
+
+Prometheus defines four metric types, each suited to a different kind of measurement:
+
+- **Counter**: a value that only goes up (or resets to zero on process restart). Examples: total HTTP requests served, total bytes sent. You almost never look at the raw counter value; instead, you compute a rate.
+- **Gauge**: a value that can go up or down. Examples: current memory usage, number of active connections, CPU temperature.
+- **Histogram**: samples observations (like request durations) and counts them in configurable buckets. Histograms let you compute quantiles (p50, p95, p99) at query time.
+- **Summary**: similar to a histogram but computes quantiles on the client side. Summaries are less flexible (you cannot aggregate them across instances) and are less commonly used today.
+
+For catching our memory leak, the key metric is a gauge: `process_resident_memory_bytes` exposed by the Node.js Prometheus client. This gauge reports the current RSS (resident set size) of the process. On a healthy server, it fluctuates within a range. On the leaking server, it trends upward continuously.
+
+## PromQL basics
+
+PromQL (Prometheus Query Language) is how you extract meaning from raw metrics. A few functions cover the vast majority of practical use cases.
+
+### Instant vectors and range vectors
+
+A simple metric name returns an **instant vector**, the most recent value for every time series matching that name:
+
+```promql
+process_resident_memory_bytes
+```
+
+Wrapping a metric name in square brackets creates a **range vector**, a set of values over a time window:
+
+```promql
+process_resident_memory_bytes[5m]
+```
+
+Range vectors are inputs to functions like `rate()` and `increase()`.
+
+### rate() and increase()
+
+`rate()` computes the per-second average rate of increase of a counter over a time window. It is the workhorse function for counters:
+
+```promql
+rate(http_requests_total[5m])
+```
+
+This returns the average requests per second over the last five minutes for each time series. `increase()` is similar but returns the total increase rather than a per-second rate:
+
+```promql
+increase(http_requests_total[1h])
+```
+
+### histogram_quantile()
+
+For histograms, `histogram_quantile()` computes percentiles at query time. To get the 95th-percentile request duration:
+
+```promql
+histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+```
+
+This is how you build latency SLI measurements directly from Prometheus data.
+
+### Aggregation operators
+
+PromQL supports aggregation across label dimensions. To get total request rate across all app server instances:
+
+```promql
+sum(rate(http_requests_total[5m])) by (job)
+```
+
+To find the app server with the highest memory usage:
+
+```promql
+topk(1, process_resident_memory_bytes{job="app"})
+```
+
+### A query to catch the memory leak
+
+Here is a practical query that detects our leak. It computes how fast memory is growing, in bytes per second, over the last hour:
+
+```promql
+deriv(process_resident_memory_bytes{job="app"}[1h])
+```
+
+A healthy process will show a `deriv()` value near zero (fluctuating slightly as allocations come and go). A leaking process will show a consistently positive derivative. You can alert on this: if the derivative stays above a threshold for 15 minutes, something is wrong.
+
+## Grafana: dashboards, panels, and variables
+
+Prometheus stores and queries data; Grafana makes it visual. A Grafana dashboard is a collection of **panels**, each displaying one or more queries as a graph, stat, gauge, table, or heatmap.
+
+### Dashboard design principles
+
+A well-designed dashboard answers a specific question at a glance. Some principles worth following:
+
+- **Layer your dashboards**. Start with a high-level overview (the "golden signals" for all services) and link to detailed dashboards for each component. For our three-tier app, the top-level dashboard might have four rows: load balancer, app servers, database, and infrastructure.
+- **Put the user perspective first**. The top row of your overview dashboard should show SLI-derived panels: request success rate, p95 latency, and error budget remaining. If those are green, everything below is context. If those are red, the panels below help you locate the source.
+- **Use consistent units and scales**. Memory should always be in the same unit (bytes or mebibytes, not a mix). Time axes should align across panels in the same row so you can visually correlate events.
+- **Add annotations for deploys and incidents**. Grafana supports annotations, vertical markers on time-series graphs that indicate when a deploy happened or an incident was declared. These are invaluable during troubleshooting because they let you answer "did anything change around the time the problem started?"
+
+### Template variables
+
+Grafana template variables let you build reusable dashboards. A variable named `instance` can be populated from a PromQL label query:
+
+```promql
+label_values(process_resident_memory_bytes{job="app"}, instance)
+```
+
+Panels then reference `$instance` in their queries, and a dropdown at the top of the dashboard lets you switch between app01 and app02 without duplicating panels. This is especially useful when your fleet grows beyond a handful of servers.
+
+### A panel for the memory leak
+
+A time-series panel with the following query, scoped to the `app` job and split by `instance`, will make the leak visually obvious:
+
+```promql
+process_resident_memory_bytes{job="app"}
+```
+
+On a healthy dashboard, both lines (app01 and app02) stay in a similar band. When app02 has a leak, its line climbs steadily while app01 stays flat. Adding a horizontal threshold line at, say, 80% of available RAM gives you a visual reference for when trouble is near.
+
+## Alerting: from metrics to action
+
+Dashboards are for humans who happen to be looking. Alerts are for humans who are not. The goal of an alerting system is to notify the right person about the right problem at the right time, with enough context to act.
+
+### Alert rules in Prometheus
+
+Prometheus alert rules live in YAML files loaded by the Prometheus server. A rule has three parts: a PromQL expression, a `for` duration (how long the condition must persist before firing), and labels/annotations that describe the alert.
+
+```yaml
+groups:
+  - name: app-server-alerts
+    rules:
+      - alert: HighMemoryUsage
+        expr: |
+          (process_resident_memory_bytes{job="app"} /
+           node_memory_MemTotal_bytes) > 0.80
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: >
+            Memory usage on {{ $labels.instance }} has exceeded 80%
+            for more than 10 minutes. Current value: {{ $value | humanize1024 }}.
+
+      - alert: MemoryLeakSuspected
+        expr: deriv(process_resident_memory_bytes{job="app"}[1h]) > 1048576
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Possible memory leak on {{ $labels.instance }}"
+          description: >
+            Memory on {{ $labels.instance }} has been growing by more than
+            1 MiB/s sustained over 30 minutes.
+```
+
+The `for` clause is critical. Without it, a momentary spike in memory during a large request would trigger a false alert. The 10-minute and 30-minute hold-downs ensure that only sustained problems generate notifications.
+
+### Severity levels and routing
+
+Not every alert deserves a page at 3 AM. A common severity scheme uses three levels:
+
+- **Critical (page)**: user-facing impact is occurring or imminent. The on-call engineer is woken up. Examples: SLO breach, database unreachable, all app servers down.
+- **Warning (ticket)**: something is degrading and needs attention within business hours. Examples: memory leak detected, disk usage above 80%, certificate expiring in 14 days.
+- **Info (dashboard only)**: notable but not actionable right now. Examples: a new version was deployed, a background job completed.
+
+Prometheus hands fired alerts to **Alertmanager**, which handles deduplication, grouping, silencing, and routing. Routing rules direct alerts to different channels based on severity and labels: critical alerts go to PagerDuty or a phone call; warnings go to a Slack channel and a ticket system; info alerts are logged but not sent anywhere.
+
+### On-call rotation concepts
+
+Alerting only works if someone is responsible for responding. On-call rotations distribute that responsibility across a team, typically in weekly shifts. A few principles keep on-call sustainable:
+
+- The on-call engineer should have the authority and access to mitigate problems, not just escalate them.
+- Track alert volume and wake-up frequency. If the on-call regularly gets more than two pages per shift, the system is too noisy; invest in fixing the underlying causes or tuning alert thresholds.
+- Every page should be actionable. If an alert fires and the correct response is "do nothing," the alert should be removed or converted to a warning.
+
+<Aside type="caution">
+Alert fatigue is a real and dangerous problem. When engineers are buried in false or low-value alerts, they start ignoring all of them, including the ones that matter. Treat every noisy alert as a bug to be fixed.
+</Aside>
+
+## Local performance tools
+
+Not every investigation starts with Prometheus. Sometimes you are SSH'd into a server, and you need to figure out what is happening right now. Linux provides a rich set of command-line tools for this purpose.
+
+### htop
+
+`htop` is an interactive process viewer. It shows per-process CPU and memory usage, sorted and color-coded. For our memory leak scenario, running `htop` on the affected app server and sorting by memory (press `M`) would immediately highlight the Node.js process consuming an outsized share of RAM. The `RES` column shows resident memory, and watching it climb in real time confirms the leak.
+
+### vmstat
+
+`vmstat` reports virtual memory statistics. Running `vmstat 1` prints a new line every second with columns for processes, memory, swap, I/O, system, and CPU:
+
+```bash
+vmstat 1 5
+```
+
+Key columns to watch: `si` and `so` (swap in/out, which should be zero on a healthy system), `us` (user CPU), `sy` (system CPU), and `wa` (I/O wait). If `wa` is consistently high, the bottleneck is likely disk I/O, not CPU.
+
+### iostat
+
+`iostat` provides detailed disk I/O statistics. The `-x` flag gives extended stats including utilization and average queue size:
+
+```bash
+iostat -x 1 5
+```
+
+The `%util` column shows how busy each device is. Values near 100% indicate a saturated disk, which maps directly to the "saturation" question in the USE method. The `await` column shows average I/O latency in milliseconds; spikes here often explain application slowdowns.
+
+### ss
+
+`ss` (socket statistics) replaces the older `netstat` and shows network connection state. To see all TCP connections with process information:
+
+```bash
+ss -tnp
+```
+
+This helps you verify that the app servers are connected to the database, that the load balancer has connections to both app servers, and that no unexpected connections are present. The `State` column reveals connections stuck in `CLOSE-WAIT` or `TIME-WAIT`, which can indicate resource leaks on the networking side.
+
+### strace
+
+`strace` attaches to a running process and prints every system call it makes. It is a last-resort diagnostic tool (it adds significant overhead) but invaluable when nothing else explains the behavior:
+
+```bash
+strace -p <PID> -c
+```
+
+The `-c` flag produces a summary of system calls rather than printing each one individually. If a process is spending most of its time in `futex()` calls, it is likely waiting on a lock. If it is stuck in `read()` or `write()`, I/O is the bottleneck.
+
+<Aside type="tip">
+When investigating a production issue, work from least invasive to most invasive: start with `htop` and `vmstat` (read-only, negligible overhead), then `iostat` and `ss`, and reach for `strace` only when you have a specific hypothesis to test.
+</Aside>
+
+## Putting it together: the golden signals dashboard
+
+Google's Site Reliability Engineering book distills monitoring into four "golden signals" that apply to any request-driven service: latency, traffic, errors, and saturation. These overlap heavily with the RED and USE methods, and they provide a practical template for your first dashboard.
+
+For our three-tier application, a golden signals dashboard might contain the following panels:
+
+**Latency**: p50, p95, and p99 request duration from the load balancer, computed with `histogram_quantile()`. This is the user-facing view. A second row might show latency broken down by backend instance, which helps you spot the leaking server (its p95 will climb as garbage collection pauses increase).
+
+**Traffic**: total request rate via `sum(rate(http_requests_total[5m]))`, split by HTTP method or endpoint. Traffic panels help you distinguish "the system is slow because it is overwhelmed" from "the system is slow because something is broken."
+
+**Errors**: error rate as a percentage, `sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m]))`. This panel directly measures your availability SLI. An error budget burn-down panel next to it shows how much budget remains.
+
+**Saturation**: CPU utilization, memory utilization, and disk I/O utilization for each tier. This is where the memory leak becomes unmistakable. A panel showing `process_resident_memory_bytes{job="app"}` by instance, with a threshold line at 80% of total memory, gives you an early warning that the affected server is heading toward trouble.
+
+### Dashboard design as a practice
+
+Building dashboards is iterative. Start with the golden signals and basic infrastructure metrics. After your first incident, you will learn which panels you wished you had and which ones you never looked at. Add the former, remove the latter. Over time, your dashboards will converge on exactly the information your team needs during troubleshooting.
+
+A few anti-patterns to avoid: dashboards with 30 panels where every metric is "just in case" (nobody reads them); dashboards without context (a CPU graph is meaningless if you do not know the machine's core count); and dashboards that require tribal knowledge to interpret (if the on-call has to ask "is this normal?" the dashboard has failed).
+
+## The full picture: from leak to resolution
+
+Let us trace how all of these pieces work together to catch our memory leak.
+
+<Steps>
+1. **Node Exporter and the app's Prometheus client** expose `process_resident_memory_bytes` and `node_memory_MemAvailable_bytes` on each app server.
+2. **Prometheus scrapes** these metrics every 15 seconds and stores them in its time-series database.
+3. **Grafana's golden signals dashboard** shows memory utilization for both app servers. The on-call engineer notices app02's line trending upward during a routine check, or alternatively, does not notice at all, because the alert handles it.
+4. **The `MemoryLeakSuspected` alert rule** fires after `deriv()` stays positive for 30 minutes. Alertmanager routes the warning to the team's Slack channel.
+5. **The on-call engineer** opens the Grafana dashboard, confirms the trend, and SSH's into app02 for a closer look.
+6. **`htop` sorted by memory** confirms the Node.js process at 2.1 GB and climbing. `vmstat 1` shows no swap activity yet, but the available memory is dropping.
+7. **The engineer restarts the app server process** as an immediate mitigation, which resets memory usage. They then file a ticket to investigate the root cause (likely an event listener or cache that is never cleared).
+8. **The postmortem** notes that the alert fired 45 minutes before the server would have run out of memory, giving the team ample time to respond. An action item is added to set up a p99 latency SLO alert that would catch degradation even earlier.
+</Steps>
+
+This scenario illustrates the core loop of monitoring: instrument, collect, visualize, alert, investigate, mitigate, and improve.
+
+## Commercial and managed alternatives
+
+The Prometheus/Grafana stack described in this chapter is the dominant open-source choice, but several commercial and SaaS platforms offer equivalent or broader functionality with less operational overhead:
+
+- **Datadog:** a SaaS observability platform that unifies metrics, logs, and traces in a single product. Its agent auto-discovers most common services, which reduces the instrumentation effort significantly. Well-suited for teams that want a managed solution at the cost of vendor lock-in.
+- **New Relic:** a full-stack SaaS platform covering application performance monitoring (APM), infrastructure metrics, and log management. New Relic's APM capability is particularly strong for tracing performance issues inside application code.
+- **Splunk:** common in enterprise and regulated industries, combining log management with security analytics and operational intelligence. Splunk's query language (SPL) is powerful; the per-GB pricing can be significant for high-volume environments.
+- **Graylog:** an open-source log management platform with optional commercial extensions. Graylog sits in a middle ground between the DIY ELK stack and fully managed SaaS, offering a friendlier UI and built-in alerting on top of Elasticsearch.
+
+For most course-scale projects, the open-source Prometheus/Grafana stack is the right starting point. For production environments, the choice between self-hosted open-source and a managed SaaS comes down to operational capacity, cost structure, and compliance requirements.
+
+## Further reading
+
+- <a href="https://sre.google/sre-book/monitoring-distributed-systems/" target="_blank" rel="noopener noreferrer">Google SRE Book: Monitoring Distributed Systems</a>
+- <a href="https://www.brendangregg.com/usemethod.html" target="_blank" rel="noopener noreferrer">Brendan Gregg: The USE Method</a>
+- <a href="https://grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services/" target="_blank" rel="noopener noreferrer">Tom Wilkie: The RED Method</a>
+- <a href="https://prometheus.io/docs/prometheus/latest/querying/basics/" target="_blank" rel="noopener noreferrer">PromQL Documentation</a>

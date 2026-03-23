@@ -1,0 +1,116 @@
+---
+title: 'Kubernetes Migration (k3s on EC2)'
+description: 'Migrate your containerized Minecraft server from Docker/Compose to Kubernetes (k3s) on EC2 while preserving state and demonstrating operational controls.'
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+- LO5: Describe how to plan major and minor tasks and time so that services are stable and effective, and meet a Service Level Agreement.
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+- LO8: Participate effectively in a team environment.
+*/}
+
+The VP of Engineering attended KubeCon and came back a changed person. A company-wide Slack message confirmed that “all services will migrate to Kubernetes by Q3.” When you pointed out that the Minecraft server is not a business-critical production service, you were told that “all means all.” There was a follow-up message clarifying that this includes the Minecraft server specifically.
+
+You are not being asked to build an enterprise platform. You *are* being asked to migrate a stateful service to Kubernetes in a controlled way: with declarative deployments, self-healing, and the buzzword compliance that leadership requires.
+
+## Learning Objectives
+
+- Deploy and operate a stateful workload in Kubernetes.
+- Use Kubernetes primitives appropriately: Services, ConfigMaps/Secrets, probes, resource controls.
+- Preserve and protect state (world data) during migration.
+- Demonstrate operational behaviors: rollout, rollback, and failure recovery.
+
+## Constraints (AWS Academy)
+
+- Kubernetes must run on EC2.
+- Use k3s for Kubernetes unless your instructor explicitly approves an alternative.
+- Infrastructure should still be provisioned via Terraform/OpenTofu.
+- State handling must be explicit and defensible (for k3s single node, simplicity is acceptable if well-justified).
+
+## Requirements
+
+### A. Provisioning
+
+- Terraform provisions an EC2 host that runs k3s.
+- Network exposure is explicitly defined:
+  - Administrative access must be restricted.
+  - Minecraft service exposure must be deliberate (e.g., NodePort with documented port mapping).
+
+### B. Kubernetes Deployment
+
+- Minecraft runs in Kubernetes using your ECR-hosted image. Use the image you published in Assignment 2 or built via your CI/CD pipeline from Assignment 3. Reference a specific pinned tag, not `latest`.
+- Configuration is delivered via ConfigMap/Secret (as appropriate).
+- Health management:
+  - Liveness and readiness probes are defined and justified.
+- Resource controls:
+  - Resource requests/limits (or a justified alternative) are present.
+
+### C. Persistence and Safety
+
+- World data is stored persistently.
+- You must document:
+  - Where the data is stored.
+  - How it is backed up to S3.
+  - How it is restored.
+
+### D. Operational Demonstrations
+
+You must demonstrate:
+
+- A rollout to a new image version.
+- A rollback to a previous version.
+- A failure drill (choose one):
+  - **Node reboot**: reboot the EC2 host, show k3s and Minecraft recover automatically with world data intact.
+  - **Bad deploy**: push a deployment with a broken or missing image tag, show the rollback process restores service.
+  - **Resource exhaustion**: simulate a resource constraint (e.g., set extremely low memory limits), show detection and recovery.
+
+## What You'll Submit
+
+1. Terraform updates for k3s provisioning
+2. Kubernetes manifests (or Helm/Kustomize config)
+3. Narrated screen recording (max 3 minutes) with timestamps for 4 checkpoints:
+   1. `kubectl get nodes/pods` showing Minecraft running, `nmap` reachability on 25565/tcp
+   2. Persistence proof: delete the pod, show world data survives
+   3. Rollout to new version, then rollback to previous version
+   4. Execute failure drill: introduce failure, detect, recover
+4. Updated documentation (architecture + runbooks)
+
+Server MOTD must include student name/ID. Submit timestamps alongside the video.
+
+## Minimal Contract (Acceptance)
+
+A TA/operator must be able to:
+
+- Deploy your manifests to a fresh k3s host and produce a joinable server.
+- Restart workloads (or the node) and see the same world persist.
+- Follow your runbook to roll forward and roll back.
+- Restore from S3 backup to recover the world.
+
+<Aside type="note" title="Question 1">
+Why is Kubernetes a better fit (or not) for this workload? Give two concrete operational benefits and one operational cost.
+</Aside>
+<Aside type="note" title="Question 2">
+How do your probes and resource settings reduce downtime or improve predictability?
+</Aside>
+<Aside type="note" title="Question 3">
+What is the single biggest failure mode in your persistence design? What is your mitigation?
+</Aside>
+## Rubric (100 points)
+
+- **Kubernetes deployment correctness (25)**: server runs on k3s, reachable on 25565/tcp, config applied via ConfigMap/Secret.
+- **State persistence + recovery (25)**: persistent world data, S3 backups, and restore process proven.
+- **Operational controls (20)**: probes defined and justified; resource requests/limits set; rollout/rollback demonstrated.
+- **Failure drill quality (15)**: realistic scenario with clear detection, recovery steps, and documented outcome.
+- **Documentation + justification (15)**: architecture diagram, tradeoff explanations, and runbook updates are clear and usable.
+
+## Extra Credit (up to +10)
+
+- **Helm chart (+5)**: package the Minecraft deployment as a Helm chart with configurable values (server properties, resource limits, image tag). Show that `helm install` and `helm upgrade` work correctly.
+- **Network policy (+5)**: define a Kubernetes NetworkPolicy that restricts Minecraft pod traffic to only required ports and sources. Document what it blocks and why.
+
+Extra credit must stay within this assignment's Kubernetes scope (no additional cloud services or multi-node setups).

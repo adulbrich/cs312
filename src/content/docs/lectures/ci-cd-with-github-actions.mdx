@@ -1,0 +1,550 @@
+---
+title: CI/CD Pipelines and GitHub Actions
+description: "Build, test, and deploy automatically using GitHub Actions: workflows, jobs, runners, and matrix builds."
+sidebar:
+  order: 12
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Imagine a team of developers working on a containerized web application. Every time someone merges a feature, a designated team member must pull the latest code, run the tests locally, build a Docker image, push it to a registry, and then SSH into a server to deploy the new version. This process is slow, error-prone, and utterly dependent on a single person remembering every step in the right order. If that person is sick, on vacation, or simply distracted, the release stalls or, worse, ships with a defect nobody caught.
+
+Continuous Integration and Continuous Delivery (CI/CD) exist to solve exactly this problem. By automating the path from code commit to running software, CI/CD pipelines eliminate human error, shorten feedback loops, and make deployments a routine, boring event rather than a stressful ritual.
+
+## Deployment Environments
+
+Before discussing CI/CD mechanics, it helps to understand the concept of **deployment environments** — the distinct places where code is deployed at different stages of its lifecycle.
+
+| Environment | Also called | Purpose |
+|-------------|-------------|---------|
+| Development | Dev | Individual developer's local machine or sandbox |
+| Test | — | Automated and manual testing |
+| Staging | Qualification / Pre-production | Production-like environment for final validation |
+| Acceptance | UAT | Business stakeholders verify requirements are met |
+| Production | Prod | The real world; live users and live data |
+
+The production environment is the most complex. It handles real users, real data, and real consequences. Breaking production is expensive, so we validate code in progressively more production-like environments before it reaches end users. CI/CD pipelines automate the journey through these environments, providing gates and checks at each stage.
+
+## Defining CI, CD, and CD
+
+The acronym "CI/CD" actually covers three distinct practices, and it is worth separating them clearly.
+
+**Continuous Integration (CI)** is the practice of merging every developer's working copy into a shared mainline frequently, at least once per day. Each merge triggers an automated build and test run. The goal is to catch integration bugs early, when they are cheap to fix, rather than late in a release cycle when dozens of changes have piled up.
+
+**Continuous Delivery (CD)** extends CI by ensuring that the codebase is always in a deployable state. After the build and tests pass, the pipeline produces an artifact (a Docker image, a compiled binary, or a deployment bundle) that *could* be released to production at any time. A human still decides when to press the button, but the artifact is ready.
+
+**Continuous Deployment** takes this one step further: every change that passes the full pipeline is automatically deployed to production with no human gate. This requires a very high degree of confidence in your test suite and monitoring, but organizations that achieve it can ship hundreds of times per day.
+
+<Aside type="tip">
+Most teams start with continuous integration and continuous delivery. Continuous deployment is a maturity goal, not a prerequisite.
+</Aside>
+
+## The Feedback Loop
+
+A CI/CD pipeline is, at its core, a feedback loop. A developer pushes a commit, and the pipeline answers a question: "Is this change safe to ship?" The faster the pipeline answers, the faster the developer can act on the result.
+
+A typical loop for a containerized web application looks like this:
+
+<Steps>
+1. **Commit and push.** A developer pushes code to a shared repository.
+2. **Lint and static analysis.** The pipeline checks code style and catches common mistakes before any code executes.
+3. **Build.** The application compiles (if applicable) and dependencies are installed.
+4. **Test.** Unit tests, integration tests, and possibly end-to-end tests run against the built artifact.
+5. **Build container image.** A Docker image is assembled from the tested code.
+6. **Push to registry.** The image is pushed to a container registry (Docker Hub, GitHub Container Registry, Amazon ECR).
+7. **Deploy.** The new image is pulled onto a server or cluster and begins serving traffic.
+</Steps>
+
+Each stage acts as a gate. If linting fails, there is no point running the full test suite. If tests fail, there is no point building an image. This "fail fast" principle keeps the loop tight: developers learn about problems within minutes, not hours.
+
+## CI/CD Tools Landscape
+
+Many CI/CD platforms exist. Knowing the major players helps you navigate job postings and existing infrastructure:
+
+| Tool | Notes |
+|------|-------|
+| **Jenkins CI** | Old and sometimes clunky, but open-source and the most widely deployed self-hosted option |
+| **GitLab CI/CD** | Built into GitLab; powerful and self-hostable |
+| **GitHub Actions** | Built into GitHub; cloud-hosted runners; large marketplace |
+| **Azure DevOps (Azure Pipelines)** | Microsoft's offering; integrates deeply with Azure services |
+| **AWS CodePipeline** | Amazon's native CI/CD service |
+| **CircleCI** | Cloud-first; fast hosted runners |
+| **Travis CI** | One of the earliest hosted CI services; less common now |
+| **TeamCity** | JetBrains product; popular in .NET and Java shops |
+| **GCP Cloud Build** | Google Cloud's serverless build system |
+
+This course focuses on GitHub Actions because it integrates directly into the repositories you already use, requires no infrastructure to operate, and reflects industry usage trends.
+
+## GitHub Actions: Core Concepts
+
+GitHub Actions is a CI/CD platform built directly into GitHub. Its tight integration with GitHub repositories makes it an excellent starting point.
+
+### Workflows
+
+A **workflow** is an automated process defined in a YAML file stored at `.github/workflows/` in your repository. A single repository can have multiple workflows: one for CI, one for deployment, one for nightly security scans, and so on. Each file is independent and can be triggered by different events.
+
+### Events
+
+An **event** is something that happens in or to your repository and triggers a workflow. Common events include pushing commits, opening a pull request, creating a release tag, or a scheduled cron expression. You can also trigger workflows manually using the `workflow_dispatch` event.
+
+### Jobs
+
+A workflow contains one or more **jobs**. Each job is a sequence of steps that runs on a single runner. By default, jobs run in parallel; if one job depends on another, you declare that dependency explicitly with the `needs` keyword.
+
+### Steps
+
+A **step** is either a shell command (specified with `run`) or a reference to a reusable action (specified with `uses`). Steps within a job execute sequentially on the same runner, so they share a filesystem and can pass data to one another through files or environment variables.
+
+### Runners
+
+A **runner** is the machine that executes a job. GitHub provides hosted runners with common operating systems (Ubuntu, Windows, macOS), or you can register your own self-hosted runners for specialized hardware or network access. Most workflows use `runs-on: ubuntu-latest` for Linux-based builds.
+
+## Writing Your First Workflow
+
+Let us build a workflow step by step for a containerized Node.js web application. The repository contains application source code, a `package.json` with test and lint scripts, and a `Dockerfile`.
+
+Create a file at `.github/workflows/ci.yml`:
+
+```yaml
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+```
+
+This workflow fires on every push to `main` and on every pull request targeting `main`. It has one job (`lint-and-test`) that checks out the code, installs Node.js, installs dependencies, lints the code, and runs the test suite.
+
+There are several things to notice here. The `actions/checkout@v4` step is a marketplace action that clones your repository onto the runner. The `actions/setup-node@v4` action installs Node.js and, because we specified `cache: npm`, it caches the npm dependency tree between runs so that subsequent builds are faster. The `npm ci` command performs a clean install from the lockfile, which is more reproducible than `npm install`.
+
+<Aside type="note">
+The `@v4` suffix pins the action to a major version. This protects your workflow from breaking changes while still receiving patches. For maximum security, you can pin to a specific commit SHA instead.
+</Aside>
+
+## Common Triggers
+
+GitHub Actions supports a wide variety of events. Here are the ones you will use most often:
+
+**push** fires when commits are pushed to a branch. You can filter by branch name or file path:
+
+```yaml
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+```
+
+**pull_request** fires when a pull request is opened, synchronized (new commits pushed), or reopened. This is the primary trigger for running CI checks on proposed changes before they are merged.
+
+**schedule** uses cron syntax to run workflows on a timer. This is useful for nightly dependency audits or security scans:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 06:00 UTC
+```
+
+**workflow_dispatch** adds a "Run workflow" button in the GitHub UI, allowing you to trigger the workflow manually with optional input parameters:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+```
+
+You can combine multiple triggers in a single workflow. For example, you might run CI on every push and pull request while also allowing manual triggers for ad hoc builds.
+
+## Using Actions from the Marketplace
+
+One of the most powerful features of GitHub Actions is its marketplace of reusable actions. Rather than writing shell commands for common tasks, you can reference community-maintained (or GitHub-maintained) actions that encapsulate complex logic.
+
+Here are a few widely used actions:
+
+| Action | Purpose |
+|--------|---------|
+| `actions/checkout@v4` | Clone the repository onto the runner |
+| `actions/setup-node@v4` | Install Node.js (also available for Python, Go, Java, etc.) |
+| `actions/cache@v4` | Cache directories between workflow runs |
+| `docker/setup-buildx-action@v3` | Set up Docker Buildx for advanced image builds |
+| `docker/login-action@v3` | Authenticate to a container registry |
+| `docker/build-push-action@v6` | Build and push Docker images |
+
+Let us extend our pipeline to build and push a Docker image after the tests pass:
+
+```yaml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  build-image:
+    needs: lint-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+```
+
+Notice how `build-image` declares `needs: lint-and-test`, which means it will not start until the first job succeeds. The `if` condition further restricts this job to pushes on `main`, since there is no reason to push images for pull request branches. The `cache-from` and `cache-to` lines enable GitHub Actions' built-in layer caching for Docker builds, which can dramatically reduce build times.
+
+## Secrets and Environment Variables
+
+Pipelines frequently need credentials: registry passwords, API keys, deployment tokens. Hardcoding these into your workflow file would be a serious security mistake, since workflow files are committed to the repository and visible to anyone with read access.
+
+GitHub provides **encrypted secrets** for this purpose. You can define secrets at the repository level (Settings > Secrets and variables > Actions) or at the organization level for sharing across repositories. In your workflow, you reference them with the `${{ secrets.SECRET_NAME }}` syntax.
+
+```yaml
+- name: Deploy to server
+  env:
+    DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+    SERVER_HOST: ${{ secrets.SERVER_HOST }}
+  run: |
+    echo "$DEPLOY_KEY" > /tmp/deploy_key
+    chmod 600 /tmp/deploy_key
+    ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no \
+      deploy@"$SERVER_HOST" "docker pull ghcr.io/myorg/myapp:latest && docker compose up -d"
+```
+
+There is also a special secret called `GITHUB_TOKEN` that GitHub automatically generates for every workflow run. This token has permissions scoped to the current repository and expires when the job finishes. It is commonly used for pushing container images to GitHub Container Registry or commenting on pull requests, and you do not need to create it manually.
+
+<Aside type="caution">
+Never echo or log secret values. GitHub automatically masks known secrets in log output, but careless string manipulation can still expose them. Treat every secret as something that must never appear in plain text.
+</Aside>
+
+You can also set plain (non-secret) environment variables at the workflow, job, or step level using the `env` key:
+
+```yaml
+env:
+  NODE_ENV: production
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - name: Show environment
+        env:
+          STEP_VAR: only-here
+        run: echo "NODE_ENV=$NODE_ENV CI=$CI STEP_VAR=$STEP_VAR"
+```
+
+Variables defined at a broader scope are inherited by narrower scopes, and a narrower definition overrides a broader one.
+
+## Matrix Builds
+
+Sometimes you need to test your application across multiple environments: different operating systems, different language versions, or different database backends. Rather than duplicating jobs, GitHub Actions supports **matrix strategies** that generate a job for every combination of parameters.
+
+```yaml
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+```
+
+This configuration produces four jobs: Ubuntu with Node 20, Ubuntu with Node 22, macOS with Node 20, and macOS with Node 22. The `fail-fast: false` setting tells GitHub to run all combinations even if one fails, which is useful when you want a complete picture of compatibility rather than stopping at the first failure.
+
+Matrix builds are particularly valuable for libraries and tools that must support multiple platforms, but even application teams use them to validate compatibility with upcoming language versions before upgrading.
+
+<Aside type="note">
+A matrix generates a maximum of 256 jobs per workflow run. By default, GitHub maximizes parallelism based on available runner capacity.
+</Aside>
+
+## Service Containers
+
+Some jobs need a running service (a database, a cache, a message broker) available during the test steps. Rather than installing and starting these services manually in shell commands, GitHub Actions supports **service containers** — Docker containers that run alongside your job and are accessible by hostname within the same network.
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npm test
+        env:
+          DATABASE_URL: postgresql://postgres:testpassword@localhost:5432/testdb
+```
+
+The `postgres` service container starts before the job's steps execute and is torn down automatically when the job finishes. The health check options tell GitHub to wait until PostgreSQL is actually accepting connections before proceeding. Service containers are available for any Docker image, making it easy to test against Redis, MySQL, MongoDB, RabbitMQ, and other dependencies in a clean, isolated environment.
+
+## Deployment Strategies
+
+A CI pipeline that only runs tests is valuable, but the full power of CI/CD emerges when the pipeline also handles deployment. There are several common strategies for triggering deployments from GitHub Actions.
+
+### Tag-Triggered Deploys
+
+A popular pattern is to deploy only when a Git tag matching a version pattern is pushed. This gives the team explicit control over releases while keeping the process automated:
+
+```yaml
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push versioned image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
+```
+
+When someone runs `git tag v1.2.0 && git push --tags`, this workflow builds an image tagged with both `v1.2.0` and `latest`, then pushes both to the registry.
+
+### Environment Protection Rules
+
+GitHub supports **environments** (such as "staging" and "production") with configurable protection rules. You can require manual approval, restrict which branches may deploy, or add a wait timer. In your workflow, you reference an environment with the `environment` key:
+
+```yaml
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - run: echo "Deploying to staging..."
+
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Deploying to production..."
+```
+
+If the "production" environment is configured to require approval from a designated reviewer, the `deploy-production` job will pause and wait for that approval before proceeding. This provides a human checkpoint at exactly the right moment: after all automated checks have passed but before the change reaches users.
+
+## A Complete Pipeline
+
+Let us bring everything together into a single, realistic workflow for our containerized web application. This pipeline lints, tests, builds a Docker image, pushes it to a registry, and deploys to staging:
+
+```yaml
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  build-and-push:
+    needs: quality
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Deploy to staging server
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.STAGING_HOST }}
+        run: |
+          echo "$SSH_KEY" > /tmp/key && chmod 600 /tmp/key
+          ssh -i /tmp/key -o StrictHostKeyChecking=no deploy@"$HOST" \
+            "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+             && docker compose up -d"
+          rm /tmp/key
+```
+
+This workflow demonstrates the full feedback loop. A pull request triggers only the `quality` job (lint and test), giving the author rapid feedback. A push to `main` runs `quality`, then `build-and-push`, then `deploy`. The `permissions` block at the top follows the principle of least privilege: the workflow can read repository contents and write packages, but nothing else.
+
+## Best Practices
+
+After working through the mechanics of GitHub Actions, it is worth stepping back to consider the practices that separate a reliable pipeline from one that becomes a source of frustration.
+
+**Optimize for fast feedback.** Every minute a developer waits for a pipeline is a minute of lost focus. Cache dependencies aggressively, run the fastest checks (linting, unit tests) first, and consider splitting long test suites into parallel jobs. If your pipeline takes more than ten minutes, look for opportunities to prune or parallelize.
+
+**Follow the principle of least privilege.** The `permissions` key in a workflow file lets you restrict the `GITHUB_TOKEN` to only the scopes the workflow actually needs. Default permissions are broader than necessary for most workflows, so declare them explicitly.
+
+**Pin action versions.** Using `actions/checkout@v4` pins to a major version, which is a reasonable balance between stability and receiving patches. For higher-security environments, pin to a full commit SHA (e.g., `actions/checkout@<sha>`) to eliminate the risk of a compromised tag.
+
+**Cache strategically.** Caching node_modules, Docker layers, or compiled artifacts can cut build times dramatically. The `actions/setup-node` action supports caching natively through its `cache` parameter. For Docker, the GitHub Actions cache backend (`type=gha`) integrates with Buildx to cache image layers.
+
+**Manage artifacts deliberately.** Use `actions/upload-artifact` and `actions/download-artifact` to pass build outputs between jobs or to preserve test reports. Artifacts are retained for a configurable period (default 90 days) and can be downloaded from the workflow run page.
+
+**Keep workflows readable.** As pipelines grow, the YAML can become unwieldy. Extract complex logic into shell scripts that live in the repository and are called from workflow steps. Use descriptive `name` fields on every step so that the GitHub Actions UI is easy to scan.
+
+**Treat the pipeline as code.** Your workflow files live in the repository alongside application code, which means they should be reviewed in pull requests, tested when modified, and refactored when they become complicated. A pipeline that nobody understands is almost as dangerous as having no pipeline at all.
+
+<Aside type="tip">
+A good litmus test for your pipeline: can a new team member read the workflow file and understand what happens when they push a commit? If not, add comments and simplify.
+</Aside>
+
+## Summary
+
+CI/CD transforms software delivery from a manual, error-prone process into an automated, repeatable one. GitHub Actions provides the infrastructure for this transformation directly within your repository: workflows defined in YAML, triggered by events, composed of jobs and steps running on cloud-hosted runners.
+
+The key ideas to carry forward are these: continuous integration catches bugs early through automated builds and tests on every commit; continuous delivery ensures that every passing build produces a deployable artifact; and continuous deployment (when your team is ready for it) removes the last manual gate by shipping every green build to production. Matrix builds let you verify compatibility across environments. Secrets keep credentials safe. Environment protection rules add human checkpoints where they matter most.
+
+The pipeline we built throughout this chapter (lint, test, build image, push, deploy) is a pattern you will see again and again in professional environments. The specific tools may change, but the feedback loop remains the same: commit, verify, ship.
+
+## Further reading
+
+- <a href="https://www.youtube.com/watch?v=R8_veQiYBjI" target="_blank" rel="noopener noreferrer">GitHub Actions Tutorial — Basic Concepts and CI/CD Pipeline with Docker (YouTube)</a>
+- <a href="https://developer.hashicorp.com/terraform/tutorials/automation/github-actions" target="_blank" rel="noopener noreferrer">Automate Terraform with GitHub Actions — HashiCorp Developer</a>
+- <a href="https://medium.com/swlh/lets-do-devops-github-actions-terraform-aws-77ef6078e4f2" target="_blank" rel="noopener noreferrer">Intro to GitHub Actions + Terraform + AWS (Medium)</a>
+- <a href="https://github.blog/2021-11-04-10-github-actions-resources-basics-ci-cd/" target="_blank" rel="noopener noreferrer">10 GitHub Actions resources to bookmark — GitHub Blog</a>
+- <a href="https://github.com/sdras/awesome-actions" target="_blank" rel="noopener noreferrer">awesome-actions — curated list of GitHub Actions (GitHub)</a>

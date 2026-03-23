@@ -1,0 +1,344 @@
+---
+title: 'k3s on EC2: First Kubernetes Deployment'
+description: "Gerald went to a restaurant tech expo and came back saying containers are the future. He means shipping containers."
+sidebar:
+  order: 8
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+*/}
+
+Gerald went to a restaurant technology expo and came back saying "containers are the future." He means shipping containers. But the point still stands. The expo had a booth about Kubernetes, and Gerald picked up a brochure. He now wants "orchestration" for the three-location website expansion. You asked him what orchestration means to him. He said, "Like an orchestra. But for websites."
+
+Docker Compose works well on a single server, but what happens when your container crashes at 3 AM? You have to notice, SSH in, and restart it manually. Kubernetes (often abbreviated k8s) solves this by acting as an orchestrator, a system that continuously monitors your containers, restarts them if they fail, and manages networking, scaling, and configuration. In this lab, you will install k3s, a lightweight Kubernetes distribution designed for resource-constrained environments, and deploy an nginx web server using Kubernetes primitives: Deployments, Services, and ConfigMaps.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+You need:
+- An AWS Academy Learner Lab environment
+- An SSH client on your laptop
+
+## Why Kubernetes?
+
+When you used Docker Compose, *you* were the orchestrator. You ran `docker compose up`, checked if containers were healthy, and restarted them when needed. Kubernetes replaces that manual work with a **control loop**: you tell it "I want 2 copies of nginx running at all times," and Kubernetes continuously compares the desired state to the actual state, making corrections automatically. A container crashes? Kubernetes starts a new one. You push a new image? Kubernetes rolls out the update gracefully.
+
+**k3s vs. full Kubernetes**: Standard Kubernetes is complex and resource-intensive. k3s is a certified Kubernetes distribution that strips out cloud-provider-specific components and bundles everything into a single binary. It runs comfortably on a t3.small instance and is ideal for learning, edge computing, and single-node deployments.
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial.
+
+1. What k3s version is running on your node? Write down the node's INTERNAL-IP address. (Use `kubectl get nodes -o wide`.) *(4 points)*
+2. Write down the names and IP addresses of your two nginx Pods. (Use `kubectl get pods -o wide`.) *(4 points)*
+3. After applying your ConfigMap with your custom `index.html`, what does `curl http://localhost:<nodeport>` return? Verify your name and today's date appear. *(4 points)*
+4. After deleting one Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(5 points)*
+5. How do the endpoint IPs shown by `kubectl describe service nginx-service` relate to the Pod IPs from question 2? *(3 points)*
+6. Get your TA's initials showing your custom nginx page (with your name) accessible in a browser or via `curl`. *(5 points)*
+
+## Tutorial
+
+### Installing k3s
+
+<Steps>
+
+1. **Launch an EC2 instance**
+
+   In the AWS Console, launch an Ubuntu 24.04 instance. Use **t3.small** (2 vCPU, 2 GiB RAM); k3s runs on t3.micro but performs better with a bit more memory. Create a Security Group that allows:
+   - SSH (port 22) from Anywhere
+   - HTTP (port 80) from Anywhere
+   - Custom TCP (ports 30000-32767) from Anywhere (this is the NodePort range Kubernetes uses)
+
+   Connect via SSH:
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem ubuntu@<your-public-ip>
+   ```
+
+2. **Install k3s**
+
+   k3s installs with a single command:
+
+   ```bash
+   curl -sfL https://get.k3s.io | sh -
+   ```
+
+   This downloads the k3s binary, installs it as a systemd service, and starts it immediately. It also installs `kubectl`, the Kubernetes command-line tool.
+
+3. **Configure kubectl access**
+
+   By default, k3s writes its configuration to `/etc/rancher/k3s/k3s.yaml`, which is only readable by root. To use `kubectl` without `sudo`:
+
+   ```bash
+   mkdir -p ~/.kube
+   sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+   sudo chown $(id -u):$(id -g) ~/.kube/config
+   export KUBECONFIG=~/.kube/config
+   echo 'export KUBECONFIG=~/.kube/config' >> ~/.bashrc
+   ```
+
+4. **Verify the cluster**
+
+   ```bash
+   kubectl get nodes -o wide
+   ```
+
+   You should see one node with status "Ready." Record the k3s version (in the VERSION column) and the INTERNAL-IP for your lab questions.
+
+</Steps>
+
+### Understanding Kubernetes Primitives
+
+Before writing manifests, let's understand the building blocks:
+
+- **Pod**: The smallest unit in Kubernetes. A Pod runs one or more containers. You rarely create Pods directly.
+- **Deployment**: Manages a set of identical Pods. You tell it "run 2 replicas of nginx," and it ensures exactly 2 Pods are always running. If one dies, the Deployment creates a replacement.
+- **Service**: Provides a stable network endpoint for a set of Pods. Pods get random IP addresses that change when they restart, but a Service gives you a fixed way to reach them.
+- **ConfigMap**: Stores configuration data (like files or environment variables) separately from the container image. This lets you change configuration without rebuilding the image.
+
+### Deploying nginx
+
+<Steps>
+
+1. **Create a project directory**
+
+   ```bash
+   mkdir ~/k8s-lab && cd ~/k8s-lab
+   ```
+
+2. **Write the Deployment manifest**
+
+   ```bash
+   vim nginx-deployment.yaml
+   ```
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: nginx
+     labels:
+       app: nginx
+   spec:
+     replicas: 2
+     selector:
+       matchLabels:
+         app: nginx
+     template:
+       metadata:
+         labels:
+           app: nginx
+       spec:
+         containers:
+           - name: nginx
+             image: nginx:1.27
+             ports:
+               - containerPort: 80
+   ```
+
+   Let's break this down:
+   - `replicas: 2` tells Kubernetes to keep 2 copies of this Pod running at all times.
+   - `selector.matchLabels` tells the Deployment which Pods it manages (those with `app: nginx` label).
+   - `template` describes the Pod itself: one container running the `nginx:1.27` image, listening on port 80.
+   - We pin the image tag to `1.27` instead of using `latest`, because `latest` is mutable and makes deployments unpredictable.
+
+3. **Write the Service manifest**
+
+   A Service of type **NodePort** exposes the application on a static port on the node's IP, making it accessible from outside the cluster.
+
+   ```bash
+   vim nginx-service.yaml
+   ```
+
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: nginx-service
+   spec:
+     type: NodePort
+     selector:
+       app: nginx
+     ports:
+       - port: 80
+         targetPort: 80
+         nodePort: 30080
+   ```
+
+   - `selector: app: nginx` routes traffic to all Pods with the `app: nginx` label.
+   - `nodePort: 30080` means you can access nginx at `http://<node-ip>:30080`. NodePorts must be in the range 30000-32767.
+
+4. **Apply both manifests**
+
+   ```bash
+   kubectl apply -f nginx-deployment.yaml -f nginx-service.yaml
+   ```
+
+   The `apply` command sends the manifests to the Kubernetes API server, which stores the desired state and begins working to achieve it.
+
+5. **Verify the Deployment**
+
+   ```bash
+   kubectl get pods -o wide
+   ```
+
+   You should see 2 Pods with status "Running." Note the pod names, the node they are running on, and their IP addresses.
+
+6. **Test the Service**
+
+   ```bash
+   curl http://localhost:30080
+   ```
+
+   You should see the default nginx welcome page ("Welcome to nginx!"). You can also access it from your laptop browser at `http://<your-ec2-public-ip>:30080` (if your Security Group allows port 30080).
+
+</Steps>
+
+### Adding a ConfigMap
+
+A ConfigMap lets you inject configuration into your containers without modifying the image. You will create a custom `index.html` and mount it into the nginx containers.
+
+<Steps>
+
+1. **Create the ConfigMap**
+
+   ```bash
+   vim nginx-configmap.yaml
+   ```
+
+   ```yaml
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: nginx-html
+   data:
+     index.html: |
+       <!DOCTYPE html>
+       <html>
+       <head><title>CS 312 Lab</title></head>
+       <body>
+         <h1>Hello from Kubernetes!</h1>
+         <p>Name: YOUR_NAME_HERE</p>
+         <p>Date: TODAY_DATE_HERE</p>
+       </body>
+       </html>
+   ```
+
+   Replace `YOUR_NAME_HERE` and `TODAY_DATE_HERE` with your actual name and today's date.
+
+2. **Update the Deployment to mount the ConfigMap**
+
+   Edit `nginx-deployment.yaml` to add a volume and volume mount:
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: nginx
+     labels:
+       app: nginx
+   spec:
+     replicas: 2
+     selector:
+       matchLabels:
+         app: nginx
+     template:
+       metadata:
+         labels:
+           app: nginx
+       spec:
+         containers:
+           - name: nginx
+             image: nginx:1.27
+             ports:
+               - containerPort: 80
+             volumeMounts:
+               - name: html-volume
+                 mountPath: /usr/share/nginx/html
+         volumes:
+           - name: html-volume
+             configMap:
+               name: nginx-html
+   ```
+
+   The `volumeMounts` section mounts the ConfigMap into the container at `/usr/share/nginx/html`, which is where nginx looks for files to serve. The `volumes` section declares that the volume comes from the `nginx-html` ConfigMap.
+
+3. **Apply the ConfigMap and updated Deployment**
+
+   ```bash
+   kubectl apply -f nginx-configmap.yaml -f nginx-deployment.yaml
+   ```
+
+   Kubernetes will perform a rolling update, replacing the old Pods with new ones that have the ConfigMap mounted.
+
+4. **Verify the custom page**
+
+   ```bash
+   curl http://localhost:30080
+   ```
+
+   You should see your custom HTML with your name and today's date. Record this output for your lab questions.
+
+</Steps>
+
+### Testing Self-Healing
+
+One of Kubernetes' most important features is that it automatically replaces failed Pods to maintain the desired number of replicas.
+
+<Steps>
+
+1. **List the running Pods**
+
+   ```bash
+   kubectl get pods
+   ```
+
+   Note the names and AGE of both Pods.
+
+2. **Delete one Pod**
+
+   ```bash
+   kubectl delete pod <pod-name>
+   ```
+
+   Replace `<pod-name>` with one of the actual Pod names from the list.
+
+3. **Watch the replacement**
+
+   Immediately run:
+
+   ```bash
+   kubectl get pods
+   ```
+
+   You should see one Pod still running (the one you did not delete) and a new Pod being created (with a different name and a very recent AGE, like "3s"). The Deployment's control loop detected that the actual state (1 Pod) did not match the desired state (2 Pods) and created a replacement.
+
+4. **Describe the Service endpoints**
+
+   ```bash
+   kubectl describe service nginx-service
+   ```
+
+   Find the "Endpoints" line. This shows the IP addresses of all Pods that the Service routes traffic to. Compare these IPs to the Pod IPs from `kubectl get pods -o wide`; they should match. When a Pod is replaced, its endpoint is automatically updated.
+
+</Steps>
+
+### Clean Up
+
+If you plan to continue with Labs 8 and 9, leave k3s and the nginx deployment running. Otherwise:
+
+```bash
+kubectl delete -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml
+```
+
+---
+
+You now understand the core Kubernetes primitives: Deployments manage replica sets of Pods, Services provide stable networking, and ConfigMaps separate configuration from images. Most importantly, you experienced the self-healing control loop: Kubernetes automatically corrects drift between desired and actual state. In the next lab, you will add health checks, resource controls, and practice failure drills.

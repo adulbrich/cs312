@@ -1,0 +1,367 @@
+---
+title: 'Observability Workshop: Prometheus and Grafana'
+description: "Gerald's investor asked how you know systems are healthy. Long silence. Gerald now needs dashboards."
+sidebar:
+  order: 10
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO5: Describe how to plan major and minor tasks and time so that services are stable and effective, and meet a Service Level Agreement.
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+*/}
+
+Gerald's investor visited last week and asked, "How do you know your systems are healthy?" Gerald said, "We check." The investor asked, "How?" There was a long silence. Gerald turned to you. You also said nothing. The investor left. Gerald now needs dashboards "for the next meeting."
+
+**Observability** is the practice of instrumenting your systems so you can answer questions like these from the outside, using metrics, logs, and traces. Your Kubernetes cluster runs containers, restarts them when they crash, and rolls out updates; but you have no visibility into what is happening inside. In this lab, you will deploy Prometheus (a metrics collection engine) and Grafana (a visualization platform) on your k3s cluster, build a custom dashboard, define alerts with runbooks, and trigger a real incident to see the entire detection-and-response loop in action.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+You need:
+- The k3s cluster from Labs 7-8 with the nginx Deployment and Service still running
+- SSH access to your EC2 instance
+
+If you no longer have the Lab 7-8 setup, re-apply the manifests from those labs before starting.
+
+## Key Concepts
+
+**Monitoring vs. Observability**: Monitoring is checking predefined metrics against thresholds ("is CPU above 90%?"). Observability goes further; it means your system emits enough data that you can diagnose *unexpected* problems without deploying new instrumentation.
+
+**Prometheus**: An open-source metrics collection system. It uses a **pull model**: Prometheus periodically scrapes HTTP endpoints (called exporters) to collect metrics. These metrics are stored as time-series data (values indexed by timestamp).
+
+**Grafana**: An open-source platform for building dashboards from data sources like Prometheus. It turns raw metrics into visual panels: graphs, gauges, and tables.
+
+**PromQL** (Prometheus Query Language): The query language for selecting and aggregating Prometheus metrics. For example, `rate(http_requests_total[5m])` computes the per-second rate of HTTP requests over the last 5 minutes.
+
+**Helm**: A package manager for Kubernetes. Helm **charts** bundle Kubernetes manifests, default configuration, and dependencies into installable packages, similar to how `apt` packages software for Ubuntu.
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial.
+
+1. What is the current memory usage percentage on the Node Exporter dashboard in Grafana? Write down the value and the panel name. *(4 points)*
+2. Write down the PromQL (Prometheus Query Language) query you used for the pod restart count panel. What is the current restart count? *(5 points)*
+3. In your PrometheusRule for the crash loop alert, what PromQL expression triggers the alert, and what is the `for` duration? *(5 points)*
+4. After killing nginx repeatedly to trigger the crash loop alert, how many minutes did it take for the alert to fire? What status did the alert show (Inactive, Pending, or Firing)? *(5 points)*
+5. What does `kubectl logs <pod> --previous` show, and why is the `--previous` flag necessary for debugging container crashes? *(3 points)*
+6. Get your TA's initials showing your Grafana dashboard with live metrics and at least one alert in Firing state. *(3 points)*
+
+## Tutorial
+
+### Installing Helm
+
+<Steps>
+
+1. **Install Helm on the EC2 instance**
+
+   Helm runs as a client on your machine and communicates with the Kubernetes API (Application Programming Interface) server:
+
+   ```bash
+   curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+   ```
+
+2. **Verify the installation**
+
+   ```bash
+   helm version
+   ```
+
+</Steps>
+
+### Deploying the Monitoring Stack
+
+The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporter, and a set of pre-configured dashboards and alerting rules. It is the standard starting point for Kubernetes monitoring.
+
+<Steps>
+
+1. **Add the Helm repository**
+
+   ```bash
+   helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+   helm repo update
+   ```
+
+2. **Install the monitoring stack**
+
+   ```bash
+   helm install monitoring prometheus-community/kube-prometheus-stack \
+     --namespace monitoring --create-namespace \
+     --set grafana.service.type=NodePort \
+     --set grafana.service.nodePort=31000 \
+     --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+     --set prometheus.prometheusSpec.ruleSelectorNilUsesHelmValues=false
+   ```
+
+   This command:
+   - Installs the chart with the release name `monitoring` in a new `monitoring` namespace
+   - Exposes Grafana on NodePort 31000 so you can access it from your browser
+   - Configures Prometheus to pick up ServiceMonitors and PrometheusRules from all namespaces (not just the monitoring namespace)
+
+   <Aside type="note">
+   The installation takes 2-3 minutes. Helm downloads container images for Prometheus, Grafana, kube-state-metrics, and Node Exporter.
+   </Aside>
+3. **Wait for all Pods to be ready**
+
+   ```bash
+   kubectl get pods -n monitoring -w
+   ```
+
+   Wait until all Pods show `Running` and `READY` as `1/1` or `2/2`. Press Ctrl+C when done.
+
+4. **Access Grafana**
+
+   If your Security Group allows port 31000, open Grafana directly in your browser:
+
+   ```
+   http://<your-ec2-public-ip>:31000
+   ```
+
+   If port 31000 is not open in your Security Group, use SSH port forwarding from your laptop:
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem -L 3000:localhost:31000 ubuntu@<your-public-ip>
+   ```
+
+   Then open `http://localhost:3000` in your browser.
+
+   The default login credentials are:
+   - Username: `admin`
+   - Password: `prom-operator`
+
+   <Aside type="tip">
+   If you cannot remember the Grafana password, retrieve it with:
+   ```bash
+   kubectl get secret -n monitoring monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d
+   ```
+   </Aside>
+</Steps>
+
+### Exploring Default Dashboards
+
+<Steps>
+
+1. **Browse the pre-built dashboards**
+
+   In Grafana, click the hamburger menu (three lines, top left), then **Dashboards**. You will see several pre-installed dashboards. Open **Node Exporter / Nodes** (the name may vary slightly).
+
+2. **Identify the key panels**
+
+   This dashboard shows hardware-level metrics from the Node Exporter, which runs on each Kubernetes node and exposes operating system metrics:
+   - **CPU Usage**: How much processing capacity is being used
+   - **Memory Usage**: Current RAM consumption as a percentage
+   - **Disk I/O**: Read and write activity on the node's storage
+   - **Network Traffic**: Bytes sent and received
+
+   Find the memory usage panel and record the current percentage value and the panel's exact name for your lab questions.
+
+3. **Explore other dashboards**
+
+   Check out the **Kubernetes / Compute Resources / Pod** dashboard. This shows per-Pod CPU and memory consumption, useful for spotting a container that is using more resources than expected.
+
+</Steps>
+
+### Building a Custom Dashboard
+
+<Steps>
+
+1. **Create a new dashboard**
+
+   In Grafana, click **Dashboards > New > New Dashboard**. Click **Add visualization**. Select the **Prometheus** data source.
+
+2. **Panel 1: Pod restart count**
+
+   In the query editor, enter this PromQL query:
+
+   ```promql
+   kube_pod_container_status_restarts_total{namespace="default", container="nginx"}
+   ```
+
+   This metric tracks the cumulative number of restarts for each container. Set the panel title to "Nginx Pod Restarts." Choose a visualization type of **Stat** or **Time series**.
+
+   Click **Apply** to save the panel.
+
+3. **Panel 2: Node memory usage percentage**
+
+   Add another panel with this query:
+
+   ```promql
+   100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)
+   ```
+
+   This calculates the percentage of memory in use by subtracting available memory from total memory. Title it "Node Memory Usage %." Use a **Gauge** visualization with a max value of 100.
+
+4. **Panel 3: Pod ready status**
+
+   Add a third panel:
+
+   ```promql
+   kube_pod_status_ready{namespace="default", condition="true", pod=~"nginx.*"}
+   ```
+
+   This returns 1 for Pods that are ready and 0 for those that are not. Title it "Nginx Pods Ready." Use a **Stat** visualization.
+
+5. **Save the dashboard**
+
+   Click the save icon (floppy disk) in the top-right corner. Name it "CS 312 Lab Dashboard."
+
+</Steps>
+
+### Defining Alerts
+
+Alerts notify you when something goes wrong; but poorly designed alerts create **alert fatigue**, where operators start ignoring notifications because too many are false positives. Every alert should be **actionable**: when it fires, the operator should know exactly what to check and what to do first. This is where **runbooks** come in, short documents linked to each alert that describe the first-response steps.
+
+<Steps>
+
+1. **Create a PrometheusRule manifest**
+
+   PrometheusRule is a Kubernetes Custom Resource Definition (CRD) that Prometheus watches for alert definitions.
+
+   ```bash
+   vim alerting-rules.yaml
+   ```
+
+   ```yaml
+   apiVersion: monitoring.coreos.com/v1
+   kind: PrometheusRule
+   metadata:
+     name: cs312-alerts
+     namespace: monitoring
+     labels:
+       release: monitoring
+   spec:
+     groups:
+       - name: cs312.rules
+         rules:
+           - alert: PodCrashLooping
+             expr: increase(kube_pod_container_status_restarts_total{namespace="default"}[5m]) > 3
+             for: 1m
+             labels:
+               severity: critical
+             annotations:
+               summary: "Pod {{ $labels.pod }} is crash looping"
+               runbook: |
+                 1. Run: kubectl describe pod {{ $labels.pod }} -n {{ $labels.namespace }}
+                 2. Check Events section for error messages
+                 3. Check logs: kubectl logs {{ $labels.pod }} --previous
+                 4. If bad image, rollback: kubectl rollout undo deployment/<name>
+
+           - alert: HighNodeCPU
+             expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 80
+             for: 2m
+             labels:
+               severity: warning
+             annotations:
+               summary: "Node CPU usage above 80% for 2 minutes"
+               runbook: |
+                 1. Run: kubectl top pods --all-namespaces --sort-by=cpu
+                 2. Identify the Pod consuming the most CPU
+                 3. Check if it is expected (build, migration) or unexpected (infinite loop)
+                 4. If unexpected, check resource limits and consider scaling
+
+           - alert: PodNotReady
+             expr: kube_pod_status_ready{namespace="default", condition="true"} == 0
+             for: 1m
+             labels:
+               severity: warning
+             annotations:
+               summary: "Pod {{ $labels.pod }} is not ready"
+               runbook: |
+                 1. Run: kubectl describe pod {{ $labels.pod }} -n {{ $labels.namespace }}
+                 2. Check readiness probe configuration and recent events
+                 3. Check logs: kubectl logs {{ $labels.pod }}
+                 4. If the Pod is failing to start, check image and config
+   ```
+
+   Let's break down the structure:
+   - **`expr`**: The PromQL expression that triggers the alert. `increase(...[5m]) > 3` means "more than 3 restarts in the last 5 minutes."
+   - **`for`**: How long the condition must be true before the alert fires. This prevents one-time blips from triggering alerts.
+   - **`labels.severity`**: Used for routing (e.g., critical alerts page on-call, warnings go to a Slack channel).
+   - **`annotations.runbook`**: The first-response steps an operator should take.
+
+2. **Apply the alert rules**
+
+   ```bash
+   kubectl apply -f alerting-rules.yaml
+   ```
+
+3. **Verify in Prometheus**
+
+   You can check that Prometheus loaded the rules by port-forwarding to the Prometheus UI:
+
+   ```bash
+   kubectl port-forward svc/monitoring-kube-prometheus-prometheus -n monitoring 9090:9090 &
+   ```
+
+   Then visit `http://localhost:9090/alerts` (or `http://<public-ip>:9090/alerts` if the port is open). You should see your three alerts listed in "Inactive" state.
+
+</Steps>
+
+### Triggering an Alert
+
+<Steps>
+
+1. **Trigger the crash loop alert**
+
+   You will force nginx containers to restart repeatedly by killing the main process inside them. The main nginx process runs as PID 1:
+
+   ```bash
+   for i in $(seq 1 5); do
+     kubectl exec $(kubectl get pods -l app=nginx -o jsonpath='{.items[0].metadata.name}') -- kill 1
+     sleep 5
+   done
+   ```
+
+   This kills the nginx process 5 times. Each kill causes the container to exit, and Kubernetes restarts it. After several restarts in 5 minutes, the `PodCrashLooping` alert should fire.
+
+2. **Watch the alert status**
+
+   Check the alert in Prometheus (refresh `http://localhost:9090/alerts`) or in Grafana (**Alerting > Alert rules**). The alert will transition from Inactive to Pending (condition is true but `for` duration has not elapsed) to Firing.
+
+   Record how many minutes it took for the alert to fire.
+
+3. **Check the dashboard**
+
+   Go to your "CS 312 Lab Dashboard" in Grafana. The pod restart count panel should show the increased restart count.
+
+4. **Investigate with logs**
+
+   Find the Pod that was restarted:
+
+   ```bash
+   kubectl get pods
+   ```
+
+   View the logs from the previous (terminated) container instance:
+
+   ```bash
+   kubectl logs <restarted-pod-name> --previous
+   ```
+
+   The `--previous` flag is essential for debugging crashes; without it, you see logs from the current (running) instance, which does not contain the error that caused the restart. Record the last 5 lines.
+
+</Steps>
+
+### Clean Up
+
+When you are done with the lab, you can uninstall the monitoring stack:
+
+```bash
+helm uninstall monitoring -n monitoring
+kubectl delete namespace monitoring
+```
+
+If you are also done with the nginx deployment:
+
+```bash
+kubectl delete -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml
+```
+
+---
+
+You have now deployed a complete monitoring stack, built dashboards that answer "is my service healthy?", defined alerts with runbooks, and experienced the full incident loop: a failure occurs, metrics detect it, an alert fires, and you investigate with logs. These are the same observability practices used in production systems at every scale.

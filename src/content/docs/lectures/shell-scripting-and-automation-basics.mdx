@@ -1,0 +1,572 @@
+---
+title: Shell Scripting & Automation Basics
+description: "Learn Bash scripting patterns to automate routine admin tasks: variables, conditionals, loops, functions, safe defaults, and scheduling with cron."
+sidebar:
+  order: 7
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Every system administrator eventually faces tasks that must be done repeatedly: rotating log files, copying backups to a remote server, provisioning user accounts. When you perform these by hand, three problems emerge. First, the work is tedious; Google's SRE team calls this kind of repetitive, automatable operational work *toil*. Second, manual work is inconsistent; you will eventually forget a step or mistype a path. Third, manual processes are not repeatable in any verifiable way.
+
+Shell scripts solve all three problems. A script encodes the exact sequence of commands, runs them the same way every time, and serves as living documentation. In this chapter we will build a backup script piece by piece, starting with a single `cp` command and ending with rotation and scheduling. Along the way, every major Bash scripting concept will earn its place by making that script better.
+
+## Your First Script
+
+A shell script is simply a text file containing commands that the shell can execute. Let's start with the simplest possible backup: copying a directory.
+
+```bash
+#!/usr/bin/env bash
+cp -r /var/www/html /backups/html-backup
+```
+
+The first line is the *shebang* (sometimes called a hashbang). It tells the operating system which interpreter should run the file. Using `#!/usr/bin/env bash` instead of `#!/bin/bash` is more portable, because `env` searches your `PATH` for `bash` rather than assuming a fixed location.
+
+<Steps>
+
+1. Save the file as `backup.sh`.
+
+2. Make it executable:
+
+   ```bash
+   chmod +x backup.sh
+   ```
+
+3. Run it:
+
+   ```bash
+   ./backup.sh
+   ```
+
+</Steps>
+
+Without the `chmod` step, the kernel will refuse to execute the file. You can also run a script explicitly with `bash backup.sh`, which bypasses the permission check, but making scripts executable is the conventional approach.
+
+## Variables and Quoting
+
+Hardcoding paths like `/var/www/html` makes a script fragile. Variables let you change a value in one place and have it take effect everywhere.
+
+```bash
+#!/usr/bin/env bash
+SOURCE="/var/www/html"
+DEST="/backups/html-backup"
+cp -r "$SOURCE" "$DEST"
+```
+
+Notice the double quotes around `$SOURCE` and `$DEST`. Quoting is one of the most important habits in shell scripting. If a path ever contains a space (for example, `/var/www/my site`), an unquoted variable would split into two separate arguments and break the command. The rule of thumb is simple: always double-quote your variable expansions.
+
+**Single quotes vs. double quotes.** Double quotes allow variable expansion and command substitution; single quotes do not. Compare:
+
+```bash
+NAME="world"
+echo "Hello $NAME"   # prints: Hello world
+echo 'Hello $NAME'   # prints: Hello $NAME
+```
+
+**Command substitution** lets you capture the output of a command into a variable. This is invaluable for timestamps, hostnames, and dynamic paths:
+
+```bash
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+DEST="/backups/html-backup-$TIMESTAMP"
+cp -r "$SOURCE" "$DEST"
+```
+
+Now every run creates a uniquely named backup directory. The `$(...)` syntax is preferred over the older backtick syntax because it nests cleanly and is easier to read.
+
+## Conditionals
+
+A backup script that blindly copies files without checking whether the source exists is asking for trouble. Bash provides `if` statements for exactly this purpose.
+
+```bash
+#!/usr/bin/env bash
+SOURCE="/var/www/html"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+DEST="/backups/html-backup-$TIMESTAMP"
+
+if [[ -d "$SOURCE" ]]; then
+    cp -r "$SOURCE" "$DEST"
+    echo "Backup complete: $DEST"
+else
+    echo "Error: source directory $SOURCE does not exist" >&2
+    exit 1
+fi
+```
+
+The `[[ ... ]]` construct is Bash's extended test command. It is preferred over the older `[ ... ]` (which is actually the `test` command) because it handles quoting more gracefully and supports pattern matching. Here are the file tests you will use most often:
+
+| Test         | Meaning                        |
+|--------------|--------------------------------|
+| `-d path`    | True if path is a directory    |
+| `-f path`    | True if path is a regular file |
+| `-e path`    | True if path exists at all     |
+| `-r path`    | True if path is readable       |
+| `-w path`    | True if path is writable       |
+| `-s path`    | True if file is non-empty      |
+
+String comparisons use `==` and `!=` inside `[[ ]]`, while numeric comparisons use `-eq`, `-ne`, `-lt`, `-gt`, `-le`, and `-ge`. You can chain conditions with `elif`:
+
+```bash
+if [[ "$EUID" -ne 0 ]]; then
+    echo "This script must be run as root" >&2
+    exit 1
+elif [[ ! -d "$SOURCE" ]]; then
+    echo "Source directory missing" >&2
+    exit 1
+else
+    echo "Preconditions met, proceeding..."
+fi
+```
+
+<Aside type="caution">
+A common mistake is writing `if [ $VAR == "yes" ]` without quotes. If `$VAR` is empty, this expands to `if [ == "yes" ]`, which is a syntax error. Always quote your variables, or use `[[ ]]` which handles empty values safely.
+</Aside>
+
+## Loops
+
+Suppose you want to back up several directories, not just one. A `for` loop lets you iterate over a list:
+
+```bash
+#!/usr/bin/env bash
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+DIRS=("/var/www/html" "/etc/nginx" "/etc/ssh")
+
+for dir in "${DIRS[@]}"; do
+    if [[ -d "$dir" ]]; then
+        dest="/backups/$(basename "$dir")-$TIMESTAMP"
+        cp -r "$dir" "$dest"
+        echo "Backed up $dir to $dest"
+    else
+        echo "Skipping $dir (not found)" >&2
+    fi
+done
+```
+
+The `"${DIRS[@]}"` syntax expands the array so that each element is treated as a separate word, even if an element contains spaces. The `basename` command strips the leading path components, turning `/var/www/html` into just `html`.
+
+**While loops** are useful when you need to read input line by line. For example, reading a list of directories from a configuration file:
+
+```bash
+while IFS= read -r dir; do
+    [[ -z "$dir" || "$dir" == \#* ]] && continue
+    echo "Processing: $dir"
+done < /etc/backup-dirs.conf
+```
+
+The `IFS=` prevents leading and trailing whitespace from being trimmed, and `-r` prevents backslash interpretation. The `continue` statement skips blank lines and comments (lines starting with `#`).
+
+**`while` with `test` and arithmetic.** The `test` command (or its `[ ]` shorthand) evaluates conditions and returns an exit code; `while` loops until the condition is false. Arithmetic on integers uses `expr` or the `(( ))` construct:
+
+```bash
+#!/bin/bash
+i=0
+while test $i -ne 5; do
+    printf "i = %d\n" "$i"
+    i=$(expr $i + 1)   # or: (( i++ ))
+done
+printf "Done, i = %d\n" "$i"
+```
+
+`test` can evaluate file existence, string equality, string length, numeric equality, and file permissions, among other things. The exit code `0` means the test is **true**; any non-zero value means **false**.
+
+**`select` for menus.** The `select` construct generates a numbered menu from a list and waits for the user to choose an option:
+
+```bash
+#!/bin/bash
+select choice in "Start service" "Stop service" "Quit"; do
+    case $choice in
+        "Start service") systemctl start nginx; break ;;
+        "Stop service")  systemctl stop nginx; break ;;
+        "Quit")          break ;;
+        *) echo "Invalid option" ;;
+    esac
+done
+```
+
+**Process substitution.** Process substitution lets you use the output of a command as if it were a file. This is useful when a command expects file paths rather than piped input:
+
+```bash
+# Compare the contents of two directories without creating temp files
+diff <(ls dir1) <(ls dir2)
+
+# Feed multiple sorted inputs into a tool expecting files
+join <(sort file1.txt) <(sort file2.txt)
+```
+
+The `<(...)` syntax creates a temporary named pipe and passes its path to the command. Unlike a pipeline, both sides can run concurrently.
+
+## Functions
+
+As scripts grow, repeating the same logic in multiple places becomes a maintenance burden. Functions let you name a block of code and call it with arguments.
+
+```bash
+#!/usr/bin/env bash
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+backup_dir() {
+    local source="$1"
+    local dest="/backups/$(basename "$source")-$TIMESTAMP"
+
+    if [[ ! -d "$source" ]]; then
+        echo "WARN: $source not found, skipping" >&2
+        return 1
+    fi
+
+    cp -r "$source" "$dest"
+    echo "OK: $source -> $dest"
+    return 0
+}
+
+backup_dir "/var/www/html"
+backup_dir "/etc/nginx"
+backup_dir "/etc/ssh"
+```
+
+Several things are worth noting here. The `local` keyword restricts a variable's scope to the function; without it, variables are global by default, which leads to subtle bugs in larger scripts. Function arguments are accessed as `$1`, `$2`, and so on (similar to script arguments). The `return` statement sets the function's exit status: 0 for success, non-zero for failure. This is distinct from `exit`, which terminates the entire script.
+
+<Aside type="note">
+Bash functions do not return values the way functions in Python or JavaScript do. The `return` statement sets an exit code (0-255). If you need to return a string, either `echo` it and capture with command substitution, or set a global variable.
+</Aside>
+
+## Input and Output
+
+Good scripts communicate clearly. They report what they are doing, signal errors to the right place, and exit with meaningful status codes.
+
+**echo and printf.** For simple messages, `echo` is fine. For formatted output, `printf` gives you more control:
+
+```bash
+printf "%-20s %s\n" "Directory" "Status"
+printf "%-20s %s\n" "/var/www/html" "OK"
+printf "%-20s %s\n" "/etc/nginx" "SKIPPED"
+```
+
+This produces neatly aligned columns, which is useful for summary reports.
+
+**Standard error.** Error messages should go to stderr (file descriptor 2), not stdout. This lets callers redirect normal output to a file while still seeing errors on the terminal:
+
+```bash
+echo "Error: disk full" >&2
+```
+
+**Exit codes and `$?`.** Every command sets an exit code. By convention, 0 means success and any non-zero value indicates failure. The special variable `$?` holds the exit code of the last command. In practice, you can test a command's success directly with `if`:
+
+```bash
+if ! cp -r /var/www/html /backups/html-latest; then
+    echo "Backup failed" >&2
+    exit 1
+fi
+```
+
+**Reading user input.** The `read` builtin captures input interactively:
+
+```bash
+read -rp "Enter backup destination: " DEST
+```
+
+The `-r` flag prevents backslash escaping, and `-p` displays a prompt.
+
+## Safe Scripting Defaults
+
+Production scripts should fail loudly rather than silently continuing after an error. Bash provides a set of options that make scripts much safer:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+```
+
+Let's break this down:
+
+- **`set -e`** (errexit): the script exits immediately if any command returns a non-zero exit code. Without this, a failing `cp` would be silently ignored and the script would keep running.
+- **`set -u`** (nounset): the script exits if you reference an undefined variable. This catches typos like `$SORUCE` instead of `$SOURCE`.
+- **`set -o pipefail`**: in a pipeline like `cmd1 | cmd2`, the pipeline's exit code is normally the exit code of the last command. With `pipefail`, the pipeline fails if *any* command in the chain fails.
+
+Together, these three options catch the vast majority of scripting bugs at the point of failure rather than letting them cascade.
+
+**Cleanup with `trap`.** Sometimes a script creates temporary files or acquires locks that must be released even if the script fails partway through. The `trap` builtin registers a command to run when the script receives a signal or exits:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+
+# Work with temporary files safely
+cp -r /var/www/html "$TMPDIR/html-staging"
+tar czf /backups/html-latest.tar.gz -C "$TMPDIR" html-staging
+
+echo "Backup archived successfully"
+```
+
+The `trap ... EXIT` fires regardless of whether the script succeeds or fails, so the temporary directory is always cleaned up. This is the Bash equivalent of a `finally` block in other languages.
+
+Let's combine everything into a more complete backup script with logging and rotation:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+BACKUP_ROOT="/backups"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+KEEP_DAYS=7
+LOG="/var/log/backup.log"
+
+log() {
+    printf "[%s] %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$1" | tee -a "$LOG"
+}
+
+backup_dir() {
+    local source="$1"
+    local dest="$BACKUP_ROOT/$(basename "$source")-$TIMESTAMP"
+    if [[ ! -d "$source" ]]; then
+        log "WARN: $source does not exist, skipping"; return 1
+    fi
+    cp -r "$source" "$dest"
+    log "OK: backed up $source to $dest"
+}
+
+rotate_old() {
+    find "$BACKUP_ROOT" -maxdepth 1 -type d -mtime +"$KEEP_DAYS" -exec rm -rf {} +
+}
+
+log "=== Backup run starting ==="
+DIRS=("/var/www/html" "/etc/nginx" "/etc/ssh")
+FAILURES=0
+
+for dir in "${DIRS[@]}"; do
+    backup_dir "$dir" || (( FAILURES++ )) || true
+done
+
+rotate_old
+
+if [[ "$FAILURES" -gt 0 ]]; then
+    log "Completed with $FAILURES warning(s)"; exit 1
+else
+    log "All backups completed successfully"
+fi
+```
+
+This script ties together every concept from the chapter: safe defaults, functions with local variables, a loop over an array, conditionals, and structured logging.
+
+## Regular Expressions
+
+Regular expressions (REs) are a concise language for describing patterns in text. They were invented by Stephen Kleene in the 1950s and are used by a wide range of Unix tools — `grep`, `sed`, `awk`, `vi` — as well as most scripting languages (Python, Perl, Ruby). Understanding regular expressions is essential for filtering logs, validating input, and extracting data in shell scripts.
+
+### Basic Operators
+
+| Operator | Meaning |
+|---|---|
+| `.` | Matches any single character |
+| `*` | Matches zero or more occurrences of the previous character or group (the Kleene star) |
+| `+` | Matches one or more occurrences |
+| `?` | Matches zero or one occurrence |
+| `^` | Anchors the match to the beginning of the line |
+| `$` | Anchors the match to the end of the line |
+| `\` | Escapes the next character so it is treated literally |
+
+Note: the `*` in a regular expression is different from the `*` wildcard in shell globbing. In a RE, `A*` means "zero or more `A` characters." In the shell, `*.log` means "any filename ending in `.log`."
+
+### Character Classes
+
+Square brackets match any one character from a set:
+
+| Pattern | Matches |
+|---|---|
+| `[abc]` | Any one of `a`, `b`, or `c` |
+| `[^abc]` | Any character except `a`, `b`, or `c` |
+| `[a-z]` | Any lowercase letter (range defined by ASCII order) |
+| `[0-9]` | Any digit |
+
+### Anchoring and Exact Matching
+
+Without anchors, a RE matches anywhere in the string:
+
+| Pattern | Behaviour |
+|---|---|
+| `Jon` | Matches any line containing `Jon` |
+| `^Jon` | Matches lines that begin with `Jon` |
+| `Jon$` | Matches lines that end with `Jon` |
+| `^CS312$` | Matches only the exact string `CS312` |
+
+### Repetition with Curly Braces
+
+Curly braces specify an exact number of repetitions (must be escaped in basic RE syntax):
+
+```
+\{3\}     exactly 3 times
+\{3,7\}   between 3 and 7 times (inclusive)
+\{3,\}    at least 3 times
+```
+
+### Grouping, Alternation, and Backreferences
+
+Parentheses capture a matched substring for later reuse:
+
+```bash
+# Match lines where the same word appears twice in a row
+grep "\(dogs\)\1" file
+
+# Match lines containing either "cat" or "dog"
+grep "cat\|dog" file
+
+# Match "i like cat" or "i like dog"
+grep "i like \(cat\|dog\)" file
+```
+
+The `\1`, `\2`, etc. constructs reference the text matched by the first, second, etc. captured group.
+
+### Using `grep` for Filtering
+
+`grep` is the primary tool for searching files and command output with regular expressions:
+
+```bash
+# Find all lines in a log containing ERROR
+grep "ERROR" /var/log/syslog
+
+# Recursive search with line numbers
+grep -rn "FINDME" ~/logs/
+
+# Invert match: lines that do NOT contain the pattern
+grep -v "DEBUG" app.log
+
+# Extended RE syntax (no backslash escaping needed for +, ?, |, {})
+grep -E "error|warning" app.log
+
+# Count matching lines
+grep -c "404" access.log
+```
+
+<Aside type="tip">
+Use `grep -E` (or `egrep`) for extended regular expressions, which allow `+`, `?`, `|`, and `{n}` without backslash escaping. Most modern shell scripting uses ERE syntax because it is more readable.
+</Aside>
+
+### Practical Examples
+
+**Match an IPv4 address:**
+
+```bash
+grep -E "([0-9]{1,3}\.){3}[0-9]{1,3}" access.log
+```
+
+**Match a timestamp in a log file (e.g., `2026-03-23 14:05:22`):**
+
+```bash
+grep -E "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}" syslog
+```
+
+**Using `find` with a regex to locate files:**
+
+```bash
+# Find all files whose name contains "fork"
+find ~ -regex ".*fork.*"
+
+# Find and delete files matching a pattern (use -i for interactive confirmation)
+find /tmp -name "*.tmp" -exec rm -i '{}' \;
+```
+
+### `sed` for Stream Editing
+
+`sed` (stream editor) applies RE-based substitutions to text:
+
+```bash
+# Replace the first occurrence of "foo" with "bar" on each line
+sed 's/foo/bar/' input.txt
+
+# Replace all occurrences (g flag)
+sed 's/foo/bar/g' input.txt
+
+# Delete lines matching a pattern
+sed '/^#/d' config.txt   # removes comment lines
+
+# In-place edit of a file
+sed -i 's/oldvalue/newvalue/g' config.txt
+```
+
+## Scheduling with Cron and Systemd Timers
+
+A backup script is only useful if it runs on a schedule. Unix systems offer two primary scheduling mechanisms.
+
+### Cron
+
+Cron is the traditional job scheduler. Each user has a crontab (cron table) that lists commands and their schedules. Edit yours with:
+
+```bash
+crontab -e
+```
+
+The format is five fields followed by the command:
+
+```
+# min  hour  day  month  weekday   command
+  0    2     *    *      *         /usr/local/bin/backup.sh
+```
+
+This runs `backup.sh` every day at 2:00 AM. The five fields are minute (0-59), hour (0-23), day of month (1-31), month (1-12), and day of week (0-7, where both 0 and 7 mean Sunday).
+
+A few practical tips for cron:
+
+- Use absolute paths for everything; cron runs with a minimal `PATH`.
+- Redirect output to a log file (`>> /var/log/backup-cron.log 2>&1`) so you can diagnose failures.
+- Test your cron expression at a site like crontab.guru before deploying it.
+
+<Aside type="tip">
+The `@daily`, `@hourly`, and `@weekly` shortcuts are supported by most cron implementations and are easier to read than the five-field syntax.
+</Aside>
+
+### Systemd Timers
+
+On modern Linux distributions, systemd timers offer a more powerful alternative to cron. A timer consists of two unit files: a `.service` file that defines what to run, and a `.timer` file that defines when to run it.
+
+```ini
+# /etc/systemd/system/backup.service
+[Unit]
+Description=Daily backup of web and config directories
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/backup.sh
+```
+
+```ini
+# /etc/systemd/system/backup.timer
+[Unit]
+Description=Run backup daily at 2 AM
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable and start the timer:
+
+```bash
+sudo systemctl enable --now backup.timer
+```
+
+Check upcoming runs:
+
+```bash
+systemctl list-timers --all
+```
+
+Systemd timers have several advantages over cron. The `Persistent=true` option means that if the machine was off at the scheduled time, the job runs as soon as the machine boots. Timer output integrates with `journalctl`, making logs easy to query. Dependencies can be expressed between units, and resource limits (CPU, memory) can be applied to the service.
+
+## When to Stop Scripting and Use a Real Tool
+
+Bash is an excellent tool for automating tasks on a single machine, but it has limits. As your scripts grow in complexity, watch for these warning signs:
+
+**You are managing multiple hosts.** A Bash script that SSHs into a dozen servers in a loop is brittle. Connection failures, partial runs, and inconsistent state are hard to handle. Configuration management tools like Ansible were designed for exactly this problem. Ansible is agentless (it uses SSH, just like your script), but it adds idempotence, inventory management, and error handling that would take hundreds of lines of Bash to replicate.
+
+**You are parsing structured data.** Bash can manipulate strings, but parsing JSON, YAML, or XML in Bash is painful and error-prone. Python, with libraries like `json`, `pyyaml`, and `requests`, handles structured data naturally. If your script has more than one or two calls to `jq` or `awk`, consider rewriting it in Python.
+
+**Your script exceeds a few hundred lines.** Bash has no real module system, limited error handling, and no type safety. Once a script becomes long enough that you need to scroll to understand it, the maintenance cost exceeds the benefit of staying in Bash.
+
+**You need testability.** Writing automated tests for Bash scripts is possible but awkward. Python, Go, and other languages have mature testing frameworks that make it straightforward to verify behavior and catch regressions.
+
+The practical rule is this: start with Bash for simple, single-machine automation. When the task outgrows Bash's strengths, move to the right tool for the job. That might be Ansible for multi-host configuration, Python for data processing, or Terraform for infrastructure provisioning. The scripting fundamentals you have learned in this chapter (variables, conditionals, loops, functions, exit codes) transfer directly to those tools, because they all build on the same Unix concepts.
+
+## Summary
+
+This chapter traced the path from a one-line `cp` command to a production-quality backup script with logging, rotation, and scheduling. Along the way, you learned the building blocks that underpin all shell automation: variables and quoting to handle data safely, conditionals to make decisions, loops to process collections, functions to organize logic, safe defaults to catch errors early, and `trap` to clean up after yourself. These patterns will serve you well whether you are writing a five-line helper script or deciding that it is time to reach for a more powerful tool.

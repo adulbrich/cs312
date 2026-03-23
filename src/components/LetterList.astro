@@ -1,0 +1,38 @@
+---
+interface Props {
+  /** 1-based index to start lettering (1 = a, 2 = b, ...) */
+  start?: number;
+  /** Extra classes to apply to the outer <ol> */
+  class?: string;
+}
+
+const { start = 1, class: className = '' } = Astro.props as Props;
+
+// Render the default slot to HTML so we can extract <li> items.
+const slotHtml = (await Astro.slots.render('default'))?.trim() ?? '';
+
+// Extract the inner HTML of all <li> elements in the provided slot.
+// This is robust enough for simple markdown-generated lists used in docs.
+let items: string[] | null = null;
+if (slotHtml) {
+  const liRegex = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+  const matches = [...slotHtml.matchAll(liRegex)];
+  if (matches.length > 0) {
+    items = matches.map((m) => m[1].trim());
+  }
+}
+---
+{items ? (
+  <ol
+    type="a"
+    start={start}
+    class={`mb-4 list-[lower-alpha] pl-6 md:pl-7 space-y-2 marker:font-medium marker:font-mono ${className}`}
+  >
+    {items.map((html) => (
+      <li class="leading-relaxed" set:html={html} />
+    ))}
+  </ol>
+) : (
+  // Fallback: if no list items were detected, render content as-is
+  <div class={`pl-6 ${className}`} set:html={slotHtml} />
+)}

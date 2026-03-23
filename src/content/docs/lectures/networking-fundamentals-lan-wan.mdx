@@ -1,0 +1,412 @@
+---
+title: Networking Fundamentals (LAN/WAN)
+description: "A practical tour of networking: OSI and TCP/IP models, IP addressing and subnetting, DNS, DHCP, NAT, routing, firewalls, ports, and the diagnostic tools every sysadmin needs."
+sidebar:
+  order: 3
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Every server you provision, every container you deploy, and every cloud instance you launch depends on a network to be useful. In this chapter we will build a mental model of how networks operate by following a single scenario throughout: you have been asked to network a small office of 20 employees that needs internal file sharing, a web application server, DNS, DHCP, and reliable internet access. By the end you should be able to trace a packet from a user's laptop to the public internet and back, read a subnet mask, interpret a routing table, and use command-line tools to diagnose the most common connectivity failures. The concepts here apply equally to a physical office wired with Ethernet and to a cloud Virtual Private Cloud (VPC), because the protocols and addressing rules are the same in both environments.
+
+## Network Models: OSI and TCP/IP
+
+Before you can troubleshoot a network, you need a shared vocabulary for where problems occur. Two layered models provide that vocabulary.
+
+The **OSI (Open Systems Interconnection)** model divides networking into seven layers, from physical cabling at the bottom to user-facing applications at the top. Each layer has a specific job and communicates only with the layers directly above and below it. From bottom to top the layers are: Physical (layer 1, electrical signals on a wire or radio wave), Data Link (layer 2, MAC addresses and Ethernet frames), Network (layer 3, IP addresses and routing), Transport (layer 4, TCP and UDP connections), Session (layer 5, connection management), Presentation (layer 6, data encoding and encryption), and Application (layer 7, HTTP, DNS, SSH, and the protocols users interact with).
+
+The **TCP/IP model** collapses these into four practical layers: Link (covering OSI layers 1 and 2), Internet (layer 3), Transport (layer 4), and Application (covering OSI layers 5 through 7). In daily work you will almost always think in TCP/IP terms, but the OSI numbering is useful because error messages, vendor documentation, and job interviews all reference "layer 2 issues" or "layer 7 firewalls" using the OSI numbers.
+
+<Aside type="tip" title="Troubleshooting With Layers">
+When something breaks, start at the bottom and work up. Can you see a link light on the switch port (layer 1)? Does the interface have an IP address (layer 3)? Can you ping the default gateway (layer 3)? Can you resolve DNS names (layer 7)? Can you reach the application port (layer 4)? This bottom-up approach prevents you from spending an hour debugging your web server configuration when the Ethernet cable is unplugged.
+</Aside>
+
+For our small office, the layers map to concrete things. Layer 1 is the Cat6 cabling running from each desk to a patch panel in the server closet. Layer 2 is the Ethernet switch connecting those cables. Layer 3 is the router assigning IP addresses and forwarding traffic. Layer 4 is the TCP connections carrying HTTP, SSH, and database traffic. Layer 7 is the web application itself. Every diagnostic step you take later in this chapter targets a specific layer.
+
+## Network Topologies
+
+A network topology describes how nodes (devices) are connected to each other. The physical topology concerns cabling and hardware placement; the logical topology concerns how data flows regardless of physical layout.
+
+| Topology | Description | Trade-offs |
+|----------|-------------|-----------|
+| **Point-to-point** | Direct link between exactly two nodes | Simple; no sharing, but no redundancy |
+| **Daisy chain (linear/ring)** | Nodes connected in a line or closed loop | Easy to extend; a single break disrupts a linear chain; ring configurations allow traffic to route around one failure |
+| **Bus** | All nodes share a single cable segment | Inexpensive; only one device can transmit at a time, performance degrades as nodes are added |
+| **Star** | All nodes connect to a central hub or switch | Easy to manage and isolate faults; if the central device fails, the entire network goes down |
+| **Mesh** | Every node connects to every other node | Maximum redundancy; expensive and complex, used in military and critical infrastructure |
+| **Tree (star-bus / hierarchical)** | Star networks linked via a bus structure | Scalable and fault-tolerant at the branch level; failure of the main trunk isolates entire branches |
+
+Modern enterprise networks most commonly use a hierarchical tree topology (see Network Configuration & Troubleshooting for the Access / Distribution / Core model).
+
+## IP Addressing and Subnetting
+
+Every device on an IP network needs a unique address. An **IPv4 address** is a 32-bit number written as four octets separated by dots, such as `192.168.1.10`. Alongside the address, a **subnet mask** defines which portion of the address identifies the network and which portion identifies individual hosts. The mask `255.255.255.0` means the first 24 bits are the network portion and the last 8 bits are for hosts, allowing up to 254 usable addresses (the first address is the network identifier and the last is the broadcast address).
+
+**CIDR (Classless Inter-Domain Routing) notation** expresses the same idea more compactly: `192.168.1.0/24` means the first 24 bits are the network prefix. You will encounter CIDR notation everywhere, from AWS VPC definitions to Linux `ip addr` output.
+
+Three ranges of IPv4 addresses are reserved for private use and will never appear on the public internet:
+
+- `10.0.0.0/8` (16,777,214 usable hosts)
+- `172.16.0.0/12` (1,048,574 usable hosts)
+- `192.168.0.0/16` (65,534 usable hosts)
+
+Our small office will use the `10.0.1.0/24` range, giving us 254 usable addresses, more than enough for 20 employees plus servers, printers, and access points.
+
+### Classful Addressing (Historical Context)
+
+Before CIDR, IPv4 addresses were divided into fixed classes based on the value of the first octet. While classful addressing has been superseded by CIDR, you will still see the class labels in documentation and in descriptions of the private ranges:
+
+| Class | Range | Default Mask | Usable Hosts |
+|-------|-------|-------------|-------------|
+| A | 1.0.0.0 – 127.255.255.255 | /8 (255.0.0.0) | 16,777,214 |
+| B | 128.0.0.0 – 191.255.255.255 | /16 (255.255.0.0) | 65,534 |
+| C | 192.0.0.0 – 223.255.255.255 | /24 (255.255.255.0) | 254 |
+
+The "-2" for usable hosts accounts for the network address (first IP in the block) and the broadcast address (last IP), which cannot be assigned to devices.
+
+### Subnetting in Practice
+
+Suppose you want to separate the employee workstations from the servers for security reasons. You could split `10.0.1.0/24` into two `/25` subnets, each with 126 usable addresses:
+
+- `10.0.1.0/25` (hosts `10.0.1.1` through `10.0.1.126`) for workstations
+- `10.0.1.128/25` (hosts `10.0.1.129` through `10.0.1.254`) for servers
+
+This separation lets you apply different firewall rules to each subnet. Workstations might be allowed outbound internet access but blocked from reaching the database server directly, while the web application server can reach the database but has no outbound internet access. On a Linux machine, you can inspect your current address and subnet with:
+
+```bash
+ip addr show
+```
+
+The output will include lines like `inet 10.0.1.10/25 brd 10.0.1.127 scope global eth0`, showing the address, prefix length, and broadcast address for that subnet.
+
+<Aside type="note" title="IPv6 in Brief">
+IPv6 uses 128-bit addresses written in hexadecimal groups called hextets (8 groups of 16 bits each), for example `0123:4567:89ab:cdef:0123:4567:89ab:cdef`. The `/64` prefix is conventional for subnets. With 2¹²⁸ possible addresses, IPv6 was designed to solve IPv4 address exhaustion. While IPv6 adoption continues to grow, most internal networks and cloud VPCs still rely on IPv4 with NAT for internet access. The subnetting and routing concepts you learn here apply to both protocols.
+</Aside>
+
+## Core Network Services: DNS, DHCP, and NAT
+
+Three services make a network usable in practice. Without them, every user would need to manually configure their IP address, memorize server addresses by number, and have no way to reach the public internet from a private network.
+
+### DHCP (Dynamic Host Configuration Protocol)
+
+When an employee plugs in a laptop or connects to Wi-Fi, **DHCP** automatically assigns an IP address, subnet mask, default gateway, and DNS server addresses. The process works in four steps (often called DORA): the client sends a Discover broadcast, the DHCP server responds with an Offer, the client sends a Request confirming it wants that address, and the server sends an Acknowledgment. Each address comes with a lease time; when the lease expires, the client must renew it.
+
+For our office, the DHCP server (often running on the router or a dedicated Linux server) might be configured to hand out addresses from `10.0.1.10` through `10.0.1.126` in the workstation subnet, with the default gateway set to `10.0.1.1` and DNS pointed to `10.0.1.129` (a server in the server subnet). Servers themselves typically use **static addresses** (also called reservations) so their addresses never change; clients and other services depend on those addresses being stable.
+
+You can inspect your current DHCP lease on a Linux system:
+
+```bash
+# Show the current IP configuration received via DHCP
+ip addr show eth0
+
+# Release and renew a DHCP lease (requires dhclient)
+sudo dhclient -r eth0
+sudo dhclient eth0
+```
+
+### DNS (Domain Name System)
+
+**DNS** translates human-readable names like `wiki.office.local` into IP addresses like `10.0.1.130`. Without DNS, users would need to type IP addresses into their browsers and every configuration file would break whenever a server moved to a new address. DNS is hierarchical: your office DNS server knows about local names and forwards everything else to an upstream resolver (such as `8.8.8.8` or `1.1.1.1`), which in turn queries the global DNS infrastructure.
+
+The most common record types are **A records** (mapping a name to an IPv4 address), **AAAA records** (mapping to IPv6), **CNAME records** (aliases pointing one name to another), and **MX records** (mail routing). When a DNS lookup fails, the symptom is usually "the internet is down" even though the network is perfectly functional; the user simply cannot resolve names to addresses.
+
+You can query DNS from the command line:
+
+```bash
+# Look up the A record for a hostname
+dig wiki.office.local
+
+# Shorter output showing just the answer
+dig +short wiki.office.local
+
+# Use nslookup for a quick interactive check
+nslookup wiki.office.local
+```
+
+### NAT (Network Address Translation)
+
+Our office uses private addresses in the `10.0.0.0/8` range, but these addresses are not routable on the public internet. **NAT** solves this by having the router rewrite the source address of outgoing packets from the private address (e.g., `10.0.1.10`) to the router's public address (e.g., `203.0.113.5`). When replies come back, the router reverses the translation and forwards the packet to the correct internal host. This allows all 20 employees to share a single public IP address for internet access.
+
+NAT is so fundamental that most home and office routers perform it transparently. In a cloud environment like AWS, a **NAT Gateway** serves the same function for instances in private subnets.
+
+There are three common NAT variants:
+
+- **PAT (Port Address Translation) / Overload** — The most common form. A single public IP address is used for all outbound connections, differentiated by port number. The router maintains a table mapping each private `address:port` pair to the corresponding public `address:port`. This is how home and small-office routers work.
+- **Dynamic NAT** — The organization purchases a pool of public IP addresses. Each private host is assigned the first available public address from the pool (rather than always sharing one). Less common because PAT is more efficient.
+- **Static NAT** — A one-to-one permanent mapping between a specific private address and a specific public address. Used for servers that must be consistently reachable from the internet under the same public IP.
+
+<Aside type="caution" title="When NAT Breaks Things">
+NAT works well for outbound connections, but it complicates inbound connections. If you need an external user to reach your office web server, you must configure **port forwarding** (also called DNAT) on the router to send incoming traffic on a specific port to the correct internal server. In cloud environments, you would instead place the server in a public subnet with a public IP, or use a load balancer.
+</Aside>
+
+#### NAT Traversal
+
+Peer-to-peer and real-time applications (VoIP, video conferencing, online gaming) need to establish direct connections between two hosts that are both behind NAT. Several techniques exist:
+
+- **UPnP (Universal Plug and Play)** — Allows a device to automatically create a port mapping on the router, so external hosts can initiate connections.
+- **STUN (Session Traversal Utilities for NAT)** — A client queries a public STUN server to discover its public IP address and the type of NAT it is behind, then uses that information to negotiate direct connections.
+- **TURN (Traversal Using Relays around NAT)** — A fallback when direct connection fails; a public relay server forwards traffic between the two peers.
+- **ICE (Interactive Connectivity Establishment)** — A framework (used by WebRTC, Zoom, etc.) that systematically tries direct, STUN, and TURN paths to find the best available route.
+
+## Routing Basics
+
+A **router** connects two or more networks and forwards packets between them. Every host on a network has a **default gateway**, the router address to which it sends any packet whose destination is not on the local subnet. In our office, the workstation at `10.0.1.10/25` has a default gateway of `10.0.1.1`. When that workstation tries to reach the server at `10.0.1.130` (a different subnet), it sends the packet to the gateway, which then forwards it to the server subnet.
+
+The router makes forwarding decisions based on its **routing table**, a list of destination networks and the next-hop address or interface to use for each. You can inspect the routing table on a Linux machine:
+
+```bash
+# Show the routing table
+ip route show
+```
+
+Typical output for a workstation in our office might look like:
+
+```
+default via 10.0.1.1 dev eth0
+10.0.1.0/25 dev eth0 proto kernel scope link src 10.0.1.10
+```
+
+The first line says "for any destination not otherwise listed, send the packet to `10.0.1.1` via the `eth0` interface." The second line says "for destinations in `10.0.1.0/25`, deliver directly on `eth0` because we are on that subnet."
+
+On the router itself, the routing table is more complex. It has entries for both internal subnets plus a default route pointing to the ISP's gateway:
+
+```bash
+# On the router
+ip route show
+# default via 203.0.113.1 dev wan0
+# 10.0.1.0/25 dev eth0 proto kernel scope link src 10.0.1.1
+# 10.0.1.128/25 dev eth1 proto kernel scope link src 10.0.1.129
+```
+
+You can also add static routes manually when needed:
+
+```bash
+# Add a route to a remote network via a specific gateway
+sudo ip route add 10.0.2.0/24 via 10.0.1.1 dev eth0
+```
+
+<Aside type="note" title="Routes in the Cloud">
+Cloud VPCs use the same routing concepts. AWS route tables, for example, contain entries like "send `0.0.0.0/0` to the internet gateway" or "send `10.0.0.0/16` to local." The syntax differs, but the logic is identical to what `ip route show` displays on a Linux box.
+</Aside>
+
+## Core Network Devices
+
+Understanding the physical (or virtual) devices on a network helps you reason about where packets go and where problems can occur.
+
+A **switch** operates at layer 2 and connects devices within a single network segment. It learns which MAC addresses live on which ports and forwards Ethernet frames only to the correct port, rather than broadcasting everything. In our office, a 24-port switch in the server closet connects all the employee workstations and servers.
+
+Switches come in two broad categories:
+
+- **Unmanaged switches** require no configuration — you plug them in and they start forwarding traffic immediately. They support only simple topologies and have no remote management, VLAN, or QoS capabilities. Use them where simplicity matters and advanced features are not needed.
+- **Managed switches** add remote management, software-defined networking support, Quality of Service (QoS) to prioritize traffic (e.g., VoIP over bulk transfers), security features (port security, 802.1X authentication, ARP inspection), and VLAN configuration. They are standard in any environment requiring segmentation or centralized control.
+
+Managed switches can also create **VLANs** (Virtual LANs), logically separating traffic on the same physical switch into distinct broadcast domains, which is another way to segment our workstation and server traffic without needing separate physical switches. VLANs are discussed in detail in Network Configuration & Troubleshooting.
+
+A **router** operates at layer 3 and forwards packets between different subnets or networks based on IP addresses. Our office router connects the workstation subnet, the server subnet, and the ISP uplink. It runs DHCP, performs NAT, and maintains the routing table.
+
+A **firewall** inspects traffic and enforces security policies. It can operate at multiple layers: a simple firewall might block or allow traffic based on IP addresses and port numbers (layers 3 and 4), while an advanced firewall might inspect HTTP headers or application content (layer 7). In our office, the router likely includes basic firewall functionality, blocking inbound connections from the internet by default and only allowing specific traffic through.
+
+In cloud environments, **security groups** act as virtual firewalls attached to individual instances. A security group rule like "allow TCP port 443 from `0.0.0.0/0`" is equivalent to a firewall rule permitting HTTPS traffic from any source. The key difference from traditional firewalls is that security groups are stateful: if you allow an outbound connection, the return traffic is automatically permitted.
+
+## Ports and Protocols
+
+Layer 4 of the TCP/IP model distinguishes between different services running on the same host using **port numbers**. An IP address gets a packet to the right machine; a port number gets it to the right application on that machine.
+
+**TCP (Transmission Control Protocol)** provides reliable, ordered delivery. It establishes a connection with a three-way handshake (SYN, SYN-ACK, ACK), retransmits lost packets, and guarantees that data arrives in order. HTTP, SSH, and database protocols typically use TCP because they need reliability.
+
+**UDP (User Datagram Protocol)** is simpler and faster but provides no delivery guarantees. DNS queries, DHCP, video streaming, and VoIP use UDP because speed matters more than perfect delivery, or because the application handles retransmission itself.
+
+Well-known port numbers (0 through 1023) are standardized. The ones you will encounter most often as a system administrator include:
+
+| Port | Protocol | Service |
+|------|----------|---------|
+| 22   | TCP      | SSH     |
+| 53   | TCP/UDP  | DNS     |
+| 80   | TCP      | HTTP    |
+| 443  | TCP      | HTTPS   |
+| 67/68| UDP      | DHCP    |
+| 25   | TCP      | SMTP    |
+| 3306 | TCP      | MySQL   |
+| 5432 | TCP      | PostgreSQL |
+
+You can inspect which ports are open and listening on a Linux system using the `ss` command:
+
+```bash
+# Show all listening TCP sockets with process names
+sudo ss -tlnp
+
+# Show all listening UDP sockets
+sudo ss -ulnp
+
+# Show all established connections
+ss -tn
+```
+
+The flags break down as follows: `-t` for TCP, `-u` for UDP, `-l` for listening sockets only, `-n` for numeric output (no DNS resolution), and `-p` to show the process using each socket. Typical output looks like:
+
+```
+State   Recv-Q  Send-Q  Local Address:Port  Peer Address:Port  Process
+LISTEN  0       128     0.0.0.0:22          0.0.0.0:*          users:(("sshd",pid=1234,fd=3))
+LISTEN  0       511     0.0.0.0:80          0.0.0.0:*          users:(("nginx",pid=5678,fd=6))
+```
+
+This tells you that SSH is listening on port 22 on all interfaces and Nginx is listening on port 80. If a service is not listening when you expect it to be, you have found your problem before ever looking at the network.
+
+<Aside type="tip" title="Firewalls and Ports">
+A common troubleshooting pattern: the application is running and the port is listening (confirmed with `ss`), but external clients cannot connect. The next thing to check is the firewall. On a Linux host, `sudo iptables -L -n` or `sudo nft list ruleset` shows the local firewall rules. In a cloud environment, check the security group and network ACL attached to the instance.
+</Aside>
+
+## Designing a Simple Network
+
+Let us pull everything together and sketch the network for our 20-person office. The design needs to provide workstation connectivity, host internal services, and allow internet access.
+
+<Steps>
+1. **Define the address space.** We allocate `10.0.1.0/24` as our overall block, then split it into two `/25` subnets: `10.0.1.0/25` for workstations and `10.0.1.128/25` for servers.
+
+2. **Assign infrastructure addresses.** The router gets `10.0.1.1` on the workstation subnet and `10.0.1.129` on the server subnet. The DNS server is `10.0.1.130`, and the web application server is `10.0.1.131`.
+
+3. **Configure DHCP.** The DHCP server hands out `10.0.1.10` through `10.0.1.126` to workstations, with the default gateway set to `10.0.1.1` and the DNS server set to `10.0.1.130`. Server addresses are statically assigned.
+
+4. **Set up routing and NAT.** The router has a default route pointing to the ISP gateway. NAT is configured so that all outbound traffic from both subnets appears to come from the router's public IP.
+
+5. **Apply firewall rules.** Inbound traffic from the internet is blocked by default. Port forwarding is configured for any services that need external access. Between subnets, workstations can reach the web server (port 443) and DNS (port 53), but direct access to the database server is restricted to the web application server only.
+</Steps>
+
+This design maps directly to cloud concepts. In AWS, the overall `10.0.1.0/24` block would be a VPC, each `/25` would be a subnet (one public, one private), the router is the VPC's implicit router, NAT is provided by a NAT Gateway, and firewall rules are expressed as security groups and network ACLs.
+
+## Configuring IP Addresses on Linux
+
+Linux provides several different tools and frameworks for network configuration, and which one applies depends on the distribution:
+
+- **ifupdown** (Debian/Ubuntu) — Configuration lives in `/etc/network/interfaces`. Simple and declarative, but lacks dynamic management.
+- **NetworkManager** (common on AlmaLinux, Fedora, and RHEL) — A daemon that manages connections dynamically. Configured via the `nmcli` command-line utility or `nmtui` text UI.
+- **systemd-networkd** — Increasingly used on server distributions; configuration files live in `/etc/systemd/network/`.
+
+The `ip` command (part of iproute2) is the current standard for viewing and modifying network state:
+
+```bash
+# Show all interfaces and their addresses
+ip addr show
+
+# Show the routing table
+ip route show
+
+# Add an address temporarily (does not persist across reboots)
+sudo ip addr add 10.0.1.50/24 dev eth0
+
+# Set default gateway temporarily
+sudo ip route add default via 10.0.1.1
+```
+
+<Aside type="caution" title="Temporary vs. Persistent Configuration">
+Changes made with `ip addr` and `ip route` commands are not persistent. They disappear on reboot. Always apply permanent configuration through your distribution's network management tool (NetworkManager, systemd-networkd, or `/etc/network/interfaces`). The older `ifconfig` and `route` commands are deprecated; use `ip` instead.
+</Aside>
+
+## Enterprise Networks
+
+Enterprise networks face requirements that differ significantly from a small office: higher bandwidth demands, multiple administrative domains, and a strong need for uptime.
+
+- **Bandwidth** — Enterprise links commonly use fiber optics rather than copper for backbone connections. **Link Aggregation (LAG)** combines multiple physical links between switches or servers into a single logical interface, increasing total throughput beyond what a single cable can carry and providing redundancy: if one physical link fails, the others continue forwarding traffic.
+- **Scale and delegation** — A large organization like Oregon State University might own an entire /16 address block (e.g., `128.193.0.0/16`, providing 65,536 addresses) and delegate sub-ranges to individual departments, each with its own network administrators.
+- **Redundancy and dynamic routing** — Critical networks use redundant paths to the internet so that if a cable is physically cut, traffic automatically reroutes via a different path. This relies on dynamic routing protocols (see below) that exchange route information and converge on a new path within seconds.
+
+## Practical Diagnostic Tools
+
+When something goes wrong, the following tools let you systematically isolate the problem layer by layer.
+
+### ping: Testing Basic Connectivity
+
+`ping` sends ICMP echo request packets to a target and reports whether replies come back and how long they take. It is your first tool for testing layer 3 connectivity:
+
+```bash
+# Can I reach the default gateway?
+ping -c 4 10.0.1.1
+
+# Can I reach a public IP (bypassing DNS)?
+ping -c 4 8.8.8.8
+
+# Can I resolve and reach a public hostname?
+ping -c 4 google.com
+```
+
+If the first ping fails, you have a local network or routing problem. If the second succeeds but the third fails, DNS is broken. If all three succeed, your basic connectivity is fine and the problem is likely at the application layer.
+
+### traceroute: Finding Where Packets Stop
+
+`traceroute` shows the path packets take to a destination, listing each router (hop) along the way. It helps you identify where packets are being dropped or delayed:
+
+```bash
+# Trace the route to a public server
+traceroute 8.8.8.8
+
+# Use TCP-based traceroute (useful when ICMP is blocked)
+sudo traceroute -T -p 443 example.com
+```
+
+If the trace stops at your default gateway, your router has a problem. If it reaches several ISP hops and then stops, the issue is upstream and outside your control.
+
+### dig and nslookup: DNS Troubleshooting
+
+These tools query DNS servers directly and show you exactly what the resolver returns:
+
+```bash
+# Full DNS query with all sections
+dig example.com
+
+# Query a specific DNS server
+dig @10.0.1.130 wiki.office.local
+
+# Reverse DNS lookup
+dig -x 10.0.1.131
+
+# Quick lookup with nslookup
+nslookup wiki.office.local 10.0.1.130
+```
+
+The `dig` output includes the answer section (the actual records), the authority section (which name server is responsible), and timing information. If `dig @10.0.1.130` works but `dig` alone does not, the workstation is configured to use the wrong DNS server.
+
+### curl: Testing Application-Layer Connectivity
+
+`curl` makes HTTP (and many other protocol) requests from the command line. It is invaluable for testing whether a web service is actually responding:
+
+```bash
+# Test if the web server responds
+curl -I https://wiki.office.local
+
+# Test with verbose output to see TLS and header details
+curl -v https://wiki.office.local
+
+# Test a specific port to bypass DNS
+curl -I http://10.0.1.131:8080
+
+# Follow redirects and show timing
+curl -o /dev/null -s -w "HTTP %{http_code} in %{time_total}s\n" https://wiki.office.local
+```
+
+The `-I` flag fetches only headers, which is useful for a quick check without downloading the entire page. The `-v` flag shows the TLS handshake and request/response headers, which helps diagnose certificate problems and redirect loops.
+
+<Aside type="tip" title="A Systematic Diagnostic Workflow">
+When a user reports "the website is down," work through the layers:
+
+1. `ping 10.0.1.1` to verify local connectivity
+2. `ping 10.0.1.131` to verify you can reach the server
+3. `dig wiki.office.local` to verify DNS resolution
+4. `curl -I http://10.0.1.131:8080` to verify the application is responding
+5. `sudo ss -tlnp` (on the server) to verify the process is listening
+
+Each step targets a different layer, and the first one that fails tells you exactly where to focus your investigation.
+</Aside>
+
+## Putting It All Together
+
+Networking can feel abstract until you connect the pieces. In our small office scenario, a single web request from an employee's laptop to `wiki.office.local` touches every concept in this chapter. The laptop uses DHCP to get an address (layer 7 service), sends a DNS query over UDP port 53 to resolve the hostname (layers 4 and 7), constructs an IP packet destined for `10.0.1.131` (layer 3), determines via the routing table that this address is on a different subnet and sends the packet to the default gateway (layer 3), the switch forwards the Ethernet frame to the router port (layer 2), the router forwards it to the server subnet (layer 3), the server's TCP stack accepts the connection on port 8080 (layer 4), and Nginx serves the wiki page (layer 7). Understanding this chain, and knowing which tool to use at each step, is the core skill that separates confident troubleshooting from guesswork.
+
+## Further reading
+
+- <a href="https://www.youtube.com/watch?v=3QhU9jd03a0" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #28: Computer Networks (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=AEaKrq3SpW8" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #29: The Internet (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=guvsH5OFizE" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #30: The World Wide Web (YouTube)</a>
+- <a href="https://aws.amazon.com/what-is/computer-networking/" target="_blank" rel="noopener noreferrer">What is Computer Networking? — AWS</a>
+- <a href="https://www.youtube.com/watch?v=dV8mjZd1OtU" target="_blank" rel="noopener noreferrer">OSI Model Explained (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=IPvYjXCsTg8" target="_blank" rel="noopener noreferrer">Computer Networking Full Course — OSI Model Deep Dive (YouTube)</a>
+- <a href="https://archive.org/details/ComputerNetworks_TheHeraldsOfResourceSharing" target="_blank" rel="noopener noreferrer">Computer Networks: The Heralds of Resource Sharing — ARPANET 1972 (Internet Archive)</a>

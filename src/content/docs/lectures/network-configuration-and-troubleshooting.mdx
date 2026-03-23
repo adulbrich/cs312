@@ -1,0 +1,485 @@
+---
+title: Network Configuration & Troubleshooting
+description: "Systematic network troubleshooting: VLANs, Wi-Fi, DNS, DHCP, routing, firewalls, and packet capture."
+sidebar:
+  order: 8
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Imagine you arrive at work on Monday morning to a flood of messages: "The website is down." Users cannot reach your company's internal web application. The application server is running, the database is healthy, and nothing changed over the weekend. Somewhere between the users and the server, something is broken.
+
+This chapter teaches you how to find that "something." We will work through network configuration and troubleshooting from the bottom of the stack upward, using this scenario as a common thread. Along the way, we will cover VLANs, Wi-Fi, DNS, DHCP, routing, firewalls, and packet capture.
+
+## A systematic troubleshooting methodology
+
+When faced with a connectivity problem, resist the urge to start changing things at random. Network issues have a logical structure, and the OSI model gives us a map for navigating it. Two strategies stand out in practice.
+
+**Bottom-up approach.** Start at the physical layer (cables, link lights, interface status) and work your way up through data link (VLANs, MAC addresses), network (IP addressing, routing), transport (ports, firewalls), and finally the application itself. This method is thorough and works well when you have no initial hypothesis.
+
+**Divide-and-conquer.** If you have a clue about where the problem might be, test at that layer first. Can you ping the gateway? If yes, layers 1 through 3 are probably fine; focus on DNS, firewalls, or the application. If no, move downward. This approach is faster when experience gives you a good starting point.
+
+<Aside type="tip">
+A helpful rule of thumb: if *nothing* on the network works, suspect layers 1 through 3. If only *one service* is broken, suspect layers 4 through 7 (DNS, firewall rules, application configuration).
+</Aside>
+
+In our scenario, the first thing to check is whether the problem is universal or isolated. Can you reach the server from your own workstation? Can the server reach the internet? These initial tests narrow the scope dramatically.
+
+## Hierarchical network design
+
+Large networks are difficult to manage as a single flat layer. The Cisco hierarchical model organizes a network into three functional layers, each with a distinct role.
+
+**The Access Layer** is where end devices connect to the network. It handles layer-2 switching, port security, QoS classification and marking (identifying and labeling traffic so the network knows what to prioritize), ARP inspection (preventing ARP spoofing attacks), VLAN assignment, spanning tree, and Power over Ethernet (PoE) for devices like VoIP phones and wireless access points.
+
+**The Distribution Layer** aggregates traffic from access switches and mediates between switching (layer 2) and routing (layer 3). It enforces policy-based security using access control lists (ACLs), provides routing between VLANs and between different routing domains, handles redundancy and load balancing, and controls broadcast domains (routers and layer-3 switches do not forward broadcast traffic, so the distribution layer acts as a boundary between broadcast domains). Route summarization here keeps the core routing tables compact: instead of advertising four `/24` subnets separately, the distribution layer can advertise a single `/22` summary route to the core.
+
+**The Core Layer** is the network backbone — the high-speed switching fabric interconnecting distribution devices. It prioritizes fast transport and fault tolerance over feature richness. CPU-intensive tasks (security inspection, QoS classification, deep packet inspection) are deliberately avoided at this layer; the goal is forwarding as fast as possible with maximum reliability.
+
+In small-to-medium networks, the distribution and core layers are often *collapsed* into a single layer-3 switch, reducing hardware cost while preserving the logical separation between access and routing functions.
+
+## VLANs and network segmentation
+
+Most production networks use VLANs (Virtual Local Area Networks) to divide a single physical switch into multiple logical broadcast domains. VLANs improve security, reduce broadcast traffic, and make network management more predictable.
+
+Every Ethernet frame on a VLAN-aware network can carry an 802.1Q tag, a small header inserted after the source MAC address that identifies which VLAN the frame belongs to. Switch ports operate in one of two modes.
+
+**Access ports** connect to end devices (servers, workstations, printers). The switch assigns all traffic on an access port to a single VLAN and strips the 802.1Q tag before delivering the frame to the device. The device never sees the tag. Traffic on an access port is *untagged* — no VLAN ID is present in the Ethernet frame, so untagged traffic on a port can only belong to one VLAN.
+
+**Trunk ports** connect switches to each other or to routers. A trunk carries traffic for multiple VLANs simultaneously, preserving the 802.1Q tag (a 4-byte addition to each Ethernet frame containing the VLAN ID) so the receiving switch knows which VLAN each frame belongs to. Tagged frames are used to communicate between devices that are aware of VLAN segmentation. This is the only way to carry multiple VLANs on a single physical cable.
+
+A common source of trouble in our scenario: someone moved a patch cable to a different switch port, and that port is configured for the wrong VLAN. The server's IP address is correct, but it is now in a broadcast domain that cannot reach the gateway. You can verify VLAN membership from the switch CLI or, on the server side, by checking whether ARP resolution works for the gateway.
+
+```bash
+# Check whether the server can resolve the gateway's MAC address
+ip neighbor show
+# If the gateway entry is missing or marked FAILED, the server
+# likely cannot reach it at layer 2 (wrong VLAN, bad cable, etc.)
+```
+
+To route traffic between VLANs, you need a layer-3 device (a router or a layer-3 switch) configured with an interface or sub-interface in each VLAN. Without inter-VLAN routing, hosts on different VLANs simply cannot communicate, regardless of their IP configuration.
+
+## Wi-Fi fundamentals
+
+Wireless networking adds complexity because the physical medium (radio waves) is shared, unpredictable, and invisible. Understanding a few core concepts helps you troubleshoot Wi-Fi issues efficiently.
+
+### Standards and bands
+
+The 802.11 family of standards defines how Wi-Fi operates. The most relevant standards today are 802.11ac (Wi-Fi 5) on the 5 GHz band and 802.11ax (Wi-Fi 6/6E), which operates on 2.4 GHz, 5 GHz, and (with 6E) 6 GHz. Older standards like 802.11n (Wi-Fi 4) are still common in legacy environments.
+
+The 2.4 GHz band offers longer range but only three non-overlapping channels (1, 6, and 11 in North America). The 5 GHz band provides more channels and higher throughput but shorter range. In a dense office, 5 GHz is usually preferable because the additional channels reduce co-channel interference.
+
+### Channels and interference
+
+When two nearby access points transmit on the same channel (or overlapping channels), they compete for airtime and degrade each other's performance. Channel allocation by band:
+
+- **2.4 GHz** — Only 3 non-overlapping channels in North America: 1, 6, and 11. Always use one of these three. Using channel 3 or 9 partially overlaps with adjacent channels and creates *worse* interference than sharing one of the standard three channels, because collisions affect both channels simultaneously.
+- **5 GHz** — 24 non-overlapping 20 MHz channels, substantially reducing co-channel interference in dense deployments.
+- **6 GHz** (Wi-Fi 6E / 802.11ax) — Up to 59 non-overlapping 20 MHz channels, with room for 29 non-overlapping 40 MHz channels, 14 non-overlapping 80 MHz channels, or 7 non-overlapping 160 MHz channels. The 6 GHz band is well suited to high-bandwidth applications such as HD video streaming and virtual reality, and is preferred in new dense deployments.
+
+<Aside type="caution">
+Microwave ovens, Bluetooth devices, and cordless phones all operate near 2.4 GHz. If users report intermittent Wi-Fi problems in a break room or kitchen, interference from appliances is a likely culprit. Prefer 5 GHz or 6 GHz in those environments.
+</Aside>
+
+### WAP placement considerations
+
+When deploying wireless access points in a building:
+
+- **Survey the site** — Understand the physical layout, wall materials (concrete and metal attenuate signals significantly), and expected user density before placing APs.
+- **Use non-overlapping channels** — Separate adjacent APs onto different channels to avoid co-channel interference.
+- **Use the same SSID and credentials** across all APs — Clients will roam automatically to the nearest AP without the user noticing.
+- **Disable low data rates** — Some APs advertise low data rates (e.g., 1 or 2 Mbps) for backwards compatibility. Devices far from an AP may lock onto it at these low rates rather than roaming to a closer AP. Disabling the lowest data rates encourages clients to roam to a stronger signal.
+- **Account for user density** — A lecture hall needs more APs than an empty corridor. Many modern APs include automatic power and channel adjustment to adapt to congestion.
+- **Segment traffic by VLAN** — Use separate SSIDs mapped to separate VLANs for different user groups (staff, students, guests) to enforce network policies without running separate physical infrastructure.
+
+### Enterprise wireless security
+
+For organizational networks, WPA2-Enterprise or WPA3-Enterprise is the standard. These protocols authenticate each user individually via 802.1X and a RADIUS server, rather than sharing a single pre-shared key (PSK) across all users. Individual authentication means you can revoke access for a single person without changing the password for everyone.
+
+If your organization still uses WPA2-PSK (a shared password), rotate the key regularly and treat it as a credential that must be protected. WPA3-SAE improves on PSK by providing forward secrecy and resistance to offline dictionary attacks, but enterprise authentication remains the gold standard.
+
+## DNS configuration and troubleshooting
+
+DNS is the most common reason users report that "the internet is down." The network may be perfectly healthy, but if name resolution fails, browsers display error pages and applications cannot connect to their backends.
+
+### How the resolver works
+
+When a Linux server needs to resolve a hostname, it consults `/etc/resolv.conf` (or, on modern systems, `systemd-resolved`) to find the IP address of its configured DNS server. It then sends a query to that server. If the server cannot answer authoritatively, it recurses through the DNS hierarchy.
+
+```bash
+# View the current resolver configuration
+cat /etc/resolv.conf
+# Typical output:
+# nameserver 10.0.1.2
+# nameserver 10.0.1.3
+# search example.com
+```
+
+The `search` directive appends a domain suffix to short hostnames. If you type `ping app01`, the resolver tries `app01.example.com` before querying for `app01` alone.
+
+### Diagnostic tools
+
+The `dig` command is the most versatile DNS troubleshooting tool. It shows you exactly what the DNS server returns, including the response code, answer section, and query time.
+
+```bash
+# Query the default resolver for an A record
+dig app.example.com
+
+# Query a specific DNS server
+dig @10.0.1.2 app.example.com
+
+# Check for a specific record type
+dig MX example.com
+
+# Get a short answer (just the IP)
+dig +short app.example.com
+```
+
+The `nslookup` command provides a simpler interface that works on both Linux and Windows, making it useful for quick checks.
+
+```bash
+nslookup app.example.com
+nslookup app.example.com 10.0.1.2
+```
+
+### Common DNS failures
+
+In our "website is down" scenario, DNS problems take several forms.
+
+The resolver is unreachable. If the DNS server's IP address is wrong in `/etc/resolv.conf`, or if the DNS server itself is down, all queries time out. Test by pinging the nameserver IP directly.
+
+The record is missing or stale. If someone deleted the A record for `app.example.com`, or if a cached record has the wrong IP, users get NXDOMAIN or are sent to the wrong server. Use `dig` to compare results from different resolvers.
+
+```bash
+# Compare your local resolver with a public one
+dig app.example.com @10.0.1.2
+dig app.example.com @8.8.8.8
+```
+
+The search domain is misconfigured. If `/etc/resolv.conf` has the wrong search domain, short hostnames resolve to the wrong fully qualified domain name, or fail entirely.
+
+## DHCP: dynamic addressing
+
+DHCP (Dynamic Host Configuration Protocol) automates IP address assignment. Without it, every device on the network would need manual configuration, a process that scales poorly and invites human error.
+
+### The lease process
+
+A DHCP transaction follows a four-step exchange, sometimes called DORA.
+
+<Steps>
+1. **Discover.** The client broadcasts a DHCPDISCOVER message on the local network, asking for an address.
+2. **Offer.** One or more DHCP servers respond with a DHCPOFFER, proposing an IP address and configuration parameters.
+3. **Request.** The client selects an offer and broadcasts a DHCPREQUEST, telling all servers which offer it accepted.
+4. **Acknowledge.** The chosen server sends a DHCPACK, confirming the lease. The client configures its interface.
+</Steps>
+
+Leases have a duration. When half the lease time has elapsed, the client attempts to renew. If renewal fails and the lease expires, the client must start the DORA process again and may receive a different address.
+
+### Static vs. dynamic allocation
+
+Servers, network printers, and infrastructure devices should use static allocation: either a manually configured IP address or a DHCP reservation that always assigns the same address based on the device's MAC address. Workstations and mobile devices typically use dynamic allocation from a pool.
+
+<Aside type="note">
+DHCP reservations give you the convenience of DHCP (centralized configuration) with the predictability of static addressing. Use them for any device that other systems need to reach by IP address.
+</Aside>
+
+### Troubleshooting DHCP
+
+If a host cannot obtain an address, check the following. Is the DHCP server running and reachable on the same broadcast domain (or is a DHCP relay agent configured)? Is the address pool exhausted? Are the DHCP options (gateway, DNS server, domain name) correct?
+
+```bash
+# On the client, check the current lease
+ip addr show eth0
+
+# Release and renew (useful for testing)
+sudo dhclient -r eth0
+sudo dhclient eth0
+
+# On systemd-based systems
+sudo networkctl renew eth0
+```
+
+In our scenario, if the server recently lost power and came back up, it may have received a different IP address from the DHCP pool. Any DNS records or firewall rules pointing to the old address would now be wrong. This is exactly why servers should use static allocation or reservations.
+
+## Routing and gateway issues
+
+Once a host has a valid IP address, it needs to know where to send traffic. The routing table maps destination networks to next-hop gateways.
+
+```bash
+# Display the routing table
+ip route show
+# Typical output:
+# default via 10.0.1.1 dev eth0
+# 10.0.1.0/24 dev eth0 proto kernel scope link src 10.0.1.50
+```
+
+The `default` route is the gateway of last resort. Traffic destined for any network not explicitly listed goes to this gateway. If the default route is missing or points to the wrong address, the host can communicate on its local subnet but nothing beyond it.
+
+### Diagnosing routing problems
+
+The `traceroute` command (or `tracepath` on some Linux distributions) reveals the path packets take through the network. Each line of output represents a router hop.
+
+```bash
+# Trace the path to a remote host
+traceroute app.example.com
+
+# Use TCP instead of UDP (helpful when ICMP is blocked)
+sudo traceroute -T -p 443 app.example.com
+```
+
+If the trace stops at a particular hop (shown as `* * *`), the problem is at or near that router. It could be a misconfigured route, an interface that is down, or a firewall blocking the traffic.
+
+### Asymmetric routing
+
+Asymmetric routing occurs when traffic takes a different path in each direction. The request might reach the server through Router A, but the response leaves through Router B. This can cause problems with stateful firewalls that expect to see both sides of a connection. If a firewall on Router A's path sees the outgoing SYN but never sees the returning SYN-ACK (because it came back through Router B), it may drop subsequent packets.
+
+Asymmetric routing is notoriously difficult to diagnose because the problem appears intermittent or one-sided. Packet captures at multiple points in the network are often necessary to confirm it.
+
+## Firewall debugging
+
+Firewalls are the most common cause of "it works from here but not from there" problems. A misconfigured firewall rule can silently drop traffic, making the application appear unreachable even though the server is running and the network path is intact.
+
+### Linux firewalls: iptables and nftables
+
+On Linux, the kernel's netfilter framework handles packet filtering. The traditional interface is `iptables`; the modern replacement is `nftables`. Both organize rules into chains (INPUT for incoming traffic, OUTPUT for outgoing, FORWARD for routed traffic).
+
+```bash
+# List current iptables rules with line numbers
+sudo iptables -L -n --line-numbers
+
+# Check if a specific port is allowed
+sudo iptables -L INPUT -n | grep 80
+
+# Temporarily allow HTTP traffic for testing
+sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+```
+
+<Aside type="caution">
+Changes made with `iptables` commands are not persistent by default. They disappear on reboot. Use `iptables-save` and `iptables-restore` (or your distribution's firewall management tool) to persist rules.
+</Aside>
+
+With `nftables`, the syntax is different but the concepts are the same.
+
+```bash
+# List all nftables rules
+sudo nft list ruleset
+
+# Add a rule to accept HTTP traffic
+sudo nft add rule inet filter input tcp dport 80 accept
+```
+
+### Cloud security groups
+
+In cloud environments (AWS, Azure, GCP), security groups or network ACLs function as firewalls. A common misconfiguration is allowing inbound traffic on port 443 but forgetting to allow the health check port that the load balancer uses. The application works when accessed directly but fails behind the load balancer.
+
+When troubleshooting in the cloud, always check both the security group rules and any network ACLs applied to the subnet. Remember that security groups are stateful (return traffic is automatically allowed), while network ACLs are stateless (you must explicitly allow return traffic).
+
+### Systematic firewall debugging
+
+When you suspect a firewall issue, follow this process. First, verify the service is listening on the expected port.
+
+```bash
+# Check listening ports
+sudo ss -tlnp | grep 80
+# Expected output shows the web server listening:
+# LISTEN  0  128  *:80  *:*  users:(("nginx",pid=1234,fd=6))
+```
+
+Next, test connectivity from the client side. If `curl` times out but the server shows the port is open, a firewall between the two is likely dropping the traffic.
+
+```bash
+# Test from the client
+curl -v --connect-timeout 5 http://app.example.com
+```
+
+If the connection times out (as opposed to being refused), the packets are being silently dropped, which is characteristic of a firewall rule. A "connection refused" error means the packets reached the server but nothing is listening, which is a different problem entirely.
+
+## Packet capture with tcpdump
+
+When higher-level tools do not reveal the problem, packet capture lets you see exactly what is happening on the wire. The `tcpdump` utility is available on virtually every Linux system and is invaluable for network troubleshooting.
+
+### Basic usage
+
+```bash
+# Capture all traffic on eth0 (stop with Ctrl+C)
+sudo tcpdump -i eth0
+
+# Capture only traffic to or from a specific host
+sudo tcpdump -i eth0 host 10.0.1.50
+
+# Capture only DNS traffic
+sudo tcpdump -i eth0 port 53
+
+# Capture HTTP traffic and show packet contents in ASCII
+sudo tcpdump -i eth0 port 80 -A
+
+# Write capture to a file for later analysis in Wireshark
+sudo tcpdump -i eth0 -w /tmp/capture.pcap
+```
+
+### Reading tcpdump output
+
+Each line of tcpdump output represents a single packet. A typical TCP exchange looks like this.
+
+```
+10:23:45.123456 IP 10.0.1.100.54321 > 10.0.1.50.80: Flags [S], seq 1234567
+10:23:45.123789 IP 10.0.1.50.80 > 10.0.1.100.54321: Flags [S.], seq 7654321, ack 1234568
+10:23:45.124012 IP 10.0.1.100.54321 > 10.0.1.50.80: Flags [.], ack 7654322
+```
+
+The flags tell you what is happening. `[S]` is a SYN (connection initiation). `[S.]` is a SYN-ACK (the server's response). `[.]` is a plain ACK. `[P.]` means data is being pushed. `[F.]` is a FIN (connection teardown). `[R]` is a RST (connection reset).
+
+### Using tcpdump in our scenario
+
+Returning to our "website is down" scenario, suppose the server is running, DNS resolves correctly, and the routing table looks fine. A packet capture on the server reveals the answer.
+
+```bash
+sudo tcpdump -i eth0 port 80 -n
+```
+
+If you see incoming SYN packets but no SYN-ACK responses, the server is receiving the requests but not responding. This could be a local firewall rule dropping the traffic before it reaches the application. If you see no packets at all, the traffic is being dropped upstream, and you need to capture at the next hop.
+
+<Aside type="tip">
+When capturing on a busy server, always use filters to limit the output. Capturing all traffic on a production server can generate enormous amounts of data and may itself cause performance problems.
+</Aside>
+
+## Address Resolution Protocol (ARP)
+
+IP addresses are layer-3 addresses used to route packets between networks. But within a single broadcast domain (a subnet), devices communicate at layer 2 using MAC addresses. **ARP** bridges the gap: it maps an IP address to the MAC address of a device on the local network.
+
+When a host needs to send a packet to `10.0.1.50` and does not already know that host's MAC address, it broadcasts an ARP request ("who has 10.0.1.50?"). The device with that IP replies with its MAC address. The requesting host stores this mapping in its ARP cache for a short time to avoid repeating the process for every packet.
+
+```bash
+# Show the local ARP/neighbor cache
+ip neighbor show
+
+# A healthy entry looks like:
+# 10.0.1.1 dev eth0 lladdr aa:bb:cc:dd:ee:ff REACHABLE
+# A failed entry indicates layer-2 problems (wrong VLAN, bad cable):
+# 10.0.1.1 dev eth0  FAILED
+```
+
+**ARP spoofing** (also called ARP poisoning) is a common attack in which a malicious host sends fake ARP replies, associating its own MAC address with a legitimate IP address. This can be used to intercept traffic (man-in-the-middle) or disrupt connectivity. Managed switches mitigate this with Dynamic ARP Inspection (DAI), which validates ARP packets against a trusted binding table.
+
+## Network Routing Protocols
+
+Static routes (manually configured entries in the routing table) work for small, stable networks. Large or dynamic networks require routing protocols that automatically exchange reachability information and adapt when paths change.
+
+| Protocol | Best For | Notes |
+|----------|----------|-------|
+| **RIP** (Routing Information Protocol) | Small, simple networks | Easy to configure but converges slowly; hop count limited to 15 |
+| **OSPF** (Open Shortest Path First) | Medium-to-large enterprise networks | Link-state, fast convergence, hierarchical design, open standard |
+| **EIGRP** (Enhanced Interior Gateway Routing Protocol) | Cisco-dominated infrastructures | Fast convergence, efficient updates; historically Cisco proprietary |
+| **BGP** (Border Gateway Protocol) | Internet routing between autonomous systems | The routing protocol of the internet; essential for multi-homed organizations |
+
+For most enterprise sysadmin work, OSPF is the interior routing protocol you are most likely to encounter. BGP appears when your organization peers with multiple ISPs or uses cloud connectivity (AWS Direct Connect, Azure ExpressRoute).
+
+## Virtual Private Networks (VPNs)
+
+A VPN creates an encrypted tunnel between two endpoints over an untrusted network (typically the internet). All traffic inside the tunnel is encrypted, appearing as ordinary encrypted packets to anyone observing the network.
+
+Three common deployment patterns:
+
+- **Site-to-site VPN** — Connects two or more geographically separate offices, allowing their internal networks to communicate securely as if they were on the same LAN. The VPN is configured on the routers/firewalls at each site.
+- **Client-to-site (remote access) VPN** — Allows individual devices (remote workers' laptops) to securely connect to the corporate network. The user runs a VPN client; the organization runs a VPN server.
+- **Remote access VPN** — A variant of client-to-site where access is provided to specific services rather than the full network.
+
+Common VPN protocols:
+
+- **IPsec** — Built into most hardware routers and firewalls; leverages hardware acceleration for high throughput. Widely used in enterprise site-to-site deployments.
+- **OpenVPN** — Open-source, flexible, and easier to configure than IPsec. Runs over TCP or UDP; easy to tunnel through firewalls.
+- **WireGuard** — Modern, lean, and significantly faster than older protocols in benchmarks. Simpler code base (easier to audit). Less legacy hardware support, but increasingly adopted in new deployments.
+
+## Firewall Types, Technologies, and Terminology
+
+### Placement and Scope
+
+Firewalls are categorized by where they sit in the network:
+
+- **Perimeter firewalls** sit between your internal network and the internet. Every packet crossing the boundary passes through them.
+- **Internal firewalls** separate network segments — for example, the corporate network from a production environment, or the access layer from the distribution layer. Data center firewalls enforce very specific rules for critical servers.
+- **Access layer firewalls** are deployed at the edge of high-risk environments or for IoT device segments.
+- **Web Application Firewalls (WAFs)** are placed in front of web applications. They inspect HTTP traffic to detect and block attacks like SQL injection, cross-site scripting (XSS), and session hijacking.
+- **Endpoint firewalls** run on the host itself (e.g., `iptables`/`nftables` on Linux, Windows Defender Firewall). They protect the device regardless of which network it is on.
+
+<Aside type="note">
+Firewalls only inspect traffic that passes through them. Traffic that stays entirely within an unmanaged switch (between two devices on the same switch port group) never hits a firewall unless endpoint firewalls are involved. This is a frequently overlooked gap in network designs.
+</Aside>
+
+### Firewall Technologies
+
+Modern firewalls combine multiple inspection techniques:
+
+- **Packet filtering** (OSI layer 3) — Allows or denies packets based on source/destination IP, protocol, and port number. Fast but cannot inspect connection state or payload.
+- **Stateful inspection** — Tracks the state of active connections in a session table. Return traffic for established connections is automatically allowed; unsolicited inbound packets are dropped.
+- **Proxy services** — The firewall acts as an intermediary: clients connect to the firewall, which makes the actual request on their behalf. Provides deep control but adds latency.
+- **Deep Packet Inspection (DPI)** — Inspects the packet payload, not just the header. Can detect malware signatures, unauthorized protocols, and data exfiltration. There is always a performance trade-off.
+- **Application-level filtering** (OSI layer 7) — Understands specific protocols (HTTP, FTP, DNS) and can make decisions based on application behavior, not just port numbers.
+- **Intrusion Prevention Systems (IPS)** — Active monitoring that detects and blocks vulnerability exploits using anomaly detection, signature matching, and policy rules.
+
+### Common Firewall Terminology
+
+| Term | Meaning |
+|------|---------|
+| **Hosts** | Sets of computers, often grouped by subnet or interface |
+| **Zones** | Logical groupings of devices/subnets sharing the same security policy (e.g., "LAN", "DMZ", "WAN") |
+| **Policies** | Sets of rules governing access control and behavior for a zone |
+| **Rules** | Specific instructions within a policy: allow or deny traffic matching source, destination, protocol, port, and optionally time of day |
+| **DMZ (Demilitarized Zone)** | A network segment isolated from the internal network by a firewall, used to host internet-facing services (web servers, mail relays) that should not have direct access to internal systems |
+| **Traffic shaping** | Rate limiting and prioritization of traffic; can alleviate the impact of denial-of-service attacks and ensure critical services get bandwidth |
+
+## Network Storage
+
+Network storage allows multiple servers and clients to access shared data over a network rather than through locally attached drives.
+
+### NFS (Network File System)
+
+NFS was developed by Sun Microsystems and is a client/server protocol that allows computers to access files over a network similarly to how they access local storage. It is the standard for Linux and UNIX environments, particularly in enterprise settings. NFSv4 adds integrated security and encryption features; earlier versions (NFSv3 and below) lack native encryption and should not be used on untrusted networks.
+
+### SMB (Server Message Block)
+
+SMB was developed by IBM and popularized by Microsoft. It supports file sharing, printer sharing, and communication with network devices. Modern SMB versions (3.x) include end-to-end encryption and improved authentication. SMB has broad cross-platform support (Windows, Linux via Samba, macOS), making it the standard for mixed-OS environments.
+
+### AFP (Apple Filing Protocol)
+
+AFP was Apple's native file-sharing protocol for macOS. It has been deprecated in favor of SMB in modern macOS versions.
+
+### SAN (Storage Area Network)
+
+A SAN is a high-speed, specialized network that provides consolidated block-level storage to servers. Unlike NFS and SMB (which present files), a SAN presents raw storage blocks, and the server formats and manages a filesystem on top. SANs use Fibre Channel or iSCSI for transport, eliminate single points of failure, and are designed for high bandwidth, low latency, and large scale. They are common in data centers for databases and virtual machine storage pools.
+
+### NAS (Network-Attached Storage)
+
+A NAS is a single device (or small cluster) that shares files over a standard TCP/IP network using NFS or SMB. Compared to a SAN, a NAS is simpler, less expensive, and easier to set up, but offers less throughput and scalability. NAS is appropriate for file archiving, home directories, and small-to-medium workloads.
+
+| | SAN | NAS |
+|-|-----|-----|
+| Storage type | Block | File |
+| Network | Fibre Channel / iSCSI | TCP/IP Ethernet |
+| Performance | High | Moderate |
+| Cost & complexity | High | Low |
+| Use case | Databases, VM datastores | File shares, backups, home directories |
+
+## Putting it all together
+
+Let us walk through our scenario one final time, applying the full troubleshooting methodology.
+
+<Steps>
+1. **Verify the report.** Try to reach the application yourself. Confirm the symptoms (timeout, connection refused, DNS error, wrong content).
+2. **Check the physical and data-link layers.** Is the server's network interface up? Is the link light on? Is it on the correct VLAN?
+3. **Check IP configuration.** Does the server have the right IP address? Is the default gateway correct? Can it ping the gateway?
+4. **Test DNS.** Does `dig app.example.com` return the correct IP? Does it match the server's actual address?
+5. **Test routing.** Can the server reach external hosts? Does `traceroute` from a client reach the server's subnet?
+6. **Check firewalls.** Is the port open in `iptables`/`nftables`? In cloud security groups? In any network firewalls between client and server?
+7. **Check the application.** Is the web server process running? Is it listening on the expected port and interface?
+8. **Capture packets.** If all of the above checks pass, use `tcpdump` to observe what is actually happening on the wire. The packets do not lie.
+</Steps>
+
+Each step either identifies the problem or eliminates a layer from consideration. By the time you reach packet capture, you have narrowed the issue to a very specific part of the stack, and the capture will almost always reveal the root cause.
+
+Networking problems can feel overwhelming when you stare at a vague error message in a browser. But with a systematic approach, the right tools, and an understanding of how each layer works, you can diagnose virtually any connectivity issue. The key is discipline: start at the bottom, verify each layer, and let the evidence guide you.
+
+## Further reading
+
+- <a href="https://www.youtube.com/@NetworkDirection" target="_blank" rel="noopener noreferrer">Network Direction — YouTube channel (highly recommended)</a>
+- <a href="https://www.youtube.com/watch?v=cNwEVYkx2Kk" target="_blank" rel="noopener noreferrer">Cabling Devices — Network Fundamentals Part 1 (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=lwArmpjGHpM" target="_blank" rel="noopener noreferrer">How To Design Your Own Enterprise Network — Cisco CCNA (YouTube)</a>

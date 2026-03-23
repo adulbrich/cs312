@@ -1,0 +1,131 @@
+---
+title: 'Log File Parsing and Reporting'
+description: "The company's notoriously slow e-commerce site, 'CatGifs-R-Us.com', is acting up again. Management suspects shenanigans."
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+*/}
+
+{/* Scripts are in OneDrive */}
+{/* https://ita.ee.lbl.gov/html/traces.html */}
+
+The company's notoriously slow e-commerce site, 'CatGifs-R-Us.com', is acting up again. Management suspects shenanigans. They've handed you a massive, cryptic access log and a simple request: 'Find out what's going on!' Your mission, should you choose to accept it, is to write a script (Bash, Python, whatever your weapon of choice) to decode this digital tome. Who's hogging all the bandwidth? Which cat gif is causing all the 404 errors? Become the Sherlock Holmes of `stdout` and deliver a report that makes sense of the chaos.
+
+## What You'll Build
+
+You'll write a small, robust command-line tool that ingests one or more web access logs and produces a concise report for non-technical stakeholders (management). The tool can be implemented in any scripting language (Bash, Python, Ruby, Node.js, etc.) as long as it:
+
+- Streams input (does not require loading the whole file into memory)
+- Handles common web log formats (see below) and ignores lines it cannot parse
+- Provides basic summaries and a few targeted insights
+- Supports simple command-line flags (input path(s), time window, “top N”, output format)
+
+Keep your code simple, readable, and well-documented. Aim for correctness first, then speed.
+
+### Supported Input Formats
+
+Your tool should accept at least Common Log Format (CLF) and ideally Combined Log Format (CLF + referer + user agent). Example lines:
+
+```text
+127.0.0.1 - frank [10/Oct/2000:13:55:36 -0700] "GET /apache_pb.gif HTTP/1.0" 200 2326
+127.0.0.1 - - [10/Oct/2000:13:56:12 -0700] "GET /cat/nyancat.gif HTTP/1.1" 404 512 "https://example.com/" "Mozilla/5.0 (Macintosh; Intel Mac OS X)"
+```
+
+If fields are missing (e.g., referer/user agent), treat them as empty.
+
+{/* https://httpd.apache.org/docs/2.4/logs.html */}
+
+## Core Requirements (Language-Agnostic)
+
+Implement the following features with flags or config where appropriate:
+
+- Input
+  - Accept one or more files via CLI (e.g., `--input access.log` or multiple files)
+  - Accept gzip-compressed logs if possible (nice-to-have)
+- Filtering
+  - Optional time window: `--since`/`--until` (e.g., ISO8601 `2025-08-12T00:00:00` or log timestamp syntax)
+  - Optional path filter: `--path-prefix /cat/`
+- Summaries
+  - Total requests, unique client IP count
+  - Requests per status code (e.g., 200, 301, 404, 500)
+  - Top N endpoints by requests (default N=10)
+  - Top N 4xx endpoints (e.g., most common 404s)
+  - Top N client IPs by request volume
+  - Requests over time (per minute or per hour) with basic spike detection
+- Indicators
+  - Possible bot detection (very high RPS from a single IP, or suspicious user agents)
+  - Error hotspots (endpoints with many 5xx)
+- Output
+  - Human-readable report to stdout
+  - Optional machine-readable: `--json report.json` or `--csv report.csv` (nice-to-have)
+
+<Aside type="note" title="Question 1">
+Briefly describe the data structures and parsing strategy you chose. Why is your solution memory-efficient?
+</Aside>
+<Aside type="note" title="Question 2">
+How do you handle lines that fail to parse? Show an example and your fallback behavior.
+</Aside>
+<Aside type="note" title="Question 3">
+What rule(s) do you use to flag “possible bots”? What are likely false positives?
+</Aside>
+## Minimal CLI Contract
+
+Your tool should at least support the following flags (names are suggestions, adapt to your language's conventions):
+
+- `--input <path ...>`: One or more log files
+- `--since <timestamp>` and/or `--until <timestamp>`: Filter by time
+- `--top <N>`: How many “top” items to show (default 10)
+- `--format <human|json|csv>`: Output format (default human)
+
+Exit code should be non-zero if no input could be processed (e.g., file not found).
+
+<Aside type="note" title="Question 4">
+Show an example help/usage message for your CLI and explain at least three flags.
+</Aside>
+## Hints (Keep It Generic)
+
+- Process the file as a stream. Avoid reading everything into memory.
+- Use a tolerant parser (regex or a small state machine). Skip or log malformed lines.
+- Normalize timestamps to a single timezone early.
+- Keep per-key counters in hash maps/dictionaries; periodically flush if needed.
+- For large logs, consider approximate top-k (e.g., min-heap) instead of sorting everything.
+
+<Aside type="note" title="Question 5">
+What is the time and space complexity of your approach for counting top endpoints? How could you improve it for very large logs?
+</Aside>
+## Stretch Goals (Optional)
+
+- Detect crawlers by User-Agent patterns and separate them from “human” traffic
+- Add rate-based anomaly detection (requests/min over baseline)
+- Emit a small HTML report with simple charts (no heavy dependencies)
+- Support additional formats (e.g., JSON logs) via a `--parser` option
+
+<Aside type="note" title="Question 6">
+Pick one stretch goal you'd consider and outline your approach in 3-5 bullets.
+</Aside>
+## Testing and Verification
+
+- Create a tiny “smoke” log (10-20 lines) to verify parsing and counters
+- Run on a larger synthetic set (≥ 10k lines) and time your script
+- Spot-check a few top endpoints and counts against `grep`/`awk` one-liners
+
+<Aside type="note" title="Question 7">
+Show one command-line check you used to validate your script's output (e.g., count 404s with `grep`/`awk`) and the corresponding output from your tool.
+</Aside>
+## Deliverables
+
+1. Source code for your script/tool (any language) with brief inline comments
+2. A short man page with:
+   - How to run (examples for your language/runtime)
+   - Supported flags and formats
+   - Assumptions and limitations
+3. A one-page report for management summarizing key findings:
+   - Traffic overview, top endpoints, error hotspots, possible bots
+   - 2-3 actionable recommendations (e.g., cache heavy endpoints, fix broken links)
+4. Answers to the 7 questions above.
+
+Keep the tone friendly and the conclusions concrete. Management speaks business, not regex.

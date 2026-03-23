@@ -1,0 +1,28 @@
+---
+title: Introduction
+description: What sysadmins, DevOps, and SREs do day-to-day, the tools they use, and how this course builds those skills with hands-on practice.
+sidebar:
+  order: 0
+---
+
+{/* NOTE: This is an introduction page to the lecture notes section of the textbook - not an actual class lecture */}
+
+System administration is the craft of keeping computer systems reliable, secure, and changeable. The through-line is stewardship: you inherit a set of machines and services that must continue to work as needs evolve. In a small organization, one person may provision servers, manage accounts, write automation, and respond to incidents. In a large organization, responsibilities are distributed across roles: traditional system administrators focus on operating systems and services, DevOps roles emphasize automation and delivery pipelines, and Site Reliability Engineers (SREs) formalize reliability through measurable objectives and engineering practices. Despite different labels, these roles share a core objective: enable the organization to deliver value without surprises.
+
+The daily work spans a consistent set of domains. Provisioning and configuration transform a blank machine into a dependable host; you will practice using images, cloud-init, and configuration management to declare the desired state rather than issuing ad-hoc commands. Networking connects components into a coherent system; addressing, routing, DNS, DHCP, and VLANs are the vocabulary you will use to make packets flow to the right place. Automation reduces toil and prevents drift; simple Bash scripts are fine for one machine, while tools such as Ansible orchestrate repeatable changes across many.
+
+Good operations assume failure and plan for it. Backups are only useful if restores are verified; you will define Recovery Point Objectives (how much data you can afford to lose) and Recovery Time Objectives (how long you can afford to be down) and use those to pick practical strategies. Observability turns guesses into knowledge: by measuring Service Level Indicators (SLIs) such as success rate and latency and comparing them to Service Level Objectives (SLOs), you can alert on symptoms that matter to users instead of implementation details. Security is a baseline, not an add-on: least privilege, timely patching, and strong defaults like key-based SSH and deny-by-default firewalls shrink the attack surface. When incidents occur, the sequence is stabilize, communicate, capture evidence, and then diagnose.
+
+This course is hands-on. You will assemble and boot a physical PC, stand up Windows Server with Active Directory, deploy Linux services, and use cloud resources. You will operate with virtual machines for isolation and speed, containerize applications with Docker to package dependencies, and apply infrastructure-as-code to declare environments. You will write shell scripts to automate routine tasks, manage configuration with Ansible, define infrastructure with Terraform, and wire up continuous integration and delivery with GitHub Actions. Throughout, you will capture what you learn in concise documentation and validate your work with checklists and small tests.
+
+The tools we use are chosen because they reflect common industry practice and because they expose the underlying ideas directly. Virtualization (VirtualBox, Proxmox) teaches you about CPU, memory, storage, and networks as resources to be allocated and observed. Cloud platforms, used judiciously, teach you about identity, segmentation, and the importance of limiting scope and cost. Docker forces you to be explicit about dependencies, runtime users, and ports. Ansible focuses your attention on idempotence and inventory: what should be true, and where. Terraform encodes the topology of systems so you can review changes before you apply them. Monitoring tools such as Prometheus and Grafana keep the feedback loop tight: if you cannot see it, you cannot manage it.
+
+As you read and build, favor habits that scale. Make changes small and reversible. Leave a measurable trail so you and your teammates can tell whether a change helped. Prefer explicit, least-privilege permissions. Automate the procedures you run more than once. When something breaks, write down what you saw and what you tried; ten lines of timeline are worth more than a paragraph of recollection. Above all, practice: reliability is not theory but repeated action.
+
+## Further reading
+
+- <a href="https://www.redhat.com/sysadmin/what-is-sysadmin" target="_blank" rel="noopener noreferrer">What is a sysadmin? (Red Hat Enable Sysadmin)</a>
+- <a href="https://www.youtube.com/watch?v=iQj06tiUjl4" target="_blank" rel="noopener noreferrer">What is a System Administrator? — Google IT Support Certificate (YouTube)</a>
+- <a href="https://sre.google/workbook/" target="_blank" rel="noopener noreferrer">Google SRE Workbook</a>
+- <a href="https://www.youtube.com/watch?v=OnK4IKgLl24" target="_blank" rel="noopener noreferrer">What is SRE? Tasks, Responsibilities, and SRE vs DevOps (YouTube)</a>
+- <a href="https://sysadminotaur.devolutions.net/comics/" target="_blank" rel="noopener noreferrer">Sysadminotaur Comics (light relief)</a>

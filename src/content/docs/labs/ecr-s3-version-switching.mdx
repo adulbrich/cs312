@@ -1,0 +1,329 @@
+---
+title: 'ECR, S3 Backups, and Version Switching'
+description: "Gerald wants seasonal website versions and a backup strategy. His nephew deleted the database again."
+sidebar:
+  order: 5
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+- LO5: Describe how to plan major and minor tasks and time so that services are stable and effective, and meet a Service Level Agreement.
+*/}
+
+Gerald wants a "winter menu" and a "summer menu" version of the website, and the ability to switch between them "like flipping a sign." Also, his nephew deleted the database again. Gerald would like "a backup, like in the movies, where they say enhance and everything comes back." You are going to implement versioned images and an actual backup strategy.
+
+In this lab, you will use Amazon Elastic Container Registry (ECR) to host your WordPress images in a private registry, practice switching between versions (and rolling back when things go wrong), and implement a backup and restore workflow using Amazon Simple Storage Service (S3).
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+You need:
+- An AWS Academy Learner Lab environment
+- An SSH client on your laptop
+- Docker installed on an EC2 instance (from Lab 3, or install fresh)
+- The AWS Command Line Interface (CLI) is pre-installed on Ubuntu AMIs in AWS Academy
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial.
+
+1. Write down the two image tags you pushed to ECR and the approximate push timestamp of each. *(4 points)*
+2. What is the first 12 characters of the SHA256 image digest of your v1 image? (Find it in the ECR console or CLI.) *(3 points)*
+3. What WordPress version is reported when running the v2 image? What version after rolling back to v1? *(4 points)*
+4. What is the file size (in bytes or KB) of your database backup in S3? Write down your S3 bucket name. *(4 points)*
+5. After restoring from the S3 backup into a fresh database, does your original blog post exist? What is its title? *(5 points)*
+6. What retention period did you configure for your S3 lifecycle rule, and why is a lifecycle rule important for cost control? *(3 points)*
+7. Get your TA's initials showing your ECR repository with both image tags visible in the AWS Console. *(2 points)*
+
+## Tutorial
+
+### Creating an ECR Repository
+
+Amazon ECR is a fully managed container image registry. It integrates with AWS Identity and Access Management (IAM) for access control, so only authorized users and services can pull or push images.
+
+<Steps>
+
+1. **Create a repository via the CLI**
+
+   SSH into your EC2 instance and run:
+
+   ```bash
+   aws ecr create-repository --repository-name cs312-wordpress-lab --region us-east-1
+   ```
+
+   The output will include a `repositoryUri` that looks something like:
+   `123456789012.dkr.ecr.us-east-1.amazonaws.com/cs312-wordpress-lab`
+
+   Note this URI; you will use it throughout the lab. The number at the beginning is your AWS account ID.
+
+2. **Authenticate Docker to ECR**
+
+   Docker needs credentials to push images to your private registry. The AWS CLI can generate a temporary token:
+
+   ```bash
+   aws ecr get-login-password --region us-east-1 | \
+     docker login --username AWS --password-stdin \
+     <your-account-id>.dkr.ecr.us-east-1.amazonaws.com
+   ```
+
+   Replace `<your-account-id>` with the number from your repository URI. You should see "Login Succeeded."
+
+   <Aside type="tip">
+   ECR login tokens expire after 12 hours. If you get "authorization token has expired" errors later, re-run this command.
+   </Aside>
+</Steps>
+
+### Pushing Two Image Versions
+
+Image tagging is how you manage versions in a container registry. A tag is a human-readable label attached to a specific image. Tags like `latest` are convenient but dangerous in production because they are mutable; anyone can push a new image with the same tag, and you lose track of what is actually running. Pinned tags (like `wp-6.4-v1`) are explicit and reproducible.
+
+<Steps>
+
+1. **Pull and tag version 1**
+
+   Pull a specific WordPress version from Docker Hub, tag it for your ECR repository, and push it:
+
+   ```bash
+   docker pull wordpress:6.4
+   docker tag wordpress:6.4 <your-repo-uri>:wp-6.4-v1
+   docker push <your-repo-uri>:wp-6.4-v1
+   ```
+
+   Replace `<your-repo-uri>` with your full ECR repository URI.
+
+2. **Pull and tag version 2**
+
+   Repeat with a different WordPress version:
+
+   ```bash
+   docker pull wordpress:6.5
+   docker tag wordpress:6.5 <your-repo-uri>:wp-6.5-v2
+   docker push <your-repo-uri>:wp-6.5-v2
+   ```
+
+3. **Verify both images are in ECR**
+
+   ```bash
+   aws ecr describe-images --repository-name cs312-wordpress-lab \
+     --query 'imageDetails[*].[imageTags,imagePushedAt,imageDigest]' \
+     --output table
+   ```
+
+   You should see two rows, one for each tag. Note the `imageDigest` (SHA256 hash) for your v1 image; this is the immutable identifier that guarantees you are running exactly the image you think you are.
+
+</Steps>
+
+### Version Switching and Rollback
+
+<Steps>
+
+1. **Create a Compose file using ECR images**
+
+   If you still have a `docker-compose.yml` from Lab 3, update the `wordpress` service image. Otherwise, create a new one:
+
+   ```bash
+   mkdir ~/ecr-lab && cd ~/ecr-lab
+   ```
+
+   Create a `.env` file with your database credentials (same as Lab 3), then create `docker-compose.yml`:
+
+   ```yaml
+   services:
+     db:
+       image: mariadb:11
+       restart: unless-stopped
+       env_file: .env
+       volumes:
+         - db_data:/var/lib/mysql
+
+     wordpress:
+       image: <your-repo-uri>:wp-6.4-v1
+       restart: unless-stopped
+       ports:
+         - "80:80"
+       environment:
+         WORDPRESS_DB_HOST: db
+         WORDPRESS_DB_USER: ${MYSQL_USER}
+         WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+         WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+       volumes:
+         - wp_content:/var/www/html/wp-content
+       depends_on:
+         - db
+
+   volumes:
+     db_data:
+     wp_content:
+   ```
+
+2. **Start the stack and create content**
+
+   ```bash
+   docker compose up -d
+   ```
+
+   Visit `http://<your-public-ip>`, complete WordPress setup, and create a blog post with your name and today's date. This post is your test data.
+
+3. **Switch to version 2**
+
+   Edit `docker-compose.yml` and change the WordPress image tag from `wp-6.4-v1` to `wp-6.5-v2`:
+
+   ```bash
+   vim docker-compose.yml
+   ```
+
+   Then apply the change:
+
+   ```bash
+   docker compose up -d
+   ```
+
+   Docker Compose detects that the image has changed and recreates the WordPress container while leaving the database container untouched. Visit your site; your blog post should still be there because the data is in the database volume, not the container.
+
+   Verify the WordPress version inside the container:
+
+   ```bash
+   docker exec $(docker compose ps -q wordpress) \
+     cat /var/www/html/wp-includes/version.php | grep wp_version
+   ```
+
+4. **Roll back to version 1**
+
+   Change the image tag back to `wp-6.4-v1` in your Compose file and run:
+
+   ```bash
+   docker compose up -d
+   ```
+
+   Verify the version again with the same `docker exec` command. You have just performed a rollback, a critical skill for recovering from a bad deployment.
+
+</Steps>
+
+### Backing Up to S3
+
+Amazon S3 is an object storage service designed for durability (99.999999999%, often called "11 nines"). It is the standard destination for backups in AWS.
+
+<Steps>
+
+1. **Create an S3 bucket**
+
+   Bucket names must be globally unique across all AWS accounts. Choose a name that includes your username or student ID:
+
+   ```bash
+   aws s3 mb s3://cs312-<your-username>-backups --region us-east-1
+   ```
+
+2. **Dump the database**
+
+   Use `mysqldump` to export the WordPress database from inside the MariaDB container:
+
+   ```bash
+   docker exec $(docker compose ps -q db) \
+     mysqldump -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" wordpress \
+     > backup.sql
+   ```
+
+   This creates a SQL file on your EC2 instance containing every table, row, and setting in the WordPress database.
+
+   <Aside type="tip">
+   Check the backup is not empty: `wc -l backup.sql` should show hundreds or thousands of lines. If it shows 0, your mysqldump command had an error; check the password.
+   </Aside>
+3. **Upload to S3**
+
+   ```bash
+   aws s3 cp backup.sql s3://cs312-<your-username>-backups/backups/
+   ```
+
+   Verify it arrived:
+
+   ```bash
+   aws s3 ls s3://cs312-<your-username>-backups/backups/
+   ```
+
+4. **Configure a lifecycle rule**
+
+   Lifecycle rules automate data management. You will create a rule that automatically deletes backups older than 7 days to prevent storage costs from growing indefinitely:
+
+   ```bash
+   aws s3api put-bucket-lifecycle-configuration \
+     --bucket cs312-<your-username>-backups \
+     --lifecycle-configuration '{
+       "Rules": [{
+         "ID": "expire-old-backups",
+         "Prefix": "backups/",
+         "Status": "Enabled",
+         "Expiration": { "Days": 7 }
+       }]
+     }'
+   ```
+
+   In production, you would choose a retention period based on your Recovery Point Objective (RPO): how much data loss is acceptable. Seven days is reasonable for a lab; a financial application might keep backups for years.
+
+</Steps>
+
+### Restoring from Backup
+
+A backup you have never tested is not a backup; it is a hope. This section proves your backup actually works.
+
+<Steps>
+
+1. **Destroy the database volume**
+
+   ```bash
+   docker compose down -v
+   ```
+
+   This deletes all volumes, including your database. Your blog post is gone from the running system.
+
+2. **Start fresh containers**
+
+   ```bash
+   docker compose up -d
+   ```
+
+   Wait about 15 seconds for MariaDB to initialize the empty database.
+
+3. **Download the backup from S3**
+
+   ```bash
+   aws s3 cp s3://cs312-<your-username>-backups/backups/backup.sql ./restore.sql
+   ```
+
+4. **Import the backup**
+
+   ```bash
+   docker exec -i $(docker compose ps -q db) \
+     mysql -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" wordpress \
+     < restore.sql
+   ```
+
+5. **Verify the restore**
+
+   Visit `http://<your-public-ip>`. Your WordPress site should be back, including your blog post with your name and date. This proves your backup and restore pipeline works end to end.
+
+</Steps>
+
+### Clean Up
+
+When you are done:
+
+```bash
+docker compose down
+```
+
+Optionally delete the ECR repository and S3 bucket to avoid charges:
+
+```bash
+aws ecr delete-repository --repository-name cs312-wordpress-lab --force --region us-east-1
+aws s3 rb s3://cs312-<your-username>-backups --force
+```
+
+---
+
+You now know how to use a private container registry, manage image versions with meaningful tags, perform version switches and rollbacks, and implement a backup/restore pipeline with S3. These are the operational building blocks you will automate with Terraform and Ansible in the next labs.

@@ -1,0 +1,368 @@
+---
+title: 'Kubernetes Operations: Probes, Rollouts, and Failure Drills'
+description: "The lunch rush crashed all three locations. Gerald calls it a digital fire and wants health checks."
+sidebar:
+  order: 9
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+- LO5: Describe how to plan major and minor tasks and time so that services are stable and effective, and meet a Service Level Agreement.
+*/}
+
+The lunch rush crashed the website at all three locations simultaneously. Gerald called it "a digital fire." He wants "those health check things" and a plan for when things break. You asked who would be on call. Gerald said, "You're on call." You asked when. He said, "Always."
+
+Your nginx deployment works, but Kubernetes does not yet know whether your application is actually healthy; it only knows whether the container process is running. A container can be running but completely broken (returning errors, stuck in a loop, out of memory). In this lab, you will add health probes that let Kubernetes make smarter decisions, set resource limits so one container cannot starve the node, practice rolling updates and rollbacks, and intentionally break things to learn how to diagnose and recover from failures.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+You need:
+- The k3s cluster from Lab 7 with the nginx Deployment and Service still running
+- SSH access to your EC2 instance
+
+If you no longer have the Lab 7 setup, re-apply the manifests from that lab before starting.
+
+## Key Concepts
+
+**Liveness Probe**: Tells Kubernetes whether the container is alive. If the liveness probe fails, Kubernetes kills the container and restarts it. Use this to recover from deadlocks or stuck processes.
+
+**Readiness Probe**: Tells Kubernetes whether the container is ready to receive traffic. If the readiness probe fails, Kubernetes removes the Pod from Service endpoints (stops sending it requests) but does *not* kill it. Use this during startup or when a container is temporarily overwhelmed.
+
+**Resource Requests**: The minimum CPU and memory a container needs. The Kubernetes scheduler uses requests to decide which node can fit the Pod.
+
+**Resource Limits**: The maximum CPU and memory a container can use. If a container exceeds its memory limit, it is killed with an Out of Memory (OOM) error.
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial.
+
+1. How many revisions does `kubectl rollout history deployment/nginx` show after the rolling update? What image tag was used in the most recent revision? *(4 points)*
+2. During the rolling update, did you observe both old and new Pods running at the same time? How does Kubernetes ensure zero downtime during a rollout? *(5 points)*
+3. When you deployed the nonexistent image (`nginx:doesnotexist`), what error status did the Pod show? Write down the exact error message from the Events section of `kubectl describe pod`. *(5 points)*
+4. When you set the memory limit to 1Mi, what status did the Pod show? What was the exit code, and what does it mean? (Hint: 128 + signal number.) *(5 points)*
+5. After your final rollback, what image tag are the healthy Pods running? How many Pods show `1/1 Ready`? *(3 points)*
+6. Get your TA's initials showing all Pods in a Running/Ready state after recovery from the OOMKill drill. *(3 points)*
+
+## Tutorial
+
+### Adding Probes and Resource Controls
+
+<Steps>
+
+1. **Update the Deployment manifest**
+
+   SSH into your EC2 instance and navigate to your lab directory:
+
+   ```bash
+   cd ~/k8s-lab
+   ```
+
+   Edit `nginx-deployment.yaml` to add probes and resource constraints:
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: nginx
+     labels:
+       app: nginx
+   spec:
+     replicas: 2
+     selector:
+       matchLabels:
+         app: nginx
+     template:
+       metadata:
+         labels:
+           app: nginx
+       spec:
+         containers:
+           - name: nginx
+             image: nginx:1.27
+             ports:
+               - containerPort: 80
+             livenessProbe:
+               httpGet:
+                 path: /
+                 port: 80
+               initialDelaySeconds: 5
+               periodSeconds: 10
+             readinessProbe:
+               httpGet:
+                 path: /
+                 port: 80
+               initialDelaySeconds: 3
+               periodSeconds: 5
+             resources:
+               requests:
+                 memory: "64Mi"
+                 cpu: "50m"
+               limits:
+                 memory: "128Mi"
+                 cpu: "100m"
+             volumeMounts:
+               - name: html-volume
+                 mountPath: /usr/share/nginx/html
+         volumes:
+           - name: html-volume
+             configMap:
+               name: nginx-html
+   ```
+
+   Let's walk through the new sections:
+   - **`livenessProbe`**: Every 10 seconds (after a 5-second initial delay), Kubernetes sends an HTTP GET to `/` on port 80. If it fails 3 times in a row, Kubernetes restarts the container.
+   - **`readinessProbe`**: Every 5 seconds (after a 3-second delay), Kubernetes checks if the container is ready for traffic. During rolling updates, new Pods must pass their readiness probe before old Pods are terminated.
+   - **`resources.requests`**: The Pod needs at least 64 Megabytes (Mi) of memory and 50 millicores (50m = 5% of one CPU core).
+   - **`resources.limits`**: The Pod cannot use more than 128Mi of memory or 100 millicores. If it exceeds the memory limit, the kernel's OOM killer terminates it.
+
+2. **Apply the updated Deployment**
+
+   ```bash
+   kubectl apply -f nginx-deployment.yaml
+   ```
+
+3. **Verify Pods are Running and Ready**
+
+   ```bash
+   kubectl get pods
+   ```
+
+   The READY column should show `1/1` for both Pods, meaning the readiness probe is passing.
+
+</Steps>
+
+### Performing a Rolling Update
+
+A rolling update replaces Pods gradually; it creates new Pods with the updated image before terminating old ones, ensuring your service never goes fully offline.
+
+<Steps>
+
+1. **Record the current revision**
+
+   ```bash
+   kubectl rollout history deployment/nginx
+   ```
+
+   You should see at least one revision.
+
+2. **Update the image to a newer version**
+
+   You can update the image directly from the command line:
+
+   ```bash
+   kubectl set image deployment/nginx nginx=nginx:1.27-alpine
+   ```
+
+   This changes the nginx container to use the Alpine-based variant (a smaller image). Kubernetes immediately starts a rolling update.
+
+3. **Watch the rollout**
+
+   In one terminal, watch the Pods:
+
+   ```bash
+   kubectl get pods -w
+   ```
+
+   You will see new Pods being created (with the new image) and old Pods being terminated. At some point, both old and new Pods will be running simultaneously; capture a `kubectl get pods` snapshot at this moment for your lab questions. Press Ctrl+C to stop watching.
+
+4. **Check the rollout status**
+
+   ```bash
+   kubectl rollout status deployment/nginx
+   ```
+
+   This command blocks until the rollout is complete and reports success or failure.
+
+5. **Verify the new image**
+
+   ```bash
+   kubectl describe deployment nginx | grep Image
+   ```
+
+   It should show `nginx:1.27-alpine`.
+
+6. **Check the revision history**
+
+   ```bash
+   kubectl rollout history deployment/nginx
+   ```
+
+   You should now see multiple revisions. Record this output.
+
+</Steps>
+
+### Rolling Back
+
+<Steps>
+
+1. **Roll back to the previous revision**
+
+   ```bash
+   kubectl rollout undo deployment/nginx
+   ```
+
+   Kubernetes creates new Pods with the previous image and terminates the current ones.
+
+2. **Verify the rollback**
+
+   ```bash
+   kubectl describe deployment nginx | grep Image
+   ```
+
+   The image should be back to `nginx:1.27`.
+
+</Steps>
+
+### Failure Drill 1: Bad Image
+
+This drill simulates a deployment that references an image that does not exist, a common mistake when a tag is misspelled or a registry is unreachable.
+
+<Steps>
+
+1. **Deploy a nonexistent image**
+
+   ```bash
+   kubectl set image deployment/nginx nginx=nginx:doesnotexist
+   ```
+
+2. **Observe the failure**
+
+   ```bash
+   kubectl get pods
+   ```
+
+   After a few seconds, you will see new Pods stuck in `ErrImagePull` or `ImagePullBackOff` status. The old Pods remain running because Kubernetes' rolling update strategy will not terminate old Pods until new Pods are ready.
+
+   <Aside type="note">
+   `ImagePullBackOff` means Kubernetes tried to pull the image, failed, and is now waiting before retrying with exponentially increasing delays. This prevents hammering the registry with requests for an image that does not exist.
+   </Aside>
+3. **Diagnose the failure**
+
+   ```bash
+   kubectl describe pod <failing-pod-name>
+   ```
+
+   Scroll to the **Events** section at the bottom. You will see the exact error message, something like "manifest for nginx:doesnotexist not found." Record this for your lab questions.
+
+4. **Recover via rollback**
+
+   ```bash
+   kubectl rollout undo deployment/nginx
+   ```
+
+   The failing Pods are replaced with Pods running the known-good image. Verify:
+
+   ```bash
+   kubectl get pods
+   ```
+
+   All Pods should return to `Running` and `Ready` state.
+
+</Steps>
+
+### Failure Drill 2: OOM Kill
+
+This drill demonstrates what happens when a container exceeds its memory limit. The kernel's Out of Memory (OOM) killer terminates the process, and Kubernetes reports it as `OOMKilled`.
+
+<Steps>
+
+1. **Set an unreasonably low memory limit**
+
+   Edit `nginx-deployment.yaml` and change the memory limit to `1Mi` (1 Megabyte, far too little for nginx to start):
+
+   ```yaml
+   resources:
+     requests:
+       memory: "1Mi"
+       cpu: "50m"
+     limits:
+       memory: "1Mi"
+       cpu: "100m"
+   ```
+
+2. **Apply the change**
+
+   ```bash
+   kubectl apply -f nginx-deployment.yaml
+   ```
+
+3. **Observe the OOM kills**
+
+   ```bash
+   kubectl get pods -w
+   ```
+
+   You will see Pods entering `OOMKilled` status, then `CrashLoopBackOff` as Kubernetes repeatedly tries to start them and they keep exceeding the memory limit. Press Ctrl+C after you observe the pattern.
+
+4. **Diagnose the failure**
+
+   ```bash
+   kubectl describe pod <oomkilled-pod-name>
+   ```
+
+   Look for the **Last State** section, which shows:
+   - Reason: `OOMKilled`
+   - Exit Code: `137` (128 + signal 9, which is SIGKILL from the OOM killer)
+
+   Record this output for your lab questions.
+
+5. **Check the logs**
+
+   ```bash
+   kubectl logs <oomkilled-pod-name> --previous
+   ```
+
+   The `--previous` flag shows logs from the last terminated container instance. There may be no logs if the process was killed before it could write any.
+
+6. **Fix the limits and recover**
+
+   Edit `nginx-deployment.yaml` and restore the memory limit to `128Mi`:
+
+   ```yaml
+   resources:
+     requests:
+       memory: "64Mi"
+       cpu: "50m"
+     limits:
+       memory: "128Mi"
+       cpu: "100m"
+   ```
+
+   Apply:
+
+   ```bash
+   kubectl apply -f nginx-deployment.yaml
+   ```
+
+7. **Verify recovery**
+
+   ```bash
+   kubectl get pods
+   ```
+
+   All Pods should be `Running` and `Ready` again. Record the current image tag from:
+
+   ```bash
+   kubectl describe deployment nginx | grep Image
+   ```
+
+</Steps>
+
+### Clean Up
+
+If you plan to continue with Lab 9 (Observability), leave k3s and the nginx deployment running. Otherwise:
+
+```bash
+kubectl delete -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml
+```
+
+---
+
+You have now added operational controls to your Kubernetes deployment: probes that tell Kubernetes whether your application is healthy, resource limits that prevent runaway containers, and you have practiced the full failure-recovery loop: introduce a fault, diagnose it with `describe` and `logs`, and recover with a rollback or configuration fix. In the next lab, you will add observability: monitoring dashboards, alerts, and incident detection.

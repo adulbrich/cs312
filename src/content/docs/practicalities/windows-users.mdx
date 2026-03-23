@@ -1,0 +1,47 @@
+---
+title: Windows Users
+description: Guidance for Windows users on setting up a Linux environment for CS312, including WSL installation, file sharing, recommended shells, and Linux distributions.
+sidebar:
+  order: 0
+---
+
+If you use Windows, you may find this class challenging since it is primarily Linux-based. However, there are several solutions, and Windows has improved significantly for development tasks.
+
+Some software used in this class (such as Ansible) does not run on Windows, and working with AWS is much easier in a Linux environment. WSL addresses these issues. Alternatively, you can use a [Linux VM](/practicalities/virtual-machines/) or dual-boot your machine with Linux.
+
+## Using WSL
+
+The best approach is to install **Windows Subsystem for Linux (WSL)**, which provides a lightweight Linux environment directly within Windows.
+
+To get started, [follow the official tutorial](https://learn.microsoft.com/en-us/windows/wsl/install). You can choose any Linux distribution, but Ubuntu (the default) is recommended for beginners.
+
+## Sharing Files
+
+To share files between Windows and your Linux subsystem, see: [Set up a WSL development environment](https://learn.microsoft.com/en-us/windows/wsl/setup/environment).
+
+When working in WSL, it's best to move files from your `/mnt` directory to your WSL filesystem (such as your home directory). Running commands (like `chmod`) on files in `/mnt` may not work as expected.
+
+## Shell Environment and SSH
+
+For your shell, it's recommended to use PowerShell or the Windows Terminal app instead of the traditional Command Prompt (`cmd.exe`).
+
+As a system administrator, you will need to use SSH to access remote machines. The simplest method is through WSL. Alternatively, you can use OpenSSH in PowerShell or Terminal (less ideal but acceptable). Using PuTTY or similar programs is not recommended.
+
+## Recommended Linux Distributions
+
+If you have an older Windows laptop, consider replacing it with Linux. Modern distributions are user-friendly and powerful.
+
+Some Linux distributions:
+
+- **Ubuntu** (based on Debian)
+- **Mint** (based on Ubuntu)
+- **openSUSE** (stable and enterprise-ready)
+- **Pop!_OS** (great for gaming)
+- **NixOS** (reproducible and portable)
+- **Manjaro** (based on Arch)
+- **Fedora** (upstream for Red Hat Enterprise and AlmaLinux/CentOS)
+- **Kali Linux** or **Kodachi** (security-focused)
+
+Each distribution offers different desktop environments, so you can choose one that fits your preferences.
+
+If you need help, feel free to reach out!

@@ -1,0 +1,532 @@
+---
+title: 'Ansible Playbook and GitHub Actions Pipeline'
+description: "The second location's server is slightly different and your notes don't work. Gerald's daughter broke production."
+sidebar:
+  order: 7
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO4: Demonstrate how to maintain a collection of devices using remote management tools in both centralized locations and across de-centralized organizations.
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+*/}
+
+The second location's server is slightly different, and your manual setup notes do not quite work. The PHP version is wrong, the MariaDB socket is in a different path, and the Apache config that worked perfectly at Location 1 throws errors at Location 2. Also, Gerald's daughter has started updating the website directly in production. Last week she broke the homepage by pasting a recipe that contained an unclosed HTML tag. You need configuration management and a proper deployment pipeline.
+
+Terraform creates your infrastructure, but a freshly provisioned EC2 instance is an empty shell: no Docker, no application, no configuration. That is where **Ansible** comes in. Ansible is a configuration management tool that connects to remote servers over SSH and executes tasks to bring them to a desired state. Unlike shell scripts, Ansible playbooks are **idempotent**: you can run them ten times and the result is the same as running them once. In the second half of this lab, you will build a **CI/CD pipeline** using GitHub Actions that automatically builds, tests, and publishes Docker images whenever you push a new version tag.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+You need:
+- An AWS Academy Learner Lab environment
+- **Two** EC2 instances running Ubuntu (details below)
+- A GitHub account
+
+### Why Two Instances?
+
+Ansible uses an **agentless** architecture: you run Ansible on a **control node**, and it connects to **managed nodes** over SSH to configure them. The control node is where you write and execute playbooks. The managed nodes are the servers being configured. Ansible does not need anything pre-installed on the managed nodes beyond SSH and Python (both of which Ubuntu includes by default).
+
+Ansible's control node **must be Linux or macOS**: it cannot run natively on Windows. Rather than wrestling with WSL2 or Homebrew on every student's laptop, we will use an EC2 instance as the control node. This gives everyone an identical environment and mirrors a real-world pattern where a dedicated management server (sometimes called a *bastion host* or *jump box*) is used to administer infrastructure.
+
+```
+┌──────────────┐         SSH          ┌──────────────┐
+│              │ ──────────────────▶  │              │
+│ Control Node │    (Ansible runs     │ Managed Node │
+│  (Ubuntu)    │     tasks over SSH)  │  (Ubuntu)    │
+│              │ ◀──────────────────  │              │
+└──────────────┘       Results        └──────────────┘
+  You SSH here                         WordPress ends
+  from your laptop                     up running here
+```
+
+<Aside type="tip" title="Alternative: Run Ansible from Your Laptop">
+If you are on **macOS**, you can install Ansible locally with `brew install ansible` and skip launching the control node. If you are on **Linux** (including WSL2 on Windows), use `sudo apt update && sudo apt install -y ansible`. In that case, use your laptop as the control node and your single EC2 instance as the managed node. The rest of the lab works the same; just adjust the SSH key paths accordingly. The EC2 control node approach described below works for everyone regardless of operating system.
+</Aside>
+
+### Launching the Instances
+
+<Steps>
+
+1. **Managed node**: If you still have the Ubuntu instance from Lab 5 (Terraform), you can reuse it. Otherwise, launch a new `t2.micro` Ubuntu instance. Make sure its security group allows:
+   - **SSH (port 22)** from anywhere (or your IP)
+   - **HTTP (port 80)** from anywhere (so you can view WordPress later)
+
+2. **Control node**: Launch a second `t2.micro` Ubuntu instance in the **same VPC**. This instance only needs SSH (port 22) open. It does not need HTTP.
+
+3. **SSH key**: Use the same `.pem` key pair for both instances (your existing `vockey` or `cs312-key`). You will need this key file on the control node so it can SSH into the managed node.
+
+</Steps>
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial.
+
+1. In the PLAY RECAP of your **first** `ansible-playbook` run, how many tasks were reported as "changed"? *(4 points)*
+2. In the PLAY RECAP of your **second** run, how many tasks were "changed"? What does a lower number prove about idempotency? *(5 points)*
+3. Write down the URL of your successful GitHub Actions workflow run. *(4 points)*
+4. What event triggers your CI/CD pipeline? (e.g., push to main, tag push, pull request.) Why is a tag-based trigger useful for deployments? *(5 points)*
+5. After the pipeline runs, does the new image tag appear in your ECR repository? Write down the tag name. *(4 points)*
+6. Get your TA's initials showing WordPress loaded via the Ansible-configured server. *(3 points)*
+
+## Part A: Ansible (60 minutes)
+
+### Understanding Ansible
+
+Ansible works over SSH; there is no agent to install on the remote servers. You write **playbooks** (YAML files describing the desired state) and run them from a control node against one or more hosts listed in an **inventory** file. Ansible connects to each host, pushes small Python scripts called *modules*, executes them, collects the results, and cleans up. Nothing is left running on the managed node.
+
+The key concept is **idempotency**: each task checks whether the desired state already exists before making changes. If Docker is already installed, the "install Docker" task does nothing. If a configuration file already has the correct contents, it is not rewritten. This makes playbooks safe to re-run at any time; on a schedule, after a failed run, or when a new server joins the fleet.
+
+### Setting Up the Control Node
+
+<Steps>
+
+1. **SSH into your control node**
+
+   From your laptop, connect to the control node instance:
+
+   ```bash
+   ssh -i ~/Downloads/labsuser.pem ubuntu@<control-node-public-ip>
+   ```
+
+2. **Install Ansible**
+
+   ```bash
+   sudo apt update && sudo apt install -y ansible
+   ```
+
+   Verify the installation:
+
+   ```bash
+   ansible --version
+   ```
+
+   You should see Ansible's version and configuration details. This confirms Ansible is ready to use.
+
+3. **Copy your SSH key to the control node**
+
+   Ansible needs the `.pem` key file to SSH into the managed node. From a **new terminal on your laptop** (not the control node SSH session), copy the key using `scp`:
+
+   ```bash
+   scp -i ~/Downloads/labsuser.pem ~/Downloads/labsuser.pem ubuntu@<control-node-public-ip>:~/labsuser.pem
+   ```
+
+   Then, back on the **control node**, set the correct permissions (SSH refuses to use key files that are too permissive):
+
+   ```bash
+   chmod 400 ~/labsuser.pem
+   ```
+
+4. **Verify SSH connectivity to the managed node**
+
+   Before involving Ansible at all, confirm you can SSH from the control node to the managed node:
+
+   ```bash
+   ssh -i ~/labsuser.pem ubuntu@<managed-node-private-ip>
+   ```
+
+   <Aside type="tip">
+   Use the managed node's **private IP** (e.g., `10.0.1.42`), not its public IP. Both instances are in the same VPC, so private IPs work and are faster and more secure. You can find the private IP in the EC2 console under "Private IPv4 address."
+   </Aside>
+
+   Type `exit` to return to the control node after confirming the connection works.
+
+</Steps>
+
+### Writing the Inventory and Playbook
+
+<Steps>
+
+1. **Create a project directory**
+
+   On the control node:
+
+   ```bash
+   mkdir ~/ansible-lab && cd ~/ansible-lab
+   ```
+
+2. **Write an Ansible configuration file**
+
+   Create a file named `ansible.cfg` in your project directory. This tells Ansible to skip host key verification (since these are ephemeral lab instances) and where to find the inventory:
+
+   ```bash
+   nano ansible.cfg
+   ```
+
+   ```ini
+   [defaults]
+   host_key_checking = False
+   inventory = inventory
+   ```
+
+   <Aside type="note">
+   In production, you would **not** disable host key checking; it protects against man-in-the-middle attacks. We disable it here because lab instances are short-lived and their host keys change every time they are recreated.
+   </Aside>
+
+3. **Write the inventory file**
+
+   The inventory tells Ansible which servers to manage and how to connect. Create a file named `inventory`:
+
+   ```bash
+   nano inventory
+   ```
+
+   ```ini
+   [webservers]
+   wordpress ansible_host=<managed-node-private-ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/labsuser.pem
+   ```
+
+   Replace `<managed-node-private-ip>` with the managed node's actual private IP address.
+
+   Here is what each piece means:
+   - `[webservers]`: a **group name**. You can target all hosts in this group at once.
+   - `wordpress`: an **alias** for this host (makes output easier to read than a raw IP).
+   - `ansible_host`: the actual IP to connect to.
+   - `ansible_user`: the SSH username.
+   - `ansible_ssh_private_key_file`: the path to the SSH private key on the control node.
+
+4. **Test connectivity with Ansible**
+
+   ```bash
+   ansible webservers -m ping
+   ```
+
+   You should see output like:
+
+   ```
+   wordpress | SUCCESS => {
+       "changed": false,
+       "ping": "pong"
+   }
+   ```
+
+   This is not an ICMP ping, Ansible's `ping` module connects over SSH, runs a small Python script, and confirms it can execute code on the managed node. A green `SUCCESS` with `"pong"` means Ansible is fully working.
+
+   <Aside type="caution">
+   If you see "UNREACHABLE," double-check: (1) the private IP in your inventory, (2) the key file path, (3) that the managed node's security group allows SSH from the control node.
+   </Aside>
+
+5. **Write the playbook**
+
+   Now for the main event. Create a file named `configure.yml`:
+
+   ```bash
+   nano configure.yml
+   ```
+
+   ```yaml
+   ---
+   - name: Configure WordPress on EC2
+     hosts: webservers
+     become: true
+     vars:
+       mysql_root_password: "rootpass123"
+       mysql_database: "wordpress"
+       mysql_user: "wp_user"
+       mysql_password: "wppass456"
+
+     tasks:
+       - name: Install Docker prerequisites
+         apt:
+           name:
+             - ca-certificates
+             - curl
+             - gnupg
+           state: present
+           update_cache: true
+
+       - name: Add Docker GPG key
+         shell: |
+           install -m 0755 -d /etc/apt/keyrings
+           curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+           chmod a+r /etc/apt/keyrings/docker.asc
+         args:
+           creates: /etc/apt/keyrings/docker.asc
+
+       - name: Add Docker apt repository
+         shell: |
+           echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+         args:
+           creates: /etc/apt/sources.list.d/docker.list
+
+       - name: Install Docker Engine
+         apt:
+           name:
+             - docker-ce
+             - docker-ce-cli
+             - containerd.io
+             - docker-compose-plugin
+           state: present
+           update_cache: true
+
+       - name: Ensure Docker is running
+         service:
+           name: docker
+           state: started
+           enabled: true
+
+       - name: Create Docker Compose directory
+         file:
+           path: /opt/wordpress
+           state: directory
+           mode: "0755"
+
+       - name: Write Docker Compose file
+         copy:
+           dest: /opt/wordpress/docker-compose.yml
+           content: |
+             services:
+               db:
+                 image: mariadb:11
+                 restart: unless-stopped
+                 environment:
+                   MYSQL_ROOT_PASSWORD: "{{ mysql_root_password }}"
+                   MYSQL_DATABASE: "{{ mysql_database }}"
+                   MYSQL_USER: "{{ mysql_user }}"
+                   MYSQL_PASSWORD: "{{ mysql_password }}"
+                 volumes:
+                   - db_data:/var/lib/mysql
+
+               wordpress:
+                 image: wordpress:6.4
+                 restart: unless-stopped
+                 ports:
+                   - "80:80"
+                 environment:
+                   WORDPRESS_DB_HOST: db
+                   WORDPRESS_DB_USER: "{{ mysql_user }}"
+                   WORDPRESS_DB_PASSWORD: "{{ mysql_password }}"
+                   WORDPRESS_DB_NAME: "{{ mysql_database }}"
+                 volumes:
+                   - wp_content:/var/www/html/wp-content
+                 depends_on:
+                   - db
+
+             volumes:
+               db_data:
+               wp_content:
+
+       - name: Start WordPress stack
+         community.docker.docker_compose_v2:
+           project_src: /opt/wordpress
+           state: present
+   ```
+
+   Let's break down what this playbook does:
+
+   - **`hosts: webservers`**: targets every host in the `[webservers]` inventory group.
+   - **`become: true`**: runs tasks with `sudo` (installing packages and managing Docker requires root).
+   - **`vars:`**: defines variables used throughout the playbook. Changing a password here changes it everywhere it is referenced.
+   - **Tasks 1–5** install Docker Engine from the official Docker repository. The `creates:` argument on shell tasks makes them idempotent, Ansible skips the task if the file already exists.
+   - **Task 6** creates a directory for the Compose project.
+   - **Task 7** writes a `docker-compose.yml` using Ansible's `copy` module with inline content. The `{{ variable }}` syntax is Jinja2 templating, Ansible substitutes the values from `vars`.
+   - **Task 8** starts the Docker Compose stack using Ansible's `community.docker.docker_compose_v2` module, which is idempotent; if the stack is already running with the same configuration, it makes no changes.
+
+6. **Install the Docker collection**
+
+   The playbook uses the `community.docker` collection for the last task. Install it on the control node:
+
+   ```bash
+   ansible-galaxy collection install community.docker
+   ```
+
+7. **Run the playbook**
+
+   ```bash
+   ansible-playbook configure.yml
+   ```
+
+   Watch the output carefully. Each task displays one of these statuses:
+   - **ok**: the desired state already exists; nothing was changed.
+   - **changed**: Ansible modified the system to reach the desired state.
+   - **skipped**: a condition prevented the task from running.
+   - **failed**: the task encountered an error.
+
+   At the end, the **PLAY RECAP** summarizes results:
+
+   ```
+   PLAY RECAP *************************************************************
+   wordpress   : ok=8    changed=8    unreachable=0    failed=0    skipped=0
+   ```
+
+   Record the number of "changed" tasks; you need this for Question 1.
+
+8. **Verify WordPress is running**
+
+   Open `http://<managed-node-public-ip>` in your browser. You should see the WordPress setup page. WordPress is now running on a server you never manually configured, Ansible did everything.
+
+9. **Run the playbook again to prove idempotency**
+
+   ```bash
+   ansible-playbook configure.yml
+   ```
+
+   This time, most tasks should show **ok** instead of **changed**. The PLAY RECAP should show `changed=0` or very few changes. This proves idempotency: the playbook describes a desired state, and if the server already matches that state, Ansible does not make unnecessary changes. This is what makes playbooks safe to re-run on a schedule, safe to run after a partial failure, and safe to apply to new servers joining the fleet.
+
+</Steps>
+
+## Part B: GitHub Actions CI/CD Pipeline (50 minutes)
+
+### Understanding CI/CD
+
+A CI/CD pipeline automates the steps between writing code and deploying it. **Continuous Integration (CI)** means every code change is automatically built and tested. **Continuous Delivery (CD)** extends this by automatically deploying tested builds to a registry or environment. GitHub Actions is GitHub's built-in CI/CD platform; it runs workflows defined in YAML files inside your repository.
+
+Where Ansible answers "how do I configure a server?", CI/CD answers "how do I safely build and publish new versions of my application?" Together, they form a complete automation pipeline: CI/CD builds and tests images, and Ansible deploys them to servers.
+
+This part runs entirely in the cloud (GitHub's servers and AWS), so you can do it from **any computer**: your laptop, the control node, or even a library computer. You just need a web browser and a terminal with Git.
+
+<Steps>
+
+1. **Create a new GitHub repository**
+
+   On github.com, create a new repository called `cs312-wordpress-pipeline` (public or private). Clone it to your laptop (or the control node):
+
+   ```bash
+   git clone https://github.com/<your-username>/cs312-wordpress-pipeline.git
+   cd cs312-wordpress-pipeline
+   ```
+
+2. **Create a Dockerfile**
+
+   This Dockerfile extends the official WordPress image with a custom health check page:
+
+   ```bash
+   nano Dockerfile
+   ```
+
+   ```dockerfile
+   FROM wordpress:6.4
+
+   # Add a simple health check page
+   RUN echo '<?php echo "OK"; ?>' > /var/www/html/health.php
+   ```
+
+3. **Write the GitHub Actions workflow**
+
+   GitHub Actions looks for workflow files in the `.github/workflows/` directory. Each YAML file in that directory defines a separate workflow.
+
+   ```bash
+   mkdir -p .github/workflows
+   nano .github/workflows/build-push.yml
+   ```
+
+   ```yaml
+   name: Build and Push to ECR
+
+   on:
+     push:
+       tags:
+         - 'v*'
+
+   env:
+     AWS_REGION: us-east-1
+     ECR_REPOSITORY: cs312-wordpress-lab
+
+   jobs:
+     build-test-push:
+       runs-on: ubuntu-latest
+
+       steps:
+         - name: Checkout code
+           uses: actions/checkout@v4
+
+         - name: Configure AWS credentials
+           uses: aws-actions/configure-aws-credentials@v4
+           with:
+             aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+             aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+             aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+             aws-region: ${{ env.AWS_REGION }}
+
+         - name: Login to Amazon ECR
+           id: login-ecr
+           uses: aws-actions/amazon-ecr-login@v2
+
+         - name: Build Docker image
+           run: |
+             docker build -t ${{ env.ECR_REPOSITORY }}:${{ github.ref_name }} .
+
+         - name: Smoke test
+           run: |
+             docker run -d --name test -p 8080:80 ${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}
+             sleep 10
+             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health.php)
+             docker stop test
+             if [ "$STATUS" != "200" ]; then
+               echo "Smoke test failed with status $STATUS"
+               exit 1
+             fi
+             echo "Smoke test passed with status $STATUS"
+
+         - name: Tag and push to ECR
+           env:
+             ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+           run: |
+             docker tag ${{ env.ECR_REPOSITORY }}:${{ github.ref_name }} \
+               $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}
+             docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}
+   ```
+
+   Here is what each section does:
+
+   - **`on: push: tags: ['v*']`**; the workflow only triggers when you push a tag starting with `v` (like `v1.0.0`). Regular commits to `main` do **not** trigger a build. This is useful for deployments because you control exactly when a new version is published.
+   - **`env:`**: environment variables available to all steps.
+   - **`runs-on: ubuntu-latest`**: GitHub spins up a fresh Ubuntu virtual machine to run the job. This machine is disposed after the job finishes.
+   - **Steps**:
+     1. **Checkout**: clones your repository into the runner.
+     2. **Configure AWS credentials**: injects your AWS secrets so subsequent steps can talk to AWS.
+     3. **Login to ECR**: authenticates Docker to push images to your private registry.
+     4. **Build**: builds the Docker image from your Dockerfile.
+     5. **Smoke test**: starts the container, waits 10 seconds, then checks if the health page returns HTTP 200. If it fails, the pipeline stops and the image is **not** pushed.
+     6. **Tag and push**: tags the image with the ECR registry prefix and pushes it.
+
+4. **Configure repository secrets**
+
+   In your GitHub repository, go to **Settings > Secrets and variables > Actions** and add three secrets:
+   - `AWS_ACCESS_KEY_ID`: from your AWS Academy credentials
+   - `AWS_SECRET_ACCESS_KEY`: from your AWS Academy credentials
+   - `AWS_SESSION_TOKEN`: from your AWS Academy credentials
+
+   <Aside type="caution">
+   AWS Academy credentials expire when your lab session ends. You will need to update these secrets each time you start a new session.
+   </Aside>
+5. **Commit and push**
+
+   ```bash
+   git add .
+   git commit -m "Add Dockerfile and CI/CD pipeline"
+   git push origin main
+   ```
+
+   This commit does **not** trigger the pipeline because it is not a tag push.
+
+6. **Create and push a tag**
+
+   ```bash
+   git tag v1.0.0
+   git push --tags
+   ```
+
+   Go to the **Actions** tab in your GitHub repository. You should see the "Build and Push to ECR" workflow running. Click on it to watch the progress. Each step shows its output in real time.
+
+7. **Verify the image in ECR**
+
+   After the pipeline succeeds, check ECR for the new image. You can do this from the AWS Console (ECR > Repositories > `cs312-wordpress-lab`) or from a terminal with AWS CLI access:
+
+   ```bash
+   aws ecr describe-images --repository-name cs312-wordpress-lab \
+     --query 'imageDetails[*].[imageTags,imagePushedAt]' --output table
+   ```
+
+   You should see your `v1.0.0` tag alongside any images from previous labs.
+
+</Steps>
+
+---
+
+You have now automated both sides of the deployment pipeline: Ansible configures servers from a blank instance to a running service, and GitHub Actions builds and publishes new images automatically. In the next lab, you will move from single-server Docker deployments to Kubernetes, where an orchestrator manages your containers for you.

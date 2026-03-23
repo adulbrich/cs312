@@ -1,0 +1,565 @@
+---
+title: 'The Hand-Crafted Linux Server'
+description: "Anyone can grab a pre-built server off the shelf. Not you. You're an artisan. A digital blacksmith."
+sidebar:
+  order: 2
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+import LetterList from '@components/LetterList.astro';
+
+{/* LOs:
+- Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+*/}
+
+Anyone can grab a pre-built server off the shelf. Not you. You're an artisan. A digital blacksmith. 
+{/* Using the hypervisor 'forge' from last week,  */}
+You will hand-craft a server from scratch using Arch Linux (the 'some assembly required' of operating systems). You will hammer out the partitions, smelt the base packages, and temper the network settings until you have a lean, mean, command-line machine, built by you and for you. There are no GUIs in this dojo.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself. 
+- Labs cannot be turned in outside of the actual lab time. 
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+In this lab, we'll install and configure Arch Linux on a hypervisor. Arch Linux is very configurable and includes nothing but what you manually specify. It's a hobbyist's dream, and you'll like the tiny distro it produces.
+
+## Before You Start
+
+<Steps>
+
+1. **Download the Arch Linux ISO**
+   
+   Visit the [Arch Linux website](https://archlinux.org/download/) and download the latest `.iso` image for the `x86_64` architecture. You can also download it from the [OSU Open Source Lab Mirrors](https://ftp.osuosl.org/pub/archlinux/iso/latest/). 
+
+2. **Research networking service**
+   
+   What is the name of the service you will use to allow your system to get an IP address? Two different answers are acceptable. *(2 points)*
+
+</Steps>
+
+## Supplies Needed
+
+- Personal laptop with a hypervisor installed
+- The Arch Linux `.iso` file 
+- Enough disk space: the VM will take up an additional 1.4 GB
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial below. Answering all questions will require finishing the tutorial and some research online; please cite working references.
+
+1. What is a protective MBR and why is it used in GPT systems? *(3 points)*
+2. What is a Secondary GPT Header? Where is it located? When would you expect it to be utilized? *(3 points)*
+3. What are some differences between the EXT4 file system we used for our root partition and the FAT32 filesystem that used to prevail? *(3 points)*
+4. Get the TA's initials, showing that you can ping a website or server on the internet. *(22 points)*
+5. What is the IP address of your VM? *(3 points)*
+6. What is the name of your ethernet adapter? *(3 points)*
+7. What are three types of platforms other than "i386-pc" that grub-install can target? *(3 points)*
+
+## Tutorial
+
+To get Arch installed, the first step is to create a Virtual Machine (VM) to hold it. We can then proceed to install Arch Linux on that VM.
+
+### VM Creation
+
+Each hypervisor will do things a little bit differently. If you are using something other than VirtualBox or UTM, please look online for a tutorial to create an empty virtual machine.
+
+#### VirtualBox
+
+<Steps>
+
+1. **Create a new VM with these settings:**
+   - Type: Linux
+   - Version: Arch Linux (64-bit)
+   - 1GB RAM
+   - Dynamic-sized HD with an 8GB size limit, normal .VDI format
+
+2. **Once the VM has been created (but before the Arch image is booted for the first time), configure these settings:**
+   
+   **System category:**
+   - Uncheck Floppy from the Boot Order
+   - Select all three Extended Features: "Enable I/O APIC", "Enable EFI (special OSes only)", "Hardware Clock in UTC Time"
+   - 2 CPUs (or more)
+   - Enable PAE/NX (if available)
+   
+   **Display category:**
+   - Video Memory 128 MB
+
+3. **In the Settings controls for your new VM, on the Storage tab, insert the .iso into the Optical Drive.**
+
+</Steps>
+
+#### UTM
+
+<Steps>
+
+1. **Create a new Emulated (if Apple Silicon) or Virtual (if Intel-based) VM** that is not preconfigured (OS = Other).
+
+2. **Select your Arch Linux ISO image.**
+
+3. **Configure the VM:**
+   - Leave architecture and system as is
+   - Adjust memory to 1024 MB 
+   - Choose at least 2 CPU Cores
+   - Set the drive size to 8GB
+   - No shared directory
+
+4. **Choose a name for your VM and save.**
+
+</Steps>
+
+### Arch Installation
+
+<Steps>
+
+1. **Start the VM**
+   
+   Choose the first option, "Arch Linux install medium (x86_64, UEFI)". The boot process will probably take about 30 seconds. This will get you into a virtual console (i.e. a RAM-based Linux install called **archiso**) that you can use to install Arch on the hard drive.
+
+   <Aside type="tip">
+   Your mouse will likely be "captured" by this VM. You'll need to press the "Host key" on your keyboard to get it back. The Host Key is listed in the bottom-right corner of the VM window. For example, on Windows, this is usually the Right CTRL key.
+   </Aside>
+2. **Test internet connection**
+   
+   Because you didn't change the network settings for the VM, the settings are configured to NAT this VM, which means it piggybacks on the networking of your Host laptop. Check your internet connection:
+
+   ```bash
+   ping google.com
+   ```
+
+   <Aside type="caution">
+   If you do not have an internet connection (i.e. this ping fails), then verify that the VM network adapter is enabled and "Attached to" has been set to "NAT", and that your laptop itself has an internet connection.
+   </Aside>
+3. **Partition the hard drive using GPT**
+   
+   We need to partition the hard drive using the GPT scheme. Our goal is to create three partitions: an EFI system partition, a swap partition, and a root partition.
+
+   Start the partitioning program:
+   ```bash
+   gdisk /dev/sda
+   ```
+
+   You'll now be at the `gdisk` prompt. Our hard disk space is currently empty and we need to create some partitions to use for the installation. Enter `?` to view possible commands:
+   ```bash
+   Command (? for help): ?
+   ```
+   ```
+   b       back up GPT data to a file
+   c       change a partition's name
+   d       delete a partition
+   i       show detailed information on a partition
+   l       list known partition types
+   n       add a new partition
+   o       create a new empty GUID partition table (GPT)
+   p       print the partition table
+   q       quit without saving changes
+   r       recovery and transformation options (experts only)
+   s       sort partitions
+   t       change a partition's type code
+   v       verify disk
+   w       write table to disk and exit
+   x       extra functionality (experts only)
+   ?       print this menu
+   ```
+
+   <Aside type="tip">
+   If you make any mistakes while creating the partition table, use option `o` which will wipe the slate clean and give you a chance to start over.
+   </Aside>
+4. **Create the EFI system partition**
+   
+   Enter `n` to begin creating a new partition:
+   ```bash
+   Command (? for help): n
+   ```
+
+   Feel free to use the default starting sector, and type "+300MB" for the last sector. When prompted for the hex code (which identifies the purpose of the partition) enter "ef00". This is the GUID corresponding to an EFI system partition.
+
+   ```
+   Partition number (1-128, default 1): [Enter]
+   First sector (34-16777182, default = 2048) or {+-}size{KMGTP}: [Enter]
+   Last sector (2048-16777182, default = 16777182) or {+-}size{KMGTP}: +300MB
+   Current type is 8300 (Linux filesystem)
+   Hex code or GUID (L to show codes, Enter = 8300): ef00
+   ```
+
+5. **Create the swap partition**
+   
+   Repeat the process to create a 400MB swap partition, which has the hex code "8200":
+   ```bash
+   Command (? for help): n
+   ```
+   ```
+   Partition number (2-128, default 2): [Enter]
+   First sector: [Enter]
+   Last sector: +400MB
+   Hex code or GUID: 8200
+   ```
+
+6. **Create the root partition**
+   
+   Create a root partition using all remaining space:
+   ```bash
+   Command (? for help): n
+   ```
+
+   Rather than specifying the partition's last sector, simply use the default value provided by `gdisk`. This will automatically configure the partition to use all remaining space on the disk. The hex code for a root partition is "8300":
+   ```
+   Partition number (3-128, default 3): [Enter]
+   First sector: [Enter]
+   Last sector: [Enter] (use default to fill remaining space)
+   Hex code or GUID: [Enter] (8300 is default)
+   ```
+
+7. **Verify and write the partition table**
+   
+   Print the proposed partition table to verify:
+   ```bash
+   Command (? for help): p
+   ```
+
+   Your configuration should resemble:
+   ```
+   Number  Start (sector)    End (sector)  Size       Code  Name
+      1            2048          616447   300.0 MiB   EF00  EFI system partition
+      2          616448         1435647   400.0 MiB   8200  Linux swap
+      3         1435648        16777182   7.3 GiB     8300  Linux filesystem
+   ```
+
+   Write the changes to disk:
+   ```bash
+   Command (? for help): w
+   ```
+   ```
+   Final checks complete. About to write GPT data. THIS WILL OVERWRITE EXISTING PARTITIONS!!
+   Do you want to proceed? (Y/N): y
+   OK; writing new GUID partition table (GPT) to /dev/sda.
+   The operation has completed successfully.
+   ```
+
+   We've now got partitions: physical spaces to install files on. These partitions need to be formatted with the appropriate filesystem before we can actually put files onto them.
+
+8. **Format the partitions**
+   
+   Format the EFI system partition with FAT32:
+   ```bash
+   mkfs.fat -F32 /dev/sda1
+   ```
+
+   Format the root partition as EXT4:
+   ```bash
+   mkfs.ext4 -F /dev/sda3
+   ```
+
+   Create and activate swap space:
+   ```bash
+   mkswap /dev/sda2
+   swapon /dev/sda2
+   ```
+
+   Now, we'll mount the root directory file system so that we can create directories in it and copy files to it. We'll be positioning this at `/mnt`.
+
+9. **Mount the file systems**
+   
+   Mount the root directory file system:
+   ```bash
+   mount /dev/sda3 /mnt
+   ```
+
+   It's a common convention to mount the ESP (EFI System Partition) at `/boot/efi`. Since our new root partition is (temporarily) placed at `/mnt` we will mount the ESP at `/mnt/boot/efi`.
+
+   Mount the ESP (EFI System Partition):
+   ```bash
+   mkdir -p /mnt/boot/efi
+   mount /dev/sda1 /mnt/boot/efi
+   ```
+
+10. **Install Arch Linux**
+
+    With the disk all nicely partitioned, we can install Arch. We'll start the installation with the dedicated tool called `pacstrap` to install Arch into our `/mnt` directory. Note that this uses an internet connection to download files, so make sure you have a network connection with `ping` first.
+    
+    ```bash
+    pacstrap /mnt base linux vim
+    ```
+
+    <Aside type="note">
+    Depending on your disk speed and internet connection, this may take a while to finish. There are about 119 packages to download and install (watch for the big Linux kernel itself). While it's running, answer questions 1, 2, and 3.
+    </Aside>
+11. **Generate the file system table**
+    
+    We now need to create a way for the OS to keep track of all the mount points and UUIDs (the `-U` switch, below) created in the installation process that we just went through. This is called a “file system table”, or `fstab`.
+
+    ```bash
+    genfstab -U /mnt > /mnt/etc/fstab
+    ```
+
+12. **Enter the chroot environment**
+    
+    In order to configure our new installation, we need to create a “chroot jail”. This is essentially a mapping that makes it so the changes we are about to make are applied to the OS we're installing, not the OS that's actually currently booted (which is the one from the `.iso` image). It also prevents commands from being used anywhere outside of this `/mnt` directory: the `/mnt` will become our new `root` directory.
+
+    ```bash
+    arch-chroot /mnt
+    ```
+
+    Verify that we're in the jail by printing out the current working directory. Note that it now thinks we're in `/`.
+
+    ```bash
+    pwd
+    ```
+
+13. **Configure locale settings**
+    
+    First, we need to copy (`cp`) the configuration of the “Los Angeles” area to where the OS looks for timezones. Then, check the time. It should be the current time in our timezone
+    ```bash
+    cp /usr/share/zoneinfo/America/Los_Angeles /etc/localtime
+    ```
+    ```bash
+    date
+    ```
+
+    Now we need to generate a set of locales the system can use. We'll set the language and character set we want to use, and lastly make them available to the system while this install process is happening. Edit the locale configuration with `vim` since we installed it with the base packages.
+
+    ```bash
+    vim /etc/locale.gen
+    ```
+
+    Inside that file, uncomment these two options by removing the hashtags:
+    ```
+    #en_US.UTF-8 UTF-8
+    #en_US ISO-8859-1
+    ```
+
+    Save and exit the file. In `vim`, you first press ESC and then type the characters `:wq` and press `Enter`.
+
+    Apply your locale changes:
+    ```bash
+    locale-gen
+    echo LANG=en_US.UTF-8 > /etc/locale.conf
+    export LANG=en_US.UTF-8
+    ```
+
+    Now we are going to install the bootloader that boots Arch Linux when the system turns on. We've installed Arch on the OS, but it currently won't be booted when the VM is started! Let's fix that by installing a bootloader called the **GR**and **U**nified **B**ootloader (GRUB).
+
+14. **Install and configure the bootloader**
+    
+    Here's how we use the Arch package manager `pacman` to install `grub` and some EFI tools (this will take a minute or two).
+
+    ```bash
+    pacman -S grub efibootmgr dosfstools mtools
+    ```
+
+    Now we need to tell grub to position itself in our root partition `/dev/sda`.
+
+    ```bash
+    grub-install --target=x86_64-efi --bootloader-id=arch --recheck
+    ```
+
+    <Aside type="tip">
+    If you are using a different hypervisor (other than VirtualBox), you may need to use this alternate command:
+    ```bash
+    grub-install --target=x86_64-efi --bootloader-id=arch --recheck --removable
+    ```
+    </Aside>
+    Finally, grub needs to write its own configuration file so it knows how to operate.
+
+    ```bash
+    grub-mkconfig -o /boot/grub/grub.cfg
+    ```
+
+    Arch is installed! Now we're going to do some configuration on it to make it more usable.
+
+15. **Configure package manager**
+    
+    Edit the `pacman` configuration to allow 32-bit software:
+    ```bash
+    vim /etc/pacman.conf
+    ```
+
+    Find and uncomment these lines:
+    ```
+    #[multilib]
+    #Include = /etc/pacman.d/mirrorlist
+    ```
+
+    Re-sync `pacman` with its new configuration (takes 1 or 2 minutes).
+    ```bash
+    pacman -Syu
+    ```
+
+16. **Install and configure `sudo`**
+
+    Now we're going to install `sudo`. Up until now, we've been operating solely as the superuser root (identified by the `#` in your terminal): this is handy for administrative work, but dangerous in production. This `sudo` tool allows us to run one-shot configuration commands as if we were root (or another user) while remaining as a lesser-privileged user.
+    
+    Install `sudo`:
+    ```bash
+    pacman -S sudo
+    ```
+
+    We now need to modify the `sudo` config file to allow a security group called “wheel” to be authorized to use `sudo`. With this done, any user in the “wheel” group will be set up to use `sudo` from all terminals, acting as any user, and run any commands with it. This config file is edited in a strange way. Instead of editing the config file directly, we use a command that loads an editor to go work on the file.
+
+    ```bash
+    visudo
+    ```
+
+    Uncomment this line and save and exit the file:
+    ```
+    #%wheel ALL=(ALL) ALL
+    ```
+
+    Now we're going to add a new user: this will be who we want to log in as normally.
+
+17. **Create a user account**
+    
+    Create the user with the following command, which will create the home directory (`-m`), add it to the additional group (`-G`) wheel which will give it `sudo` access, set the shell (`-s`) to `bash`, and name the new user `archuser`.
+    ```bash
+    useradd -m -G wheel -s /bin/bash archuser
+    ```
+
+    Set the password for this new user (you will be prompted to provide a password). Note that you have to type it twice.
+    ```bash
+    passwd archuser
+    ```
+
+    Now, we can reboot!
+
+18. **Complete the installation**
+    
+    Exit the chroot environment:
+    ```bash
+    exit
+    ```
+
+    Eject the `.iso` from the Virtual Machine.
+
+    Reboot the VM:
+    ```bash
+    reboot
+    ```
+
+    <Aside type="tip">
+    You may see some errors and warnings, but let the countdowns do their thing and allow the reboot to finish. If all goes well, it should go to an OS selection screen where it will automatically choose Arch after 5 seconds, and then present you with a login prompt!
+    </Aside>
+</Steps>
+
+### Post-Installation Configuration
+
+After rebooting, log in with your new user account and configure networking. You'll find that many, many, most, many, practically all things are not installed. That's Arch! For example, you probably don't have a network interface turned on, so ping will fail. Continue on! 
+
+<Aside type="note">
+If you'd like to shutdown the VM, you can do so with this command:
+```bash
+sudo shutdown now
+```
+</Aside>
+Note that we're using the bash shell now, so the prompt symbol is the traditional `$` (instead of `#`) which means we're a normal user, not the superuser root. If you need to run a command as root, you can use `sudo` before the command.
+
+<Steps>
+
+1. **Create a hostname**
+
+   The first thing we need to do is create a hostname for our system. This name is used to identify this machine on the network, and is required for it to get an address. We'll need to create a file in this location with this name
+   
+   ```bash
+   sudo vim /etc/hostname
+   ```
+
+   Inside that file, put just a word with no spaces. Consider "RefArch", for example. Save and exit.
+
+2. **Configure the hosts file**
+
+   Now we need to configure the networking hosts file to know about our name. This file tracks several memorized network locations, including our own. 
+
+   ```bash
+   sudo vim /etc/hosts
+   ```
+
+   Add these lines (replace "RefArch" with your chosen hostname):
+   ```
+   127.0.0.1  localhost
+   127.0.1.1  RefArch.localdomain RefArch
+   ```
+
+3. **Configure network interface**
+   
+   List the interfaces to see what you have:
+   ```bash
+   ip link
+   ```
+
+   The first one, “lo”, is the loop device, or the loopback identifier. This isn't used for actual communication. The second one is the actual ethernet connection we care about. It will probably show up with a name like “enp0s3”. If yours is slightly different, just substitute that below.
+
+   Query your specific interface (replace "enp0s3" with your interface name):
+   ```bash
+   ip link ls dev enp0s3
+   ```
+
+   The state should be DOWN initially. That's right: Arch's networking starts in a down state so that it doesn't automatically reach out and join the network. That allows you to be explicit about when you're ready to connect. 
+
+4. **Configure DHCP**
+   
+   Let's configure our interface to obtain an IP address via DHCP using a new `systemd` configuration file.
+   ```bash
+   sudo vim /etc/systemd/network/wan.network
+   ```
+
+   Insert this content (changing the interface name if needed), then save and close the file:
+   ```ini
+   [Match]
+   Name=enp0s3
+
+   [Network]
+   DHCP=yes
+   ```
+
+5. **Enable and start networking service**
+   
+   Now let's enable the corresponding system service (`systemd-networkd`) so that it starts on boot.
+   ```bash
+   sudo systemctl enable systemd-networkd
+   ```
+
+   We don't want to wait for a reboot, so we'll manually start the service.
+   ```bash
+   sudo systemctl start systemd-networkd
+   ```
+
+6. **Verify network configuration**
+   
+   Check if your interface got an IP address:
+   ```bash
+   ip addr ls
+   ```
+
+   Look for an "inet" field showing an IP address like 10.0.X.Y/24. It can also start with 192 or 172, as those are reserved for private networks.
+
+7. **Configure DNS**
+
+   We need DNS in order for our internet connection to be useful.
+   ```bash
+   sudo vim /etc/resolv.conf
+   ```
+
+   Add these Google public DNS servers:
+   ```
+   nameserver 8.8.8.8
+   nameserver 8.8.4.4
+   ```
+
+8. **Test internet connectivity**
+   
+   You should now have a working connection:
+   ```bash
+   ping archlinux.org
+   ```
+
+   <Aside type="tip" title="TA Checkpoint">
+   Show the TA that you can successfully ping a website to get their initials for question 4.
+   </Aside>
+9. **Shutdown when complete**
+   
+   When you're done, shut down your VM:
+   ```bash
+   sudo shutdown -h now
+   ```
+
+</Steps>
+
+You're done! To receive credit for this lab, you must turn in your answer sheet with your names listed.

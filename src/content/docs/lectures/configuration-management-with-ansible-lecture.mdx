@@ -1,0 +1,427 @@
+---
+title: Configuration Management with Ansible
+description: "Understanding configuration management principles and Ansible: inventories, idempotent playbooks, roles, templates, and managing fleets of servers."
+sidebar:
+  order: 11
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Imagine you are responsible for three web servers that must serve identical content behind a load balancer. On day one you log into each machine, install nginx, copy over a configuration file, and start the service. Everything works. A month later, a colleague patches one server but forgets the other two. Someone else tweaks a timeout setting on the third machine to debug a problem, then never reverts it. Before long, the three "identical" servers have quietly diverged. This phenomenon is called **configuration drift**, and it is one of the most common sources of mysterious, hard-to-reproduce bugs in production environments.
+
+A server that has been hand-configured over time, accumulating one-off changes that nobody fully remembers, is sometimes called a **snowflake server**. Like an actual snowflake, it is unique, and that uniqueness is a liability. If it fails, recreating it from memory is slow and error-prone.
+
+Configuration management tools solve this problem by letting you declare the **desired state** of your infrastructure in code. Instead of writing step-by-step instructions ("install this package, then edit that file"), you describe what the end result should look like ("nginx should be installed, this config file should have these contents, the service should be running"). The tool inspects each server, determines what changes are necessary, and applies only those changes. If a server already matches the desired state, nothing happens.
+
+<Aside type="tip">
+Desired-state thinking is a shift from imperative scripting ("do these steps") to declarative configuration ("ensure this outcome"). The same idea appears in tools like Terraform for infrastructure provisioning.
+</Aside>
+
+This chapter introduces **Ansible**, one of the most widely adopted configuration management tools. Throughout, we will use a single running example: configuring three identical web servers (`web1`, `web2`, `web3`) so that each one has nginx installed, a custom configuration file deployed, and the service running at boot.
+
+## Configuration Management Tools
+
+Several major CM tools are available, each with different design philosophies:
+
+| Tool | Released | Language/DSL | Notes |
+|------|----------|-------------|-------|
+| Puppet | 2005 | Ruby DSL | Declarative; agent-based |
+| Chef | 2009 | Ruby DSL | Procedural-leaning; agent-based; steep learning curve |
+| Salt | 2011 | YAML | Agent-based or agentless; acquired by Broadcom via VMware |
+| Ansible | 2012 | YAML | Agentless; declarative; Python-based |
+
+The core software for each is open source, though commercial support and enterprise features typically cost money.
+
+### Procedural vs. Declarative Models
+
+CM software generally uses one of two models:
+
+- **Procedural (scripting):** you provide a series of tasks, and the software follows your instructions step by step.
+- **Declarative (CM):** you specify the end state you desire, and the software determines what changes are necessary to achieve it.
+
+Ansible uses a declarative model. Rather than writing "run apt-get install nginx," you declare "nginx should be in the installed state." If nginx is already installed, Ansible does nothing.
+
+## Ansible Architecture
+
+Ansible uses an **agentless** architecture. Unlike Puppet or Chef, which require a dedicated agent process on every managed machine, Ansible needs nothing on the target hosts beyond a standard SSH server and Python.
+
+The machine where you write and run your Ansible code is called the **control node**. The servers you manage are called **managed nodes**. When you execute an Ansible command, the control node connects to each managed node over SSH, pushes small Python scripts (called modules) to the remote machine, executes them, collects the results, and cleans up. No long-running daemon, no central database, no complicated certificate infrastructure.
+
+### System Requirements
+
+**Control node** requirements:
+- Nearly any UNIX-like machine: Linux distributions, macOS, BSDs, or WSL on Windows.
+- Python must be installed (Ansible is a Python-based tool).
+
+**Managed node** requirements:
+- Python installed (Ansible pushes and runs Python scripts on the target).
+- A user account that can connect via SSH with an interactive POSIX shell.
+
+<Aside type="note">
+Because Ansible communicates over SSH, any machine you can reach with `ssh user@host` can be managed by Ansible. If your SSH keys are already configured, Ansible will use them automatically.
+</Aside>
+
+The typical workflow is: write an **inventory** listing your servers, write a **playbook** describing the desired state, then run `ansible-playbook` on the control node. Ansible fans out over SSH in parallel, executes the necessary tasks, and reports what changed.
+
+## Inventory Files
+
+An inventory tells Ansible which machines to manage. The simplest form is a static INI-style file listing hostnames or IP addresses, organized into groups.
+
+```ini
+[webservers]
+web1 ansible_host=192.0.2.10
+web2 ansible_host=192.0.2.11
+web3 ansible_host=192.0.2.12
+
+[webservers:vars]
+ansible_user=deploy
+ansible_python_interpreter=/usr/bin/python3
+
+[dbservers]
+db1 ansible_host=192.0.2.20
+
+[production:children]
+webservers
+dbservers
+```
+
+Three hosts are placed into a group called `webservers`. The `ansible_host` variable maps a short alias (like `web1`) to an IP address. The `[webservers:vars]` section assigns variables to every host in that group. The `[production:children]` block creates a parent group whose members are the combined hosts from `webservers` and `dbservers`, so you can target the entire fleet or narrow your scope to one tier.
+
+<Aside type="tip">
+Ansible automatically creates two default groups: `all` (every host in the inventory) and `ungrouped` (hosts not in any explicit group).
+</Aside>
+
+## Ad-Hoc Commands
+
+Before writing full playbooks, Ansible lets you run one-off tasks from the command line. These **ad-hoc commands** are useful for quick checks and simple operations:
+
+```bash
+# Test connectivity to all webservers
+ansible webservers -i hosts.ini -m ansible.builtin.ping
+
+# Check free disk space
+ansible webservers -i hosts.ini -m ansible.builtin.command -a "df -h"
+
+# Install nginx (requires become/sudo)
+ansible webservers -i hosts.ini -m ansible.builtin.apt \
+  -a "name=nginx state=present" --become
+
+# Ensure nginx is running and enabled
+ansible webservers -i hosts.ini -m ansible.builtin.service \
+  -a "name=nginx state=started enabled=true" --become
+```
+
+The `ping` module does not send an ICMP ping; it verifies that Ansible can connect over SSH and execute Python. Ad-hoc commands are convenient for exploration and emergencies, but they are not repeatable or version-controlled. For anything you plan to do more than once, write a playbook.
+
+**Modules** (also called task plugins) are discrete units of code that perform a single action — installing a package, copying a file, managing a service. Ansible executes each module on the remote managed node and collects the return value. Modules are grouped into **Collections** and distributed through the Ansible community. To read the documentation for any module locally, use:
+
+```bash
+ansible-doc ansible.builtin.apt
+```
+
+## Playbooks
+
+A playbook is a YAML file describing the desired state of one or more groups of servers. Playbooks are the heart of Ansible.
+
+### Structure: Plays, Tasks, and Modules
+
+A playbook contains one or more **plays**. Each play targets a group of hosts and contains a list of **tasks**. Each task invokes a **module** with specific arguments:
+
+```yaml
+---
+- name: Configure web servers
+  hosts: webservers
+  become: true
+
+  tasks:
+    - name: Install nginx
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+
+    - name: Deploy nginx configuration
+      ansible.builtin.copy:
+        src: files/nginx.conf
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload nginx
+
+    - name: Ensure nginx is running and enabled
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+```
+
+The play targets the `webservers` group and uses `become: true` for sudo privileges. The `ansible.builtin.apt` module manages packages on Debian-based systems. The `ansible.builtin.copy` module copies a file from the control node to the managed nodes. The `ansible.builtin.service` module manages system services. You run the playbook with:
+
+```bash
+ansible-playbook -i hosts.ini site.yml
+```
+
+### Handlers
+
+Notice the `notify` directive on the copy task and the `handlers` section at the bottom. Handlers solve a common problem: you need to reload nginx when its configuration file changes, but not when it stays the same. The `notify` keyword tells Ansible, "if this task changes something, schedule the named handler to run." Handlers execute once at the end of the play, even if multiple tasks notify the same handler. This prevents unnecessary restarts mid-run.
+
+## Idempotency
+
+**Idempotency** is the most important concept in configuration management. An operation is idempotent if running it once produces the same result as running it multiple times. If your three web servers already have nginx installed and running, executing the playbook again should report "ok" for every task and make zero changes.
+
+This property makes playbooks safe to run repeatedly, whether on a schedule or after every code merge. It also enables self-healing: if someone manually changes a configuration file on one server, the next playbook run detects the difference and corrects it.
+
+Ansible's built-in modules are designed to be idempotent. The `apt` module checks whether a package is already installed. The `copy` module compares checksums before transferring a file. The `service` module checks current state before acting.
+
+<Aside type="caution">
+The `ansible.builtin.command` and `ansible.builtin.shell` modules are exceptions. They run a command and have no way to know whether the system already has the desired state. Use them sparingly, and consider adding `creates` or `removes` parameters to make them conditionally idempotent.
+</Aside>
+
+To verify idempotency, run your playbook twice. On the second run, every task should report "ok" rather than "changed."
+
+## Variables and Facts
+
+Variables make playbooks flexible. Instead of hardcoding package names, port numbers, or file paths, you parameterize them so the same playbook works across environments.
+
+### Group and Host Variables
+
+Ansible supports variables at many levels. The most common approach uses **group_vars** and **host_vars** directories alongside your inventory:
+
+```
+project/
+  hosts.ini
+  group_vars/
+    webservers.yml
+  host_vars/
+    web1.yml
+  site.yml
+```
+
+The file `group_vars/webservers.yml` applies to every host in the `webservers` group:
+
+```yaml
+nginx_worker_processes: 4
+nginx_listen_port: 80
+app_document_root: /var/www/html
+```
+
+The file `host_vars/web1.yml` applies only to `web1` and overrides group variables for that host:
+
+```yaml
+nginx_worker_processes: 8
+```
+
+### Gathered Facts
+
+When a playbook runs, Ansible automatically collects **facts** about each managed node (OS, IP addresses, CPU count, memory, and more). You can reference these in tasks and templates:
+
+```yaml
+- name: Print OS information
+  ansible.builtin.debug:
+    msg: "This host runs {{ ansible_distribution }} {{ ansible_distribution_version }}"
+```
+
+### Registering Task Output
+
+You can capture a task's output with the `register` keyword and branch on it with `when`:
+
+```yaml
+- name: Check if custom config exists
+  ansible.builtin.stat:
+    path: /etc/myapp/custom.conf
+  register: custom_config
+
+- name: Deploy default config if custom one is absent
+  ansible.builtin.copy:
+    src: files/default.conf
+    dest: /etc/myapp/custom.conf
+  when: not custom_config.stat.exists
+```
+
+This pattern (register a result, then conditionally act on it) is common in real-world playbooks.
+
+## Roles
+
+As your Ansible codebase grows, a single playbook becomes unwieldy. **Roles** provide a standard directory structure for reusable, self-contained components:
+
+```
+roles/
+  nginx/
+    tasks/main.yml
+    handlers/main.yml
+    templates/nginx.conf.j2
+    files/index.html
+    defaults/main.yml
+```
+
+The `tasks/main.yml` contains tasks, `handlers/main.yml` contains handlers, `templates/` holds Jinja2 templates, `files/` holds static files, and `defaults/main.yml` provides default variable values (lowest precedence). Ansible automatically resolves paths within these directories, so a template source of `nginx.conf.j2` is found in the role's `templates/` folder.
+
+Your main playbook becomes remarkably concise:
+
+```yaml
+---
+- name: Configure web servers
+  hosts: webservers
+  become: true
+  roles:
+    - nginx
+```
+
+Once a role is written and tested, any team member can apply it to any group of servers with a single line. The community repository Ansible Galaxy hosts thousands of pre-built roles for common tasks.
+
+## Collections and Galaxy
+
+**Collections** are the distribution format for Ansible content. A collection can contain playbooks, roles, modules, and plugins, all packaged together. You install them with:
+
+```bash
+ansible-galaxy collection install cisco.ios
+```
+
+**Ansible Galaxy** (`galaxy.ansible.com`) is the community hub for sharing collections and standalone roles. Useful examples include collections for managing Cisco IOS network devices, macOS automation, and general Linux system administration. Before writing a complex role from scratch, check Galaxy — a well-maintained community collection may already exist.
+
+## Protecting Sensitive Data with Ansible Vault
+
+Inventories and playbooks sometimes need to reference secrets: database passwords, API keys, or private keys. Committing these in plain text to a repository is a serious security risk. **Ansible Vault** encrypts files or individual variables so they can be stored safely in version control:
+
+```bash
+# Encrypt an entire variables file
+ansible-vault encrypt group_vars/production/secrets.yml
+
+# Edit an encrypted file
+ansible-vault edit group_vars/production/secrets.yml
+
+# Run a playbook that uses encrypted variables
+ansible-playbook site.yml --ask-vault-pass
+```
+
+For dynamic infrastructure (such as EC2 instances that come and go), Ansible also supports **dynamic inventory** scripts that query a cloud provider's API at runtime instead of relying on a static hosts file. This is especially useful when you are spinning up and tearing down many instances automatically.
+
+<Aside type="caution">
+Never commit plaintext secrets, SSH private keys, or cloud credentials to your repository. Use Ansible Vault for secrets and keep host-specific connection details in files excluded from version control via `.gitignore`.
+</Aside>
+
+## Templates with Jinja2
+
+Static file copies work for simple cases, but real-world configuration files need values that vary by host or environment. Ansible uses the **Jinja2** templating engine to generate files dynamically. Here is `templates/nginx.conf.j2`:
+
+```jinja2
+worker_processes {{ nginx_worker_processes }};
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+
+    server {
+        listen {{ nginx_listen_port }};
+        server_name {{ ansible_hostname }};
+        root {{ app_document_root }};
+        index index.html;
+
+        location / {
+            try_files $uri $uri/ =404;
+        }
+    }
+}
+```
+
+Ansible replaces `{{ nginx_worker_processes }}` with the host's variable value (4 for most servers, 8 for web1), `{{ ansible_hostname }}` with the actual hostname from gathered facts. Each server receives a tailored configuration file from a single template.
+
+Jinja2 also supports control structures for conditional blocks and loops:
+
+```jinja2
+{% if enable_ssl %}
+    listen 443 ssl;
+    ssl_certificate     {{ ssl_cert_path }};
+    ssl_certificate_key {{ ssl_key_path }};
+{% endif %}
+
+{% for upstream in upstream_servers %}
+    server {{ upstream }};
+{% endfor %}
+```
+
+The `ansible.builtin.template` module works like `copy` but processes the file through Jinja2 first. It is idempotent: if the rendered output matches what is already on disk, no change is reported.
+
+## Testing and Debugging
+
+### Dry Run with Check Mode
+
+The `--check` flag runs the playbook in dry-run mode, evaluating each task without making changes. Combine it with `--diff` to see line-by-line file differences:
+
+```bash
+ansible-playbook -i hosts.ini site.yml --check --diff
+```
+
+<Aside type="caution">
+Check mode has limitations. Tasks that depend on earlier tasks (for example, configuring software that has not been installed yet in dry-run mode) may report errors. Use check mode as a guide, not a guarantee.
+</Aside>
+
+### Verbosity Levels
+
+Increasing verbosity reveals more detail when diagnosing problems:
+
+```bash
+ansible-playbook -i hosts.ini site.yml -v     # task results
+ansible-playbook -i hosts.ini site.yml -vv    # input parameters
+ansible-playbook -i hosts.ini site.yml -vvv   # SSH connection details
+ansible-playbook -i hosts.ini site.yml -vvvv  # maximum detail
+```
+
+Start with `-v` and increase only if needed.
+
+### Common Errors
+
+**"Permission denied" or "unreachable"** usually means SSH is misconfigured. Verify that you can manually SSH to the host with the same user Ansible is using.
+
+**"MODULE FAILURE"** often includes a message explaining the cause. Common culprits: missing Python on the managed node, incorrect module arguments, or insufficient permissions (did you forget `become: true`?).
+
+**"Undefined variable"** means a referenced variable cannot be found. Check your `group_vars`, `host_vars`, and role `defaults` for typos. The debug module can help:
+
+```yaml
+- name: Show all variables
+  ansible.builtin.debug:
+    var: vars
+```
+
+You can also skip ahead to a specific task with `--start-at-task="task name"`, which is helpful when iterating on a task near the end of a long playbook.
+
+## Putting It All Together
+
+With the concepts from this chapter, our three-server project looks like this:
+
+```
+project/
+  hosts.ini
+  site.yml
+  group_vars/
+    webservers.yml
+  roles/
+    nginx/
+      tasks/main.yml
+      handlers/main.yml
+      templates/nginx.conf.j2
+      defaults/main.yml
+```
+
+The inventory defines the three servers. Group variables set shared configuration values. The nginx role encapsulates all tasks, handlers, and templates. The top-level playbook ties everything together. Any team member can run `ansible-playbook -i hosts.ini site.yml` and be confident that all three servers will converge to the same desired state.
+
+This is the core promise of configuration management: infrastructure defined as code, version-controlled, repeatable, and auditable. When a new server joins the fleet, you add one line to the inventory and run the playbook. When a configuration change is needed, you update the template, commit the change, and apply it uniformly across every server.
+
+<Aside type="tip">
+Keep your Ansible code in version control. Treat playbook changes like application code: review them, test in staging, then apply to production. This practice, combined with idempotent playbooks, gives you a reliable and auditable configuration management workflow.
+</Aside>
+
+## Further reading
+
+- <a href="https://www.youtube.com/watch?v=1id6ERvfozo" target="_blank" rel="noopener noreferrer">What is Ansible? Playbooks explained — Beginner Tutorial (YouTube)</a>

@@ -1,0 +1,390 @@
+---
+title: 'Terraform: Your First Infrastructure Stack'
+description: "Pinnacle Provisions is opening a second location. Gerald asks if you can copy the IT."
+sidebar:
+  order: 6
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+*/}
+
+Pinnacle Provisions is opening a second location. Gerald asked if you can "copy the IT" to the new restaurant. You pulled up your notes from setting up the first location and realized they say things like "click the orange button" and "the password is on a sticky note on the monitor." Nothing is documented. Nothing is reproducible. If the building burned down, you would be starting from memory.
+
+Infrastructure as Code (IaC) solves this by letting you define your infrastructure in configuration files that can be stored in Git, reviewed in pull requests, and applied repeatably. Terraform, created by HashiCorp, is the most widely used IaC tool in the industry. In this lab, you will write Terraform configurations that provision the same resources you have been creating by hand, and then destroy them with a single command.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+You need:
+- An AWS Academy Learner Lab environment
+- An SSH client on your laptop
+- A text editor (VS Code recommended for HCL syntax highlighting)
+
+## Declarative vs. Imperative
+
+Terraform uses a **declarative** approach: you describe the desired end state ("I want an EC2 instance with these properties"), and Terraform figures out what actions to take to reach that state. This contrasts with **imperative** tools like shell scripts, where you list the exact steps ("create this, then create that"). Declarative tools are easier to reason about because you state *what* you want, not *how* to get there.
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial.
+
+1. How many resources does `terraform plan` say it will create? List the resource types (e.g., `aws_instance`, `aws_security_group`). *(5 points)*
+2. After `terraform apply`, write down the **public IP** and **Instance ID** from the Terraform outputs. Verify you can SSH in. *(5 points)*
+3. When you changed the instance type from t3.micro to t3.small, did `terraform plan` show "destroy and recreate" or "update in-place"? Why does this distinction matter? *(5 points)*
+4. Find the `"arn"` of your EC2 instance in `terraform.tfstate`. Write down the 12-digit AWS account ID embedded in the ARN (Amazon Resource Name). *(3 points)*
+5. After `terraform destroy`, what does `terraform show` display? *(2 points)*
+6. Get your TA's initials showing a successful SSH session into your Terraform-provisioned instance. *(5 points)*
+
+## Tutorial
+
+### Installing Terraform
+
+<Steps>
+
+1. **Install Terraform on your laptop**
+
+   Terraform runs on your local machine (or a bastion host) and talks to the AWS Application Programming Interface (API) remotely. Install it based on your operating system:
+
+   **macOS (with Homebrew):**
+   ```bash
+   brew tap hashicorp/tap
+   brew install hashicorp/tap/terraform
+   ```
+
+   **Ubuntu/Debian:**
+   ```bash
+   wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+   echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+   sudo apt update && sudo apt install terraform
+   ```
+
+   **Windows (with Chocolatey):**
+   ```bash
+   choco install terraform
+   ```
+
+   Alternatively, you can install OpenTofu, an open-source fork of Terraform. The commands are nearly identical; just replace `terraform` with `tofu`.
+
+2. **Verify the installation**
+
+   ```bash
+   terraform --version
+   ```
+
+3. **Configure AWS credentials**
+
+   Terraform needs AWS credentials to create resources. In AWS Academy, download your credentials from the Learner Lab page (click **AWS Details**, then **Show** next to AWS CLI). Copy the credentials block and paste it into `~/.aws/credentials`:
+
+   ```bash
+   mkdir -p ~/.aws
+   vim ~/.aws/credentials
+   ```
+
+   The file should look like:
+
+   ```ini
+   [default]
+   aws_access_key_id=ASIA...
+   aws_secret_access_key=...
+   aws_session_token=...
+   ```
+
+   <Aside type="caution">
+   AWS Academy credentials are temporary and rotate each time you start a new Learner Lab session. If Terraform commands fail with "ExpiredToken," get fresh credentials from the Learner Lab page.
+   </Aside>
+</Steps>
+
+### Writing the Terraform Configuration
+
+Terraform configurations are written in HashiCorp Configuration Language (HCL). You will create three files: `main.tf` (resources), `variables.tf` (inputs), and `outputs.tf` (values to display after apply).
+
+<Steps>
+
+1. **Create a project directory**
+
+   ```bash
+   mkdir ~/terraform-lab && cd ~/terraform-lab
+   ```
+
+2. **Write `main.tf`**
+
+   ```bash
+   vim main.tf
+   ```
+
+   Add the following:
+
+   ```hcl
+   terraform {
+     required_providers {
+       aws = {
+         source  = "hashicorp/aws"
+         version = "~> 5.0"
+       }
+     }
+   }
+
+   provider "aws" {
+     region = "us-east-1"
+   }
+
+   # Use the default VPC instead of creating a new one
+   data "aws_vpc" "default" {
+     default = true
+   }
+
+   # Security Group allowing SSH and HTTP
+   resource "aws_security_group" "web" {
+     name        = "cs312-tf-sg"
+     description = "Allow SSH and HTTP"
+     vpc_id      = data.aws_vpc.default.id
+
+     ingress {
+       description = "SSH"
+       from_port   = 22
+       to_port     = 22
+       protocol    = "tcp"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     ingress {
+       description = "HTTP"
+       from_port   = 80
+       to_port     = 80
+       protocol    = "tcp"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     egress {
+       from_port   = 0
+       to_port     = 0
+       protocol    = "-1"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     tags = {
+       Name = "cs312-tf-sg"
+     }
+   }
+
+   # IAM role for ECR read access
+   resource "aws_iam_role" "ec2_ecr" {
+     name = "cs312-tf-ec2-ecr-role"
+
+     assume_role_policy = jsonencode({
+       Version = "2012-10-17"
+       Statement = [{
+         Action = "sts:AssumeRole"
+         Effect = "Allow"
+         Principal = {
+           Service = "ec2.amazonaws.com"
+         }
+       }]
+     })
+   }
+
+   resource "aws_iam_role_policy_attachment" "ecr_readonly" {
+     role       = aws_iam_role.ec2_ecr.name
+     policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+   }
+
+   resource "aws_iam_instance_profile" "ec2_profile" {
+     name = "cs312-tf-ec2-profile"
+     role = aws_iam_role.ec2_ecr.name
+   }
+
+   # EC2 instance
+   resource "aws_instance" "web" {
+     ami                    = var.ami_id
+     instance_type          = var.instance_type
+     key_name               = var.key_name
+     vpc_security_group_ids = [aws_security_group.web.id]
+     iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+
+     tags = {
+       Name = "cs312-tf-instance"
+     }
+   }
+   ```
+
+   Let's walk through this:
+   - The `terraform` block specifies which providers (plugins) to use. The AWS provider lets Terraform manage AWS resources.
+   - The `data` block reads existing resources (the default VPC) without creating them.
+   - Each `resource` block declares a resource Terraform should manage. The first argument is the resource type, the second is a local name.
+   - The IAM (Identity and Access Management) role and instance profile give the EC2 instance permission to pull images from ECR without hardcoding credentials.
+
+3. **Write `variables.tf`**
+
+   Variables make your configuration reusable. Instead of hardcoding values, you parameterize them:
+
+   ```bash
+   vim variables.tf
+   ```
+
+   ```hcl
+   variable "ami_id" {
+     description = "AMI ID for the EC2 instance (Ubuntu 24.04 in us-east-1)"
+     type        = string
+     default     = "ami-0a0e5d9c7acc336f1"
+   }
+
+   variable "instance_type" {
+     description = "EC2 instance type"
+     type        = string
+     default     = "t3.micro"
+   }
+
+   variable "key_name" {
+     description = "Name of the SSH key pair (must already exist in AWS)"
+     type        = string
+   }
+   ```
+
+   <Aside type="tip">
+   The `ami_id` default may need updating; AMI IDs change over time and vary by region. To find the current Ubuntu 24.04 AMI in us-east-1, search for it in the EC2 launch wizard or run:
+   ```bash
+   aws ec2 describe-images --owners 099720109477 \
+     --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
+     --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' --output text
+   ```
+   </Aside>
+4. **Write `outputs.tf`**
+
+   Outputs display useful information after `terraform apply`:
+
+   ```bash
+   vim outputs.tf
+   ```
+
+   ```hcl
+   output "instance_public_ip" {
+     description = "Public IP address of the EC2 instance"
+     value       = aws_instance.web.public_ip
+   }
+
+   output "instance_id" {
+     description = "Instance ID"
+     value       = aws_instance.web.id
+   }
+   ```
+
+</Steps>
+
+### The Terraform Lifecycle: Init, Plan, Apply
+
+<Steps>
+
+1. **Initialize the project**
+
+   ```bash
+   terraform init
+   ```
+
+   This downloads the AWS provider plugin and sets up the working directory. You will see a `.terraform/` directory appear; this is where Terraform stores its plugins. You only need to run `init` once per project (or when you change providers).
+
+2. **Preview the changes**
+
+   ```bash
+   terraform plan -var="key_name=cs312-key"
+   ```
+
+   Replace `cs312-key` with the name of your existing SSH key pair. Terraform will show you exactly what it plans to create, change, or destroy, without actually doing it. This is the "measure twice" step before "cutting once."
+
+   Review the output carefully. You should see several resources listed with a `+` symbol, meaning they will be created. Record the first 20 lines for your lab questions.
+
+3. **Apply the configuration**
+
+   ```bash
+   terraform apply -var="key_name=cs312-key"
+   ```
+
+   Terraform will show the plan again and ask for confirmation. Type `yes`. It will then make API calls to AWS to create each resource. This takes 30-60 seconds.
+
+   After completion, Terraform prints the output values. Record the public IP and instance ID.
+
+4. **Verify by SSHing in**
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem ubuntu@<public-ip-from-output>
+   ```
+
+   Run `hostname` and `whoami` to confirm you are on the new instance.
+
+</Steps>
+
+### Modifying Infrastructure
+
+<Steps>
+
+1. **Change the instance type**
+
+   Edit `variables.tf` and change the default instance type from `t3.micro` to `t3.small`:
+
+   ```hcl
+   default = "t3.small"
+   ```
+
+2. **Preview the change**
+
+   ```bash
+   terraform plan -var="key_name=cs312-key"
+   ```
+
+   Terraform will show whether this change requires an "update in-place" (the instance is modified without being destroyed) or "destroy and recreate" (the old instance is terminated and a new one launched). Record which it shows; the answer reveals how AWS handles instance type changes.
+
+   <Aside type="note">
+   You do not need to apply this change. The `plan` output is sufficient for the lab question. If you do apply it, remember that a destroy/recreate will give you a new public IP.
+   </Aside>
+</Steps>
+
+### Understanding State
+
+<Steps>
+
+1. **Inspect the state file**
+
+   After `terraform apply`, Terraform writes a `terraform.tfstate` file containing the current state of all managed resources. This is how Terraform knows what exists in AWS:
+
+   ```bash
+   cat terraform.tfstate | python3 -m json.tool | head -80
+   ```
+
+   Find the `"arn"` field for your EC2 instance. An ARN (Amazon Resource Name) is a globally unique identifier for any AWS resource. It contains your account ID, the region, and the resource ID.
+
+   <Aside type="danger">
+   The state file contains sensitive data (resource IDs, IP addresses, and potentially secrets). Never commit it to a public Git repository. In production, teams store state remotely using an S3 backend with encryption.
+   </Aside>
+</Steps>
+
+### Destroying Infrastructure
+
+<Steps>
+
+1. **Tear everything down**
+
+   ```bash
+   terraform destroy -var="key_name=cs312-key"
+   ```
+
+   Terraform will show you what it plans to destroy and ask for confirmation. Type `yes`. All resources will be deleted from AWS.
+
+2. **Verify nothing remains**
+
+   ```bash
+   terraform show
+   ```
+
+   This should display an empty state. You can also check the EC2 console to confirm the instance is terminated.
+
+</Steps>
+
+---
+
+You have now defined infrastructure as code, provisioned it with a single command, previewed changes before applying them, and destroyed everything cleanly. In the next lab, you will combine Terraform (which creates infrastructure) with Ansible (which configures it) and a CI/CD pipeline (which automates image builds).

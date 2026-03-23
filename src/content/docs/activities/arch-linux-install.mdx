@@ -1,0 +1,438 @@
+---
+title: "Install Arch Linux from Scratch"
+description: "Hands-on exercise: partition a disk, install a bootloader, configure users and networking, and boot into a minimal Linux system you built yourself."
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This activity puts into practice the concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture. Where Ubuntu's installer handles partitioning, bootloader installation, user creation, and networking automatically, Arch Linux makes you do each step by hand. That is precisely the point: by the end of this exercise, you will have directly touched every layer of a Linux system that most distributions hide behind a setup wizard.
+
+<Aside type="tip">
+Read the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture before starting. Each section below notes which lecture concept it exercises, so you can connect what you are doing to what you read.
+</Aside>
+
+## What You Will Need
+
+- A laptop with a hypervisor installed (VirtualBox, UTM, or similar)
+- The Arch Linux ISO image, downloaded from [archlinux.org](https://archlinux.org/download/) or the [OSU Open Source Lab mirror](https://mirrors.osuosl.org/pub/archlinux/iso/latest/)
+- About 2 GB of free disk space for the VM
+- An internet connection
+
+## Create the Virtual Machine
+
+<Tabs>
+<TabItem label="VirtualBox">
+<Steps>
+1. Create a new VM with these settings:
+   - **Type:** Linux
+   - **Version:** Arch Linux (64-bit)
+   - **Memory:** 1024 MB (1 GB)
+   - **Hard disk:** Create a virtual hard disk, VDI format, dynamically allocated, 8 GB
+
+2. Before booting, open **Settings** and adjust:
+   - **System > Motherboard:** Uncheck **Floppy** from boot order. Check **Enable EFI (special OSes only)**.
+   - **System > Processor:** Set to 2 CPUs.
+   - **Display:** Set video memory to 128 MB.
+
+3. Under **Storage**, click the empty optical drive and select the Arch Linux ISO.
+</Steps>
+</TabItem>
+<TabItem label="UTM (macOS)">
+<Steps>
+1. Create a new VM:
+   - Choose **Emulate** (Apple Silicon) or **Virtualize** (Intel).
+   - Operating System: **Other**.
+   - Select the Arch Linux ISO image.
+
+2. Configure resources:
+   - Memory: 1024 MB
+   - CPU Cores: 2
+   - Drive size: 8 GB
+
+3. No shared directory needed. Name the VM and save.
+</Steps>
+</TabItem>
+</Tabs>
+
+## Boot into the Live Environment
+
+<Steps>
+1. Start the VM. Select **Arch Linux install medium (x86_64, UEFI)** from the boot menu. After about 30 seconds you will land at a root shell prompt.
+
+2. Verify you have an internet connection (the VM's NAT adapter piggybacks on your host's network):
+
+   ```bash
+   ping -c 3 archlinux.org
+   ```
+
+   If this fails, verify that the VM's network adapter is enabled and set to NAT.
+</Steps>
+
+<Aside type="note">
+You are currently running from a RAM-based live environment called **archiso**. Nothing you do here persists to disk until you explicitly install it. The live environment is your staging area.
+</Aside>
+
+## Partition the Disk
+
+**Lecture concept:** This section exercises the *Filesystem Layout and Disk Management* concepts from the lecture. You will create the partition scheme that the lecture describes in the context of `/boot/efi`, swap, and the root filesystem.
+
+We will create three partitions using GPT: an EFI System Partition, a swap partition, and a root partition.
+
+<Steps>
+1. Launch the partitioning tool:
+
+   ```bash
+   gdisk /dev/sda
+   ```
+
+   <Aside type="tip">
+   If you make a mistake at any point, type `o` at the gdisk prompt to wipe the partition table and start over. Changes are not written to disk until you explicitly tell gdisk to do so.
+   </Aside>
+
+2. **Create the EFI System Partition.** Type `n` for a new partition. Accept the default partition number (1) and default first sector. For the last sector, type `+300M`. When prompted for the hex code, enter `ef00` (EFI System Partition).
+
+   ```
+   Command (? for help): n
+   Partition number (1-128, default 1):
+   First sector (34-16777182, default = 2048) or {+-}size{KMGTP}:
+   Last sector (...) or {+-}size{KMGTP}: +300M
+   Hex code or GUID (L to show codes, Enter = 8300): ef00
+   ```
+
+3. **Create the swap partition.** Type `n` again. Accept defaults for partition number (2) and first sector. For the last sector, type `+400M`. Hex code: `8200` (Linux swap).
+
+4. **Create the root partition.** Type `n` again. Accept all defaults (partition 3, default first sector, default last sector to use all remaining space). Accept the default hex code `8300` (Linux filesystem).
+
+5. **Verify your work.** Type `p` to print the partition table. You should see something like:
+
+   ```
+   Number  Start (sector)    End (sector)  Size       Code  Name
+      1            2048          616447   300.0 MiB   EF00  EFI system partition
+      2          616448         1435647   400.0 MiB   8200  Linux swap
+      3         1435648        16777182   7.3 GiB     8300  Linux filesystem
+   ```
+
+6. **Write the partition table.** Type `w` and confirm with `y`.
+</Steps>
+
+### Format the Partitions
+
+Each partition needs a filesystem before it can hold data. This is what `mkfs` does, and it is the same concept as the `mkfs.ext4` example from the lecture's disk management section.
+
+```bash
+# FAT32 on the EFI partition (required by the UEFI specification)
+mkfs.fat -F32 /dev/sda1
+
+# ext4 on the root partition
+mkfs.ext4 -F /dev/sda3
+
+# Initialize and activate swap
+mkswap /dev/sda2
+swapon /dev/sda2
+```
+
+### Mount the Filesystems
+
+**Lecture concept:** This mirrors the lecture's discussion of mount points and `/etc/fstab`. You are manually doing what the "Mount Points" section describes.
+
+```bash
+# Mount the root partition
+mount /dev/sda3 /mnt
+
+# Create and mount the EFI partition
+mkdir -p /mnt/boot/efi
+mount /dev/sda1 /mnt/boot/efi
+```
+
+<Aside type="note">
+**Checkpoint:** Run `lsblk` and verify that `/dev/sda3` is mounted at `/mnt` and `/dev/sda1` at `/mnt/boot/efi`. Compare this output to the `lsblk` example in the lecture. The column names and structure are identical; only the device names and sizes differ.
+</Aside>
+
+## Install the Base System
+
+This step downloads and installs the core Arch Linux packages into your mounted root partition. The `pacstrap` tool is Arch's equivalent of running an installer, but it is transparent: you can see exactly which packages it installs.
+
+```bash
+pacstrap /mnt base linux vim
+```
+
+This installs about 120 packages including the Linux kernel itself. It will take a few minutes depending on your internet speed.
+
+While it runs, generate the filesystem table so the installed system knows how to mount its own partitions at boot:
+
+```bash
+genfstab -U /mnt > /mnt/etc/fstab
+```
+
+<Aside type="note">
+**Lecture connection:** `genfstab` automates exactly what the lecture describes in the *Mount Points* section: writing entries to `/etc/fstab` with UUIDs, mount points, filesystem types, and mount options. After it runs, inspect the result with `cat /mnt/etc/fstab` and compare it to the lecture's description.
+</Aside>
+
+## Enter the New System
+
+To configure the installed system, you need to "pivot" into it using `chroot` (change root). This makes `/mnt` appear as `/` so that every command you run applies to the installed system, not the live environment.
+
+```bash
+arch-chroot /mnt
+```
+
+Verify you are inside the chroot:
+
+```bash
+pwd
+# Should output: /
+```
+
+## Configure Locale and Timezone
+
+<Steps>
+1. Set the timezone (adjust if you are not on the US West Coast):
+
+   ```bash
+   cp /usr/share/zoneinfo/America/Los_Angeles /etc/localtime
+   date
+   ```
+
+2. Configure the locale. Open the locale configuration file:
+
+   ```bash
+   vim /etc/locale.gen
+   ```
+
+   Find and uncomment these two lines (remove the leading `#`):
+
+   ```
+   en_US.UTF-8 UTF-8
+   en_US ISO-8859-1
+   ```
+
+3. Generate the locale and set it as default:
+
+   ```bash
+   locale-gen
+   echo LANG=en_US.UTF-8 > /etc/locale.conf
+   export LANG=en_US.UTF-8
+   ```
+</Steps>
+
+## Install the Bootloader
+
+**Lecture concept:** This section directly exercises the *Boot Process* section from the lecture. You are installing GRUB2 (the bootloader the lecture describes) and configuring it to chainload from UEFI firmware.
+
+<Steps>
+1. Install GRUB and supporting EFI tools:
+
+   ```bash
+   pacman -S grub efibootmgr dosfstools mtools
+   ```
+
+2. Install GRUB to the EFI partition:
+
+   ```bash
+   grub-install --target=x86_64-efi --bootloader-id=arch --recheck
+   ```
+
+   <Aside type="tip">
+   If you are using a hypervisor other than VirtualBox and this command fails, try adding the `--removable` flag. Some hypervisors require the bootloader to be installed to the fallback EFI path.
+   </Aside>
+
+3. Generate the GRUB configuration:
+
+   ```bash
+   grub-mkconfig -o /boot/grub/grub.cfg
+   ```
+</Steps>
+
+<Aside type="note">
+**Lecture connection:** The lecture says "you should edit `/etc/default/grub` and then run `sudo update-grub` rather than modifying `grub.cfg` directly." On Arch, `grub-mkconfig` is the equivalent of Ubuntu's `update-grub`. The principle is the same: never edit the generated config directly.
+</Aside>
+
+## Configure sudo and Create a User
+
+**Lecture concept:** This section exercises the *User and Group Management* section from the lecture. You will use `useradd`, configure the `wheel` group via `visudo`, and see the same `-m`, `-G`, and `-s` flags the lecture demonstrates.
+
+<Steps>
+1. Install sudo:
+
+   ```bash
+   pacman -S sudo
+   ```
+
+2. Open the sudoers file (never edit it directly, always use `visudo`):
+
+   ```bash
+   visudo
+   ```
+
+   Find and uncomment this line:
+
+   ```
+   %wheel ALL=(ALL) ALL
+   ```
+
+   This grants sudo access to all members of the `wheel` group, the same concept as Ubuntu's `sudo` group that the lecture describes.
+
+3. Create a regular user with a home directory, bash shell, and wheel group membership:
+
+   ```bash
+   useradd -m -G wheel -s /bin/bash archuser
+   ```
+
+4. Set the password:
+
+   ```bash
+   passwd archuser
+   ```
+</Steps>
+
+<Aside type="note">
+**Checkpoint:** Compare the command you just ran to the lecture's user creation example. The flags are identical: `-m` creates the home directory, `-G` adds to a supplementary group, `-s` sets the shell. The only difference is the group name (`wheel` on Arch, `sudo` on Ubuntu).
+</Aside>
+
+## Reboot into Your New System
+
+<Steps>
+1. Exit the chroot:
+
+   ```bash
+   exit
+   ```
+
+2. Eject the ISO from the VM's virtual optical drive (use your hypervisor's UI).
+
+3. Reboot:
+
+   ```bash
+   reboot
+   ```
+</Steps>
+
+After a few seconds, GRUB should appear, select Arch Linux, and drop you at a login prompt. Log in as `archuser` with the password you set.
+
+<Aside type="caution">
+You may see warnings during boot. This is normal for a minimal Arch installation. Let the boot sequence complete on its own.
+</Aside>
+
+## Configure Networking
+
+**Lecture concept:** This section exercises the *Network Configuration Basics* section from the lecture. Where the lecture uses Netplan (Ubuntu's tool), Arch uses systemd-networkd directly. The underlying concepts are the same: identify the interface, configure an address source (DHCP or static), enable the service.
+
+<Steps>
+1. Set a hostname (the lecture covers this with `hostnamectl`):
+
+   ```bash
+   sudo vim /etc/hostname
+   ```
+
+   Type a single word (e.g., `archbox`) and save the file.
+
+2. Configure `/etc/hosts`:
+
+   ```bash
+   sudo vim /etc/hosts
+   ```
+
+   Add these lines:
+
+   ```
+   127.0.0.1   localhost
+   127.0.1.1   archbox.localdomain archbox
+   ```
+
+3. Find your network interface name:
+
+   ```bash
+   ip link
+   ```
+
+   You will see `lo` (loopback) and one other interface, likely `enp0s3` or similar. Note the name.
+
+4. Create a systemd-networkd configuration file:
+
+   ```bash
+   sudo vim /etc/systemd/network/20-wired.network
+   ```
+
+   Add the following (substitute your interface name if it differs):
+
+   ```ini
+   [Match]
+   Name=enp0s3
+
+   [Network]
+   DHCP=yes
+   ```
+
+5. Enable and start the network service:
+
+   ```bash
+   sudo systemctl enable --now systemd-networkd
+   ```
+
+   <Aside type="note">
+   **Lecture connection:** `enable --now` is the same combined command from the lecture's systemd section. It both enables the service at boot and starts it immediately.
+   </Aside>
+
+6. Verify you received an IP address:
+
+   ```bash
+   ip addr show
+   ```
+
+   Look for an `inet` address on your interface (e.g., `10.0.2.15/24`).
+
+7. Configure DNS so you can resolve domain names:
+
+   ```bash
+   sudo vim /etc/resolv.conf
+   ```
+
+   Add:
+
+   ```
+   nameserver 8.8.8.8
+   nameserver 8.8.4.4
+   ```
+
+8. Test your connection:
+
+   ```bash
+   ping -c 3 archlinux.org
+   ```
+</Steps>
+
+## Verify Your Understanding
+
+You have now manually performed every step that an Ubuntu installer does automatically. Take a moment to reflect on these connections:
+
+| What you did in this activity | Lecture section it maps to |
+|-------------------------------|---------------------------|
+| Created GPT partitions with gdisk | Filesystem Layout and Disk Management |
+| Formatted with `mkfs.ext4`, `mkfs.fat` | Filesystem Layout and Disk Management |
+| Generated `/etc/fstab` with `genfstab` | Mount Points |
+| Installed GRUB to the EFI partition | The Boot Process |
+| Created a user with `useradd -m -G -s` | User and Group Management |
+| Configured `wheel` group via `visudo` | Privilege Escalation with sudo |
+| Installed packages with `pacman` | Package Management |
+| Enabled services with `systemctl enable --now` | Systemd Services |
+| Configured hostname and `/etc/hosts` | Hostname and /etc/hosts |
+| Set up DHCP via systemd-networkd | Network Configuration Basics |
+
+Consider the following questions:
+
+1. **Partitioning:** Why does the EFI System Partition use FAT32 instead of ext4? What would happen if you formatted it as ext4?
+2. **Boot process:** The lecture describes four stages (firmware, bootloader, kernel, systemd). Which steps in this activity correspond to each stage?
+3. **Package management:** Arch uses `pacman` where Ubuntu uses `apt`. What are the equivalent commands for `apt update`, `apt install`, and `apt upgrade` in pacman?
+4. **Users:** The lecture warns that forgetting the `-a` flag with `usermod -G` replaces all supplementary groups. Why did we not need the `-a` flag when we used `useradd -G` to create the user?
+
+## Cleanup
+
+When you are finished, shut down the VM:
+
+```bash
+sudo shutdown -h now
+```
+
+You can delete the VM if you no longer need it, or keep it as a sandbox for experimenting with Linux commands from future lectures.

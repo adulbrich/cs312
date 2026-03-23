@@ -1,0 +1,80 @@
+---
+title: Introduction
+description: TBD
+sidebar: 
+  order: 0
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+{/* NOTE: This is an introduction page to the assignments section of the textbook - not an actual assignment */}
+
+This course uses a single evolving project to teach practical system administration in a way that forces you to operate real services: you'll build and run a Minecraft server on AWS Academy and progressively increase maturity: from manual operations, to containerization, to infrastructure as code, to Kubernetes, to observability.
+
+These assignments are **not tutorials**. They are specifications. Your job is to make defensible engineering decisions, document them, and prove that your system works under real operational conditions.
+
+{/* TODO: let the students proposer their own service to deploy instead of minecraft -- subject to instructor approval -- it has to be network-accessible */}
+
+## The Sequence
+
+You will complete the following five milestones in order:
+
+1. [Minecraft Ops 1: Manual EC2 Server (AWS Academy)](/assignments/minecraft-1-manual-configuration/)
+2. [Minecraft Ops 2: Docker + ECR on EC2](/assignments/minecraft-2-docker/)
+3. [Minecraft Ops 3: Terraform-Provisioned EC2 + Automated Deploy](/assignments/minecraft-3-terraform-compose/)
+4. [Minecraft Ops 4: Kubernetes Migration (k3s on EC2)](/assignments/minecraft-4-k3s-migration/)
+5. [Minecraft Ops 5: IaC + Multi-Node k3s + Observability](/assignments/minecraft-5-platform-observability/)
+
+Each assignment builds on the last. You are expected to carry forward working artifacts and improve them rather than starting over.
+
+## What We're Evaluating
+
+Across all five assignments, you will be graded on the same operator-grade themes:
+
+- **Correctness**: the service runs and clients can connect.
+- **Security posture**: least privilege, minimal exposure, reasonable defaults.
+- **Recoverability**: backups exist, restores work, failures are survivable.
+- **Operational maturity**: clear procedures, safe change practices, evidence-based troubleshooting.
+- **Documentation**: someone else can operate your system using what you wrote.
+
+## Shared Constraints (AWS Academy)
+
+You must assume a real cloud billing model and treat cost as a design constraint.
+
+- Prefer small instances and justify instance sizing.
+- Restrict administrative access (SSH from known IPs or SSM if available).
+- Minimize public ports (only what is required for Minecraft and administration).
+- Use IAM instance profiles instead of long-lived access keys on servers.
+- Include a teardown or “stop resources” plan in every submission.
+
+<Aside type="note">
+If an AWS service required by an assignment is unavailable in your AWS Academy environment, document the limitation and implement the closest viable alternative with the same operational intent.
+</Aside>
+## Submission Expectations
+
+{/* TODO: review */}
+
+Unless an assignment specifies otherwise, each submission should include:
+
+- **Architecture & decisions**: a short design note explaining the key choices and tradeoffs.
+- **Runbooks**: how to deploy, validate health, upgrade, rollback, and recover.
+- **Evidence**: screenshots, logs, dashboard exports, and/or command output that proves requirements are met.
+- **Cost controls**: what you will shut down, when, and how you'll prevent surprise charges.
+
+Your artifacts should be reviewable by a third party (TA/operator) without private context.
+
+## Collaboration and Integrity
+
+- You may discuss approaches and troubleshoot with classmates.
+- Your infrastructure code, automation, and documentation must be your own work unless explicitly approved as shared starter code.
+- If you use external references, cite them in your design note.
+
+## Practical Advice (Non-Tutorial)
+
+{/* TODO: review */}
+
+- Treat every change like it could break production: write down a rollback plan before you deploy.
+- Record what “healthy” looks like (logs/metrics) so you can detect when it isn't.
+- Make small changes, validate, then proceed.
+
+If you keep your system reproducible and your docs honest, these assignments become easier over time.

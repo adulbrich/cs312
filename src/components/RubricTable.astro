@@ -1,0 +1,145 @@
+---
+type Props = {
+  tsv: string;
+  caption?: string;
+  sourceLabel?: string;
+};
+
+const { tsv, caption = 'Rubric', sourceLabel = 'inline rubric text' } = Astro.props as Props;
+
+if (!tsv) {
+  throw new Error('RubricTable: missing required prop "tsv"');
+}
+
+function parseTsvLine(line: string): string[] {
+  // Canvas rubric TSVs are tab-delimited without quotes.
+  return line.split('\t');
+}
+
+function parseRubric(tsvText: string) {
+  // IMPORTANT: This component expects a headerless TSV (no column names row).
+  // Each row must follow Canvas rubric export/import ordering:
+  //  0: title_or_outcome_id (criterion title)
+  //  1: description (optional notes)
+  //  2: use_range (true/false)
+  //  3+: repeating rating groups (3 columns each):
+  //      rating_points_X, rating_title_X, rating_description_X
+  //      (additional rating groups may follow)
+  const lines = tsvText
+    .split('\n')
+    .map((l) => l.replace(/\r$/, ''))
+    .filter((l) => l.trim().length > 0);
+
+  if (lines.length < 1) {
+    throw new Error(`RubricTable: TSV at ${sourceLabel} has no data rows`);
+  }
+
+  const IDX_TITLE = 0;
+  const IDX_DESCRIPTION = 1;
+  const IDX_FIRST_RATING_POINTS = 3;
+  const RATING_GROUP_WIDTH = 3;
+
+  const criteria = lines.map((line) => {
+    const cells = parseTsvLine(line);
+    const title = (cells[IDX_TITLE] ?? '').trim();
+    const description = (cells[IDX_DESCRIPTION] ?? '').trim();
+
+    const ratings: Array<{ points: number; title: string; description: string }> = [];
+
+    for (let i = IDX_FIRST_RATING_POINTS; i < cells.length; i += RATING_GROUP_WIDTH) {
+      const pointsRaw = (cells[i] ?? '').trim();
+      const ratingTitle = (cells[i + 1] ?? '').trim();
+      const ratingDescription = (cells[i + 2] ?? '').trim();
+
+      // Stop if we hit a completely empty trailing group.
+      if (!pointsRaw && !ratingTitle && !ratingDescription) {
+        break;
+      }
+
+      const pointsParsed = Number(pointsRaw);
+      ratings.push({
+        points: Number.isFinite(pointsParsed) ? pointsParsed : 0,
+        title: ratingTitle,
+        description: ratingDescription,
+      });
+    }
+
+    const maxPoints = ratings.reduce((m, r) => Math.max(m, r.points), 0);
+
+    return {
+      title,
+      description,
+      ratings,
+      maxPoints,
+    };
+  });
+
+  const ratingGroupCount = criteria.reduce(
+    (m, c) => Math.max(m, c.ratings.length),
+    0
+  );
+
+  const totalPoints = criteria.reduce((sum, c) => sum + c.maxPoints, 0);
+
+  return { criteria, totalPoints, ratingGroupCount };
+}
+
+const { criteria, totalPoints, ratingGroupCount } = parseRubric(tsv);
+
+const ratingCols = Math.max(1, ratingGroupCount);
+const ratingColsClass =
+  ratingCols === 1 ? 'md:grid-cols-1' :
+  ratingCols === 2 ? 'md:grid-cols-2' :
+  ratingCols === 3 ? 'md:grid-cols-3' :
+  ratingCols === 4 ? 'md:grid-cols-4' :
+  ratingCols === 5 ? 'md:grid-cols-5' :
+  ratingCols === 6 ? 'md:grid-cols-6' :
+  'md:grid-cols-6';
+---
+
+<p>Always refer to Canvas for the most up-to-date rubric information. Canvas's rubric will be used for grading.</p>
+
+<table class="w-full table-fixed">
+  {caption && <caption>{caption} (Total: {totalPoints} pts)</caption>}
+  <thead>
+    <tr>
+      <th class="w-3/8">Criteria</th>
+      <th class="w-5/8">Ratings</th>
+    </tr>
+  </thead>
+  <tbody>
+    {criteria.map((c) => (
+      <tr>
+        <td class="wrap-break-word">
+          <div class="leading-snug">
+            <div>{c.title}</div>
+            {c.description && <div class="mt-3">{c.description}</div>}
+          </div>
+        </td>
+
+        <td class="wrap-break-word">
+          <div
+            class={`grid grid-cols-1 ${ratingColsClass} gap-x-6 gap-y-4`}
+          >
+            {Array.from({ length: Math.max(1, ratingGroupCount) }).map((_, idx) => {
+              const r = c.ratings[idx];
+              return (
+                <div class="leading-snug mt-0">
+                  {r ? (
+                    <>
+                      <div class="font-semibold">{r.points} pts</div>
+                      <div>{r.title}</div>
+                      {r.description && <div class="mt-2 text-sm">{r.description}</div>}
+                    </>
+                  ) : (
+                    <div>&nbsp;</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </td>
+      </tr>
+    ))}
+  </tbody>
+</table>

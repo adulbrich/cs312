@@ -1,0 +1,605 @@
+---
+title: 'Manual WordPress Server on EC2'
+description: "Gerald wants a website. His daughter says WordPress. The budget is zero and you have one afternoon."
+sidebar:
+  order: 3
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO2: Demonstrate how to plan, install, and troubleshoot a Local Area Network, connecting it to a Wide Area Network.
+- LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+- LO6: Produce written documentation of system problems, solutions, processes, and procedures.
+*/}
+
+Gerald wants a website. "Like a blog. For the specials. My daughter says WordPress." The budget is still zero and you have one afternoon. Gerald's daughter has already texted him a list of features she wants, including a photo carousel, a reservation system, and "something with AI." You are going to start with a working WordPress installation and go from there.
+
+Today you are building a real, multi-tier web application from scratch: a WordPress site served by Apache and PHP on one EC2 instance, connected to a MariaDB database running on a **separate** server. You will set up the networking between these two tiers yourself, using security groups to control which traffic can flow between them. Every package, every config file, every firewall rule: you will create it all by hand. This is how system administrators operated before automation tools existed, and understanding this process is essential before you learn to automate it.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+You need:
+- An AWS Academy Learner Lab environment (from the [AWS Academy Onboarding](/labs/aws-academy-onboarding) lab)
+- An SSH client on your laptop
+- `nmap` installed on your laptop (macOS: `brew install nmap`, Ubuntu: `sudo apt install nmap`, Windows: download from [nmap.org](https://nmap.org/download))
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial.
+
+1. After rebooting, run `systemctl status apache2`. Write down the **PID** of the main Apache process and how long it has been running (the `Active:` line shows uptime). *(4 points)*
+2. Run `ss -tlnp | grep :80`. What is the **process name** listening on port 80? *(3 points)*
+3. Why did we create a separate `wp_user` database user instead of using the MariaDB root account? What security principle does this follow? *(4 points)*
+4. What is the **private IP address** of your database (RDS endpoint or EC2 private IP)? Why is it important that the database is **not** reachable from the public internet? *(4 points)*
+5. Check `/var/log/wordpress-health.log`. What is the time gap between the last two entries? Did the health timer survive the reboot? *(4 points)*
+6. Run `nmap -sV -Pn -p T:80 <public-ip>` from your laptop. What service name and version does nmap report? *(3 points)*
+7. **Trade-off question:** You chose either RDS or a self-managed EC2 database. Name one advantage and one disadvantage of the option you **did not** choose. *(3 points)*
+8. Get your TA's initials showing WordPress loaded in your browser. *(7 points)*
+
+## Tutorial
+
+### Launching a Fresh Ubuntu Instance
+
+<Steps>
+
+1. **Launch an EC2 instance**
+
+   In the AWS Console, go to EC2 and click **Launch instance**. This time, choose **Ubuntu Server 24.04 LTS** as the Amazon Machine Image (AMI) instead of Amazon Linux. Ubuntu is one of the most popular Linux distributions for web servers, and its package manager (`apt`) is widely used in industry.
+
+   - Name: `cs312-wordpress`
+   - Instance type: **t3.micro**
+   - Key pair: use your existing key from Lab 1b
+   - Security Group: create a new one named `cs312-wordpress-sg` with inbound rules for **SSH (port 22)** and **HTTP (port 80)**, both from Anywhere-IPv4
+
+   Click **Launch instance** and wait for it to reach "Running."
+
+2. **Connect via SSH**
+
+   The default username on Ubuntu AMIs is `ubuntu` (not `ec2-user` as on Amazon Linux):
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem ubuntu@<your-public-ip>
+   ```
+
+</Steps>
+
+### Installing the Web Stack (WordPress Instance)
+
+A WordPress site requires three software components working together, often called the **LAMP stack**: **L**inux (the OS), **A**pache (the web server), **M**ariaDB (the database), and **P**HP (the programming language that WordPress is written in). You already have Linux. In this lab the database will run on a **separate server**, so on this instance you only install Apache and PHP.
+
+<Steps>
+
+1. **Update the package index**
+
+   Before installing anything, update the list of available packages so you get the latest versions:
+
+   ```bash
+   sudo apt update && sudo apt upgrade -y
+   ```
+
+2. **Install Apache**
+
+   Apache HTTP Server (often just called Apache) is the software that listens for incoming web requests on port 80 and serves web pages in response. It has been the most widely used web server on the internet for decades.
+
+   ```bash
+   sudo apt install -y apache2
+   ```
+
+   Apache starts automatically after installation on Ubuntu. Verify it:
+
+   ```bash
+   sudo systemctl status apache2
+   ```
+
+   You should see `active (running)` in the output.
+
+3. **Install PHP**
+
+   PHP (PHP: Hypertext Preprocessor, a recursive acronym) is the programming language WordPress is written in. Apache needs PHP installed to execute WordPress code. We also install the MySQL extension so PHP can communicate with the database:
+
+   ```bash
+   sudo apt install -y php php-mysql libapache2-mod-php php-curl php-xml php-mbstring
+   ```
+
+</Steps>
+
+### Choosing Your Database Tier
+
+In production, the web server and the database almost never run on the same machine. Separating them improves security (the database is not exposed to the internet), scalability (each tier can be sized independently), and reliability (a crash in one tier does not take down the other).
+
+You have two options for setting up your database. **Read both before choosing.**
+
+| | Option A: AWS RDS (Recommended) | Option B: Self-Managed EC2 |
+|---|---|---|
+| **What you do** | Create a managed MariaDB instance through the AWS console | Launch a second EC2 instance and install MariaDB yourself |
+| **Networking** | Security group allows MySQL traffic from WordPress SG | Security group allows MySQL traffic from WordPress SG |
+| **Maintenance** | AWS handles backups, patching, failover | You handle everything |
+| **Learning focus** | Managed services, VPC networking | Full-stack administration, manual DB hardening |
+| **Difficulty** | Easier: fewer steps | Harder: more configuration |
+| **Cost** | RDS Free Tier eligible (db.t3.micro) | Another t3.micro EC2 (free tier eligible) |
+
+<Aside type="tip" title="Recommendation">
+**Option A (RDS) is recommended.** It is the industry-standard approach for production databases and will take less time, leaving you more time to explore WordPress itself. Option B is for students who want deeper hands-on experience with database administration.
+</Aside>
+---
+
+### Option 1: Setting Up an RDS MariaDB Instance
+
+<Steps>
+
+1. **Create a database security group**
+
+   Before launching the database, create a security group that only allows MySQL/MariaDB traffic (port 3306) from your WordPress instance.
+
+   In the AWS Console, go to **EC2 → Security Groups → Create security group**:
+   - Name: `cs312-db-sg`
+   - Description: `Allow MySQL from WordPress`
+   - VPC: use the same VPC as your WordPress instance (usually the default VPC)
+   - Inbound rule: **MySQL/Aurora (port 3306)**, source: select **Custom** and enter the security group ID of `cs312-wordpress-sg`
+
+   By referencing the WordPress security group as the source (instead of an IP address), any instance in that security group can reach the database. This is more maintainable than hardcoding IPs; if you replace the WordPress instance, you do not need to update the database firewall.
+
+2. **Launch the RDS instance**
+
+   Go to **RDS → Create database**:
+   - Creation method: **Standard create**
+   - Engine: **MariaDB**
+   - Templates: **Free tier**
+   - DB instance identifier: `cs312-wordpress-db`
+   - Master username: `admin`
+   - Master password: choose a strong password and **write it down**
+   - DB instance class: **db.t3.micro**
+   - Storage: 20 GiB gp2 (default)
+   - Connectivity: select the same VPC as your WordPress instance
+   - Public access: **No** (this is critical: the database must not be reachable from the internet)
+   - VPC security group: choose **existing** and select `cs312-db-sg`; remove the default security group
+   - Availability Zone: no preference
+
+   Click **Create database**. This takes 5–10 minutes. While you wait, continue with the WordPress installation steps below and come back for the endpoint.
+
+3. **Note the RDS endpoint**
+
+   Once the instance shows "Available," click on it and find the **Endpoint** under Connectivity & security. It will look something like:
+
+   ```
+   cs312-wordpress-db.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com
+   ```
+
+   This is the hostname your WordPress instance will use to connect to the database. Note it down; you will need it for `wp-config.php`.
+
+4. **Create the WordPress database**
+
+   From your WordPress EC2 instance, connect to the RDS instance using the MySQL client:
+
+   ```bash
+   sudo apt install -y mariadb-client
+   mysql -h <rds-endpoint> -u admin -p
+   ```
+
+   Enter the master password you set during RDS creation. At the MariaDB prompt, create a dedicated database and user. The principle of **least privilege** says you should never give an application the admin password. Instead, create a user that can only access the specific database it needs:
+
+   ```sql
+   CREATE DATABASE wordpress;
+   CREATE USER 'wp_user'@'%' IDENTIFIED BY 'your-wp-password-here';
+   GRANT ALL PRIVILEGES ON wordpress.* TO 'wp_user'@'%';
+   FLUSH PRIVILEGES;
+   EXIT;
+   ```
+
+   Replace `your-wp-password-here` with a strong password (different from the admin password). The `@'%'` allows connections from any host; this is safe because the security group already restricts network access to only the WordPress instance.
+
+</Steps>
+
+<Aside type="caution" title="Cost Warning">
+RDS instances accrue charges even when idle. **Delete your RDS instance at the end of the lab.** Go to RDS → Databases → select your instance → Actions → Delete. Uncheck "Create final snapshot" (this is a lab, not production) and confirm. Forgetting this step will cost real money.
+</Aside>
+Your database endpoint for `wp-config.php` will be:
+```
+<rds-endpoint>   (e.g., cs312-wordpress-db.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com)
+```
+
+### Option 2: Setting Up MariaDB on a Separate EC2 Instance
+
+<Steps>
+
+1. **Create a database security group**
+
+   Before launching the database instance, create a security group that only allows MySQL/MariaDB traffic (port 3306) from your WordPress instance, plus SSH for your management access.
+
+   In the AWS Console, go to **EC2 → Security Groups → Create security group**:
+   - Name: `cs312-db-sg`
+   - Description: `Allow MySQL from WordPress and SSH`
+   - VPC: use the same VPC as your WordPress instance (usually the default VPC)
+   - Inbound rules:
+     - **MySQL/Aurora (port 3306)**, source: **Custom** → enter the security group ID of `cs312-wordpress-sg`
+     - **SSH (port 22)**, source: **My IP**
+
+   By referencing the WordPress security group as the source (instead of an IP address), any instance in that security group can reach the database. This is more maintainable than hardcoding IPs.
+
+   <Aside type="note">
+   Notice there is **no** HTTP rule on the database security group. The database should never be reachable from the public internet; only the WordPress server and your SSH session can reach it.
+   </Aside>
+2. **Launch the database EC2 instance**
+
+   Go to EC2 → Launch instance:
+   - Name: `cs312-wordpress-db`
+   - AMI: **Ubuntu Server 24.04 LTS**
+   - Instance type: **t3.micro**
+   - Key pair: use your existing key from Lab 1b
+   - Network: same VPC and **same subnet** as your WordPress instance
+   - Security group: select **existing** → `cs312-db-sg`
+
+   Click **Launch instance** and wait for it to reach "Running."
+
+3. **Note the private IP address**
+
+   In the EC2 console, select `cs312-wordpress-db` and note its **Private IPv4 address** (something like `172.31.xx.xx`). This is the address your WordPress instance will use to connect, not the public IP.
+
+4. **Connect via SSH and install MariaDB**
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem ubuntu@<db-public-ip>
+   ```
+
+   Update packages and install MariaDB:
+
+   ```bash
+   sudo apt update && sudo apt upgrade -y
+   sudo apt install -y mariadb-server
+   ```
+
+5. **Secure MariaDB**
+
+   MariaDB ships with permissive defaults meant for development, not production. The `mysql_secure_installation` script tightens things up:
+
+   ```bash
+   sudo mysql_secure_installation
+   ```
+
+   Recommended answers:
+   - Switch to unix_socket authentication: **n**
+   - Change the root password: **Y** (set a strong password)
+   - Remove anonymous users: **Y**
+   - Disallow root login remotely: **Y**
+   - Remove test database: **Y**
+   - Reload privilege tables: **Y**
+
+6. **Configure MariaDB to accept remote connections**
+
+   By default, MariaDB only listens on `127.0.0.1` (localhost). You need to change this so the WordPress instance can connect over the network.
+
+   Edit the MariaDB configuration:
+
+   ```bash
+   sudo vim /etc/mysql/mariadb.conf.d/50-server.cnf
+   ```
+
+   Find the line:
+
+   ```ini
+   bind-address            = 127.0.0.1
+   ```
+
+   Change it to:
+
+   ```ini
+   bind-address            = 0.0.0.0
+   ```
+
+   This tells MariaDB to listen on all network interfaces. The security group ensures that only the WordPress instance can actually reach port 3306; `bind-address` controls what the OS listens on, while the security group controls what the network allows through.
+
+   Restart MariaDB:
+
+   ```bash
+   sudo systemctl restart mariadb
+   ```
+
+7. **Create the WordPress database and user**
+
+   ```bash
+   sudo mysql -u root -p
+   ```
+
+   At the MariaDB prompt, create a dedicated database and user. The principle of **least privilege** says you should never give an application the root password. The `@'%'` wildcard allows connections from any host; this is safe because the security group already restricts network access:
+
+   ```sql
+   CREATE DATABASE wordpress;
+   CREATE USER 'wp_user'@'%' IDENTIFIED BY 'your-wp-password-here';
+   GRANT ALL PRIVILEGES ON wordpress.* TO 'wp_user'@'%';
+   FLUSH PRIVILEGES;
+   EXIT;
+   ```
+
+   Replace `your-wp-password-here` with a strong password.
+
+8. **Test the connection from the WordPress instance**
+
+   Back on your WordPress EC2 instance, install the MariaDB client and test:
+
+   ```bash
+   sudo apt install -y mariadb-client
+   mysql -h <db-private-ip> -u wp_user -p
+   ```
+
+   If you can log in and run `SHOW DATABASES;` and see `wordpress`, the networking is working correctly. Type `EXIT;` to disconnect.
+
+</Steps>
+
+Your database host for `wp-config.php` will be:
+```
+<db-private-ip>   (e.g., 172.31.42.10)
+```
+
+---
+
+### Installing WordPress
+
+<Steps>
+
+1. **Create a dedicated OS user**
+
+   It is best practice to run web applications as a non-root user. Create a `wordpress` system user:
+
+   ```bash
+   sudo useradd -r -s /usr/sbin/nologin wordpress
+   ```
+
+   The `-r` flag creates a system user (no home directory needed, low UID) and `-s /usr/sbin/nologin` prevents anyone from logging in as this user directly.
+
+2. **Download WordPress**
+
+   Download the latest WordPress release and extract it:
+
+   ```bash
+   cd /tmp
+   curl -O https://wordpress.org/latest.tar.gz
+   sudo tar -xzf latest.tar.gz -C /var/www/
+   ```
+
+   This creates `/var/www/wordpress/` containing all the WordPress files.
+
+3. **Set file ownership**
+
+   Apache's worker processes run as the `www-data` user on Ubuntu. WordPress needs to read (and sometimes write) its own files, so we give ownership to `www-data`:
+
+   ```bash
+   sudo chown -R www-data:www-data /var/www/wordpress
+   ```
+
+4. **Configure WordPress**
+
+   WordPress ships with a sample configuration file. Copy it and edit it:
+
+   ```bash
+   sudo cp /var/www/wordpress/wp-config-sample.php /var/www/wordpress/wp-config.php
+   sudo vim /var/www/wordpress/wp-config.php
+   ```
+
+   Find these lines and update them with your database details:
+
+   ```php
+   define( 'DB_NAME', 'wordpress' );
+   define( 'DB_USER', 'wp_user' );
+   define( 'DB_PASSWORD', 'your-wp-password-here' );
+   define( 'DB_HOST', '<your-database-host>' );
+   ```
+
+   For **DB_HOST**, use the value from the database option you chose:
+   - **Option A (RDS):** the RDS endpoint (e.g., `cs312-wordpress-db.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com`)
+   - **Option B (EC2):** the private IP of your database instance (e.g., `172.31.42.10`)
+
+   <Aside type="caution">
+   In a production environment, you would never store database credentials in a plain-text config file on disk. You would use environment variables or a secrets manager. For this lab, editing the file directly is fine.
+   </Aside>
+</Steps>
+
+### Configuring the Apache VirtualHost
+
+A **VirtualHost** is Apache's way of serving different websites from the same server. Each VirtualHost maps a domain name (or IP) to a directory on disk. Even though we only have one site, using a VirtualHost is standard practice.
+
+<Steps>
+
+1. **Create the VirtualHost configuration**
+
+   ```bash
+   sudo vim /etc/apache2/sites-available/wordpress.conf
+   ```
+
+   Add the following content:
+
+   ```apache
+   <VirtualHost *:80>
+       ServerAdmin admin@localhost
+       DocumentRoot /var/www/wordpress
+
+       <Directory /var/www/wordpress>
+           AllowOverride All
+           Require all granted
+       </Directory>
+
+       ErrorLog ${APACHE_LOG_DIR}/wordpress-error.log
+       CustomLog ${APACHE_LOG_DIR}/wordpress-access.log combined
+   </VirtualHost>
+   ```
+
+   `DocumentRoot` tells Apache where the site's files live. `AllowOverride All` permits WordPress to use `.htaccess` files for URL rewriting (pretty permalinks).
+
+2. **Enable the site and disable the default**
+
+   ```bash
+   sudo a2ensite wordpress.conf
+   sudo a2dissite 000-default.conf
+   sudo a2enmod rewrite
+   sudo systemctl restart apache2
+   ```
+
+   The `a2ensite` command creates a symbolic link that activates your VirtualHost. The `a2enmod rewrite` command enables Apache's URL rewriting module, which WordPress needs for clean URLs.
+
+3. **Verify WordPress loads**
+
+   Open your browser and navigate to `http://<your-public-ip>`. You should see the WordPress installation wizard. Complete the setup: choose a site title, create an admin user, and finish the installation.
+
+   From your SSH session, verify with `curl`:
+
+   ```bash
+   curl -s -o /dev/null -w "%{http_code}" http://localhost
+   ```
+
+   This should return `200`, meaning the server responded successfully.
+
+</Steps>
+
+### Creating a Health Check Timer
+
+A health check is a simple automated test that runs periodically to confirm your service is still working. In production, monitoring systems do this for you; but for now, you will create one using systemd timers.
+
+<Steps>
+
+1. **Create a health check script**
+
+   ```bash
+   sudo vim /usr/local/bin/wordpress-health.sh
+   ```
+
+   Add the following:
+
+   ```bash
+   #!/bin/bash
+   STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost)
+   echo "$(date '+%Y-%m-%d %H:%M:%S') - HTTP status: $STATUS" >> /var/log/wordpress-health.log
+   ```
+
+   Make it executable:
+
+   ```bash
+   sudo chmod +x /usr/local/bin/wordpress-health.sh
+   ```
+
+2. **Create a systemd service unit**
+
+   ```bash
+   sudo vim /etc/systemd/system/wordpress-health.service
+   ```
+
+   ```ini
+   [Unit]
+   Description=WordPress health check
+
+   [Service]
+   Type=oneshot
+   ExecStart=/usr/local/bin/wordpress-health.sh
+   ```
+
+3. **Create a systemd timer unit**
+
+   ```bash
+   sudo vim /etc/systemd/system/wordpress-health.timer
+   ```
+
+   ```ini
+   [Unit]
+   Description=Run WordPress health check every minute
+
+   [Timer]
+   OnCalendar=*-*-* *:*:00
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+   ```
+
+   The `OnCalendar` line means "every minute, on the zero-second mark." The `Persistent=true` line ensures that if the system was off when a check was due, it runs one immediately after boot.
+
+4. **Enable and start the timer**
+
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable wordpress-health.timer
+   sudo systemctl start wordpress-health.timer
+   ```
+
+   Wait two minutes, then check the log:
+
+   ```bash
+   cat /var/log/wordpress-health.log
+   ```
+
+   You should see entries appearing every minute with HTTP status 200.
+
+</Steps>
+
+### Verifying Persistence Across Reboot
+
+<Steps>
+
+1. **Enable Apache to start on boot**
+
+   On Ubuntu, Apache is typically enabled by default after installation, but verify:
+
+   ```bash
+   sudo systemctl is-enabled apache2
+   ```
+
+   If it says `disabled`, enable it:
+
+   ```bash
+   sudo systemctl enable apache2
+   ```
+
+2. **Reboot the instance**
+
+   ```bash
+   sudo reboot
+   ```
+
+   Wait about 30 seconds, then reconnect via SSH. Your public IP may remain the same since you did not Stop the instance; a reboot from within the OS does not release the IP.
+
+3. **Verify everything survived**
+
+   Check that Apache is running and note the Process ID (PID) and uptime:
+
+   ```bash
+   systemctl status apache2
+   ```
+
+   Check the health log for any gap during the reboot:
+
+   ```bash
+   tail -5 /var/log/wordpress-health.log
+   ```
+
+   Visit `http://<your-public-ip>` in your browser to confirm WordPress is still serving.
+
+</Steps>
+
+### Scanning Your Server
+
+<Steps>
+
+1. **Run nmap from your laptop**
+
+   `nmap` (Network Mapper) is a tool for scanning a host to discover what ports are open and what services are running. The `-sV` flag tells nmap to probe open ports to determine the service version:
+
+   ```bash
+   nmap -sV -Pn -p T:80 <your-public-ip>
+   ```
+
+   The output will show you the service name and version Apache is reporting. This is the same information an attacker would see when scanning your server, which is why keeping software updated is critical.
+
+</Steps>
+
+### Cleanup
+
+<Aside type="danger" title="Do not skip this step">
+Terminate all resources you created in this lab to avoid charges:
+- **Option A students:** Go to RDS → Databases → select your instance → Actions → Delete. Uncheck "Create final snapshot" and confirm.
+- **Option B students:** Go to EC2 → Instances → select `cs312-wordpress-db` → Instance state → Terminate.
+- **Both options:** Terminate the `cs312-wordpress` EC2 instance as well.
+</Aside>
+You have now built a multi-tier web application from the ground up: installed an operating system's packages, set up a separate database tier with proper network isolation and access controls, deployed a web application, configured automated health monitoring, and verified the system survives a reboot. In the next lab, you will replace all of this manual work with containers.

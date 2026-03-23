@@ -1,0 +1,138 @@
+---
+title: 'Incident Response and Post-Mortem'
+description: "It's 3 AM. Your phone buzzes with an alert: `[CRITICAL] - The Great Hamster Wheel that powers the checkout service has stopped spinning.`"
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- Describe how to plan major and minor tasks and time so that services are stable and effective, and meet a Service Level Agreement.
+- Produce written documentation of system problems, solutions, processes, and procedures.
+*/}
+
+It's 3 AM. Your phone buzzes with an alert: `[CRITICAL] - The Great Hamster Wheel that powers the checkout service has stopped spinning.` The site is down. Panic? No, you're a pro. Your task is to write the 'In Case of Fire, Break Glass' document for this exact scenario. Detail the immediate steps (who do you wake up?), how you'll communicate the apocalypse to management (without getting fired), and create the template for the 'So... What The Heck Happened?' meeting (a.k.a. the post-mortem) for when the dust settles.
+
+## Scenario
+
+You are the on-call engineer for a small but mighty e-commerce platform. The “Checkout” service is timing out and orders aren't processing. You must:
+
+1. Stabilize the system (or make it fail safely)
+2. Keep stakeholders informed without causing chaos
+3. Capture enough evidence to learn afterward
+
+Assume you have basic observability (logs, metrics, alerts), feature flags, a canary or rollback mechanism, a chat channel, and a status page.
+
+## What You'll Produce
+
+Create a small, coherent incident response package that your team could actually use:
+
+1) Break-Glass Runbook (1–2 pages)
+   - Clear trigger/entry criteria (when to declare an incident; severity mapping)
+   - Roles and first 15 minutes checklist (Incident Commander, Operations Lead, Comms Lead, Scribe)
+   - Triage/containment steps for the Checkout outage (rollback/feature-flag flow, quick mitigations)
+   - Evidence capture list (where to get logs/dashboards, how to timestamp events)
+   - Exit criteria (when to de-escalate/resolve)
+
+2) Communications Plan (+ Templates)
+   - Stakeholder matrix: who needs to know (customers, execs, support, engineering), how often, and via which channel
+   - Templates for: “incident declared”, “update”, “mitigation applied”, “resolved”, and a 5-sentence management summary
+   - Status page guidelines: when to post, what to include, when to update
+
+3) Blameless Postmortem Template (1–2 pages)
+   - Sections: Summary, Impact, Timeline, Contributing Factors, Root-Cause Analysis (e.g., 5 Whys), What Went Well/Where We Got Lucky, Action Items (with owners, priority, due dates), Follow-up Metrics
+   - How to measure response quality: MTTA/MTTR, detection vs. response gaps
+
+4) Tabletop Simulation Plan (½–1 page)
+   - A short “dry run” plan your team can use to practice the runbook in 20–30 minutes
+   - Include roles, prompts, and 3–4 injects (surprises) that test comms and decision-making
+
+Keep your docs concise, skimmable, and executable under pressure.
+
+## Core Requirements (Tooling-Agnostic)
+
+- Severity & Triggers
+  - Define at least three severities (SEV-1/2/3) and give concrete examples for each
+  - Map each severity to comms cadence and who gets paged
+
+- Roles & Flow
+  - Assign default roles and alternates; document a handoff protocol
+  - Include a “first 15 minutes” checklist with explicit decision points (rollback vs. wait; feature flag vs. scale-up)
+  - Ensure there is a single source of truth (status doc or channel topic) and a decision log
+
+- Containment & Safety
+  - Provide a fast mitigation pathway for Checkout (e.g., rollback last deploy, disable non-essential features, degrade gracefully)
+  - List preconditions/checks (e.g., verify rollback health, confirm database state)
+
+- Evidence & Timeline
+  - Specify where to pull logs/metrics, how to snapshot dashboards, and how to timestamp major events
+  - Include a lightweight timeline format usable by the Scribe during the call
+
+- Communications
+  - Include templates for initial notice, periodic updates, and resolution; tailor tone to audience
+  - Write one filled example update for SEV-1 (keep it brief and factual)
+
+- Postmortem
+  - Provide a blameless template with root-cause analysis guidance and SMART action items
+  - Include a minimal rubric for prioritizing actions (e.g., customer impact, risk reduction)
+
+<Aside type="tip">
+You do not need to invent brand-new processes. Start small, write only what your team would actually use at 3 AM, and iterate.
+</Aside>
+## Minimal Contract
+
+Your package should let a teammate who's never been on-call:
+
+- Decide if/when to declare an incident and what severity
+- Know who to page and which channel/bridge to join
+- Stabilize Checkout via one of your mitigations, or make a clear no-regret call to rollback
+- Post one clear external status page update and one internal management summary
+- Capture a timeline and later run the postmortem using your template
+
+Exit criteria: documents are clear, specific to the scenario, and runnable with minimal context.
+
+<Aside type="note" title="Question 1">
+List your severity levels and give one concrete trigger example for each. How does cadence differ across them?
+</Aside>
+<Aside type="note" title="Question 2">
+Write the first three steps in your “first 15 minutes” checklist. Why are they in that order?
+</Aside>
+<Aside type="note" title="Question 3">
+Describe two fast mitigations for Checkout failure that do not require code changes. What's the rollback guardrail you'll use?
+</Aside>
+<Aside type="note" title="Question 4">
+Paste your template for the initial incident announcement and a sample SEV-1 update (2–4 sentences). Who is the audience for each?
+</Aside>
+<Aside type="note" title="Question 5">
+Outline your postmortem analysis method (e.g., 5 Whys). What evidence will you collect to avoid speculation?
+</Aside>
+<Aside type="note" title="Question 6">
+Propose three action items from this incident, each with an owner and success metric. Which one is highest priority and why?
+</Aside>
+## Hints (Guided, Not Spoilers)
+
+- Keep severity definitions observable: tie them to SLO/SLI breaches, error rates, and business impact (e.g., orders/min dropped > X%)
+- Roles reduce chaos. Default assignments and alternates avoid “who's IC?” debates at 3 AM
+- Write comms before you need them. Templates save time, avoid panic, and reduce accidental blame
+- Prefer reversible mitigations (feature flags, rollbacks) before invasive fixes during an active incident
+- Timelines matter. Capture “who decided what when” to speed learning and reduce myth-making
+
+See Lectures for sample templates and detailed walkthroughs.
+
+## Testing and Practice
+
+- Do a 15–20 minute tabletop with a friend/classmate. Use your injects to test paging, decision-making, and comms cadence
+- Time-box the “first 15 minutes” and check if your checklist is actually doable
+- Write one realistic status page update and have a non-technical reader confirm it's clear
+
+<Aside type="note" title="Question 7">
+During your tabletop, what took the longest and why? What would you change in your runbook as a result?
+</Aside>
+## Deliverables
+
+1. Break-Glass Runbook (PDF or MDX) for the Checkout outage
+2. Communications Plan with at least three filled templates (initial, update, resolved)
+3. Blameless Postmortem Template (+ a one-paragraph filled summary for this incident)
+4. Tabletop Simulation Plan with 3–4 injects
+5. Answers to the 7 questions above
+
+Keep it practical and respectful. We're here to fix systems, not people.

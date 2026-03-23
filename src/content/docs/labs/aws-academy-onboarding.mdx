@@ -1,0 +1,317 @@
+---
+title: 'AWS Academy Onboarding'
+description: "The PC didn't survive reassembly. Gerald takes it as a sign. You've been promoted. We're going to the cloud."
+sidebar:
+  order: 2
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO2: Demonstrate how to plan, install, and troubleshoot a Local Area Network, connecting it to a Wide Area Network.
+- LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+*/}
+
+The back-office PC did not survive reassembly. Gerald took this as a sign. His nephew had told him about "the cloud" at Thanksgiving dinner, and now that the hardware is officially dead, Gerald wants you to "put the restaurant on the cloud" by end of day. When you asked what that meant, he said, "You know. The cloud. Where Netflix lives." You have been promoted from intern to sole IT person. You are starting with the basics.
+
+In this lab, you will launch a virtual server in Amazon Web Services (AWS), connect to it remotely over Secure Shell (SSH), and learn how Security Groups act as virtual firewalls controlling who can talk to your server and on which ports. By the end, you will have a web server running in the cloud that the entire internet can reach; and you will have toggled that access on and off with a few clicks.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+<Steps>
+
+1. **Accept your AWS Academy invitation**
+
+   You should have received an email from AWS Academy with a link to register. Click it, create your Canvas-based AWS Academy account, and confirm you can log in. If you have not received this email, tell your instructor immediately.
+
+2. **Ensure you have an SSH client**
+
+   - **macOS / Linux:** The built-in `ssh` command in Terminal works perfectly.
+   - **Windows:** Use the built-in OpenSSH client (available in PowerShell) or install [PuTTY](https://www.putty.org/). Alternatively, you can use WSL2.
+
+3. **Have a web browser ready**
+
+   You will use it to access both the AWS Console and your running web server.
+
+</Steps>
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial below.
+
+1. Write down the **Instance ID** (starts with `i-`) and the **Availability Zone** (e.g., `us-east-1a`) of your running instance. *(4 points)*
+2. What Operating System (OS) name and version is running on your instance? (Run `cat /etc/os-release | head -3` to find out.) *(3 points)*
+3. After you removed the HTTP Security Group rule, what error did your browser show? Approximately how many seconds did it take before the error appeared, and why? *(5 points)*
+4. What is the difference between **Stop** and **Terminate** for an EC2 instance? Write down your public IP before stopping, and again after restarting. Did it change? *(5 points)*
+5. Get your TA's initials showing the Apache test page loading in your browser. *(8 points)*
+
+## Tutorial
+
+### Navigating to the Learner Lab
+
+<Steps>
+
+1. **Log into AWS Academy**
+
+   Go to [https://awsacademy.instructure.com](https://awsacademy.instructure.com) and sign in with the credentials you created during registration. You will land on your AWS Academy Canvas dashboard.
+
+2. **Open the Learner Lab**
+
+   Find your course (it will be named something like "AWS Academy Learner Lab") and click into it. On the left sidebar, click **Modules**, then click **Learner Lab**. This opens the lab environment. Accept the Terms and Conditions if prompted.
+
+3. **Start the lab**
+
+   Click the green **Start Lab** button in the upper left. The AWS indicator light will turn from red to yellow (starting) to green. Once it's green, your temporary AWS environment is ready. The lab gives you a sandboxed AWS account with limited permissions and a budget. The first time you start the lab, it may take a few minutes to provision your account and resources.
+
+4. **Open the AWS Console**
+
+   Click the **AWS** link (next to the green indicator light) to open the AWS Management Console in a new tab. You are now inside a real AWS account.
+
+5. **Check your region**
+
+   In the top-right corner of the console, you will see a region name (e.g., "N. Virginia"). AWS operates data centers in many geographic **Regions** around the world, and each Region contains multiple **Availability Zones (AZs)** -- physically separate data centers. Your Learner Lab defaults to **us-east-1 (N. Virginia)**. Leave it set to this region for this lab.
+
+</Steps>
+
+### Launching an EC2 Instance
+
+Elastic Compute Cloud (EC2) is the AWS service that lets you rent virtual servers, called **instances**. Think of it as spinning up a computer in someone else's data center that you control remotely.
+
+<Steps>
+
+1. **Navigate to EC2**
+
+   In the search bar at the top of the AWS Console, type `EC2` and click the **EC2** service. This brings you to the EC2 Dashboard.
+
+2. **Click "Launch instance"**
+
+   Click the orange **Launch instance** button. This opens the instance configuration wizard.
+
+3. **Name your instance**
+
+   Under **Name and tags**, enter a name like `cs312-lab1`. Tags are key-value labels that help you organize and identify your resources.
+
+4. **Choose an Amazon Machine Image (AMI)**
+
+   An AMI is a template that contains the operating system and any pre-installed software for your instance. Think of it as a snapshot you clone to create a new server.
+
+   Under **Application and OS Images**, make sure **Amazon Linux** is selected. Choose **Amazon Linux 2023 AMI** (it should be the default and marked "Free tier eligible"). This is Amazon's own Linux distribution, optimized for cloud workloads.
+
+5. **Choose an Instance Type**
+
+   The instance type determines the hardware specs (CPU, memory, network) of your virtual server. Select **t3.micro** (2 vCPUs, 1 GiB memory). This is a small, general-purpose instance that is free-tier eligible and perfect for learning.
+
+6. **Create a Key Pair**
+
+   A key pair is used for SSH authentication. Instead of a password, you use a cryptographic key to prove your identity when connecting.
+
+   - Click **Create new key pair**.
+   - Name it something like `cs312-key`.
+   - Key pair type: **RSA**.
+   - Private key file format: Choose **.pem** (for macOS/Linux) or **.ppk** (if you plan to use PuTTY on Windows).
+   - Click **Create key pair**. Your browser will download the private key file. **Save this file somewhere safe** -- you cannot download it again.
+
+   <Aside type="caution">
+   Never share your private key file with anyone. Anyone who has this file can log into your server. If you lose it, you will need to create a new key pair and launch a new instance.
+   </Aside>
+7. **Network settings**
+
+   Under **Network settings**, click **Edit**. Your instance will be placed in the **default Virtual Private Cloud (VPC)**. A VPC is an isolated virtual network within AWS -- think of it as your own private section of the cloud.
+
+   For now, ensure the following:
+   - **Auto-assign public IP** is set to **Enable**. This gives your instance a public IP address so you can reach it from the internet.
+   - Under **Firewall (security groups)**, select **Create security group**. Name it `cs312-sg`. The wizard will add a rule allowing SSH (port 22) from anywhere by default. Leave this for now -- we will modify Security Groups later.
+
+8. **Leave everything else as default and launch**
+
+   Scroll down and click **Launch instance**. AWS will begin provisioning your virtual server. Click **View all instances** to go back to the instances list.
+
+9. **Wait for the instance to start**
+
+   Your instance will go through states: **Pending** then **Running**. Wait until the **Instance state** column shows a green "Running" and the **Status check** column shows "2/2 checks passed". This usually takes 30-60 seconds.
+
+10. **Note your instance details**
+
+    Click on your instance to see its details. Record the following for your lab questions:
+    - **Instance ID** (starts with `i-`, e.g., `i-0abcdef1234567890`)
+    - **Availability Zone** (e.g., `us-east-1a`)
+    - **Public IPv4 address** (e.g., `54.123.45.67`)
+
+</Steps>
+
+### Connecting via SSH
+
+SSH (Secure Shell) is a protocol for securely connecting to a remote computer over an unsecured network. You will use it to get a command-line terminal on your EC2 instance.
+
+<Steps>
+
+1. **Set permissions on your key file**
+
+   Open a terminal on your laptop. Navigate to where you saved your `.pem` file and restrict its permissions. SSH refuses to use key files that are too open.
+
+   ```bash
+   chmod 400 ~/Downloads/cs312-key.pem
+   ```
+
+   On Windows PowerShell, the permissions work differently. You may need to right-click the file, go to Properties, Security, and remove access for all users except yourself. Alternatively, use the AWS Connect button method in the next tip.
+
+   <Aside type="tip">
+   If SSH key setup is giving you trouble, you can click the **Connect** button at the top of your instance details page in the AWS Console, then choose **EC2 Instance Connect** to get a browser-based terminal. However, learning to use SSH from your own terminal is an essential skill.
+   </Aside>
+2. **Connect to your instance**
+
+   Use the `ssh` command with your key file and the default username for Amazon Linux (`ec2-user`):
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem ec2-user@<your-public-ip>
+   ```
+
+   Replace `<your-public-ip>` with the public IP address from the console. The first time you connect, SSH will ask you to verify the host fingerprint. Type `yes` to continue.
+
+   You can also click on your instance in the AWS Console, then click the **Connect** button. Under the "SSH client" tab, it will show you the exact `ssh` command to run, which includes the correct username and IP.
+
+3. **Verify your connection**
+
+   You should now see a prompt like `[ec2-user@ip-172-31-xx-xx ~]$`. You are now on your cloud server. Run the following commands for your lab questions:
+
+   ```bash
+   ssh -V
+   ```
+
+   ```bash
+   cat /etc/os-release | head -3
+   ```
+
+   Record the output of both commands.
+
+</Steps>
+
+### Creating a Security Group Rule for HTTP
+
+A **Security Group (SG)** acts as a virtual firewall for your EC2 instance. It contains **inbound rules** (what traffic can reach your instance) and **outbound rules** (what traffic can leave). By default, all outbound traffic is allowed but inbound traffic is blocked unless you create a rule for it. Right now, your SG only allows SSH on port 22 -- we need to add HTTP on port 80 so web browsers can reach your server.
+
+<Steps>
+
+1. **Install a web server on your instance**
+
+   While still connected via SSH, install Apache HTTP Server (called `httpd` on Amazon Linux):
+
+   ```bash
+   sudo dnf install -y httpd && sudo systemctl start httpd
+   ```
+
+   The `dnf` command is the package manager for Amazon Linux 2023 (similar to `apt` on Ubuntu). The `systemctl start` command tells systemd to start the Apache service immediately.
+
+2. **Verify Apache is running locally**
+
+   ```bash
+   curl -s http://localhost | head -5
+   ```
+
+   You should see HTML content, confirming Apache is serving pages on the instance itself.
+
+3. **Try to access the page from your laptop browser**
+
+   Open your browser and go to `http://<your-public-ip>`. The page should **fail to load** because your Security Group does not yet allow HTTP traffic.
+
+4. **Add an HTTP rule to your Security Group**
+
+   Go back to the AWS Console. Navigate to **EC2 > Instances**, click your instance, then scroll down to the **Security** tab. Click the link to your Security Group (e.g., `sg-xxxxxxxxx (cs312-sg)`).
+
+5. **Edit inbound rules**
+
+   On the Security Group page, click your security group ID, then click the **Inbound rules** tab, then click **Edit inbound rules**.
+
+6. **Add the HTTP rule**
+
+   Click **Add rule** and configure:
+   - **Type:** HTTP
+   - **Port range:** 80 (auto-filled when you select HTTP)
+   - **Source:** Anywhere-IPv4 (`0.0.0.0/0`)
+
+   This means "allow any IPv4 address on the internet to reach port 80 on this instance." Click **Save rules**.
+
+7. **Verify from your browser**
+
+   Refresh `http://<your-public-ip>` in your browser. You should now see the **Apache HTTP Server Test Page** -- a page with "It works!" or the Amazon Linux test page. Congratulations, your server is live on the internet.
+
+</Steps>
+
+### Testing the Security Group Firewall
+
+Now you will see firsthand how Security Groups protect your instance.
+
+<Steps>
+
+1. **Remove the HTTP rule**
+
+   Go back to your Security Group's **Inbound rules** tab. Click **Edit inbound rules**. Find the HTTP rule you just added and click **Delete** on that row. Click **Save rules**.
+
+2. **Try your browser again**
+
+   Refresh `http://<your-public-ip>` in your browser. The page should fail to load. Note the exact error message and approximately how long it took before the error appeared. Security Group changes take effect almost immediately, but your browser may wait for a TCP timeout before showing an error.
+
+   <Aside type="note">
+   You should see something like "connection timed out" or "unable to connect." The exact wording depends on your browser. The timeout is typically 15-30 seconds because the Security Group silently drops the packets rather than actively rejecting them.
+   </Aside>
+3. **Re-add the HTTP rule**
+
+   Go back and add the same HTTP inbound rule again (Type: HTTP, Source: Anywhere-IPv4). Save the rules.
+
+4. **Verify it works again**
+
+   Refresh your browser. The Apache test page should reappear. This demonstrates that Security Groups are stateless filters you can toggle at any time without restarting your instance or web server.
+
+</Steps>
+
+### Exploring Stop vs. Terminate
+
+EC2 instances have two ways to shut down, and they are very different.
+
+<Steps>
+
+1. **Understand the difference**
+
+   - **Stop** is like shutting down your computer. The instance halts, but the virtual hard drive (Elastic Block Store, or EBS, volume) is preserved. You can start it again later. You are not charged for compute while stopped, but you still pay a small fee for the storage.
+   - **Terminate** is like throwing your computer in a dumpster. The instance is permanently deleted, and by default, its storage is deleted too. This is irreversible.
+
+2. **Stop your instance**
+
+   In the EC2 Console, select your instance. Click **Instance state > Stop instance**. Confirm. Watch the state change from "Running" to "Stopping" to "Stopped."
+
+3. **Check the public IP**
+
+   Once the instance is stopped, look at the **Public IPv4 address** field in the instance details. It should now be blank or show a dash. When you stop an instance, AWS releases the public IP address back to its pool.
+
+4. **Start it again**
+
+   Select the instance and click **Instance state > Start instance**. Wait for it to reach "Running" again. Check the public IP -- it will be a **new, different** IP address. This is why Elastic IPs exist (a static IP you can reserve), but that is a topic for another day.
+
+5. **Record your findings**
+
+   Note what happened to the IP address during Stop and Start for your lab questions. You now understand why Stop and Terminate behave differently and why relying on a public IP for a stopped/started instance is unreliable.
+
+6. **Terminate your instance**
+
+   Finally, select your instance and click **Instance state > Terminate instance**. Confirm. The instance will be deleted. This is irreversible, so only do this when you are done with the lab.
+
+</Steps>
+
+### Cost Awareness
+
+<Steps>
+
+1. **Find your instance's hourly cost**
+
+   In the EC2 Console, click on your instance, then look at the **Instance type** in the details (e.g., `t3.micro`). Open a new tab and search for "EC2 pricing" or navigate to the [EC2 On-Demand Pricing page](https://aws.amazon.com/ec2/pricing/on-demand/). Find the hourly price for a `t3.micro` in the `us-east-1` region. It should be around $0.0104/hour -- about one penny per hour.
+
+   Being aware of costs is a critical system administration skill. Cloud bills can grow quickly if instances are left running or if you accidentally launch expensive instance types.
+
+</Steps>
+
+You have now launched your first cloud server, connected to it remotely, served a web page to the world, and learned how Security Groups act as firewalls. These are foundational skills for every lab that follows.

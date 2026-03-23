@@ -1,0 +1,552 @@
+---
+title: Linux Server Planning & Configuration Essentials
+description: "A comprehensive guide to planning, installing, and configuring a Linux server: from choosing a distribution to managing users, packages, services, networking, and storage."
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Throughout this chapter, we will follow a single scenario: you have been asked to set up a fresh Ubuntu 24.04 LTS server to host a small web application backed by a database. Every concept we cover (choosing a distribution, planning resources, managing users, configuring services) will be grounded in that scenario so you can see how the pieces fit together in practice.
+
+## Where Does a Linux Server Run?
+
+Linux servers run on bare metal (a physical machine you can touch), inside a virtual machine (VirtualBox, Proxmox, or a cloud hypervisor), or as a cloud instance (an EC2 instance on AWS, a Droplet on DigitalOcean, etc.). The operating system does not care which of these it is running on; once you have a shell prompt, the commands in this chapter work the same way everywhere. The differences show up at the edges: device names (`sda` on physical SATA, `vda` on virtio in a VM, `nvme0n1` on NVMe or some cloud instance types), how you access the console (a monitor vs. a VNC window vs. SSH), and who manages the firmware and hardware underneath you.
+
+For the purposes of this chapter, we assume you have a fresh Ubuntu 24.04 LTS installation with SSH access. Any of the following will work:
+
+- **Cloud instance (easiest to start).** Launch a `t3.micro` or `t3.small` EC2 instance with the Ubuntu 24.04 LTS AMI. You get a running server in under a minute and can tear it down when you are done.
+- **Local VM.** Create a virtual machine in VirtualBox or UTM (macOS) with 2 GB of RAM and 20 GB of disk. Download the Ubuntu Server 24.04 ISO and install from it. This gives you the full installation experience including the boot process, partitioning, and first-boot configuration.
+- **Bare metal.** If you have a spare physical machine, install Ubuntu Server directly. This is the most complete experience (you will see real firmware, real disk detection, real network interfaces), but it requires dedicated hardware.
+
+<Aside type="tip">
+If you want to practice the installation process itself (partitioning, bootloader, first boot), use a local VM. If you just want to practice configuration and administration, a cloud instance skips the installation and gets you to a shell faster.
+</Aside>
+
+## Choosing a Linux Distribution
+
+The first decision you face when building a server is which Linux distribution to run. This choice affects your package ecosystem, support lifecycle, default tooling, and the community you turn to when things break.
+
+Linux distributions fall into a small number of family trees that share a common ancestry, package format, and tooling. Knowing the lineage helps you transfer skills from one distro to another.
+
+- **Debian family**: Debian is the upstream root. Ubuntu is built on Debian and is the most widely used server distribution. Mint, Kali, and Knoppix all derive from Ubuntu or Debian. Package format: `.deb`; package manager: `apt`.
+- **Red Hat / Fedora family**: Red Hat Enterprise Linux (RHEL) is the commercial flagship. Fedora is the upstream community project. AlmaLinux and Rocky Linux are free rebuilds of RHEL. Amazon Linux is based on this family as well. Package format: `.rpm`; package manager: `dnf` (formerly `yum`).
+- **Arch family**: Arch Linux follows a rolling-release model. Manjaro is a more beginner-friendly derivative. Package manager: `pacman`.
+- **Other notable distributions**: openSUSE (dominant in Europe), Gentoo (source-based), Slackware (one of the oldest maintained distros). ChromeOS is Linux-based. FreeBSD and other BSDs are Unix-like but are not Linux.
+
+**Ubuntu Server (LTS)** is one of the most popular choices for new deployments. Canonical publishes Long Term Support releases every two years, each backed by five years of security patches (ten with Ubuntu Pro). Ubuntu uses the `apt` package manager and has an enormous ecosystem of community packages. For our scenario, Ubuntu 24.04 LTS is an excellent fit: it ships with recent versions of Nginx, PostgreSQL, and Node.js, and its documentation is extensive.
+
+**Debian** is the upstream project that Ubuntu is built on. Debian Stable prioritizes rock-solid reliability over cutting-edge software. Release cycles are longer (roughly every two years), and packages tend to be older than Ubuntu's. Debian is a strong choice when you want maximum stability and minimal surprises, but you may need to pull newer software from backports or third-party repositories.
+
+**RHEL and its rebuilds (AlmaLinux, Rocky Linux)** dominate enterprise environments. Red Hat Enterprise Linux uses the `dnf` package manager (formerly `yum`) and follows a ten-year support lifecycle. AlmaLinux and Rocky Linux are community rebuilds that track RHEL releases without the subscription cost. If your organization already runs RHEL-family systems, staying in that ecosystem reduces the number of things your team needs to know.
+
+<Aside type="tip">
+For servers, always prefer an LTS or Stable release over a rolling or short-lived release. A server that quietly drifts out of security support is a liability you may not notice until it is too late.
+</Aside>
+
+**Server vs. Desktop editions.** Most distributions offer both. A server edition omits the graphical desktop environment, reducing the installed package count, memory footprint, and attack surface. Our Ubuntu server will run headless (no GUI); we will manage it entirely over SSH.
+
+## Pre-Install Planning
+
+Resist the urge to boot the installer immediately. A few minutes of planning will save hours of rework later.
+
+### Purpose and Sizing
+
+Start by writing down what the server will do. In our scenario, the server will run three services: an Nginx reverse proxy, a Node.js application, and a PostgreSQL database. This tells us we need enough CPU for request handling, enough RAM for the database buffer pool and the application runtime, and enough disk for the OS, application code, database files, and logs.
+
+A reasonable starting point for a small web application might be 2 vCPUs, 4 GB of RAM, and a 40 GB root disk. You can always resize later (especially in the cloud), but having a baseline prevents both over-provisioning (wasting money) and under-provisioning (dropping requests under load).
+
+### Naming Conventions
+
+Every server needs a hostname. In a small environment, a simple convention like `purpose-environment-number` works well: `web-prod-01`, `db-staging-01`. Avoid cute names ("gandalf", "mordor") in production; they are fun until you have forty servers and cannot remember which one runs the billing database.
+
+Set the hostname during installation or immediately after:
+
+```bash
+sudo hostnamectl set-hostname web-prod-01
+```
+
+Verify it took effect:
+
+```bash
+hostnamectl
+```
+
+## The Boot Process
+
+Understanding how a Linux server starts up helps you diagnose problems when it does not. The boot sequence has four major stages.
+
+**1. Firmware (UEFI or BIOS).** When the machine powers on, the firmware initializes hardware and looks for a bootable device. Modern servers use UEFI, which reads from an EFI System Partition (ESP) formatted as FAT32. Older systems use legacy BIOS, which reads the first 512 bytes of the boot disk (the Master Boot Record).
+
+**2. Bootloader (GRUB2).** The firmware hands control to the bootloader. On most Linux systems this is GRUB2 (the current standard, replacing Legacy GRUB). GRUB2 presents a menu of available kernels and passes boot parameters to the one you select. Its configuration lives in `/boot/grub/grub.cfg`, but you should edit `/etc/default/grub` and then run `sudo update-grub` rather than modifying that file directly. New kernels are usually installed alongside older versions so that you can roll back if a new kernel causes problems; GRUB's menu lists all available kernels for this reason.
+
+**3. Kernel initialization.** The Linux kernel decompresses itself into memory, detects hardware, mounts an initial ramdisk (`initramfs`) to load essential drivers, and then mounts the real root filesystem. The kernel executable itself lives in `/boot/vmlinuz*`.
+
+**4. Init system (systemd).** Once the kernel has mounted the root filesystem, it starts PID 1: the init system. On virtually all modern distributions, this is `systemd`. Systemd reads its unit files, builds a dependency graph of services, and starts them in parallel. It brings the system to a defined "target" (analogous to the older concept of a runlevel). The default target for a server is `multi-user.target`, which provides a full multi-user environment without a graphical desktop.
+
+A few special process IDs are worth knowing. PID 0 is the scheduler and memory page daemon, a kernel-internal entity that never appears as a normal user-space process. PID 1 is `systemd` (or `init` on older systems), the first user-space process. PID 2 is typically `kthreadd`, which spawns kernel threads on demand — many of the low-level daemons visible in `ps` output are children of PID 2.
+
+<Aside type="note">
+If your server hangs during boot, GRUB lets you interrupt the process and edit kernel parameters. Appending `systemd.unit=rescue.target` to the kernel command line boots into single-user rescue mode, which is invaluable for troubleshooting.
+</Aside>
+
+## User and Group Management
+
+A freshly installed Ubuntu server has a root account and the admin user you created during installation. Before deploying any application, you need to think about who (and what) needs access to this machine.
+
+### Creating Users
+
+The `useradd` command creates a new user account. On Ubuntu, the friendlier `adduser` wrapper is also available, but understanding the lower-level command matters:
+
+```bash
+# Create a user with a home directory and bash as the default shell
+sudo useradd -m -s /bin/bash deploy
+
+# Set the user's password
+sudo passwd deploy
+```
+
+The `-m` flag creates the home directory (`/home/deploy`), and `-s` sets the login shell. Without `-m`, the home directory is not created, which is a common source of confusion.
+
+### Key Files
+
+User account information is stored in two files:
+
+- `/etc/passwd` contains one line per user with fields separated by colons: username, a placeholder for the password, UID, GID, comment (full name), home directory, and shell.
+- `/etc/shadow` contains the actual password hashes and password aging information. This file is readable only by root.
+
+You can inspect a user's entry with:
+
+```bash
+getent passwd deploy
+# deploy:x:1001:1001::/home/deploy:/bin/bash
+```
+
+### Modifying Users and Groups
+
+The `usermod` command changes an existing account. One of its most common uses is adding a user to supplementary groups:
+
+```bash
+# Add the deploy user to the www-data group
+sudo usermod -aG www-data deploy
+```
+
+The `-aG` flags mean "append to the supplementary group list." Forgetting the `-a` replaces all supplementary groups, which can lock a user out of resources they need.
+
+To create a group explicitly:
+
+```bash
+sudo groupadd appteam
+```
+
+### Privilege Escalation with sudo
+
+The `sudo` command lets a permitted user run commands as root (or another user) without sharing the root password. On Ubuntu, users in the `sudo` group automatically gain full sudo privileges. For our deploy user, we might grant limited access:
+
+```bash
+# Open the sudoers file safely
+sudo visudo
+```
+
+Add a line that lets the deploy user restart Nginx without a password prompt:
+
+```
+deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
+```
+
+<Aside type="caution">
+Never edit `/etc/sudoers` with a regular text editor. The `visudo` command validates syntax before saving, preventing you from locking yourself out of sudo access with a typo.
+</Aside>
+
+## Linux Filesystems
+
+Choosing the right filesystem for your workload matters more on Linux than on most other operating systems, because the options differ significantly in features and performance characteristics.
+
+**ext4** is the default filesystem for most Debian/Ubuntu installations and the workhorse of the Linux world. It is stable, well-understood, and works well for general-purpose servers. It supports large files and volumes and includes journaling to recover gracefully from crashes.
+
+**xfs** is the default on RHEL-family distributions. It was designed for high-throughput workloads and large files and handles large filesystems efficiently. It is a good choice for database servers and file storage systems.
+
+**ZFS** was created in 2001 by Sun Microsystems and became open-source as OpenZFS in 2013. It acts simultaneously as both a filesystem and a volume manager, giving it complete knowledge of the physical disks, volumes, and the files stored on them. ZFS is mature and production-ready. It is especially well-suited to large-scale storage:
+
+- **Data integrity**: ZFS checksums all data and metadata, detecting and automatically repairing silent corruption (bit rot). This self-healing property sets it apart from traditional filesystems.
+- **Storage pools (zpools)**: instead of formatting individual disks, you add disks to a pool and ZFS manages the allocation. Pools can grow dynamically by adding more disks.
+- **Snapshots and clones**: point-in-time read-only snapshots can be created almost instantly and take up minimal space initially (only changed blocks consume additional space). Writable clones derive from snapshots.
+- **RAID-Z**: ZFS's own RAID implementation that avoids the RAID-5 write-hole vulnerability.
+- **Compression and deduplication**: both happen transparently on the fly.
+- **Native encryption**: introduced in later OpenZFS versions.
+
+ZFS can be resource-intensive (it benefits from ample RAM for its adaptive replacement cache), but its data integrity guarantees make it a compelling choice wherever data loss is unacceptable.
+
+**Btrfs** (B-tree filesystem) was designed as a modern alternative to ext4 and shares several goals with ZFS. It is lighter on resources than ZFS and is the default filesystem in Fedora and openSUSE. Key features include copy-on-write semantics, snapshots, transparent automatic compression, and subvolumes (virtual partitions within a single Btrfs volume that can be mounted independently). Btrfs is generally considered less production-ready than ZFS for mission-critical storage but is excellent for desktop machines and general-purpose servers.
+
+For high-performance computing and distributed storage, Linux supports specialized clustered filesystems such as Lustre, BeeGFS, GPFS, and Ceph, but these are outside the scope of a typical server deployment.
+
+## Package Management
+
+Once users are in place, you need to install software. Linux distributions use package managers to install, update, and remove software from curated repositories.
+
+### apt (Debian/Ubuntu)
+
+Ubuntu uses `apt`, which downloads `.deb` packages from repositories defined in `/etc/apt/sources.list` and `/etc/apt/sources.list.d/`. The workflow follows a predictable pattern:
+
+<Steps>
+1. **Update the package index.** This downloads the latest list of available packages from all configured repositories.
+   ```bash
+   sudo apt update
+   ```
+
+2. **Install packages.** Specify the packages you need by name.
+   ```bash
+   sudo apt install nginx postgresql nodejs npm
+   ```
+
+3. **Upgrade installed packages.** Apply available updates to everything already installed.
+   ```bash
+   sudo apt upgrade
+   ```
+</Steps>
+
+To search for a package:
+
+```bash
+apt search "web server"
+```
+
+To see details about an installed package:
+
+```bash
+apt show nginx
+```
+
+### dnf (RHEL/AlmaLinux/Rocky)
+
+On Red Hat-family distributions, the equivalent commands use `dnf`:
+
+```bash
+sudo dnf check-update        # similar to apt update
+sudo dnf install nginx       # install a package
+sudo dnf upgrade             # upgrade all packages
+```
+
+### Universal Package Formats
+
+Distribution-specific package managers require the package to be built for that distribution. Three cross-distribution formats address this limitation:
+
+- **Flatpak**: packages run in sandboxed containers with their own dependencies bundled. Widely used for desktop applications and available on most distributions.
+- **Snap**: developed by Canonical. Packages (called snaps) bundle all dependencies and run with strict confinement. Integrated with Ubuntu and available on other distributions.
+- **AppImage**: a single self-contained executable that runs on any Linux distribution without installation. Users just download, mark executable, and run.
+
+These formats trade some efficiency for portability. On a server, distribution packages (`apt`, `dnf`) are almost always preferable because they integrate with the system's security update mechanisms.
+
+### Repositories and Pinning
+
+Sometimes the version of a package in the default repositories is not the one you need. You can add third-party repositories (called PPAs on Ubuntu) to get newer or specialized builds:
+
+```bash
+# Example: adding the official Node.js 22.x repository on Ubuntu
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install nodejs
+```
+
+If you need to prevent a package from being upgraded automatically (for example, to keep a specific PostgreSQL version), you can pin it:
+
+```bash
+sudo apt-mark hold postgresql-16
+```
+
+To release the hold later:
+
+```bash
+sudo apt-mark unhold postgresql-16
+```
+
+<Aside type="tip">
+Run `sudo apt update && sudo apt upgrade` regularly, or enable unattended security updates with the `unattended-upgrades` package. Unpatched servers are one of the most common vectors for security breaches.
+</Aside>
+
+## Systemd Services
+
+With our packages installed, we need to manage the services they provide. Systemd is the service manager on modern Linux, and `systemctl` is the command you will use constantly.
+
+### Basic Service Management
+
+```bash
+# Check the status of Nginx
+sudo systemctl status nginx
+
+# Start, stop, and restart
+sudo systemctl start nginx
+sudo systemctl stop nginx
+sudo systemctl restart nginx
+
+# Reload configuration without dropping connections
+sudo systemctl reload nginx
+```
+
+To make a service start automatically at boot:
+
+```bash
+sudo systemctl enable nginx
+```
+
+To prevent it from starting at boot:
+
+```bash
+sudo systemctl disable nginx
+```
+
+Combining `enable` and `start` in one command:
+
+```bash
+sudo systemctl enable --now nginx
+```
+
+### Unit Files
+
+Systemd services are defined by unit files, typically stored in `/usr/lib/systemd/system/` (distribution-provided) or `/etc/systemd/system/` (administrator overrides). A unit file for our Node.js application might look like this:
+
+```ini
+# /etc/systemd/system/webapp.service
+[Unit]
+Description=Node.js Web Application
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/opt/webapp
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=PORT=3000
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The `[Unit]` section declares dependencies: our app should start after the network is up and PostgreSQL is running. The `[Service]` section defines how to run it: as the `deploy` user, from the `/opt/webapp` directory, restarting on failure after a five-second delay. The `[Install]` section tells systemd that this service belongs in the `multi-user.target`, so it starts on a normal boot.
+
+After creating or modifying a unit file, reload the systemd daemon and start the service:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now webapp.service
+```
+
+Check the logs for your service with `journalctl`:
+
+```bash
+sudo journalctl -u webapp.service -f
+```
+
+The `-f` flag follows the log output in real time, similar to `tail -f`.
+
+<Aside type="note">
+The `After=` directive controls ordering (what starts first), while `Requires=` controls dependency (if the dependency fails, this unit fails too). For most application services, `After=` is sufficient; use `Requires=` sparingly.
+</Aside>
+
+## Network Configuration Basics
+
+A server that cannot be reached over the network is not very useful. Let us configure networking for our Ubuntu web server.
+
+### Viewing the Current Configuration
+
+The `ip` command is the modern tool for inspecting network interfaces:
+
+```bash
+# Show all interfaces and their IP addresses
+ip addr show
+
+# Show just the routing table
+ip route show
+```
+
+You will see at least two interfaces: `lo` (the loopback interface, always 127.0.0.1) and one or more physical or virtual interfaces (commonly named `eth0`, `ens3`, `enp0s3`, or similar).
+
+### Configuring a Static IP with Netplan
+
+Ubuntu uses Netplan for network configuration. Netplan reads YAML files from `/etc/netplan/` and applies them to the underlying network manager (usually `systemd-networkd` on servers). Here is a configuration that assigns a static IP:
+
+```yaml
+# /etc/netplan/01-static.yaml
+network:
+  version: 2
+  renderer: networkd
+  ethernets:
+    ens3:
+      addresses:
+        - 10.0.1.10/24
+      routes:
+        - to: default
+          via: 10.0.1.1
+      nameservers:
+        addresses:
+          - 10.0.1.1
+          - 8.8.8.8
+```
+
+Apply the configuration:
+
+```bash
+sudo netplan apply
+```
+
+Verify connectivity:
+
+```bash
+ip addr show ens3
+ping -c 3 10.0.1.1
+```
+
+### Hostname and /etc/hosts
+
+We already set the hostname with `hostnamectl`. For local name resolution (before DNS is consulted), edit `/etc/hosts`:
+
+```bash
+# /etc/hosts
+127.0.0.1   localhost
+10.0.1.10   web-prod-01.example.com web-prod-01
+```
+
+This ensures the server can resolve its own fully qualified domain name even if DNS is temporarily unavailable.
+
+## Filesystem Layout and Disk Management
+
+Linux organizes files according to the Filesystem Hierarchy Standard (FHS). Understanding this layout helps you decide where to put things and how to size your partitions.
+
+### Key Directories
+
+The Filesystem Hierarchy Standard (FHS) defines where things live. The table below covers the directories you will encounter most often:
+
+| Path              | Purpose                                                                                    |
+|-------------------|--------------------------------------------------------------------------------------------|
+| `/`               | The root of the entire filesystem tree                                                     |
+| `/boot`           | Kernel images (`vmlinuz*`), initial ramdisk (`initramfs`), bootloader files, EFI partition |
+| `/bin`            | Essential binaries available to all users (`cd`, `kill`, `ping`, `mount`, `passwd`)        |
+| `/sbin`           | System binaries for booting, restoring, and repairing (`fdisk`, `fsck`, `useradd`)         |
+| `/usr`            | UNIX Systems Resource: installed programs, libraries, documentation, source code           |
+| `/usr/bin`        | Most general-purpose user binaries (`grep`, `ls`, `curl`, `chmod`)                        |
+| `/usr/sbin`       | System-administration binaries typically run by root (`chroot`, `shutdown`)                |
+| `/usr/local/bin`  | Locally compiled or manually installed binaries                                            |
+| `/etc`            | System-wide configuration files (see below for notable examples)                          |
+| `/home`           | User home directories                                                                      |
+| `/root`           | Home directory for the root user                                                           |
+| `/lib`            | Shared libraries and kernel modules                                                        |
+| `/dev`            | Device files (see below)                                                                   |
+| `/proc`           | Virtual filesystem exposing kernel and process state                                       |
+| `/var`            | Variable data: logs (`/var/log`), databases, mail, caches                                  |
+| `/tmp`            | Temporary files, often cleared on reboot                                                   |
+| `/opt`            | Optional third-party software packages                                                     |
+| `/media`          | Mount points for removable media (USB drives, optical discs)                               |
+
+**Notable `/etc` files.** `/etc` is where almost all system configuration lives. Some frequently referenced files include:
+
+| File                   | Purpose                                                    |
+|------------------------|------------------------------------------------------------|
+| `/etc/passwd`          | User account information (username, UID, home dir, shell)  |
+| `/etc/shadow`          | Password hashes and aging information (root-readable only) |
+| `/etc/group`           | Group definitions                                          |
+| `/etc/sudoers`         | Defines who may use `sudo` (edit with `visudo`)            |
+| `/etc/hosts`           | Static hostname-to-IP mappings                             |
+| `/etc/fstab`           | Filesystem mount table, read at boot                       |
+| `/etc/shells`          | List of permitted login shells                             |
+| `/etc/os-release`      | Distribution identification (name, version, ID)            |
+| `/etc/apt/sources.list`| APT repository definitions (Debian/Ubuntu)                 |
+| `/etc/yum.repos.d/`    | YUM/DNF repository definitions (RHEL family)               |
+
+**`/dev` — device files.** In Linux, hardware devices are represented as files in `/dev`. Hard drives appear as `/dev/sda`, `/dev/sdb`, and so on (or `/dev/nvme0n1` for NVMe drives). In addition to real hardware, a few special pseudo-devices are useful in scripting:
+
+| Path           | Behavior                                                         |
+|----------------|------------------------------------------------------------------|
+| `/dev/null`    | Discards everything written to it; reads return EOF             |
+| `/dev/zero`    | Returns an endless stream of null bytes on read                 |
+| `/dev/random`  | Returns cryptographically random bytes                          |
+| `/dev/tty`     | Refers to the current terminal; writing to it outputs to screen |
+
+**`/proc` — the process virtual filesystem.** `/proc` is not stored on disk; it is created and destroyed dynamically by the kernel. Each running process has a subdirectory `/proc/<PID>/` containing virtual files like `cmdline`, `status`, and the standard streams (`stdin`, `stdout`, `stderr`). The `/proc/sys/` subtree exposes many kernel tuning parameters. Because the data is hard to read directly, higher-level tools like `top`, `ps`, and `htop` parse it for you. For example, `/proc/1/stat` contains the state information for PID 1 (systemd).
+
+For our web application, the application code will live in `/opt/webapp`, the database files will be managed by PostgreSQL under `/var/lib/postgresql`, and logs will accumulate in `/var/log`.
+
+### Inspecting Disks and Usage
+
+Several commands help you understand your storage situation:
+
+```bash
+# List all block devices (disks and partitions)
+lsblk
+
+# Show filesystem disk usage (human-readable)
+df -h
+
+# Show how much space a directory uses
+du -sh /var/log
+```
+
+A typical `lsblk` output on a cloud instance might look like the following (on a local VM you would see `sda` instead of `vda`, and on NVMe hardware you would see `nvme0n1`):
+
+```
+NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
+vda     252:0    0   40G  0 disk
+├─vda1  252:1    0  512M  0 part /boot/efi
+├─vda2  252:2    0    1G  0 part /boot
+└─vda3  252:3    0 38.5G  0 part /
+```
+
+### Mount Points
+
+In Linux, every storage device is accessed by mounting it at a directory in the filesystem tree. The `/etc/fstab` file defines which filesystems are mounted automatically at boot:
+
+```bash
+cat /etc/fstab
+```
+
+If you add a new disk (for example, a separate volume for database storage), you would partition it, create a filesystem, and mount it:
+
+```bash
+# Create a filesystem on the new partition
+sudo mkfs.ext4 /dev/vdb1
+
+# Create the mount point
+sudo mkdir -p /mnt/pgdata
+
+# Mount it
+sudo mount /dev/vdb1 /mnt/pgdata
+
+# Add to fstab for persistence across reboots
+echo '/dev/vdb1 /mnt/pgdata ext4 defaults 0 2' | sudo tee -a /etc/fstab
+```
+
+<Aside type="caution">
+Always verify your `fstab` entry with `sudo mount -a` before rebooting. A malformed `fstab` can prevent the system from booting, requiring you to fix it from a rescue environment.
+</Aside>
+
+Monitoring disk usage is an ongoing responsibility. A full `/var` partition (common when logs grow unchecked) can cause services to crash or refuse to start. Set up log rotation and keep an eye on `df -h` output regularly.
+
+## Putting It All Together
+
+Let us recap the steps we would follow to bring our scenario server from a blank machine to a running web application:
+
+<Steps>
+1. **Plan.** Document the server's purpose, choose Ubuntu 24.04 LTS, decide on resource sizing (2 vCPU, 4 GB RAM, 40 GB disk), and pick a hostname (`web-prod-01`).
+
+2. **Install.** Boot the Ubuntu Server installer, select a minimal installation, configure the disk layout, and create an admin user.
+
+3. **Configure the system.** Set the hostname, configure a static IP with Netplan, and update `/etc/hosts`.
+
+4. **Create users.** Add a `deploy` user for the application, configure appropriate sudo rules, and set up SSH key authentication.
+
+5. **Install packages.** Run `apt update && apt install nginx postgresql nodejs npm` to get the software stack in place.
+
+6. **Deploy the application.** Place the code in `/opt/webapp`, create a systemd unit file, and enable the service.
+
+7. **Verify.** Confirm all services are running with `systemctl status`, check network connectivity, review logs with `journalctl`, and monitor disk usage with `df -h`.
+</Steps>
+
+Each section of this chapter covered one piece of that pipeline. The key insight is that server administration is not a collection of disconnected commands; it is a sequence of deliberate decisions, each building on the last, that turns a blank machine into a reliable, maintainable system. Whether that machine is a cloud instance you launched two minutes ago, a VM on your laptop, or a physical server in a rack, the process and the commands are the same.
+
+## Further reading
+
+- <a href="https://www.youtube.com/watch?v=26QPDBe-NB8" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #18: Operating Systems (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=KN8YgJnShPM" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #20: Files and File Systems (YouTube)</a>

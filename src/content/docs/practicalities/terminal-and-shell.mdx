@@ -1,0 +1,226 @@
+---
+title: The Terminal, Shell, and Text Editors
+description: A practical cheatsheet for navigating the command line, understanding the shell, editing files, and working efficiently in a terminal environment.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+If you have never used a terminal before, this page will get you oriented. If you have, use it as a quick reference. This is not a comprehensive guide; it covers enough to be productive in this course.
+
+<Aside type="tip">
+For a deeper treatment of these topics, see MIT's [The Missing Semester of Your CS Education](https://missing.csail.mit.edu/).
+</Aside>
+
+## Terminal vs. Shell
+
+A **terminal** (or terminal emulator) is the window you type commands into. A **shell** is the program running inside that window that interprets your commands and executes them.
+
+Common shells:
+- **bash** (Bourne Again Shell): the default on most Linux servers and older macOS versions.
+- **zsh** (Z Shell): the default on modern macOS. Nearly identical to bash for basic usage.
+
+When you open Terminal on macOS or a WSL window on Windows, you are running a shell inside a terminal. The **prompt** (something like `ubuntu@ip-172-31-0-5:~$`) tells you who you are, where you are, and that the shell is ready for input.
+
+## Navigating the Filesystem
+
+Everything in Linux is a file or a directory. Paths use forward slashes (`/`). The root of the filesystem is `/`.
+
+| Command | What it does | Example |
+|---------|-------------|---------|
+| `pwd` | Print the current directory | `pwd` |
+| `ls` | List files in the current directory | `ls -la` (all files, detailed) |
+| `cd` | Change directory | `cd /var/log` |
+| `cd ..` | Go up one directory | `cd ..` |
+| `cd ~` | Go to your home directory | `cd ~` |
+| `cd -` | Go to the previous directory | `cd -` |
+
+**Absolute paths** start with `/` (e.g., `/etc/apache2/apache2.conf`). **Relative paths** start from your current directory (e.g., `./config.txt` or `../other-dir/`).
+
+## Working with Files
+
+| Command | What it does | Example |
+|---------|-------------|---------|
+| `cat` | Print a file's contents | `cat /etc/hostname` |
+| `less` | View a file with scrolling (press `q` to quit) | `less /var/log/syslog` |
+| `head` / `tail` | Show the first/last lines | `tail -20 /var/log/syslog` |
+| `cp` | Copy a file or directory | `cp file.txt backup.txt` |
+| `mv` | Move or rename a file | `mv old.txt new.txt` |
+| `rm` | Remove a file (**no undo**) | `rm temp.txt` |
+| `rm -r` | Remove a directory and its contents | `rm -r old-dir/` |
+| `mkdir` | Create a directory | `mkdir -p logs/2026` |
+| `touch` | Create an empty file or update a timestamp | `touch notes.txt` |
+
+<Aside type="caution">
+`rm` deletes permanently. There is no recycle bin on the command line. Double-check before pressing Enter.
+</Aside>
+
+## Searching
+
+| Command | What it does | Example |
+|---------|-------------|---------|
+| `grep` | Search for a pattern in files | `grep "error" /var/log/syslog` |
+| `grep -r` | Search recursively in a directory | `grep -r "DB_HOST" /var/www/` |
+| `grep -i` | Case-insensitive search | `grep -i "warning" log.txt` |
+| `find` | Locate files by name or attributes | `find /etc -name "*.conf"` |
+| `which` | Show the path of a command | `which python3` |
+
+## Pipes and Redirection
+
+The shell's real power is combining small commands. The **pipe** (`|`) sends one command's output as input to another.
+
+```bash
+# Count how many lines contain "error" in the syslog
+grep "error" /var/log/syslog | wc -l
+
+# Show the 10 largest files in /var
+du -ah /var | sort -rh | head -10
+
+# Find which process is listening on port 80
+ss -tlnp | grep :80
+```
+
+**Redirection** sends output to a file instead of the screen:
+
+```bash
+echo "hello" > file.txt     # Write (overwrite) to file
+echo "world" >> file.txt    # Append to file
+command 2> errors.log        # Redirect errors only
+command > out.log 2>&1       # Redirect both stdout and stderr
+```
+
+## File Permissions
+
+Every file has an owner, a group, and permissions for read (`r`), write (`w`), and execute (`x`).
+
+```bash
+ls -l script.sh
+# -rwxr-xr-- 1 ubuntu www-data 512 Mar 15 script.sh
+#  ^^^         owner permissions (rwx)
+#     ^^^      group permissions (r-x)
+#        ^^^   others permissions (r--)
+```
+
+| Command | What it does | Example |
+|---------|-------------|---------|
+| `chmod` | Change file permissions | `chmod +x script.sh` |
+| `chmod 755` | Set specific permissions (owner rwx, group r-x, others r-x) | `chmod 755 script.sh` |
+| `chown` | Change file owner | `sudo chown www-data:www-data index.html` |
+
+The numeric form (like `755`) encodes permissions as three digits: owner, group, others. Each digit is the sum of read (4), write (2), and execute (1). So `755` means `rwxr-xr-x`.
+
+## `sudo`
+
+`sudo` runs a command as the superuser (root). Most system administration tasks require it.
+
+```bash
+sudo apt update              # Update package lists
+sudo systemctl restart nginx # Restart a service
+sudo vim /etc/hosts          # Edit a system file
+```
+
+Use `sudo` only when necessary. Running everything as root is a security risk.
+
+## Text Editors
+
+You will need to edit files on remote servers where there is no graphical interface. Two terminal editors are available on virtually every Linux system.
+
+### nano (beginner-friendly)
+
+```bash
+nano /path/to/file.txt
+```
+
+nano shows keyboard shortcuts at the bottom of the screen. The `^` symbol means Ctrl.
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+O` | Save (write out) |
+| `Ctrl+X` | Exit |
+| `Ctrl+K` | Cut the current line |
+| `Ctrl+U` | Paste |
+| `Ctrl+W` | Search |
+| `Ctrl+G` | Help |
+
+### vim (powerful but has a learning curve)
+
+```bash
+vim /path/to/file.txt
+```
+
+vim has **modes**. You start in **Normal mode** (for navigation and commands). Press `i` to enter **Insert mode** (for typing text). Press `Esc` to return to Normal mode.
+
+| Key/Command | Mode | Action |
+|-------------|------|--------|
+| `i` | Normal | Enter Insert mode (start typing) |
+| `Esc` | Insert | Return to Normal mode |
+| `:w` | Normal | Save |
+| `:q` | Normal | Quit |
+| `:wq` | Normal | Save and quit |
+| `:q!` | Normal | Quit without saving |
+| `dd` | Normal | Delete the current line |
+| `u` | Normal | Undo |
+| `/text` | Normal | Search for "text" |
+| `n` | Normal | Jump to next search match |
+
+<Aside type="tip">
+If you get stuck in vim, press `Esc` a few times, then type `:q!` and press Enter. This will exit without saving. You can always start over.
+</Aside>
+
+## Package Managers
+
+Package managers install, update, and remove software. The package manager depends on your distribution.
+
+| Distribution | Manager | Install example |
+|-------------|---------|----------------|
+| Ubuntu/Debian | `apt` | `sudo apt install nginx` |
+| Amazon Linux/RHEL | `dnf` / `yum` | `sudo dnf install nginx` |
+| macOS | `brew` | `brew install wget` |
+
+Always run `sudo apt update` (or equivalent) before installing packages to refresh the package list.
+
+## Environment Variables
+
+Environment variables store configuration that programs can read. They are written in `ALL_CAPS` by convention.
+
+```bash
+echo $HOME         # Print your home directory
+echo $PATH         # Print the list of directories the shell searches for commands
+export MY_VAR=42   # Set a variable for the current session
+```
+
+Variables set with `export` last only until you close the terminal. To make them permanent, add the `export` line to your shell configuration file (`~/.bashrc` for bash, `~/.zshrc` for zsh).
+
+## SSH
+
+SSH (Secure Shell) connects you to a remote machine over an encrypted channel. You will use it constantly in this course.
+
+```bash
+# Connect to a remote server
+ssh -i ~/Downloads/cs312-key.pem ubuntu@54.123.45.67
+
+# Copy a file to a remote server
+scp file.txt ubuntu@54.123.45.67:/home/ubuntu/
+
+# Copy a file from a remote server
+scp ubuntu@54.123.45.67:/var/log/syslog ./syslog-copy.txt
+```
+
+If you get a "permission denied" error on your key file, fix its permissions:
+
+```bash
+chmod 400 ~/Downloads/cs312-key.pem
+```
+
+## Getting Help
+
+When you encounter an unfamiliar command, these are the fastest ways to learn what it does:
+
+```bash
+man ls              # Open the manual page for "ls" (press q to quit)
+ls --help           # Print a brief help summary
+tldr tar            # Community-maintained cheat sheets (install with "brew install tldr" or "sudo apt install tldr")
+```
+
+Reading manual pages (`man`) is a core skill. The format is dense at first but becomes natural with practice.

@@ -1,0 +1,445 @@
+---
+title: "Hardware Fundamentals"
+description: "A clarity-first tour of PC and server hardware: motherboard, CPU, RAM, storage, PSU, GPU, and cooling, how they fit, how to choose compatible parts, assemble a system, and validate a first boot."
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import FigureWithCaption from '/src/components/FigureWithCaption.astro';
+
+import StorageLayers from './hardware-components/StorageLayers.astro';
+
+Modern computers look simple on the outside, but they are built from a few well-defined parts that must match one another in socket, speed, and power. In this lecture, you will learn how the motherboard, central processing unit (CPU), memory, storage, graphics, power, and cooling fit together and what "compatibility" really means in practice. We will favor plain language first, then introduce the necessary terms such as socket, chipset, PCIe lanes, and TDP with short glosses. By the end, you should be able to read a spec sheet, choose parts that make sense for a goal (e.g., a quiet student workstation or a small home server), and assemble a system that boots on the first try. You will also practice the "first boot" validation routine that separates a confident builder from a frustrated one. Building on this foundation, later lectures on networking and operating systems assume you can reliably bring bare metal to life.
+
+<Aside type="note" title="2025 Hardware Trends and Future-Proofing">
+As of 2025, the job market expects familiarity with the latest standards: DDR5 memory, PCI Express (PCIe) 5.0 for graphics and storage, Gen5 NVMe SSDs, and ATX 3.1 power supplies (PSUs) that support new power delivery and efficiency requirements. When planning a build, look for these features to ensure your system is ready for current and near-future workloads. Always leave budget for a quality PSU and cooling; these are critical for reliability and upgradability. Sustainability is also a growing concern: favor modular, repairable designs and consider e-waste when replacing parts.
+</Aside>
+
+## The Motherboard-CPU Platform
+
+Think of the **motherboard** as the city's road grid and the **central processing unit (CPU)** as its central station: everything plugs into the board, and the CPU executes instructions. The motherboard is a large circuit board that connects all the main parts of a computer, providing a **CPU socket** (the physical interface for a specific processor family), a **chipset** (the set of controllers that expose expansion features), **slots for memory** (DIMM slots), storage connectors, and expansion slots. This platform choice creates the electrical and mechanical constraints every later decision must fit inside, so treating it as an integrated decision (CPU + board + memory generation) reduces downstream surprises.
+
+import MBRAMCPUImage from '/src/content/docs/lectures/hardware-components/motherboard-ram-cpu.png';
+
+<FigureWithCaption src={MBRAMCPUImage} alt="Motherboard Overview (GIGABYTE B850M DS3H Motherboard)" imageHeight="h-96"/>
+
+[**ATX**](https://en.wikipedia.org/wiki/ATX) is the most common motherboard size (form factor) for desktops, measuring about 12 x 9.6 inches. It matters because it determines how many slots and ports you get, and what cases will fit. Smaller sizes like microATX (mATX) and Mini-ITX offer fewer slots but fit in smaller cases. In 2025, most new boards support PCIe 5.0 for GPUs and at least one NVMe slot, with some offering Gen5 NVMe for ultra-fast storage. ATX 3.1 PSUs are now standard for new builds, providing better efficiency and support for high-wattage GPUs.
+
+For storage, motherboards provide connectors like [**SATA**](https://en.wikipedia.org/wiki/SATA) (Serial ATA), a cable-based interface for hard drives and older SSDs, and [**M.2**](https://en.wikipedia.org/wiki/M.2) slots for modern, stick-shaped drives. Some M.2 slots support [**NVMe**](https://en.wikipedia.org/wiki/NVM_Express) (Non-Volatile Memory Express), a protocol that lets SSDs talk directly to the CPU over [**PCI Express (PCIe)**](https://en.wikipedia.org/wiki/PCI_Express) lanes for much higher speeds than SATA. In 2025, PCIe 5.0 and Gen5 NVMe SSDs are becoming mainstream, offering up to 14 GB/s sequential reads, ideal for demanding workloads but requiring careful attention to cooling and lane allocation. PCIe is the main expansion bus for add-in cards like graphics cards (graphics processing units, or GPUs) and high-speed storage.
+
+import MBPCIESATAImage from './hardware-components/motherboard-pcie-sata.png';
+
+<FigureWithCaption src={MBPCIESATAImage} caption="SATA Ports and PCIe Slots (GIGABYTE B850M DS3H Motherboard)" imageHeight="h-96"/>
+
+import MBCaseConnectorsImage from './hardware-components/motherboard-case-connectors.png';
+
+<FigureWithCaption src={MBCaseConnectorsImage} caption="Case Connectors (GIGABYTE B850M DS3H Motherboard)" imageHeight="h-96"/>
+
+The CPU you choose locks in the socket and often the memory generation; for example, an "AM5" AMD CPU demands an AM5 board and DDR5 memory. **Thermal Design Power (TDP)** is a planning number for heat and power (not a strict cap), so cooling and power choices must assume real workloads. Some CPUs include integrated graphics for display output; if yours does not, a discrete GPU is required for video. Building on this platform is about matching the socket, chipset features, and physical layout to your goals and case size. A clear map of these relationships helps you reason about performance ceilings and upgrade paths. As platforms evolve, expect more features to move on-die (integrated into the CPU), and for new standards like PCIe 6.0 to appear on high-end boards first.
+
+<Aside type="note" title="Chipset Evolution: Northbridge, Southbridge, and Modern PCH/FCH">
+Older motherboard designs (circa 2007 and earlier) split the chipset into two chips: the **Northbridge**, which handled high-speed components (RAM, PCIe x16 for the GPU), and the **Southbridge**, which handled slower peripherals (SATA, USB, audio, PCI). Communication between them was a bottleneck. AMD integrated the memory controller directly into the CPU in **2003** with its K8 (Athlon 64) architecture; Intel followed in **2008** with Nehalem. Today, the CPU handles RAM and the primary PCIe lanes directly. What remains of the traditional chipset is now a single **Platform Controller Hub** — called **PCH** by Intel and **FCH** (Fusion Controller Hub) by AMD — which manages secondary PCIe lanes, SATA, USB, and audio. This integration reduces latency and is why modern motherboards look much simpler than their predecessors.
+</Aside>
+
+- Read the board's CPU support list and memory Qualified Vendor List (QVL) before buying.
+- Favor chipsets that expose the lanes and ports you will actually use.
+- Confirm rear I/O you need (USB-C, 2.5/10GbE, Wi-Fi) and internal headers for your case.
+- Check the manual for lane sharing rules between M.2, SATA, and PCIe slots.
+
+<Aside type="note" title="Qualified Vendor List (QVL)">
+The memory QVL is a list published by the motherboard (MB) manufacturer that shows which RAM kits have been tested and confirmed to work reliably with that board. Checking the QVL before buying memory helps avoid compatibility issues, especially with newer or high-speed kits. If your exact kit is not listed, it may still work, but using a QVL-listed kit gives you the best chance of a smooth first boot.
+</Aside>
+
+<Aside type="tip" icon="star" title="Example: Planning a Compatible Platform">
+Suppose you want fast single- and multi-threaded performance, a quiet system at idle, one graphics card, and two NVMe drives. Start by picking a recent AMD Ryzen 7 (AM5 socket) or Intel Core i7 (LGA1700 socket). For an AM5 build, a B650 motherboard (MB) gives you PCIe Gen 4 NVMe support and plenty of USB ports without the extra cost of X670. Check that the MB has two M.2 slots, both wired for x4 PCIe lanes, and read the manual to see if using both disables any SATA ports you need. Make sure your case supports ATX if you want more expansion slots, or choose micro-ATX (mATX) for a smaller footprint. Always confirm the MB's CPU support list and memory QVL before buying to avoid compatibility surprises.
+</Aside>
+
+**Common Pitfalls**
+
+- Buying a CPU that the board supports only after a BIOS update you cannot perform without an older CPU.
+- Assuming every M.2 slot is the same; many are electrically x2 or share lanes with SATA ports.
+- Ignoring case clearance; tall VRM heatsinks can clash with large coolers in small cases.
+
+## Cases, Form Factors, and Physical Constraints
+
+The enclosure (**case**) is more than aesthetics; it enforces the mechanical envelope for motherboard size, cooler height, GPU length, drive mounting, and cable routing that in turn affects thermals and noise. 
+
+
+import CaseImage from './hardware-components/case.png';
+
+<FigureWithCaption src={CaseImage} caption="Desktop Enclosure (Fractal Design Epoch)" imageHeight="h-64"/>
+
+**ATX** is not just a motherboard size: it is a **standard** that enforces the placement and dimensions of mounting holes, rear I/O shield cutouts, expansion slot alignment, and power connectors. This ensures that any ATX-compliant motherboard will fit in any ATX-compliant case, and that power supplies, expansion cards, and other components will line up correctly. ATX also defines the standard 24-pin power connector, rear I/O layout, and slot spacing, making it possible to mix and match parts from different vendors with confidence.
+
+The name **AT** comes from IBM's second-generation PC, the IBM PC/AT, where AT stands for "Advanced Technology." **ATX** (Advanced Technology eXtended) is the modern, extended successor to the AT standard. In addition to physical dimensions and mounting, ATX standardizes the DC voltages a PSU must supply: **+12 V** (GPU and drives), **+5 V** (motherboard logic, some drives), **+3.3 V** (RAM and some expansion slots), **−12 V** (backward compatibility for some legacy serial and analog devices), and **+5 VSB** (Stand-By, so components like the real-time clock remain active when the system is powered off). The main board connector is 24-pin; an additional 4- or 8-pin EPS connector delivers a stable +12 V feed directly to the CPU.
+
+Common motherboard **form factors**, such as Extended ATX (E-ATX), ATX, microATX, and Mini-ITX, scale down slot count and header real estate as they shrink, so choosing smaller always trades expansion and sometimes ease of building for footprint. 
+
+
+import ATXMBImage from './hardware-components/atx-motherboards.png';
+
+<FigureWithCaption src={ATXMBImage} caption="E-ATX, CEB, ATX, microATX, and Mini-ITX Form Factors (GIGABYTE)" imageHeight="h-32"/>
+
+Power supply form factors (full ATX vs. SFX / SFX-L) influence internal volume and airflow paths, and cramped cases demand more deliberate cable management to avoid blocking front-to-back air. 
+
+import ATXSFXPSUImage from './hardware-components/atx-sfx-psu.png';
+
+<FigureWithCaption src={ATXSFXPSUImage} caption="ATX, SFX-L, and SFX PSUs" imageHeight="h-32"/>
+
+Front panel connectors (power/reset switches, LEDs, USB headers, audio) must be matched to the board's pin layout; miswiring can cause mysterious no-boot or instant shutdown behavior. Treat clearances (CPU cooler height, radiator thickness, GPU slot width) as first-class constraints you verify from spec sheets; don't assume "standard" parts fit.
+
+- Map required PCIe cards (GPU, NIC, HBA) before choosing a compact form factor.
+- Confirm maximum GPU length and cooler height vs. your chosen components.
+- Use all supplied standoffs only where the board has holes; extras can short traces.
+
+Many business desktops, especially those from large OEMs like Dell, HP, and Lenovo, often use **custom or proprietary form factors** for their motherboards, power supplies, and cases. These designs may not follow ATX standards, which can limit upgradability and part interchangeability. For example, mounting holes, power connectors, or case layouts may differ from standard ATX, making it difficult or impossible to replace the motherboard or PSU with off-the-shelf components. This approach allows manufacturers to optimize for size, cost, or specific business needs, but it reduces flexibility for upgrades and repairs compared to standard ATX-based systems.
+
+<Aside type="tip" icon="star" title="Example: Mini-ITX Tradeoffs">
+You plan a quiet Mini-ITX build with a 240 mm AIO, a 3-slot GPU, and two NVMe drives. The chosen case supports a 240 mm radiator only if you use an SFX PSU. Switching from ATX to SFX frees space for front-mounted fans, improving intake pressure and lowering GPU temps by ~5-7 °C under gaming load. Had you kept an ATX PSU, the radiator would have been restricted to slim fans, raising noise. This illustrates how enclosure, PSU form factor, and cooling choices interlock.
+</Aside>
+
+**Common Pitfalls**
+
+- Forgetting to remove a pre-installed case standoff that does not align with the board.
+- Assuming any "120 mm radiator support" implies room for push/pull or thick radiators.
+- Buying a large triple-slot GPU that blocks necessary airflow or the only remaining PCIe slot.
+
+## Memory (RAM): Capacity, Channels, and ECC
+
+Building on the socket and chipset foundation, memory (RAM) determines how much active working data the system can keep close to the processor and how quickly it can be accessed. **Random Access Memory (RAM)** is where active programs and data live; more capacity prevents slow disk swapping and higher effective speed lowers latency.
+
+The naming of DDR memory modules can be confusing at first glance. For example, a stick labeled **DDR5-6000 (PC5-48000)** tells you two things: the "DDR5-6000" part refers to the memory's data rate: 6,000 megatransfers per second (MT/s), which is the effective speed at which data can be read or written. The "PC5-48000" part is the theoretical peak bandwidth in megabytes per second (MB/s), calculated as 8 times the data rate (6000 × 8 = 48,000 MB/s). So, **DDR5-6000 (PC5-48000)** means this module can transfer data at up to 6,000 MT/s, with a maximum bandwidth of 48 GB/s per channel under ideal conditions.
+
+<Aside type="note" title="SDR vs DDR vs QDR">
+**Single Data Rate (SDR)** RAM is largely obsolete in modern computing. It was common in the late 1990s and early 2000s (think Intel Pentium III/IV era) but has been replaced by Double Data Rate (DDR) RAM and its successors (DDR2, DDR3, DDR4, DDR5) due to significantly higher performance and efficiency. SDR RAM operates at much lower speeds, transferring data only on one edge of the clock signal, while DDR RAM transfers data on both edges, effectively doubling the data rate.
+
+**Quad Data Rate (QDR)** RAM transfers data on both the rising and falling edges of the clock cycle for both input and output, effectively quadrupling the data rate relative to SDR for the same clock speed. It's primarily used in specialized, high-performance applications rather than consumer PCs.
+
+import SDRDDRQDRmage from './hardware-components/SDR_DDR_QDR.png';
+
+<FigureWithCaption src={SDRDDRQDRmage} caption="Comparison of RAM Data Rates by MisterSanderson, CC BY-SA 3.0 <https://creativecommons.org/licenses/by-sa/3.0>, via Wikimedia Commons" />
+</Aside>
+
+You may also see memory described by its **CAS Latency (CL)** and **timings**, such as **CAS Latency 36** or **36-44-44-96**. CAS Latency is the number of clock cycles between when the memory controller requests data and when it is available from the RAM. Lower CAS Latency means less delay, but actual performance depends on both latency and data rate. The full timing string (e.g., 36-44-44-96) refers to a sequence of delays for different memory operations:  
+- **CAS Latency (CL)**: delay for column access  
+- **tRCD**: Row to Column Delay  
+- **tRP**: Row Precharge Time  
+- **tRAS**: Row Active Time
+
+Lower numbers are generally better, but must be considered alongside the memory speed for real-world performance.
+
+import DDR5Image from './hardware-components/ddr5.png';
+
+<FigureWithCaption src={DDR5Image} caption="A DDR5 Memory Stick" imageHeight="h-32"/>
+
+Desktop boards support generations like DDR4 or DDR5; you must match the memory to what the CPU/motherboard supports. Two sticks arranged for dual channel usually outperform a single larger stick because the memory controller can access two channels in parallel. Vendors publish memory profiles (XMP for Intel, EXPO for AMD) that set frequency and timing automatically; enabling them after a stable first boot yields the intended speed. 
+
+import DDRComparisonImage from './hardware-components/DDR-memory-comparison.png';
+
+<FigureWithCaption src={DDRComparisonImage} caption="Desktop DDR Memory Comparison by Martin Iturbide, Public domain, via Wikimedia Commons" imageHeight="h-40"/>
+
+Laptop RAM (commonly called SO-DIMM) is physically smaller than desktop DIMMs and often operates at lower voltages to save power and reduce heat. For example, DDR4 laptop memory typically runs at 1.2V, while DDR5 SO-DIMMs may use even less. Always check both the form factor and voltage requirements when upgrading laptop memory, as using the wrong type or voltage can prevent the system from booting or cause instability.
+
+import DDR5LImage from './hardware-components/ddr5l.png';
+
+<FigureWithCaption src={DDR5LImage} caption="A Laptop DDR5 Memory Stick" imageHeight="h-32"/>
+
+Capacity planning follows workload: 16-32 GB for general use, 32-64 GB for heavy creative or virtualization tasks, and more for specialized servers.
+
+- Install in the slots the manual marks for 2-DIMM operation to enable dual channel.
+- Prefer matched kits (2×16 GB) over mixing brands or speeds.
+- Enable XMP/EXPO only after a clean, stable POST at default settings.
+
+<Aside type="tip" icon="star" title="Example: Memory Kit and Testing">
+If you plan to run a Linux virtual machine while browsing and editing, 32 GB (2×16 GB) of DDR5-6000 is a good balance on AM5. Populate the A2/B2 slots as indicated in the manual for dual channel. First boot at "Auto," then enable EXPO and verify stability with a 10-15 minute memory test before moving on.
+
+Memory testing is important because even new kits can have subtle errors that cause crashes or data loss. Tools like [MemTest86](https://www.memtest86.com/) (bootable USB) or Windows Memory Diagnostic can check for errors by writing and reading patterns in every part of your RAM. A successful test means zero errors after at least one full pass. If you see any errors, reseat the DIMMs, check BIOS settings, or try running at a lower speed before assuming the kit is bad.
+</Aside>
+
+**Common Pitfalls**
+
+- Mixing DIMMs of different speeds/timings and expecting the kit to run at the higher spec.
+- Forcing aggressive overclocks before confirming a stable baseline.
+- Seating a DIMM incompletely; one unlatched side can cause a no-POST condition.
+
+## Interfaces and Connectors
+
+Every desktop or laptop computer exposes a variety of ports (physical connectors on the case or motherboard) that allow you to attach external devices and peripherals. These interfaces connect your system to monitors, storage drives, networks, input devices, and more. 
+
+import BackpanelImage from './hardware-components/backpanel.png';
+
+<FigureWithCaption src={BackpanelImage} caption="Backpanel Connectors (GIGABYTE B850M DS3H)" imageHeight="h-40"/>
+
+Understanding the difference between the protocol (the "language" and electrical signaling) and the physical connector (the mechanical shape) is key to predicting compatibility and performance. The arrangement and type of ports available will vary by system, but most computers include a mix of USB, audio, video, and networking connectors, along with specialized ports for storage and expansion.
+
+import USBConnectorsImage from './hardware-components/USB-connectors.png';
+
+<FigureWithCaption src={USBConnectorsImage} caption="Universal Serial Bus (USB) Connectors by Milos634, CC BY-SA 4.0 <https://creativecommons.org/licenses/by-sa/4.0>, via Wikimedia Commons" imageHeight="h-64"/>
+
+### Protocol vs. Physical Plug
+
+Many names you encounter (SATA, NVMe, PCIe, USB, Thunderbolt, M.2, DisplayPort) mix protocols (the "language" and electrical signaling) with physical connectors (the mechanical shape). 
+
+- **M.2** is a connector specification that can carry different buses (PCIe, often for NVMe SSDs; SATA; or even USB), so an M.2 slot is not always NVMe-capable. 
+- **NVMe** itself is a storage protocol running atop PCIe, independent of the M.2 shape; the same protocol can use U.2/U.3 or add-in card form factors in servers. 
+- **Thunderbolt** encapsulates PCIe and DisplayPort plus power over a USB-C connector, demonstrating how a physical port can tunnel multiple protocols. 
+
+Distinguishing these layers helps you predict compatibility: a USB-C shaped port may only implement USB 2.0 internally, while a "Gen 2x2" port advertises both connector and high signaling rate. 
+
+**SATA** (Serial AT Attachment) replaced the older **PATA** (Parallel ATA) standard, which used wide ribbon cables. SATA uses thin, dedicated cables for both data and power, and is still common for HDDs and budget SSDs, though M.2/NVMe is now preferred for performance builds.
+
+**USB** (Universal Serial Bus) is the predominant peripheral interface today. Generations differ significantly in speed:
+
+| USB Version | Max Speed |
+|---|---|
+| USB 1.1 | 12 Mb/s |
+| USB 2.0 | 480 Mb/s |
+| USB 3.x | 5–20 Gb/s (Gen 1 / Gen 2 / Gen 2×2) |
+| USB 4 / Thunderbolt | 20–80 Gb/s |
+
+With USB 3.2 and USB 4, only the USB-C connector is not deprecated for high-speed transfers. Note that USB marketing names (e.g., "USB 3.2 Gen 2×2") describe both speed tier and connector expectations — always verify both when purchasing cables or hubs.
+
+Legacy interfaces like **RS-232** (serial) and **VGA** (analog video) persist for diagnostics and KVM switches even if they are no longer performance-relevant. They are another good example of how standards and physical connectors differ. RS-232 can use DE-9 or DB-25 connectors, while VGA uses a DE-15 connector even though early days also used DE-9.
+
+import SerialConnectorsImage from './hardware-components/serial-connectors.png';
+
+<FigureWithCaption src={SerialConnectorsImage} caption="DE-9, DB-25, and DE-15" imageHeight="h-32"/>
+
+The table below compares the peak theoretical speeds of common interfaces. Real-world performance is always lower, and multiple factors (protocol overhead, queue depth, cable quality) affect actual throughput. Use this as a reference for rough comparisons, not absolute guarantees.
+
+| Interface | Peak bandwidth (latest version) |
+|---|---|
+| SATA | 16 Gb/s |
+| SAS | 22.5 Gb/s |
+| NVMe (PCIe) | 128 Gb/s |
+| PCI Express | 968 Gb/s |
+| NVLink (GPU–GPU) | 1.2 Tb/s |
+| USB 4 / Thunderbolt | 80 Gb/s |
+| HDMI | 48 Gb/s |
+| Ethernet | 400 Gb/s |
+| Wi-Fi | 40 Gb/s |
+| Bluetooth | 50 Mb/s |
+| LTE | 4 Gb/s (download) |
+| DRAM | 400 Gb/s |
+
+- Read motherboard fine print for which M.2 keys (B, M, B+M) and protocols each slot supports.
+- Treat USB marketing names (3.2 Gen 1/Gen 2/2x2) as bandwidth indicators, not just connector shape.
+- Prefer DisplayPort (or USB-C Alt Mode) for high refresh, high resolution displays.
+
+<Aside type="tip" icon="star" title="Example: Avoiding a Bandwidth Bottleneck">
+You buy a USB-C external NVMe enclosure rated for 20 Gb/s (USB 3.2 Gen 2x2) but plug it into a motherboard front-panel USB-C wired only for 5 Gb/s (Gen 1). CrystalDiskMark reports ~450 MB/s and you suspect the drive is slow. Checking the manual reveals the header's limitation; moving to a rear Gen 2x2 port raises sequential reads to ~2,000 MB/s, matching expectations.
+</Aside>
+
+**Common Pitfalls**
+
+- Equating M.2 with NVMe automatically; some slots are SATA-only.
+- Buying a "USB-C" device and discovering the host port is power-only or low-speed.
+- Assuming any PCIe slot length (x16 physical) guarantees full x16 electrical lanes.
+
+## Storage and Expansion Planning
+
+Building on interconnect concepts, storage and expansion planning combines media characteristics, connector/protocol capabilities, physical slot layout, and data integrity strategies. 
+
+While NVMe dominates performance discussions, multiple storage media remain relevant: 
+
+- **Hard Disk Drives (HDDs)** use spinning magnetic platters and moving heads, offering low cost per GB and good sequential throughput but higher latency and mechanical fragility; 
+- **Solid-State Drives (SSDs)** store data in NAND flash with no moving parts, giving very low seek latency and high parallel throughput; 
+- **Optical media** (e.g., Blu-ray) and **tape** provide removable or archival options with long shelf lives but slow random access. 
+
+SSD endurance is finite because flash cells wear after program/erase cycles; firmware spreads writes via **wear leveling** and recovers performance with **TRIM**, a command by which the OS signals which blocks are no longer in use so the drive can pre-erase them.
+
+Both HDDs and SSDs expose **SMART (Self-Monitoring, Analysis and Reporting Technology)** attributes to predict some failure modes, but sudden failures still occur; data protection relies on backups and redundancy, not SMART alone. Failure rate curves commonly show early "infant mortality," a stable middle period, then rising wear-out; burn-in testing can catch early defects.
+
+Physical form factor governs slot count and layout (ATX vs. mATX vs. ITX) and interacts with lane sharing: adding a second NVMe drive may downshift a PCIe slot or disable SATA ports, so manuals matter. 
+
+Plan early so cable routing, thermals, and lane allocation reinforce rather than conflict.
+
+- Use an NVMe drive for OS, apps, and I/O-intensive workloads, and optional SATA/HDD for bulk media or backups.
+- Enable TRIM (modern OSes do this by default) to sustain SSD write performance.
+- Monitor key SMART attributes (reallocated sector count, media errors) and act on trends, not isolated single values.
+- Verify heatspreaders or board-side M.2 shields fit with your chosen drives.
+- In small ITX builds, prefer single-sided M.2 SSDs and low-profile cables to reduce clutter.
+
+<Aside type="tip" icon="star" title="Example: M.2 and Lane Sharing">
+You populate a second M.2 slot and your previously x16 GPU now reports x8. The manual shows that slot steals CPU lanes from the primary GPU slot. Moving the second NVMe to a chipset-attached slot restores full GPU bandwidth with negligible impact to the secondary drive's latency, an optimal trade for graphics workloads.
+</Aside>
+
+**Common Pitfalls**
+
+- Mounting an M.2 drive without moving the standoff to the correct length.
+- Assuming front-panel USB-C exists because the case has the hole; the motherboard must also have the internal header.
+- Forgetting that a triple-slot GPU can block a second PCIe slot in mATX/ITX cases.
+- Assuming a single SMART warning means immediate catastrophic failure, or ignoring a steadily climbing count.
+- Believing secure file deletion is achieved by a quick format; remnants persist without full drive erase.
+- Ignoring lane sharing footnotes leading to disabled SATA ports after NVMe install.
+- Mounting HDDs loosely so vibration propagates and accelerates mechanical wear.
+
+<Aside type="tip" icon="star" title="Example: SMART Trend Response">
+You notice an SSD's SMART "media errors" count jump from 0 to 8 within a week while reallocated sectors remain 0. You immediately capture a fresh backup and schedule a warranty RMA instead of waiting; subsequent extended tests reveal intermittent read failures. Early action avoided data reconstruction stress later.
+</Aside>
+
+## Graphics and Parallel Accelerators
+
+**Graphics Processing Units (GPUs)** evolved from fixed-function pipelines into massively parallel processors optimized for throughput on vectorizable workloads. 
+
+For desktops they render frames; for compute they accelerate machine learning, scientific simulation, and video transcoding. Performance depends on shader count, memory bandwidth, and driver/runtime stack; bottlenecks arise when feeding data across a limited PCIe link or from insufficient system RAM. A GPU can be bottlenecked by a slow CPU (the CPU cannot prepare draw calls or data fast enough) and conversely a very fast GPU may idle waiting on a weak CPU — this CPU–GPU imbalance is commonly called a "bottleneck" and is worth checking when selecting parts for gaming or compute builds.
+
+import RTX5080Image from './hardware-components/rtx5080.png';
+
+<FigureWithCaption src={RTX5080Image} caption="Discrete GPU" imageHeight="h-64"/>
+
+**Integrated** graphics share system memory and are power-efficient, while **discrete** GPUs offer higher performance at greater power and thermal cost. Emerging **accelerators** (TPUs, NPUs) specialize further, trading flexibility for efficiency on specific operations like matrix multiply or inference.
+
+- Match GPU capability to resolution/refresh or compute workload; excess capacity wastes power.
+- Ensure PSU has sufficient dedicated PCIe power connectors and headroom.
+- Consider case airflow (exhaust vs. axial cooler designs) to prevent hotspot recirculation.
+
+<Aside type="tip" icon="star" title="Example: PCIe Lane Negotiation Impact">
+A GPU installed in a secondary mechanical x16 slot wired electrically for x4 (due to lane sharing with M.2 devices) shows reduced performance in bandwidth-heavy compute tasks (~10% drop). Moving it to the primary CPU-attached x16 slot restores full throughput, highlighting the need to confirm electrical lane counts, not just slot size.
+</Aside>
+
+**Common Pitfalls**
+
+- Assuming any x16-length slot provides x16 bandwidth.
+- Undersizing the PSU when adding a second accelerator or high-TDP GPU.
+- Blocking GPU intake with vertical cable runs or front drive cages.
+
+## Power, Cooling, and Firmware
+
+All the components you have selected only deliver sustained performance when electrical power is stable, heat is removed efficiently, and low-level firmware is configured sensibly. In 2025, **ATX 3.1** power supplies are the new standard, supporting higher transient loads for modern GPUs and improved efficiency. 
+
+A **power supply unit (PSU)** converts wall AC into regulated DC rails and exposes the 24-pin ATX connector for the board, one or two 8-pin EPS connectors for CPU power, and PCIe leads for GPUs. 
+
+The **ATX connector** is the standard 24-pin plug that powers the motherboard; **EPS** is a similar standard for CPU power. Choose wattage by adding the realistic maximum draw for CPU and GPU, then adding about 30-40% headroom to keep the PSU in an efficient, quiet range; favor reputable models with robust protections and an 80 Plus rating. Modular PSUs make upgrades and repairs easier, reducing e-waste.
+
+import RM1000EImage from './hardware-components/rm1000e.png';
+
+<FigureWithCaption src={RM1000EImage} caption="Modular PSU" imageHeight="h-64"/>
+
+**Cooling** keeps components within safe temperature limits; tower air coolers and AIO (All-In-One) liquid coolers must fit the case and memory height, and case fans should create a front/side-to-rear/top airflow path. PCIe 5.0 and Gen5 NVMe SSDs can run hot; ensure adequate airflow or heatsinks for these devices. When possible, choose fans and coolers that are easy to clean and replace, supporting longer hardware lifespans.
+
+**Firmware** is the low-level software that runs before your operating system. Modern systems use [**UEFI (Unified Extensible Firmware Interface)**](https://en.wikipedia.org/wiki/UEFI), which replaces the older [BIOS](https://en.wikipedia.org/wiki/BIOS). UEFI provides a graphical setup menu, lets you configure fan curves, memory profiles (XMP/EXPO), [Secure Boot](https://en.wikipedia.org/wiki/UEFI#Secure_Boot), and [Trusted Platform Module (TPM)](https://en.wikipedia.org/wiki/Trusted_Platform_Module) settings, and gives diagnostic LEDs and beep codes at first boot. With good power, clean airflow, and sensible firmware settings, you get a system that is fast, quiet, and reliable.
+
+- Use separate PCIe power cables for high-draw GPUs instead of daisy-chaining splitters.
+- Start with conservative fan curves, then tune for noise vs. temperature after stress testing.
+- Update firmware only on a stable system and only when it solves a real issue.
+- Prefer modular, repairable PSUs and coolers to reduce e-waste and support sustainability.
+
+<Aside type="tip" icon="star" title="Example: PSU Sizing, ATX 3.1, and 80PLUS">
+Suppose your CPU peaks near 125 W and your GPU near 350 W (a common value for PCIe 5.0 cards). Add 60 W for the board, drives, and fans to estimate ~535 W under combined load. Adding 40% headroom suggests a PSU around 750 W; choose an ATX 3.1 model rated for PCIe 5.0 transient loads. This keeps fan noise low, leaves upgrade room, and ensures compatibility with new GPUs.
+
+When choosing a power supply, look for the [**80 PLUS**](https://en.wikipedia.org/wiki/80_Plus) efficiency label. These ratings mean the PSU wastes less power as heat and is more reliable and quieter under load. For most builds, 80 Plus Gold is a sweet spot for efficiency and value. In UEFI, set case fans to ramp with CPU temperature and keep idle near 30-40% duty for quiet operation.
+
+import D80PlusImage from './hardware-components/80PLUS.png';
+
+<FigureWithCaption src={D80PlusImage} alt="80 PLUS efficiency badges"/>
+
+</Aside>
+
+**Common Pitfalls**
+
+- Forgetting the 8-pin (or 8+4-pin) EPS CPU power cable; the system will not POST.
+- Mounting an AIO radiator with tubes entering at the top of a front mount, which can trap air in the pump; prefer tubes at the bottom for front mounts.
+- Overlooking cooler and RAM height interactions; tall DIMMs can collide with some air coolers.
+- Choosing a PSU without ATX 3.1 support for a PCIe 5.0 GPU, leading to instability under load.
+
+## Enterprise and Business-Grade Hardware
+
+Consumer and business-class components share the same fundamental architecture but diverge in several areas relevant to system administrators. Business-grade and enterprise hardware typically includes:
+
+- **Remote management** features such as **Intel vPro** and **AMD PRO** platforms, which allow IT staff to remotely power cycle, update firmware, or diagnose systems even when the OS is unresponsive or the machine is powered off.
+- **Hardware security add-ons**: hardware-backed encryption keys, firmware integrity verification, and platform attestation features built into the CPU and chipset.
+- **Extended warranty and service contracts**: consumer-grade drives typically carry 2–5 year warranties; enterprise drives often have 5-year warranties and rated duty cycles suited for 24/7 operation.
+- **ISV (independent software vendor) certifications**: workstations from Dell, HP, and Lenovo with certified drivers for CAD, medical imaging, or financial software.
+
+The practical implication is that enterprise platforms simplify large-scale deployments and reduce the cost of unplanned downtime, but carry a price premium. For a sysadmin, understanding these features helps justify hardware selection to stakeholders and enables faster troubleshooting through remote management tooling.
+
+## Hardware Repairs, Diagnostics, and Tools
+
+Knowing how to diagnose and repair hardware is a core sysadmin skill. Before ordering replacement parts or escalating to a vendor, run systematic diagnostics.
+
+**Repair guidance**
+
+- [iFixit](https://www.ifixit.com/) maintains free, community-sourced teardown and repair guides for thousands of consumer devices. Search by model (e.g., "HP EliteBook 840") to find step-by-step instructions and identify replaceable components.
+- Manufacturer documentation (Dell, HP, Lenovo, etc.) provides service manuals and parts lists for business hardware.
+
+**Per-OS diagnostic entry points**
+
+- **macOS**: Run [Apple Diagnostics](https://support.apple.com/en-us/HT202731) at startup; review logs in the Console app.
+- **Windows**: Use Performance Monitor, Windows Memory Diagnostic, and `chkdsk` for disk checks.
+- **Linux**: Review `dmesg`, kernel logs in `/var/log`, and the Red Hat [hardware troubleshooting guide](https://www.redhat.com/sysadmin/troubleshooting-hardware-problems-linux).
+
+**Diagnostic tools**
+
+| Tool | Purpose |
+|---|---|
+| [MemTest86](https://www.memtest86.com/) | Bootable memory stress test (x86 and ARM) |
+| [Prime95](https://www.mersenne.org/download/) | CPU stability and thermal stress test |
+| [smartmontools / S.M.A.R.T.](https://www.smartmontools.org/) | Drive health monitoring (HDD and SSD) |
+| AIDA64 | System information, hardware sensor monitoring, stability tests |
+| Vendor tools | Most server vendors (Dell iDRAC, HP iLO) ship their own diagnostic suites |
+
+**General approach**: check logs, note any diagnostic LED codes or beep codes at POST, measure temperatures and utilization, inspect for physical damage and loose connections, then use the tools above to isolate the failing component. Always start by verifying the basics — power, seating, and connections — before running software diagnostics.
+
+## Assembly To First Boot
+
+With parts chosen for compatibility, careful physical assembly and a disciplined first-boot process convert planning into a working machine. 
+
+Building a computer is a process where careful planning and methodical steps pay off. The goal is to assemble the system so that every part is properly installed, cables are tidy, and the system boots reliably on the first try. The process starts with a "breadboard" test outside the case, then moves to final assembly, and ends with a first boot validation. Following a clear sequence helps avoid common mistakes and makes troubleshooting much easier if something goes wrong. Observe basic electrostatic discharge (ESD) precautions (work on a non-conductive surface and touch grounded metal before handling components) to reduce the chance of latent damage.
+
+<Steps>
+1. **Breadboard Test (Outside the Case)**
+
+    Install the CPU, one stick of memory, and (if needed) the GPU on the motherboard outside the case. Connect the power supply and monitor. Power on to check for a successful POST (Power-On Self-Test) and display output. This step ensures your core parts work before you commit to full assembly.
+
+2. **Install in the Case**
+
+    Mount the motherboard on the correct standoffs, install the I/O shield if needed, and route the main power cables (24-pin ATX, 8-pin EPS for CPU). Connect front-panel connectors (power switch, reset, LEDs) as shown in the manual. Install storage drives and any additional cards.
+
+3. **Cable Management and Final Checks**
+
+    Tidy up cables to ensure good airflow and no loose connectors. Double-check that all power cables are fully seated and that no standoffs are misplaced under the board (which could cause a short).
+
+4. **First Boot and UEFI Setup**
+
+    Power on the system. Enter UEFI/BIOS to confirm that the CPU, memory, and drives are detected. Check idle temperatures. Only after a clean POST should you enable memory profiles (XMP/EXPO), set the boot order, and adjust fan curves. If there is no display or no POST, simplify the build, reseat memory and GPU, and consult the board's diagnostic LEDs or beep codes.
+
+</Steps>
+
+<Aside type="tip" icon="star" title="Example">
+You build on an mATX board and get no video. The board's "DRAM" LED is lit. Remove the GPU, move a single DIMM to the A2 slot, and clear CMOS. The system now POSTs to UEFI. You update to a stable BIOS revision listed as improving memory compatibility, then reinstall the second DIMM and the GPU. The system boots; you run a short memory test before enabling EXPO.
+</Aside>
+
+**Common Pitfalls**
+
+- Misplaced standoffs causing a short under the board.
+- Reversing front-panel connectors or missing the power-switch header entirely.
+- Tight cable bends that slowly work connectors loose during transport.
+
+## Quick Recap
+
+- Match platform trio (CPU socket, chipset feature set, memory generation) early; verify BIOS support and lane sharing.
+- The ATX standard (descended from the IBM PC/AT) defines physical dimensions, power voltages (+12 V, +5 V, +3.3 V, −12 V, +5 VSB), and connectors; modern CPUs integrate the memory controller and PCIe lanes that used to live in the Northbridge.
+- Right-size and validate memory (dual channel, stability first, then XMP/EXPO; consider ECC for reliability-critical systems).
+- Plan storage & expansion holistically: NVMe (preferably Gen4/Gen5) for active workloads, monitored redundancy plus separate backups for resilience.
+- Distinguish protocol vs. connector to avoid hidden bandwidth bottlenecks and lane-sharing surprises; USB and PCIe generation matter as much as physical shape.
+- Treat physical constraints (case, PSU form factor, cooler/GPU clearance) and airflow as core design inputs; provide power/cooling headroom.
+- Check GPU–CPU balance when selecting parts for performance workloads.
+- For enterprise and business hardware, evaluate remote management (vPro/AMD PRO), extended warranties, and vendor diagnostics as part of total cost of ownership.
+- Use systematic diagnostics (MemTest86, S.M.A.R.T., OS logs, vendor tools) before replacing hardware.
+- Prefer modular, repairable, and upgradable components to support sustainability and reduce e-waste.
+
+## Further reading
+
+- <a href="https://www.youtube.com/watch?v=fpnE6UAfbtU" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #6: Registers and RAM (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=FZGugFqdr60" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #7: The CPU (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=rtAlC5J1U40" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #9: Advanced CPU Designs (YouTube)</a>
+- <a href="https://www.tomshardware.com/reviews/motherboard-parts-explained,5669.html" target="_blank" rel="noopener noreferrer">Motherboard Parts and Their Functions — Tom's Hardware</a>
+- <a href="https://www.newegg.com/tools/custom-pc-builder" target="_blank" rel="noopener noreferrer">Custom PC Builder — Newegg</a>
+- <a href="https://en.wikipedia.org/wiki/Chipset" target="_blank" rel="noopener noreferrer">Chipset — Wikipedia</a>
+- <a href="https://en.wikipedia.org/wiki/Central_processing_unit" target="_blank" rel="noopener noreferrer">Central processing unit — Wikipedia</a>
+- <a href="https://en.wikipedia.org/wiki/Graphics_processing_unit" target="_blank" rel="noopener noreferrer">Graphics processing unit — Wikipedia</a>
+- <a href="https://en.wikipedia.org/wiki/Computer_memory" target="_blank" rel="noopener noreferrer">Computer memory — Wikipedia</a>
+- <a href="https://www.redhat.com/sysadmin/troubleshooting-hardware-problems-linux" target="_blank" rel="noopener noreferrer">Troubleshooting hardware problems in Linux (Red Hat Enable Sysadmin)</a>
+- <a href="https://www.memtest86.com/" target="_blank" rel="noopener noreferrer">MemTest86 — Official Site</a>

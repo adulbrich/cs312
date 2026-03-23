@@ -1,0 +1,134 @@
+---
+title: 'Infrastructure Automation: Terraform, Ansible, and CI/CD'
+description: 'Provision infrastructure with Terraform, configure servers with Ansible, and automate image builds with CI/CD to deliver a reproducible Minecraft deployment.'
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO4: Demonstrate how to maintain a collection of devices using remote management tools in both centralized locations and across de-centralized organizations.
+- LO6: Produce written documentation of system problems, solutions, processes, and procedures.
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+*/}
+
+Obsidian Dynamics acquired a three-person startup last quarter. Their "CTO" (who is also their intern) was given read access to the AWS account as part of onboarding. He deleted your EC2 instance on his second day, thinking it was a test environment. It was not a test environment.
+
+Rebuilding from your notes took most of a weekend. Leadership's takeaway was not "let's improve the onboarding process" but rather "we need an audit trail." Every layer of the stack must now be automated: Terraform declares infrastructure, Ansible configures the host, and a CI/CD pipeline builds and publishes container images. Nothing is hand-configured. Everything is rebuildable.
+
+## Learning Objectives
+
+- Model cloud infrastructure with Terraform/OpenTofu.
+- Automate server configuration with Ansible so that it is idempotent and repeatable.
+- Automate image builds and publishing with a CI/CD pipeline.
+- Design for rebuildability and auditability.
+
+## Constraints (AWS Academy)
+
+- Use Terraform (or OpenTofu) for provisioning.
+- Ansible is required for post-provision server configuration.
+- CI/CD pipeline must use GitHub Actions.
+- EC2 remains the compute target.
+- Use IAM roles (instance profile) instead of placing AWS access keys on the host.
+- ECR remains the container registry for images.
+- You must document how your state is handled (remote state preferred when permitted).
+
+## Requirements
+
+### A. Provisioned Infrastructure (Terraform)
+
+Your Terraform must create (or explicitly and cleanly reference) the following:
+
+- Networking placement for the instance (VPC/subnet strategy must be stated).
+- Security Group rules for admin access and Minecraft port.
+- EC2 instance configuration (AMI choice, instance type, storage choice).
+- IAM role + instance profile that enables:
+  - Pulling from ECR
+  - Writing backups to S3
+
+### B. Configuration Management (Ansible)
+
+An Ansible playbook configures the EC2 instance after Terraform provisions it.
+
+- The playbook must:
+  - Install runtime prerequisites.
+  - Authenticate to ECR.
+  - Pull the pinned image version from ECR.
+  - Configure persistent storage for world data.
+  - Start the service.
+- Cloud-init/user-data may handle initial bootstrap (e.g., installing Ansible, cloning the repo), but all server configuration must live in the Ansible playbook.
+- The playbook must be idempotent: re-running it against the same host produces the same result without duplication or errors.
+
+### C. Image Build Pipeline (CI/CD)
+
+A GitHub Actions workflow automates image builds and pushes to ECR.
+
+- The workflow triggers when a git tag is pushed.
+- The workflow must build the Docker image and push it to ECR.
+- The workflow must include a smoke test (e.g., verify the image starts and the server JAR loads).
+- At least one successful pipeline run must be evidenced (link to the Actions tab or screenshot).
+- This replaces the manual `docker build && docker push` workflow from Assignment 2.
+
+### D. Rebuild Proof
+
+- Demonstrate that `terraform destroy` followed by `terraform apply` plus running the Ansible playbook produces a joinable server.
+- Document what happens to world data in your rebuild strategy (S3 restore, snapshot, or other approach).
+- A full end-to-end restore does not need to be shown in video if time-constrained, but the strategy must be documented.
+
+### E. Documentation
+
+Your documentation must include:
+
+- An architecture diagram showing AWS resources, Ansible configuration flow, and the CI/CD pipeline.
+- Terraform inputs/variables and what they control.
+- A change process: how a teammate would propose and review infrastructure changes.
+- A teardown checklist to prevent runaway cost.
+
+## Reflection Questions
+
+<Aside type="note" title="Question 1">
+What parts of your system are intended to be immutable vs. mutable? Where does state live?
+</Aside>
+<Aside type="note" title="Question 2">
+If a teammate pushed an Ansible change that broke the server, how would you detect and revert the damage?
+</Aside>
+<Aside type="note" title="Question 3">
+What is your "minimum safe" Security Group policy, and what tradeoffs did you make?
+</Aside>
+## What You'll Submit
+
+1. Terraform code and a brief design note.
+2. Ansible playbook(s) and inventory.
+3. GitHub Actions workflow file (`.github/workflows/`).
+4. Narrated screen recording (max 3 minutes) with timestamps for the following checkpoints:
+   1. Show `terraform apply` output and the Ansible playbook running against the instance.
+   2. `nmap` showing 25565/tcp reachable after automated deploy.
+   3. Show the GitHub Actions pipeline run (Actions tab or screenshot).
+   4. `terraform destroy` then `terraform apply`: show the server comes back joinable.
+5. Documentation package.
+
+Server MOTD must include your student name/ID. Submit timestamps alongside the video.
+
+## Minimal Contract (Acceptance)
+
+A TA/operator must be able to:
+
+- Review Terraform and Ansible code and understand what will be provisioned and configured.
+- Apply Terraform and run the playbook to get a joinable server.
+- See a successful CI/CD pipeline run that built and pushed an image.
+- Replace the server (destroy/apply) and recover service using the documented process.
+
+## Rubric (100 points)
+
+- **Terraform correctness (25)**: provisions required resources; inputs are sensible; SG rules are minimal and justified.
+- **Ansible configuration quality (25)**: playbook is idempotent; configures server from blank EC2 to running service; tasks are clear and ordered.
+- **CI/CD pipeline (15)**: GitHub Actions builds and pushes image to ECR on tag; includes smoke test; at least one successful run evidenced.
+- **Rebuildability evidence (15)**: destroy/apply cycle produces a joinable server; world data strategy is documented.
+- **Documentation + cost controls (20)**: architecture diagram, variable docs, teardown checklist, change process are complete and skimmable.
+
+## Extra Credit (up to +10)
+
+- **Remote Terraform state (+3)**: configure an S3 backend with state locking if permitted by AWS Academy; document the setup and tradeoffs.
+- **Ansible role reuse (+4)**: structure the playbook as reusable role(s) with variables; demonstrate running against a second instance or show how the role could be reused.
+- **Pipeline hardening (+3)**: add linting, security scanning, or build caching to the CI/CD pipeline; document what each step catches.

@@ -1,0 +1,46 @@
+---
+import { Image } from 'astro:assets';
+
+export interface Props {
+  src: ImageMetadata | string;
+  /** Defaults to caption when omitted. */
+  alt?: string;
+  /** Defaults to alt when omitted. */
+  caption?: string;
+
+  /** Optional class overrides */
+  imageHeight?: string;
+  wrapperClass?: string;
+  figureClass?: string;
+  figcaptionClass?: string;
+}
+
+const {
+  src,
+  alt,
+  caption,
+  imageHeight = "",
+  wrapperClass = "",
+  figureClass = "",
+  figcaptionClass = "",
+} = Astro.props;
+
+const computedAlt = alt ?? caption ?? "";
+const computedCaption = caption ?? alt ?? "";
+
+---
+
+<figure class={figureClass}>
+  <div class={`${imageHeight ? `**:${imageHeight} ` : ''} **:mx-auto **:w-auto **:object-contain ${wrapperClass}`}>
+    {typeof src === 'string'
+      ? <img src={src} alt={computedAlt} />
+      : <Image src={src} alt={computedAlt} />
+    }
+  </div>
+
+  {computedCaption && (
+    <figcaption class={`text-center italic text-sm m-0 p-0 ${figcaptionClass}`}>
+      {computedCaption}
+    </figcaption>
+  )}
+</figure>

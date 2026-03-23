@@ -1,0 +1,525 @@
+---
+title: Infrastructure as Code with Terraform
+description: "Use Terraform to declare and provision infrastructure: providers, resources, variables, and the plan/apply lifecycle."
+sidebar:
+  order: 9
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Imagine you need to deploy a web server. You log in to the AWS console, click through a dozen screens, choose an AMI, configure a security group, attach a key pair, and launch the instance. A week later a colleague needs an identical server in a different region. Can you reproduce exactly what you did? Probably not with perfect fidelity, and certainly not quickly.
+
+This scenario illustrates the core problem that Infrastructure as Code (IaC) solves. When infrastructure is provisioned by hand, three risks emerge:
+
+- **Configuration drift.** Two servers that should be identical slowly diverge as engineers apply ad-hoc changes to one but not the other.
+- **Lack of reproducibility.** If a disaster strikes, you are relying on memory and wiki pages to rebuild from scratch.
+- **No review process.** A manual change in a cloud console leaves no pull request, no diff, and no approval trail.
+
+IaC addresses all three by expressing infrastructure in source files that live in version control. Changes go through code review, environments can be rebuilt from a single command, and drift is detected automatically. Terraform is one of the most widely adopted IaC tools, and the one we will focus on throughout this chapter.
+
+## The Two Phases of Infrastructure Management
+
+It helps to think of infrastructure work in two distinct phases, each with different concerns.
+
+**Initial setup** is the provisioning phase: spinning up servers, configuring networks, creating load balancers, setting up databases. This is largely a one-time activity for a given environment.
+
+**Ongoing maintenance** is the operational phase: updating software versions, deploying new application releases, scaling resources up or down, changing network configuration, and recovering from failures.
+
+The same tools do not always serve both phases equally well. Terraform excels at provisioning and lifecycle management of infrastructure objects. Ansible is better suited for configuration management and application deployment onto already-running servers. CI/CD pipelines handle continuous deployment of application code. In practice, combining tools is common — for example, Terraform provisions an EC2 instance, Ansible installs and configures the application, and GitHub Actions deploys updates automatically.
+
+## Declarative vs. Imperative Approaches
+
+There are two broad philosophies for automating infrastructure. In an **imperative** approach, you write a sequence of steps: "create a VPC, then create a subnet, then launch an instance." Shell scripts and SDK-based tools work this way; the code describes *how* to reach the desired state.
+
+In a **declarative** approach, you describe *what* the desired state looks like: "there should be a VPC with one public subnet and one EC2 instance." The tool figures out how to make reality match the declaration.
+
+Terraform is declarative. You write configuration files that describe the end state of your infrastructure, and Terraform calculates the difference between that desired state and the current state, then applies only the necessary changes. This property (sometimes called **convergence**) means you can run Terraform repeatedly and it will not recreate resources that already exist and already match the configuration.
+
+<Aside type="tip">
+Declarative tools tend to be safer for teams because the configuration file always represents the intended state. You never have to wonder "which script was run last?"
+</Aside>
+
+## Terraform Architecture
+
+Terraform's design is built around four key concepts.
+
+### Providers
+
+A **provider** is a plugin that teaches Terraform how to talk to a particular platform or service. The AWS provider knows how to create EC2 instances and S3 buckets; the Google Cloud provider knows how to create Compute Engine VMs and Cloud Storage buckets. Providers are distributed independently from Terraform itself through the Terraform Registry.
+
+### Resources
+
+A **resource** is a single piece of infrastructure managed by a provider: an EC2 instance, a security group, a DNS record, a database. Each resource has a type (like `aws_instance`) and a local name that you choose (like `web`). Together these form the resource address `aws_instance.web`.
+
+### Data Sources
+
+A **data source** lets you look up information that already exists outside of your Terraform configuration. For example, you might query AWS for the latest Ubuntu AMI rather than hard-coding an AMI ID that will go stale. Data sources are read-only; Terraform will never try to create or modify them.
+
+### State
+
+Terraform keeps a record of every resource it manages in a **state file**. This file (by default, `terraform.tfstate` in your working directory) maps the resources in your configuration to real objects in the cloud. State is what allows Terraform to know that `aws_instance.web` corresponds to instance `i-0abc123def456` in your AWS account. We will discuss state management in greater detail later in this chapter.
+
+## HCL Syntax
+
+Terraform configurations are written in HashiCorp Configuration Language (HCL). HCL is designed to be both human-readable and machine-parseable. Let us walk through the primary building blocks.
+
+### Blocks
+
+Almost everything in HCL is a **block**. A block has a type, zero or more labels, and a body enclosed in curly braces:
+
+```hcl
+resource "aws_instance" "web" {
+  ami           = "ami-0abcdef1234567890"
+  instance_type = "t3.micro"
+}
+```
+
+Here `resource` is the block type, `"aws_instance"` is the resource type label, and `"web"` is the local name label. Inside the body, `ami` and `instance_type` are **arguments**.
+
+### Variables
+
+Input variables let you parameterize your configuration so that the same code can be reused across environments. You declare a variable in a `variable` block:
+
+```hcl
+variable "instance_type" {
+  description = "EC2 instance size"
+  type        = string
+  default     = "t3.micro"
+}
+```
+
+You then reference it elsewhere as `var.instance_type`. Variables can be set through `.tfvars` files, environment variables, or command-line flags.
+
+### Outputs
+
+Outputs expose values from your configuration so that other tools (or other Terraform configurations) can consume them:
+
+```hcl
+output "web_public_ip" {
+  description = "Public IP of the web server"
+  value       = aws_instance.web.public_ip
+}
+```
+
+After `terraform apply`, outputs are printed to the terminal and stored in state.
+
+### Locals
+
+Locals are named expressions that let you avoid repeating complex values:
+
+```hcl
+locals {
+  common_tags = {
+    Project     = "cs312"
+    Environment = "dev"
+  }
+}
+```
+
+You reference a local as `local.common_tags`. Unlike variables, locals are not settable by the user; they are internal to the configuration.
+
+## A Running Example: Web Server with SSH Access
+
+Throughout the rest of this chapter we will build a small but realistic Terraform configuration. We start with a single web server that we can reach over SSH, then evolve the configuration to add a database tier.
+
+Create a file called `main.tf`:
+
+```hcl
+terraform {
+  required_version = ">= 1.6"
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = var.region
+}
+
+variable "region" {
+  description = "AWS region to deploy into"
+  type        = string
+  default     = "us-west-2"
+}
+
+variable "instance_type" {
+  description = "EC2 instance size"
+  type        = string
+  default     = "t3.micro"
+}
+
+data "aws_ami" "ubuntu" {
+  most_recent = true
+  owners      = ["099720109477"] # Canonical
+
+  filter {
+    name   = "name"
+    values = ["ubuntu/images/hvm-ssd/ubuntu-*-24.04-amd64-server-*"]
+  }
+}
+
+resource "aws_security_group" "web_sg" {
+  name        = "web-sg"
+  description = "Allow SSH and HTTP"
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.ssh_cidr]
+  }
+
+  ingress {
+    description = "HTTP"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = local.common_tags
+}
+
+variable "ssh_cidr" {
+  description = "CIDR block allowed to SSH (e.g., your IP as x.x.x.x/32)"
+  type        = string
+}
+
+locals {
+  common_tags = {
+    Project = "cs312"
+    ManagedBy = "terraform"
+  }
+}
+
+resource "aws_instance" "web" {
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  vpc_security_group_ids = [aws_security_group.web_sg.id]
+
+  tags = merge(local.common_tags, {
+    Name = "cs312-web"
+  })
+}
+
+output "web_public_ip" {
+  description = "Public IP of the web server"
+  value       = aws_instance.web.public_ip
+}
+```
+
+This configuration declares a provider (AWS), looks up the latest Ubuntu 24.04 AMI, creates a security group that permits SSH from a specific CIDR and HTTP from anywhere, launches an EC2 instance into that security group, and outputs the public IP.
+
+<Aside type="note">
+The `ssh_cidr` variable has no default, so Terraform will prompt you for a value (or you can supply one in a `.tfvars` file). This is a deliberate safety choice: you should never hard-code `0.0.0.0/0` for SSH access.
+</Aside>
+
+## The Core Workflow
+
+Terraform has four commands that form the backbone of every workflow.
+
+<Steps>
+1. **`terraform init`** downloads provider plugins and initializes the working directory. You run this once when you create a new configuration and again whenever you add a new provider or change backend settings.
+
+2. **`terraform plan`** reads the current state, compares it to the configuration, and produces an execution plan. The plan shows exactly what Terraform intends to create, modify, or destroy. Nothing changes yet.
+
+3. **`terraform apply`** executes the plan. Terraform will show the plan one more time and ask for confirmation before making any changes. Once confirmed, it provisions resources and updates the state file.
+
+4. **`terraform destroy`** removes all resources managed by the configuration. This is the inverse of `apply` and is invaluable for tearing down temporary environments.
+</Steps>
+
+In practice the cycle looks like this:
+
+```bash
+terraform init
+terraform plan -var 'ssh_cidr=203.0.113.50/32'
+terraform apply -var 'ssh_cidr=203.0.113.50/32'
+```
+
+After the apply completes, Terraform prints the outputs (in this case, the web server's public IP). You can SSH to the instance using that IP.
+
+When you are done experimenting:
+
+```bash
+terraform destroy -var 'ssh_cidr=203.0.113.50/32'
+```
+
+<Aside type="caution">
+Always run `terraform plan` before `terraform apply` in any shared or production environment. Treat the plan output as a diff to review carefully, just as you would review a code change before merging.
+</Aside>
+
+## State Management
+
+State is one of the most important (and most misunderstood) aspects of Terraform. The state file records the mapping between your configuration and the real infrastructure, along with metadata such as resource dependencies and attribute values.
+
+### Local State
+
+By default, Terraform writes state to a file called `terraform.tfstate` in the project directory. This works fine for individual learning and experimentation, but it creates problems in a team setting. If two engineers run `terraform apply` at the same time from their own laptops, they can overwrite each other's state and corrupt the environment.
+
+### Remote State
+
+For any shared project you should store state in a **remote backend**. AWS S3 with DynamoDB locking is one common pattern:
+
+```hcl
+terraform {
+  backend "s3" {
+    bucket         = "my-terraform-state"
+    key            = "cs312/web/terraform.tfstate"
+    region         = "us-west-2"
+    dynamodb_table = "terraform-locks"
+    encrypt        = true
+  }
+}
+```
+
+With this configuration, state is stored in an S3 bucket (encrypted at rest) and a DynamoDB table provides locking. If one engineer is running `apply`, another engineer who tries to run `apply` at the same time will receive a lock error rather than silently corrupting state.
+
+### Sensitive Data in State
+
+Be aware that state files contain the attribute values of every managed resource. If a resource has a password attribute, that password is stored in state in plain text. This is why you should always encrypt remote state at rest, restrict access to the state bucket, and never commit `terraform.tfstate` to version control.
+
+<Aside type="danger">
+Add `*.tfstate` and `*.tfstate.backup` to your `.gitignore` file. State files often contain secrets and should never be committed to a repository.
+</Aside>
+
+## Variables and Parameterization
+
+We have already seen simple variable declarations. Let us explore the full range of options for supplying values to variables.
+
+### Defaults and Required Variables
+
+A variable with a `default` block is optional; Terraform uses the default if no value is provided. A variable without a default is required; Terraform will prompt for it interactively or fail if running in a non-interactive context (like CI).
+
+### Variable Files
+
+For repeatable deployments, you can create a file called `terraform.tfvars` (or any file ending in `.auto.tfvars`):
+
+```hcl
+region        = "us-west-2"
+instance_type = "t3.small"
+ssh_cidr      = "203.0.113.50/32"
+```
+
+Terraform loads `terraform.tfvars` automatically. You can also specify a file explicitly:
+
+```bash
+terraform apply -var-file="production.tfvars"
+```
+
+This pattern is useful for managing multiple environments (dev, staging, production) from the same configuration with different variable files.
+
+### Variable Types
+
+Terraform supports several types beyond `string`: `number`, `bool`, `list(...)`, `map(...)`, and `object(...)`. For example, to allow multiple SSH CIDRs:
+
+```hcl
+variable "ssh_cidrs" {
+  description = "CIDR blocks allowed to SSH"
+  type        = list(string)
+  default     = []
+}
+```
+
+You would then use `var.ssh_cidrs` in the security group's `cidr_blocks` argument.
+
+## Resource Dependencies
+
+Terraform automatically infers dependencies between resources based on references. In our example, `aws_instance.web` references `aws_security_group.web_sg.id`, so Terraform knows it must create the security group before the instance. This is called an **implicit dependency**.
+
+Occasionally you need a dependency that is not visible in the configuration. For example, suppose you have an IAM role that must exist before an instance can assume it, but the instance references the role by name (a string) rather than by Terraform attribute. In this case you can declare an **explicit dependency**:
+
+```hcl
+resource "aws_instance" "web" {
+  ami           = data.aws_ami.ubuntu.id
+  instance_type = var.instance_type
+
+  depends_on = [aws_iam_role.web_role]
+}
+```
+
+The `depends_on` argument tells Terraform to create or update `aws_iam_role.web_role` before touching `aws_instance.web`, even though there is no attribute reference linking them.
+
+<Aside type="tip">
+Prefer implicit dependencies (through attribute references) whenever possible. They are self-documenting: anyone reading the code can see why one resource depends on another. Use `depends_on` only as a last resort.
+</Aside>
+
+## Evolving the Configuration: Adding a Database Tier
+
+Let us extend our running example. A real web application typically needs a database. We will add an RDS instance and a second security group that allows the web server to connect on port 5432 (PostgreSQL).
+
+Add the following to `main.tf`:
+
+```hcl
+variable "db_password" {
+  description = "Password for the database master user"
+  type        = string
+  sensitive   = true
+}
+
+resource "aws_security_group" "db_sg" {
+  name        = "db-sg"
+  description = "Allow PostgreSQL from web tier"
+
+  ingress {
+    description     = "PostgreSQL from web"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.web_sg.id]
+  }
+
+  tags = local.common_tags
+}
+
+resource "aws_db_instance" "database" {
+  identifier          = "cs312-db"
+  engine              = "postgres"
+  engine_version      = "16"
+  instance_class      = "db.t3.micro"
+  allocated_storage   = 20
+  db_name             = "appdb"
+  username            = "dbadmin"
+  password            = var.db_password
+  skip_final_snapshot = true
+
+  vpc_security_group_ids = [aws_security_group.db_sg.id]
+
+  tags = local.common_tags
+}
+
+output "db_endpoint" {
+  description = "RDS endpoint for the database"
+  value       = aws_db_instance.database.endpoint
+}
+```
+
+Notice how `aws_security_group.db_sg` references `aws_security_group.web_sg.id` in its ingress rule. This creates an implicit dependency: Terraform will create the web security group first, then the database security group, and finally the RDS instance. The `db_password` variable is marked `sensitive = true`, which tells Terraform to redact its value from plan and apply output.
+
+After applying, you now have a two-tier architecture: a web server accessible over SSH and HTTP, backed by a PostgreSQL database that only the web server can reach.
+
+## Modules
+
+As configurations grow, repeating the same blocks across projects becomes tedious and error-prone. Terraform **modules** let you package a set of resources into a reusable unit.
+
+A module is simply a directory containing `.tf` files. The directory you have been working in is actually the **root module**. You can create a child module by placing files in a subdirectory and calling it from the root:
+
+```
+project/
+  main.tf          # root module
+  modules/
+    web_server/
+      main.tf      # child module
+      variables.tf
+      outputs.tf
+```
+
+The child module `modules/web_server/main.tf` might contain the security group and instance resources we wrote earlier, parameterized with variables. The root module calls it like this:
+
+```hcl
+module "web" {
+  source        = "./modules/web_server"
+  instance_type = "t3.micro"
+  ssh_cidr      = var.ssh_cidr
+}
+
+output "web_ip" {
+  value = module.web.public_ip
+}
+```
+
+Modules enforce a clean interface: the child module declares which variables it accepts and which outputs it exposes. The root module passes values in and reads outputs back. This encapsulation makes it possible to share modules across teams or even publish them to the Terraform Registry for the community to use.
+
+<Aside type="tip">
+A good rule of thumb: if you find yourself copying and pasting a block of resources, it is time to extract a module. Start simple; a module with two or three resources is perfectly fine.
+</Aside>
+
+## Other Infrastructure Provisioning Tools
+
+Terraform is not the only tool in this space. The ecosystem includes several alternatives worth knowing:
+
+- **OpenTofu** — a community-maintained, open-source fork of Terraform created after HashiCorp changed Terraform's license in 2023. OpenTofu is a drop-in replacement with identical HCL syntax and is the choice for teams that require a fully open-source license.
+- **Pulumi** — lets you write infrastructure definitions in general-purpose programming languages (TypeScript, Python, Go, C#) rather than a domain-specific language like HCL. This can lower the barrier for developers already fluent in those languages.
+- **AWS CloudFormation** — AWS's native IaC service. It uses JSON or YAML templates and integrates tightly with the AWS ecosystem, but it is cloud-specific.
+- **Azure Resource Manager (ARM) / Bicep** — Microsoft's equivalent for Azure infrastructure. Bicep is a more readable DSL that compiles down to ARM JSON.
+- **OpenStack Heat** — the orchestration service for OpenStack private clouds.
+- **Ansible** — primarily a configuration management tool, but it can also provision infrastructure resources through its cloud modules. The overlap with Terraform is real, but the tools approach the problem differently: Ansible is procedural and agent-less; Terraform is declarative and state-driven.
+
+<Aside type="tip">
+Many tools overlap in capability without being identical. Terraform + Ansible is a common pairing: Terraform provisions infrastructure objects, Ansible configures the software running on them. Learning one tool deeply makes learning the others significantly easier, since the underlying concepts (desired state, idempotency, providers, inventory) recur across the whole ecosystem.
+</Aside>
+
+## Best Practices
+
+As you begin using Terraform in real projects, the following practices will save you from common pitfalls.
+
+### Pin Provider Versions
+
+Always specify version constraints for your providers. The `~> 5.0` constraint we used means "any version in the 5.x range." Without version pinning, a provider update could introduce breaking changes that alter your infrastructure unexpectedly.
+
+```hcl
+required_providers {
+  aws = {
+    source  = "hashicorp/aws"
+    version = "~> 5.0"
+  }
+}
+```
+
+After running `terraform init`, Terraform writes a `.terraform.lock.hcl` file that records the exact provider versions installed. Commit this lock file to version control so that every team member uses the same versions.
+
+### Use Remote State from the Start
+
+Even for small projects, storing state remotely with locking prevents a class of painful bugs. Set up an S3 backend (or equivalent) before your first `apply` in any shared environment.
+
+### Treat Plans as Code Review
+
+In a CI/CD pipeline, generate a plan file with `terraform plan -out=tfplan` and require a human to review it before running `terraform apply tfplan`. This is analogous to requiring pull request reviews before merging code.
+
+### Keep Secrets Out of Configuration
+
+Never hard-code passwords, API keys, or other secrets in `.tf` files. Use variables marked `sensitive = true`, inject values through environment variables (Terraform reads `TF_VAR_<name>` automatically), or integrate with a secrets manager.
+
+### Estimate Costs Before Applying
+
+Tools like Infracost can analyze a Terraform plan and estimate the monthly cost of the resources being created. Adding cost estimation to your review process prevents surprise bills.
+
+### Organize with a Consistent Structure
+
+A typical Terraform project separates concerns across files:
+
+```
+main.tf          # provider config and primary resources
+variables.tf     # all input variable declarations
+outputs.tf       # all output declarations
+terraform.tfvars # default variable values (environment-specific)
+```
+
+This convention is not enforced by Terraform (it loads all `.tf` files in a directory), but it makes configurations easier to navigate.
+
+## Summary
+
+Infrastructure as Code transforms infrastructure management from a manual, error-prone process into a disciplined engineering practice. Terraform, with its declarative approach and broad provider ecosystem, is a powerful tool for this purpose. The broader IaC ecosystem includes OpenTofu (an open-source Terraform fork), Pulumi, CloudFormation, and others — the concepts transfer directly across all of them. The key ideas to carry forward are:
+
+- **Declarative configuration** describes the desired end state; Terraform calculates how to get there.
+- **The plan/apply workflow** gives you a preview before any change takes effect, reducing risk.
+- **State** is the bridge between your configuration and real infrastructure; protect it, lock it, and never commit it to Git.
+- **Variables and modules** make configurations reusable and maintainable across environments and teams.
+- **Version pinning, remote state, and code review** are non-negotiable practices for production use.
+
+Starting from a single web server with a security group, we built up to a two-tier architecture with a database, introduced modules for reuse, and discussed the operational practices that make Terraform safe and effective in team environments. These fundamentals apply regardless of the cloud provider or the scale of the infrastructure you manage.
+
+## Further reading
+
+- <a href="https://www.youtube.com/watch?v=l5k1ai_GBDE" target="_blank" rel="noopener noreferrer">Terraform explained in 15 minutes — Beginner Tutorial (YouTube)</a>
+- <a href="https://developer.hashicorp.com/terraform/tutorials/automation/github-actions" target="_blank" rel="noopener noreferrer">Automate Terraform with GitHub Actions — HashiCorp Developer</a>

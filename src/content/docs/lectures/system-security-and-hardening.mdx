@@ -1,0 +1,452 @@
+---
+title: System Security and Hardening
+description: "Practical server hardening from first boot: threat models, least privilege, SSH keys, UFW firewalls, Fail2Ban, patching, and auditing."
+sidebar:
+  order: 6
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Imagine you have just provisioned a fresh Ubuntu server and attached it to a public IP address. Within minutes, automated scanners will discover it. Within hours, bots will begin probing SSH, HTTP, and any other open port for default credentials and known vulnerabilities. This is not hypothetical; it is the baseline reality of operating a public-facing server.
+
+This chapter walks through the practical steps you would take to harden that server, starting from the moment you first log in. Every decision traces back to a simple principle: reduce the attack surface so that the only things reachable from the network are services you intentionally chose to expose, configured in the most restrictive way that still allows them to function.
+
+## Why Security Matters
+
+Security failures have real consequences: data breaches expose private user information and intellectual property, extended downtime costs revenue and erodes trust, and ransomware can put a company out of business entirely. The motivating framework is the **CIA Triad**, which describes the three properties that every secure system must preserve.
+
+**Confidentiality** means that only authorized users and processes can access or modify data. Authentication (proving you are who you claim to be — passwords, biometrics, cryptographic keys) and authorization (verifying that you have the right to access what you are requesting — file permissions, access control lists) are the primary mechanisms. A data breach is a loss of confidentiality.
+
+**Integrity** means that data is maintained in a correct state and cannot be improperly modified, either accidentally or maliciously. Read/write permissions, checksums, backups, and ECC RAM all protect integrity. Altering business records to influence decision-making or defacing a website's source code are examples of integrity violations.
+
+**Availability** means that authorized users can access data and services when they need to. Systems must handle expected load, hardware must be maintained, infrastructure must be monitored, and a Disaster Recovery (DR) plan must be in place. A Denial-of-Service (DoS) attack — or its distributed variant, DDoS, which floods a target with traffic from many sources — is a direct attack on availability.
+
+<Aside type="note">
+A useful illustration: an ATM covers all three CIA properties. It enforces confidentiality through two-factor authentication (card + PIN); it enforces integrity by ensuring that withdrawals are accurately reflected in your account balance; and it provides availability by being accessible in a public place even when the bank is closed.
+</Aside>
+
+## How Security is Compromised
+
+Understanding the attack surface is the first step toward defending it. Common attack vectors include:
+
+- **Social engineering.** Phishing emails, pretexting, and other manipulation techniques that trick legitimate users into handing over credentials or executing malicious code.
+- **Software vulnerabilities.** Unpatched bugs in the OS, libraries, or applications that allow an attacker to execute arbitrary code or escalate privileges.
+- **Distributed Denial-of-Service (DDoS).** Flooding a service with traffic from many sources (often a botnet) until it exhausts available bandwidth or server resources.
+- **Insider abuse.** Employees or contractors who misuse their legitimate access, whether for personal gain, espionage, or sabotage.
+- **Misconfiguration.** A database listening on a public IP with no authentication, an open S3 bucket, or a debug endpoint left exposed — these are responsible for a large fraction of real breaches.
+- **Hardware-level attacks.** Side-channel attacks that extract secrets by monitoring power consumption, electromagnetic emissions, or CPU frequency/temperature behavior.
+
+## The Threat Model for a Public Server
+
+Before locking anything down, it helps to think clearly about what you are defending against. A **threat model** identifies the assets you care about (the data on the server, the services it provides, the trust your users place in you), the adversaries who might target them, and the attack vectors those adversaries are likely to use.
+
+For a typical web-facing Ubuntu server, the most common attack vectors are:
+
+- **Credential stuffing and brute force.** Automated tools try thousands of username/password combinations against SSH, database ports, and web login forms.
+- **Exploitation of unpatched software.** Public vulnerability databases (CVEs) are monitored by attackers just as they are monitored by defenders. A known vulnerability in an outdated package is low-hanging fruit.
+- **Misconfigured services.** A database listening on 0.0.0.0 with no authentication, or a web server exposing a debug panel, can be discovered and exploited within hours.
+- **Privilege escalation.** Once an attacker gains any foothold on the system (even as a low-privilege user), they will attempt to escalate to root.
+
+## Defense in Depth
+
+No single security control is sufficient on its own. A layered approach — sometimes called "defense in depth" or **multi-layered security** — ensures that if one layer fails, others remain in place. A practical layering strategy combines:
+
+- **Access control and authentication:** user management, multi-factor authentication (MFA), single sign-on (SSO), and strong password policies.
+- **Endpoint security:** anti-malware software, host-based firewalls, and patch management.
+- **Network security:** firewalls at multiple network layers, VPNs for remote access, and network segmentation.
+- **Encryption:** data protected both at rest (stored on disk or in a database) and in transit (using TLS/HTTPS).
+- **Backups:** regular, tested, off-site copies of critical data.
+- **Hardware and software redundancy:** failover systems that maintain availability under partial failure.
+- **Incident response:** a documented plan for detecting breaches, containing damage, recovering data, and communicating with affected parties.
+
+## Principle of Least Privilege
+
+The principle of least privilege states that every user, process, and program should operate with the minimum set of permissions necessary to complete its task. On a Linux server, this principle shows up in three places: user accounts, file permissions, and sudo access.
+
+Your server should never run application workloads as root. Instead, create a dedicated non-root user for administration:
+
+```bash
+sudo adduser deploy
+sudo usermod -aG sudo deploy
+```
+
+Sensitive configuration files should be readable only by the accounts that need them. If you find a config file that is world-readable and contains credentials, tighten it:
+
+```bash
+sudo chmod 640 /etc/myapp/config.yml
+sudo chown root:myapp /etc/myapp/config.yml
+```
+
+The `sudo` tool grants temporary elevated privileges. You can refine access in `/etc/sudoers` (always edited with `visudo`) to restrict specific users to specific commands:
+
+```bash
+# Allow deploy to restart nginx without a password prompt
+deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
+```
+
+<Aside type="caution">
+Never edit `/etc/sudoers` directly with a text editor. A syntax error in that file can lock you out of sudo entirely. Always use `visudo`, which validates the file before saving.
+</Aside>
+
+### Kernel-Level Access Controls: AppArmor and SELinux
+
+Beyond user-level permissions, the Linux kernel offers Mandatory Access Control (MAC) frameworks that constrain what individual programs can do, regardless of which user runs them.
+
+**AppArmor** (the default on Ubuntu) defines per-application profiles that specify which files, capabilities, and network operations a program is permitted to use. If a web server is compromised, an AppArmor profile can prevent it from reading `/etc/shadow` or spawning a shell, even though the process itself might have a path to those actions.
+
+**SELinux** (the default on Red Hat-based distributions such as RHEL, CentOS, and Fedora) provides finer-grained control through security labels on every file, process, and socket. SELinux is more powerful but significantly more complex to configure.
+
+The key difference in practice: AppArmor is path-based and relatively straightforward to manage; SELinux is label-based and suitable for environments with strict regulatory requirements. AppArmor is the practical starting point for Ubuntu servers.
+
+```bash
+# Check AppArmor status
+sudo aa-status
+
+# Enforce a specific profile
+sudo aa-enforce /etc/apparmor.d/usr.sbin.nginx
+```
+
+## SSH Hardening
+
+SSH is the primary way you will manage your server, which makes it both essential and a high-value target. The default OpenSSH configuration on Ubuntu is functional but permissive.
+
+### Key-Based Authentication
+
+Password authentication over SSH is vulnerable to brute-force attacks. Key-based authentication eliminates this vector entirely. On your local machine, generate a key pair and copy it to the server:
+
+```bash
+ssh-keygen -t ed25519 -C "yourname@example.com"
+ssh-copy-id deploy@your-server-ip
+```
+
+Verify that you can log in with the key before proceeding. If you disable password authentication before confirming key access, you will lock yourself out.
+
+### Hardening sshd_config
+
+Once key-based login works, edit `/etc/ssh/sshd_config` on the server and set the following directives:
+
+```text
+PasswordAuthentication no
+PermitRootLogin no
+PubkeyAuthentication yes
+AllowUsers deploy
+```
+
+The `AllowUsers` directive limits SSH access to a specific list of usernames. Even if another account has a valid shell and key, SSH will reject the connection if that user is not listed.
+
+You may also consider changing the SSH port from 22 to a high-numbered port (e.g., 2222). This does not provide real security against a determined attacker, but it dramatically reduces log noise from automated scanners:
+
+```text
+Port 2222
+```
+
+<Aside type="tip">
+If you change the SSH port, update your firewall rules before restarting the SSH service. Otherwise you will be locked out.
+</Aside>
+
+After making changes, restart the SSH daemon and test from a second terminal before closing your current session:
+
+```bash
+sudo systemctl restart sshd
+```
+
+## Firewall Configuration with UFW
+
+A firewall controls which network traffic is allowed to reach your server and which is silently dropped. Ubuntu ships with `ufw` (Uncomplicated Firewall), a user-friendly frontend for the underlying `iptables`/`nftables` rules.
+
+The most important firewall principle is "default deny." Start by blocking all incoming traffic and allowing all outgoing traffic, then open only the ports your server actually needs:
+
+```bash
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+```
+
+UFW includes a built-in rate limiting feature that temporarily blocks IP addresses making too many connections in a short period. This is especially useful for SSH:
+
+```bash
+sudo ufw limit 22/tcp
+```
+
+The `limit` rule allows six connection attempts within a 30-second window, then blocks the source IP. Enable the firewall and review:
+
+```bash
+sudo ufw enable
+sudo ufw status verbose
+```
+
+You should see output similar to:
+
+```text
+Status: active
+Default: deny (incoming), allow (outgoing), disabled (routed)
+
+To                         Action      From
+--                         ------      ----
+22/tcp                     LIMIT IN    Anywhere
+80/tcp                     ALLOW IN    Anywhere
+443/tcp                    ALLOW IN    Anywhere
+```
+
+<Aside type="caution">
+Always confirm that your SSH port is allowed before enabling UFW. If you enable the firewall without an SSH allow rule, you will lose remote access to the server.
+</Aside>
+
+You can verify the firewall from another machine:
+
+```bash
+nmap -Pn your-server-ip
+```
+
+Only the ports you explicitly allowed should appear as open.
+
+## Keeping Software Updated
+
+Unpatched software is one of the easiest targets for attackers. The time between a vulnerability being publicly disclosed and exploit code appearing in the wild is often measured in hours, not days.
+
+The basic approach is straightforward:
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+```
+
+For security patches specifically, Ubuntu supports automatic installation through the `unattended-upgrades` package:
+
+```bash
+sudo apt install -y unattended-upgrades
+sudo dpkg-reconfigure -plow unattended-upgrades
+```
+
+The configuration file at `/etc/apt/apt.conf.d/50unattended-upgrades` controls which updates are applied automatically. By default, it enables only security updates, which is a sensible starting point. You can also configure email notifications and automatic reboots for kernel updates:
+
+```text
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+};
+Unattended-Upgrade::Mail "admin@example.com";
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+```
+
+<Aside type="note">
+Automatic reboots should be used carefully on production servers. Consider whether your application can tolerate brief downtime at 4:00 AM, or whether you need a more controlled maintenance window.
+</Aside>
+
+## Fail2Ban: Brute-Force Protection
+
+Even with key-based SSH authentication, your server will still receive thousands of failed login attempts that fill your logs and consume resources. Fail2Ban monitors log files for patterns of repeated failures and temporarily bans offending IP addresses by adding firewall rules.
+
+```bash
+sudo apt install -y fail2ban
+sudo systemctl enable --now fail2ban
+```
+
+The main configuration file, `jail.conf`, should not be edited directly because package updates will overwrite it. Instead, create a local override file at `/etc/fail2ban/jail.local`:
+
+```ini
+[sshd]
+enabled  = true
+port     = ssh
+filter   = sshd
+backend  = systemd
+maxretry = 5
+findtime = 600
+bantime  = 3600
+banaction = ufw
+```
+
+This tells Fail2Ban to watch for failed SSH logins. If the same IP fails five times within 600 seconds (10 minutes), it will be banned for 3600 seconds (one hour) via a UFW rule. After saving, restart the service:
+
+```bash
+sudo systemctl restart fail2ban
+```
+
+You can check the status of any jail and see currently banned IPs:
+
+```bash
+sudo fail2ban-client status sshd
+```
+
+```text
+Status for the jail: sshd
+|- Filter
+|  |- Currently failed: 2
+|  |- Total failed:     847
+|  `- File list:        /var/log/auth.log
+`- Actions
+   |- Currently banned: 3
+   |- Total banned:     41
+   `- Banned IP list:   203.0.113.50 198.51.100.23 192.0.2.17
+```
+
+To manually unban an IP (if you accidentally triggered a ban from your own location):
+
+```bash
+sudo fail2ban-client set sshd unbanip 203.0.113.50
+```
+
+<Aside type="tip">
+Fail2Ban is not limited to SSH. It ships with filters for Apache, Nginx, Postfix, and many other services. Once you are comfortable with the SSH jail, consider enabling jails for other public-facing services.
+</Aside>
+
+## Zero Trust: Never Trust, Always Verify
+
+Traditional network security assumed that everything inside the corporate perimeter was safe. The **Zero Trust** model rejects that assumption entirely: it treats every request as if it originates from an untrusted network, regardless of whether it comes from inside or outside the firewall.
+
+Zero Trust is built on three principles:
+
+1. **Verify explicitly.** Always authenticate and authorize based on all available context: user identity, device health, location, data classification, and behavioral anomalies. Do not rely on network location as a proxy for trust.
+2. **Use least-privilege access.** Grant just-in-time, just-enough access (JIT/JEA) rather than broad standing permissions. Apply risk-based adaptive policies that can tighten access when anomalies are detected.
+3. **Assume breach.** Segment networks and workloads to minimize the blast radius of any compromise. Enforce end-to-end encryption and use analytics to detect lateral movement early.
+
+<Aside type="note">
+Zero Trust is not a single product — it is an architectural philosophy. It is now mandated for US federal agencies under White House memorandum M-22-09, and it underpins modern identity platforms like Microsoft Entra ID and Google BeyondCorp.
+</Aside>
+
+## Secrets Management with HashiCorp Vault
+
+SSH keys, API tokens, database passwords, and TLS certificates are all secrets that need protection beyond what a configuration file or environment variable can provide. **HashiCorp Vault** is an open-source tool for centralized secrets management.
+
+Vault's key capabilities include:
+
+- **Secret engines** that store and serve different types of secrets (key/value pairs, PKI certificates, cloud provider credentials, etc.).
+- **Dynamic secrets** that are generated on demand and automatically expire — a database credential that exists for only 30 minutes dramatically reduces the window of exposure if it is leaked.
+- **Fine-grained policies** that determine which applications and identities can access which secrets.
+- **Audit logging** of every secret access event.
+
+For system administrators, Vault is the answer to the question: "where do I store the production database password so that the application can read it, but it is not hard-coded in a config file or visible in the repository?"
+
+## Staying Current on Vulnerabilities
+
+Hardening a server is not a one-time event. New vulnerabilities are disclosed constantly, and a configuration that was secure last month may not be secure today.
+
+Authoritative sources for tracking security vulnerabilities:
+
+- **NVD (National Vulnerability Database)** at [nvd.nist.gov](https://nvd.nist.gov/) — the US government's catalog of known CVEs, with severity scores (CVSS).
+- **CVE (Common Vulnerabilities and Exposures)** at [cve.org](https://www.cve.org/) — the canonical identifier system for publicly known vulnerabilities.
+- **SecLists.Org** at [seclists.org](https://seclists.org/) — an archive of security mailing lists.
+- **Vendor security advisories** — Ubuntu Security Notices (USN), Red Hat Security Advisories (RHSA), and similar feeds from your OS and software vendors.
+- **Security blogs** such as Krebs on Security and the SANS Internet Storm Center for news and analysis.
+
+<Aside type="tip">
+Subscribe to the Ubuntu Security Notices RSS feed or mailing list for your distribution. When a critical vulnerability is disclosed in a package you run, you want to know the same day, not next week.
+</Aside>
+
+## File Integrity and Auditing Basics
+
+Hardening is not a one-time event. You need ongoing visibility into what is happening on your server.
+
+If an attacker modifies a system binary or configuration file, you want to know about it. The simplest approach uses cryptographic hashes to establish a baseline and check for changes:
+
+```bash
+# Generate a baseline
+sha256sum /usr/bin/sshd /etc/ssh/sshd_config > /root/baseline.sha256
+
+# Later, verify nothing has changed
+sha256sum -c /root/baseline.sha256
+```
+
+For production environments, tools like `AIDE` (Advanced Intrusion Detection Environment) automate this across the entire filesystem with nightly checks and email reports.
+
+Linux logs are your audit trail. The most relevant logs for security monitoring are `/var/log/auth.log` (authentication events), `/var/log/syslog` (general system messages), and the systemd journal. A few useful commands:
+
+```bash
+# Recent failed SSH login attempts
+journalctl -u sshd --since "1 hour ago" | grep "Failed"
+
+# Sudo commands executed today
+journalctl _COMM=sudo --since today
+
+# Recent logins
+last -10
+```
+
+Regular log review, even a quick daily scan, can reveal patterns that automated tools miss: login attempts from unexpected IPs, sudo usage at unusual hours, or services restarting without explanation.
+
+## Backups
+
+No technology, policy, or security control is more important than having a working backup. A good backup strategy satisfies five properties:
+
+- **Frequent.** The backup must run often enough to capture recent changes. For critical data, this might mean hourly incremental backups.
+- **Comprehensive.** It must cover all data that cannot be easily recreated.
+- **Accessible.** The backup is worthless if restoring from it takes so long that the business cannot survive the downtime.
+- **Verifiable.** A backup that was never tested is an assumption, not a guarantee. Backups should report success or failure, and restoration should be tested periodically.
+- **Secured.** An infected or encrypted backup cannot save you. Backups must be stored separately from the live system — ideally off-site — and access-controlled so that ransomware spreading across the network cannot reach them.
+
+<Aside type="caution">
+Cloud sync services (Dropbox, Google Drive) and version control (Git) are not backups. They are useful tools, but a ransomware infection that encrypts your files can propagate through a sync client and overwrite cloud copies within minutes. Proper off-site backups are a separate, purpose-built system.
+</Aside>
+
+On Linux, `rsync` remains a widely-used tool for scripted backups:
+
+```bash
+# Incremental backup with compression to a remote server
+rsync -avzh /var/data/ backup-server:/backups/$(date +%F)/
+```
+
+Pair this with a cron job for automation, and store snapshots far enough back to detect a slow-moving infection before all clean copies are overwritten.
+
+## DevSecOps: Integrating Security into the Pipeline
+
+**DevSecOps** extends the DevOps philosophy by integrating security practices at every stage of the development and operations lifecycle rather than treating security as a final gate before deployment. The guiding concept is **Shift-Left Security**: move security checks earlier in the process, where fixes are cheaper and faster.
+
+DevSecOps tools organized by pipeline stage:
+
+**Pre-Commit Hooks** run before code is even committed to a repository. Tools like [Talisman](https://github.com/thoughtworks/talisman) and [TruffleHog](https://github.com/trufflesecurity/trufflehog) scan outgoing changesets for secrets (tokens, passwords, private keys) that should not enter version control.
+
+**Software Composition Analysis (SCA)** identifies known vulnerabilities in open-source dependencies. Tools include [Dependabot](https://github.com/dependabot) (built into GitHub) and [Snyk](https://snyk.io/product/open-source-security-management/). SCA runs automatically on every push.
+
+**Static Application Security Testing (SAST)** analyzes source code without executing it, looking for injection vulnerabilities, insecure authentication patterns, and unsafe API usage. Tools include [SonarQube](https://www.sonarsource.com/products/sonarqube/) and [Bandit](https://github.com/PyCQA/bandit) (Python-specific). SAST integrates into CI pipelines and provides developers with immediate feedback.
+
+**Dynamic Application Security Testing (DAST)** tests a running application by simulating attacks and observing how it responds. Unlike SAST, DAST can discover vulnerabilities that only appear at runtime. Tools include [OWASP ZAP](https://www.zaproxy.org/).
+
+**Container and Image Security** scans Docker images for known CVEs before they are deployed. Tools include [Grype](https://github.com/anchore/grype) and [Trivy](https://github.com/aquasecurity/trivy). [Falco](https://falco.org/) monitors running containers for anomalous behavior.
+
+**Runtime Application Self-Protection (RASP)** embeds security controls directly into an application's runtime environment, detecting and blocking attacks as they occur rather than relying solely on perimeter defenses.
+
+<Aside type="note">
+For a sysadmin or DevOps engineer, the most immediately actionable DevSecOps practices are: adding secret scanning pre-commit hooks to every repository, enabling Dependabot on GitHub projects, and scanning container images in CI before pushing to a registry.
+</Aside>
+
+## Security Checklists and CIS Benchmarks
+
+When hardening a server, it helps to work from a structured checklist rather than relying on memory. The **Center for Internet Security (CIS)** publishes detailed benchmarks for most major operating systems, including Ubuntu. These provide hundreds of specific recommendations, each with a rationale, audit procedure, and remediation command.
+
+A simplified hardening checklist for a new Ubuntu server, drawn from the themes in this chapter:
+
+<Steps>
+
+1. **Update all packages** and enable unattended security upgrades.
+
+2. **Create a non-root admin user**, add it to the sudo group, and lock the root account for direct login.
+
+3. **Configure SSH** with key-based authentication, disable password auth, disable root login, and restrict access with AllowUsers.
+
+4. **Enable UFW** with a default deny policy, then allow only the specific ports your services require.
+
+5. **Install and configure Fail2Ban** to protect SSH and any other public-facing service from brute-force attacks.
+
+6. **Review open ports** with `ss -tulpen` and verify that nothing unexpected is listening.
+
+7. **Set up log monitoring** for visibility into authentication events, sudo usage, and service health.
+
+8. **Create a file integrity baseline** for critical system binaries and configuration files.
+
+</Steps>
+
+The full CIS benchmarks go much further, covering kernel parameters, filesystem mount options, network stack tuning, and audit daemon configuration. Working through the CIS benchmark for your distribution is an excellent way to deepen your understanding of Linux security.
+
+<Aside type="note">
+No checklist can make a server perfectly secure. Security is an ongoing process of monitoring, patching, and adapting. The goal of hardening is to raise the cost of attack high enough that automated threats are neutralized and targeted attackers face significant obstacles at every step.
+</Aside>
+
+## Summary
+
+This chapter traced the path from a freshly provisioned Ubuntu server to a hardened system ready for the public internet. The organizing frameworks are the CIA Triad (confidentiality, integrity, availability) and defense in depth — no single control is sufficient, so you layer them. The practical controls are: restrict network access with a default-deny firewall, authenticate with keys instead of passwords, run services with the minimum privileges they need, keep software patched, monitor logs continuously, and back up everything to a secured off-site location.
+
+Beyond individual server hardening, the Zero Trust model extends these principles to entire architectures: never assume a request is safe based on where it comes from; always verify identity and context. And the DevSecOps philosophy carries security left into the development pipeline itself — catching secrets, vulnerabilities in dependencies, and insecure code patterns before they ever reach production.
+
+Work from a checklist so you do not skip a step under pressure. These practices are not exotic or advanced; they are the baseline. Every server you deploy should start here.

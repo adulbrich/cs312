@@ -1,0 +1,369 @@
+---
+title: Cloud Computing & VM Deployment
+description: "Cloud service models, AWS core infrastructure (EC2, VPC, S3, IAM, ECR), and practical patterns for launching, securing, and managing cloud workloads."
+sidebar:
+  order: 10
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Cloud computing replaces the capital expense of buying and maintaining physical servers with on-demand, pay-as-you-go infrastructure accessed over the Internet. For a system administrator, this shift changes the daily work surface: instead of racking hardware and running cables, you provision resources through APIs, web consoles, and infrastructure-as-code tools. The underlying principles (networking, storage, security, capacity planning) remain the same, but the speed of provisioning and the scale of available resources increase dramatically.
+
+This chapter uses a running example to ground the concepts. Imagine a small startup called Greenfield Analytics that currently runs its web application on a single on-premise server in a closet. The server handles the web frontend, application logic, and database on one machine. Traffic is growing, the hardware is aging, and the team wants to move to the cloud. We will follow Greenfield's migration decisions as we explore each layer of cloud infrastructure.
+
+By the end of this chapter you should be able to explain cloud service models, navigate AWS regions and availability zones, launch and connect to EC2 instances, design basic network topologies with VPCs, choose appropriate storage services, configure identity and access controls, push container images to a registry, and reason about cloud costs.
+
+## Cloud Service Models
+
+Cloud providers offer services at different levels of abstraction. Understanding these levels helps you decide how much infrastructure you want to manage yourself versus how much you want the provider to handle.
+
+**Infrastructure as a Service (IaaS)** gives you virtual machines, networks, and storage. You install and manage the operating system, middleware, and applications. AWS EC2 is the canonical example; others include Google Compute Engine and Azure Virtual Machines. Greenfield's first move to the cloud will likely be IaaS: they can replicate their existing server setup on a virtual machine without rewriting their application.
+
+**Platform as a Service (PaaS)** removes the operating system from your responsibility. You deploy application code, and the platform handles scaling, patching, and runtime management. AWS Elastic Beanstalk, Google App Engine, and Heroku are examples. Greenfield might consider PaaS later, once they want to stop managing OS updates and focus purely on their application code.
+
+**Software as a Service (SaaS)** is the fully managed end of the spectrum. You consume the application through a browser or API with no infrastructure management at all. Google Workspace, Slack, and Salesforce are SaaS products. Greenfield already uses SaaS daily for email, chat, and project management.
+
+<Aside type="tip" title="Choosing a Service Model">
+A useful rule of thumb: start with the highest level of abstraction that meets your requirements, and move lower only when you need control that the higher level does not provide. If PaaS handles your web app well, there is no operational advantage to managing your own VMs for that workload.
+</Aside>
+
+These models are not mutually exclusive. A single organization typically uses all three. Greenfield might run their custom analytics engine on EC2 (IaaS), deploy their public API on Elastic Beanstalk (PaaS), and use Google Workspace for company email (SaaS).
+
+### Renting vs. Building a Cloud
+
+The simplest path to cloud infrastructure is to rent it from a public provider. You pay money, the provider gives you API access to virtualized servers, storage, and networking, and you can instantly launch resources as needed. AWS, Azure, GCP, and similar providers all follow this model.
+
+Alternatively, organizations can build a private cloud using on-premises servers and software like OpenStack or Proxmox VE. This requires a higher initial investment — servers, network and power and cooling infrastructure, and engineers who know how to operate it — but gives you full control and can be cost-effective at large scale.
+
+<Aside type="caution" title="Cloud Does Not Mean Cheap">
+Public cloud costs scale with consumption. Forgetting to shut down unused instances, choosing oversized instance types, or not using storage lifecycle policies can result in unexpectedly large bills. Always set billing alerts and review costs regularly.
+</Aside>
+
+## AWS Regions, Availability Zones, and the Shared Responsibility Model
+
+AWS organizes its global infrastructure into **regions**, each of which is a geographic cluster of data centers. Examples include `us-east-1` (Northern Virginia), `us-west-2` (Oregon), and `eu-west-1` (Ireland). Within each region, AWS operates multiple **availability zones** (AZs), which are physically separate facilities with independent power, cooling, and networking connected by low-latency links. An AZ name like `us-east-1a` identifies a specific facility within the `us-east-1` region.
+
+Why does this matter for Greenfield? If they deploy their application in a single AZ and that facility loses power, their application goes down. By spreading resources across two or three AZs within the same region, they gain resilience against localized failures without the complexity of multi-region networking. Region selection also affects latency (choose a region close to your users), regulatory compliance (some data must stay within certain jurisdictions), and cost (pricing varies by region).
+
+The **shared responsibility model** defines who secures what. AWS is responsible for the security *of* the cloud: the physical data centers, the hypervisor layer, the global network backbone, and the managed services' underlying infrastructure. You are responsible for security *in* the cloud: your operating system patches, application code, firewall rules, IAM policies, and data encryption choices. This division means that even though AWS physically secures the building, a misconfigured security group that exposes your database to the Internet is your problem, not theirs.
+
+<Aside type="caution" title="A Common Misconception">
+"It's in the cloud, so AWS handles security" is dangerously wrong. The majority of cloud security incidents stem from customer misconfigurations, not AWS infrastructure failures. You must actively manage your side of the shared responsibility model.
+</Aside>
+
+## Compute: EC2 Instances
+
+Amazon Elastic Compute Cloud (EC2) provides resizable virtual machines called **instances**. Greenfield's first cloud resource will almost certainly be an EC2 instance replacing their closet server.
+
+### Instance Types and Families
+
+EC2 instance types follow a naming convention like `t3.micro` or `m6i.xlarge`. The letter prefix indicates a **family** optimized for a particular balance of resources. The `t` family provides burstable CPU performance suitable for workloads with variable utilization; the `m` family offers a balanced ratio of compute, memory, and networking; the `c` family is compute-optimized for CPU-intensive work; the `r` family is memory-optimized for in-memory databases or caches. The number after the letter indicates the generation (higher is newer and generally more cost-effective), and the suffix after the dot indicates the size (nano, micro, small, medium, large, xlarge, 2xlarge, and so on), each roughly doubling the resources of the previous size.
+
+For Greenfield's initial migration, a `t3.small` or `t3.medium` instance would be reasonable. The burstable `t3` family accumulates CPU credits during idle periods and spends them during traffic spikes, making it cost-effective for workloads that are not constantly CPU-bound.
+
+### Amazon Machine Images (AMIs)
+
+An **AMI** is a template that contains the operating system, pre-installed software, and configuration used to launch an instance. AWS provides official AMIs for Amazon Linux, Ubuntu, Debian, Red Hat, and Windows Server. The community and AWS Marketplace offer specialized AMIs with additional software pre-installed. You can also create custom AMIs from a running instance to capture your configured environment as a reusable template.
+
+When Greenfield provisions their first instance, they will select an AMI as the starting point. For a general-purpose Linux server, the Ubuntu Server LTS or Amazon Linux 2023 AMIs are common choices.
+
+### Key Pairs and SSH Access
+
+EC2 uses **key pairs** for SSH authentication rather than passwords. When you create a key pair through AWS, you receive the private key file (a `.pem` file) exactly once; AWS retains only the public key. The public key is injected into the instance at launch, typically into the default user's `~/.ssh/authorized_keys` file.
+
+<Aside type="caution" title="Protect Your Private Key">
+If you lose the private key file, you cannot retrieve it from AWS. Store it securely, set its file permissions to `400` (read-only for the owner), and never commit it to version control.
+</Aside>
+
+### Launching an Instance
+
+The launch process can be performed through the AWS Management Console or the AWS CLI. Here is the CLI approach, which is more repeatable and scriptable.
+
+<Steps>
+1. **Create a key pair** (if you do not already have one):
+   ```bash
+   aws ec2 create-key-pair \
+     --key-name greenfield-key \
+     --query 'KeyMaterial' \
+     --output text > greenfield-key.pem
+   chmod 400 greenfield-key.pem
+   ```
+
+2. **Find an AMI ID** for Ubuntu Server in your region:
+   ```bash
+   aws ec2 describe-images \
+     --owners 099720109477 \
+     --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
+     --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+     --output text
+   ```
+
+3. **Launch the instance** using the AMI and key pair:
+   ```bash
+   aws ec2 run-instances \
+     --image-id ami-0abcdef1234567890 \
+     --instance-type t3.small \
+     --key-name greenfield-key \
+     --security-group-ids sg-0123456789abcdef0 \
+     --subnet-id subnet-0123456789abcdef0 \
+     --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=greenfield-web}]' \
+     --query 'Instances[0].InstanceId' \
+     --output text
+   ```
+
+4. **Wait for the instance to reach a running state**, then retrieve its public IP:
+   ```bash
+   aws ec2 describe-instances \
+     --instance-ids i-0abcdef1234567890 \
+     --query 'Reservations[0].Instances[0].PublicIpAddress' \
+     --output text
+   ```
+
+5. **Connect via SSH**:
+   ```bash
+   ssh -i greenfield-key.pem ubuntu@<PUBLIC_IP>
+   ```
+</Steps>
+
+Once connected, Greenfield can install their application stack just as they would on the closet server, but now on infrastructure that can be stopped, resized, snapshotted, and replicated.
+
+## Networking: VPCs, Subnets, and Security
+
+When Greenfield's closet server sat on the office network, networking was simple: one NIC, one IP, one router. In AWS, you design your own virtual network from scratch using a **Virtual Private Cloud (VPC)**.
+
+### VPCs and Subnets
+
+A VPC is a logically isolated network within your AWS account, defined by a CIDR block (for example, `10.0.0.0/16`, providing 65,536 addresses). Within the VPC you create **subnets**, each associated with a specific availability zone and carved from the VPC's address space.
+
+Subnets are classified as **public** or **private** based on their routing. A public subnet has a route to an **internet gateway (IGW)**, which allows resources with public IPs to communicate directly with the Internet. A private subnet does not route to an IGW; instances there can reach the Internet only through a **NAT gateway** (which lives in a public subnet) or not at all.
+
+For Greenfield, a sensible initial design places the web server in a public subnet (it needs to receive HTTP traffic from the Internet) and the database in a private subnet (it should only be reachable from the web server, not from the Internet).
+
+```
+VPC: 10.0.0.0/16
+├── Public Subnet (10.0.1.0/24) - us-east-1a
+│   ├── Internet Gateway route
+│   └── Web server instance
+├── Public Subnet (10.0.2.0/24) - us-east-1b
+│   └── (future redundancy)
+├── Private Subnet (10.0.10.0/24) - us-east-1a
+│   ├── NAT Gateway route
+│   └── Database instance
+└── Private Subnet (10.0.11.0/24) - us-east-1b
+    └── (future redundancy)
+```
+
+### Security Groups
+
+A **security group** acts as a stateful virtual firewall attached to an instance's network interface. You define inbound and outbound rules specifying allowed protocols, ports, and source/destination addresses. "Stateful" means that if an inbound request is allowed, the response traffic is automatically permitted regardless of outbound rules.
+
+Greenfield's web server security group might look like this:
+
+| Direction | Protocol | Port Range | Source/Destination | Purpose |
+|-----------|----------|------------|-------------------|---------|
+| Inbound | TCP | 80 | 0.0.0.0/0 | HTTP from anywhere |
+| Inbound | TCP | 443 | 0.0.0.0/0 | HTTPS from anywhere |
+| Inbound | TCP | 22 | 203.0.113.50/32 | SSH from office IP only |
+| Outbound | All | All | 0.0.0.0/0 | Allow all outbound |
+
+Their database security group would allow inbound traffic only on port 5432 (PostgreSQL) from the web server's security group, not from any IP address. This is a key pattern: referencing one security group as the source in another security group's rules creates a trust relationship between tiers without hardcoding IP addresses.
+
+### Network ACLs
+
+**Network Access Control Lists (NACLs)** operate at the subnet level and are stateless, meaning you must define rules for both directions explicitly. They process rules in order by rule number, and the first match wins. NACLs provide a coarse outer perimeter, while security groups provide fine-grained per-instance control. Most teams rely primarily on security groups and use NACLs as an additional defense layer or to block specific IP ranges at the subnet boundary.
+
+<Aside type="note" title="Security Groups vs NACLs">
+Security groups are stateful, operate at the instance level, and only support allow rules (all traffic is denied by default). NACLs are stateless, operate at the subnet level, and support both allow and deny rules. In practice, security groups handle most access control needs; NACLs are useful when you need explicit deny rules or subnet-wide policies.
+</Aside>
+
+## Storage: EBS and S3
+
+Greenfield's closet server used a single physical disk for everything. In AWS, storage is decoupled from compute, giving you flexibility to choose the right storage type for each workload.
+
+### Elastic Block Store (EBS)
+
+**EBS** provides network-attached block storage volumes that you attach to EC2 instances. An EBS volume behaves like a raw, unformatted disk that you can format with a filesystem and mount. EBS volumes persist independently of the instance lifecycle; if you stop or terminate an instance, the volume can survive (depending on the "delete on termination" setting).
+
+EBS volume types offer different performance characteristics. General Purpose SSD (`gp3`) provides a good baseline for most workloads and lets you independently configure IOPS and throughput. Provisioned IOPS SSD (`io2`) is designed for latency-sensitive databases. Throughput Optimized HDD (`st1`) suits sequential-access workloads like log processing. Each instance's root volume is an EBS volume, and you can attach additional volumes for data separation.
+
+```bash
+# Create a 50 GB gp3 volume
+aws ec2 create-volume \
+  --volume-type gp3 \
+  --size 50 \
+  --availability-zone us-east-1a \
+  --tag-specifications 'ResourceType=volume,Tags=[{Key=Name,Value=greenfield-data}]'
+
+# Attach it to a running instance
+aws ec2 attach-volume \
+  --volume-id vol-0abcdef1234567890 \
+  --instance-id i-0abcdef1234567890 \
+  --device /dev/sdf
+```
+
+After attaching, you would SSH into the instance, create a filesystem on the device, and mount it, just as you would with a physical disk on a traditional server.
+
+### Simple Storage Service (S3)
+
+**S3** is object storage, fundamentally different from block storage. Instead of mounting a filesystem, you store and retrieve objects (files) via HTTP APIs, organized into **buckets**. Each object is identified by a key (essentially a path-like string) and can range from a few bytes to 5 terabytes.
+
+S3 is ideal for backups, static assets, log archives, and data that does not require POSIX filesystem semantics. Greenfield might use S3 to store nightly database backups, user-uploaded files, and application build artifacts.
+
+```bash
+# Create a bucket
+aws s3 mb s3://greenfield-backups-2026
+
+# Upload a file
+aws s3 cp database-backup.sql.gz s3://greenfield-backups-2026/db/2026-03-15.sql.gz
+
+# List objects in the bucket
+aws s3 ls s3://greenfield-backups-2026/db/
+```
+
+**Lifecycle policies** automate cost management by transitioning objects to cheaper storage classes over time or deleting them after a retention period. For example, Greenfield could configure a policy that moves backup files to S3 Glacier (archival storage) after 30 days and deletes them after 365 days. This keeps recent backups immediately accessible while minimizing long-term storage costs.
+
+<Aside type="tip" title="Block vs Object Storage">
+Use EBS when your application needs a traditional filesystem with random read/write access (databases, application servers). Use S3 when you are storing discrete files that are written once and read many times (backups, images, logs, static websites). Many architectures use both: EBS for the live database volume and S3 for database backups and static content.
+</Aside>
+
+## Identity and Access Management (IAM)
+
+When Greenfield had one server, access control was simple: whoever had the root password or an SSH key could do everything. In AWS, **IAM** provides granular control over who (or what) can access which resources and under what conditions.
+
+### Users, Groups, and Policies
+
+An **IAM user** represents a person or service that interacts with AWS. Rather than attaching permissions directly to users, best practice is to organize users into **IAM groups** (such as "developers" or "operations") and attach **policies** to the groups. A policy is a JSON document that specifies allowed or denied actions on specific resources.
+
+For example, a policy granting read-only access to a specific S3 bucket looks like this:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::greenfield-backups-2026",
+        "arn:aws:s3:::greenfield-backups-2026/*"
+      ]
+    }
+  ]
+}
+```
+
+The principle of least privilege applies: grant only the permissions needed for a task, nothing more. A developer who needs to deploy code should not have permission to delete VPCs or modify billing settings.
+
+### Roles and Instance Profiles
+
+**IAM roles** are meant to be *assumed* rather than permanently assigned. They provide temporary credentials and are particularly important for EC2 instances. Instead of storing AWS access keys on an instance (which creates a secret that could be stolen), you attach an **instance profile** containing a role. The instance can then call AWS APIs using temporary credentials that rotate automatically.
+
+Greenfield's web server needs to read from an S3 bucket to serve user-uploaded images. Rather than embedding access keys in the application configuration, they create an IAM role with S3 read permissions and attach it to the instance via an instance profile. The application uses the AWS SDK, which automatically discovers the role credentials from the instance metadata service.
+
+```bash
+# Create a role that EC2 can assume
+aws iam create-role \
+  --role-name greenfield-web-role \
+  --assume-role-policy-document file://ec2-trust-policy.json
+
+# Attach a policy granting S3 read access
+aws iam attach-role-policy \
+  --role-name greenfield-web-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+# Create an instance profile and add the role
+aws iam create-instance-profile \
+  --instance-profile-name greenfield-web-profile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name greenfield-web-profile \
+  --role-name greenfield-web-role
+```
+
+<Aside type="caution" title="Never Hardcode Credentials">
+Embedding AWS access keys in application code, configuration files, or environment variables on an instance is a common source of security breaches. Always use IAM roles and instance profiles for EC2 workloads. If credentials appear in a Git repository, consider them compromised and rotate them immediately.
+</Aside>
+
+## Container Registries: ECR
+
+As Greenfield matures, they begin containerizing parts of their application. They need a place to store their Docker images. **Amazon Elastic Container Registry (ECR)** is a fully managed Docker container registry integrated with AWS IAM for access control.
+
+ECR organizes images into **repositories**, each holding multiple tagged versions of a single image. The workflow follows the standard Docker push/pull pattern, with an added authentication step.
+
+<Steps>
+1. **Create a repository**:
+   ```bash
+   aws ecr create-repository \
+     --repository-name greenfield/web-app \
+     --image-scanning-configuration scanOnPush=true
+   ```
+
+2. **Authenticate Docker to ECR** (credentials are valid for 12 hours):
+   ```bash
+   aws ecr get-login-password --region us-east-1 | \
+     docker login --username AWS --password-stdin \
+     123456789012.dkr.ecr.us-east-1.amazonaws.com
+   ```
+
+3. **Tag and push an image**:
+   ```bash
+   docker tag greenfield-web:latest \
+     123456789012.dkr.ecr.us-east-1.amazonaws.com/greenfield/web-app:v1.2.0
+
+   docker push \
+     123456789012.dkr.ecr.us-east-1.amazonaws.com/greenfield/web-app:v1.2.0
+   ```
+
+4. **Pull the image** (on a deployment target):
+   ```bash
+   docker pull \
+     123456789012.dkr.ecr.us-east-1.amazonaws.com/greenfield/web-app:v1.2.0
+   ```
+</Steps>
+
+Enabling `scanOnPush` tells ECR to automatically scan images for known vulnerabilities when they are pushed, surfacing CVEs in the console and API responses. A sensible tagging strategy uses both a version tag (`v1.2.0`) and `latest` for the most recent stable build, so deployments can reference either a specific version for reproducibility or the newest build for development environments.
+
+## Cost Awareness
+
+Cloud spending can surprise teams that are used to fixed hardware budgets. With on-premise servers, the cost is paid upfront and largely fixed. In the cloud, every resource accrues charges by the hour (or second, for EC2), by the gigabyte, or by the request. Greenfield needs to build cost awareness into their operational culture from day one.
+
+### The Free Tier
+
+AWS offers a **free tier** for new accounts that includes 750 hours per month of `t2.micro` or `t3.micro` instances (enough to run one instance continuously), 5 GB of S3 storage, and limited usage of many other services, all for the first 12 months. Some services (like the Lambda free tier of 1 million requests per month) remain free indefinitely. The free tier is an excellent way to learn, but it requires vigilance: accidentally launching a larger instance type, leaving resources running in a forgotten region, or exceeding storage limits will generate charges.
+
+### Billing Alerts
+
+Setting up billing alerts early prevents surprises. AWS CloudWatch can trigger an alarm when estimated charges exceed a threshold, sending you an email notification.
+
+```bash
+# Enable billing alerts (must be done in us-east-1)
+aws cloudwatch put-metric-alarm \
+  --alarm-name "billing-alarm-10usd" \
+  --metric-name EstimatedCharges \
+  --namespace AWS/Billing \
+  --statistic Maximum \
+  --period 21600 \
+  --threshold 10.00 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 1 \
+  --alarm-actions arn:aws:sns:us-east-1:123456789012:billing-alerts \
+  --dimensions Name=Currency,Value=USD
+```
+
+Greenfield sets a $10 alarm for their learning environment and a $100 alarm for their production account. When an alarm fires, they investigate what is consuming resources and take corrective action.
+
+### Right-Sizing and Stopping vs Terminating
+
+**Right-sizing** means matching instance types to actual workload requirements rather than guessing large. AWS Cost Explorer and Compute Optimizer analyze utilization history and recommend smaller or differently balanced instance types. Greenfield might discover that their `t3.medium` instance averages 8% CPU utilization and could safely downsize to a `t3.small`, halving the compute cost.
+
+The distinction between **stopping** and **terminating** an instance matters for both cost and data. Stopping an instance is like powering off a server; the instance disappears from compute billing, but its EBS volumes persist (and still incur storage charges). You can restart a stopped instance later. Terminating an instance is permanent: the instance is deleted, and any EBS volumes marked "delete on termination" are destroyed. Greenfield's development instances should be stopped every evening and started each morning to avoid paying for idle overnight hours. Their production instance, of course, runs continuously.
+
+<Aside type="caution" title="Stopped Is Not Free">
+A stopped instance does not incur compute charges, but its attached EBS volumes, allocated Elastic IP addresses (when not associated with a running instance), and any snapshots continue to generate costs. Review all associated resources when cleaning up.
+</Aside>
+
+## Quick Recap
+
+Cloud computing shifts infrastructure from a capital expense to an operational one, offering IaaS, PaaS, and SaaS at increasing levels of abstraction. AWS organizes its infrastructure into regions and availability zones, providing geographic redundancy and failure isolation. EC2 instances are virtual machines launched from AMIs and accessed via SSH key pairs, with instance families optimized for different workload profiles. VPCs let you design isolated networks with public and private subnets, secured by stateful security groups and stateless NACLs. EBS provides block storage for database volumes and operating system disks, while S3 provides object storage for backups, artifacts, and static content. IAM controls access through users, groups, roles, and policies, with instance profiles providing secure, credential-free API access from EC2. ECR offers a managed container registry integrated with IAM for storing Docker images. Cost discipline requires billing alerts, right-sizing, and understanding the difference between stopping and terminating instances. Throughout all of this, the shared responsibility model reminds us that AWS secures the infrastructure, but we secure everything we build on top of it.

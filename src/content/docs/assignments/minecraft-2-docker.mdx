@@ -1,0 +1,128 @@
+---
+title: 'Docker + ECR on EC2'
+description: 'Run Minecraft in a container on EC2, store artifacts in ECR, and implement safe upgrades with persistent world storage and S3 backups.'
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+import RubricTable from '../../../components/RubricTable.astro'
+import rubricTsv from '../../../../canvas/assignments/assignment-2-rubrics.tsv?raw'
+
+{/* LOs:
+- LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+- LO5: Describe how to plan major and minor tasks and time so that services are stable and effective, and meet a Service Level Agreement.
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+*/}
+
+The server crashed during the CEO's first session. He lost a diamond pickaxe. An all-hands email with the subject line "ACCOUNTABILITY" was sent at 11:47 PM. The phrase "enterprise-grade reliability" now appears in your quarterly objectives.
+
+Your manual setup works, but it drifts every time someone touches it, upgrades break in unpredictable ways, and recovery is a prayer-based workflow. Obsidian Dynamics now requires containerized, versioned, and recoverable operations that another operator can execute without improvisation.
+
+## Learning Objectives
+
+- Package a stateful service in Docker while preserving data correctly.
+- Publish and consume immutable image versions from ECR.
+- Execute safe upgrade and rollback procedures with explicit checks.
+- Implement S3 backup/restore with a defined retention policy.
+
+## Constraints (AWS Academy)
+
+- Compute remains on EC2.
+- Container images are stored in ECR.
+- Backups are stored in a private S3 bucket.
+- Security Group exposure must stay minimal and justified.
+
+## Requirements
+
+### Runtime Definition (Container + Service)
+
+- Provide a container runtime definition that runs the Minecraft server on EC2.
+  - `docker compose` is allowed but not required for a single container.
+  - Plain `docker run`, Podman, or equivalent is acceptable if reproducible.
+- Service must be reachable by clients on `25565/tcp`.
+  - Verify reachability using:
+    ```shell
+    nmap -sV -Pn -p T:25565 <instance_public_ip>
+    ```
+- Runtime configuration is externalized (environment variables and/or mounted config).
+- Service must come back automatically after host reboot.
+  - Acceptable mechanisms include container restart policies and/or generated `systemd` units (`docker`/`podman` workflows).
+  - You do **not** need to hand-write a `systemd` unit if your runtime tooling generates one.
+
+### State Boundary and Persistence
+
+- World data is stored outside the container image (host volume or bind mount).
+- Demonstrate persistence by restarting/recreating the container while preserving world state.
+  - Verification approach:
+    1. Create a marker file in the world directory: `touch world/PERSISTENCE_TEST`
+    2. Note the modification time of `level.dat`: `stat -c '%Y' world/level.dat` (or `stat -f '%m'` on macOS)
+    3. Stop, remove, and recreate the container
+    4. Verify marker file still exists and `level.dat` timestamp is unchanged
+- Clearly document what is stateful vs immutable.
+
+### ECR Publishing and Version Discipline
+
+- Publish your image to an ECR repository.
+- **Baseline approach**: Re-tag a trusted upstream Minecraft server image and publish it to your ECR repository.
+  - Document upstream image provenance and why it is trusted.
+- Define and use an immutable tagging scheme (for example: `mc-1.21.1-build7`).
+- `latest` may exist, but deployments must pin a specific version tag.
+- You must have **at least two distinct versioned images** published to ECR to demonstrate upgrade and rollback.
+
+### Safe Upgrade and Rollback Workflow
+
+- Provide a pre-change checklist that includes:
+  - Backup world data to S3 before any upgrade (mandatory).
+  - Verify both image versions exist in ECR.
+- Perform an upgrade from one pinned image version to another and validate success.
+- Perform rollback to the prior known-good image version without rebuilding from scratch.
+- Include post-change validation steps and expected healthy outcomes.
+
+### Backup/Restore to S3
+
+- Create a backup artifact for world data and upload it to S3.
+- S3 bucket must be private.
+- Configure at least one S3 lifecycle rule (e.g., expire backups older than 7 days) and document why you chose that retention period.
+- Demonstrate restore from S3 backup onto the service.
+
+### Operator Documentation
+
+Your documentation must include:
+
+- Build + publish workflow (conceptual steps, not command dump only).
+- ECR usage expectations and image tag policy.
+- Runtime architecture diagram (simple is acceptable).
+- Backup and restore runbook for S3.
+- Upgrade and rollback runbook with explicit checks.
+
+<Aside type="note" title="Question 1">
+What happens to your world data if you accidentally run `docker system prune -a`? How would you recover?
+</Aside>
+<Aside type="note" title="Question 2">
+Why is tagging images as `latest` considered risky for production deployments?
+</Aside>
+## What You'll Submit
+
+1. **Operator Runbook (PDF)** containing all required documentation sections and answers to the reflection questions above.
+2. **Container deployment definition** (`docker-compose.yml` or equivalent).
+3. **ECR reference + versioning policy** (repository URI and tag strategy), plus image provenance notes.
+4. **Narrated screen recording (max 3 minutes)** with a timestamp list for each checkpoint:
+   1. Show running container, `nmap` reachability on 25565/tcp, and reboot auto-recovery.
+   2. Persistence proof: place a marker, restart/recreate the container, show marker survives.
+   3. Upgrade to a new ECR image version, then rollback to the previous version.
+   4. S3 backup upload and restore demonstration.
+
+Your server MOTD must include your name or student ID. Submit timestamps alongside the video.
+
+## Rubric
+
+<RubricTable tsv={rubricTsv} sourceLabel="canvas/assignments/assignment-2-rubrics.tsv" caption="Docker + ECR on EC2" />
+
+## Extra Credit (up to +10)
+
+- **Custom Dockerfile (+5)**: Build your own container image using a Dockerfile instead of re-tagging an upstream image. Include a justified base image choice and at least one hardening step (e.g., non-root user, minimal layers). Document your build choices.
+- **In-service administration (+5)**: Configure secure remote administration (e.g., RCON with authentication) and execute at least 3 admin commands without stopping the container. Include safety notes about when admin intervention is appropriate vs. when a controlled restart is safer.
+
+Extra credit must stay within this assignment's scope (no orchestration, IaC frameworks, or CI/CD pipelines).

@@ -1,0 +1,351 @@
+---
+title: Postmortems and Communications
+description: "Blameless postmortems, concise stakeholder communications, and a tabletop plan: templates included."
+sidebar:
+  order: 16
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Every production system will eventually fail. The defining characteristic of a mature engineering organization is not whether it experiences incidents, but how it responds to them, learns from them, and communicates about them. This chapter walks through the complete lifecycle of an incident: from the first alert through stakeholder communication, postmortem analysis, and follow-up actions that prevent recurrence.
+
+To make the concepts concrete, we will follow a single scenario throughout the chapter: a database migration that causes 45 minutes of downtime for a web application's checkout system.
+
+## Why Postmortems Exist
+
+On a Tuesday morning, an engineer runs a scheduled database migration against the production checkout database. The migration adds a new index to the `orders` table, but the table has 14 million rows, and the migration acquires a lock that blocks all writes. For 45 minutes, customers cannot complete purchases. Revenue is lost. Support tickets pile up. The on-call engineer scrambles to figure out what happened.
+
+After the dust settles, the team faces a choice. They can move on and hope it does not happen again, or they can conduct a structured review of the incident to understand exactly what went wrong and what to change. The second option is a postmortem.
+
+Postmortems exist for two reasons. First, they create a shared, factual record of what happened. Memory is unreliable, especially under stress, and without a written account the details of an incident will drift and distort within days. Second, they produce specific, actionable improvements. A postmortem without action items is just storytelling; a postmortem with action items is an investment in reliability.
+
+<Aside type="tip">
+The word "postmortem" comes from medicine, where it means an examination after death. In engineering, the system (usually) survives, but the term stuck. Some organizations prefer "incident review" or "learning review" to avoid the morbid connotation.
+</Aside>
+
+The best organizations treat incidents as data, not disasters. Every outage is an opportunity to discover a gap in testing, monitoring, deployment practice, or documentation. Over time, a well-maintained library of postmortems becomes one of the most valuable artifacts an engineering team owns; it is a searchable record of hard-won lessons.
+
+## Blameless Culture
+
+When something goes wrong, the instinct to assign blame is powerful. Someone made the change. Someone approved it. Someone should have caught it. But blame is corrosive, and it directly undermines the purpose of a postmortem.
+
+### Blame vs. Accountability
+
+Blame sounds like this: "The migration caused downtime because the engineer did not test it properly." This framing discourages honesty. If people know they will be singled out after an incident, they will hide mistakes, avoid volunteering information, and hesitate to take risks that might lead to improvements.
+
+Accountability sounds different: "The migration caused downtime because our deployment process did not include a step to verify lock behavior on large tables. We need to add that step." This framing acknowledges that the failure was systemic. The engineer operated within a system that allowed the mistake to happen. The goal is to fix the system, not punish the individual.
+
+<Aside type="caution">
+Blameless does not mean "no one is responsible." People are still accountable for their work. But the postmortem is not the venue for performance evaluation. If there are genuine concerns about an individual's judgment or competence, those are addressed in private, through normal management channels, not in a group document.
+</Aside>
+
+### Psychological Safety
+
+Google's well-known Project Aristotle found that psychological safety (the belief that you will not be punished for making a mistake) was the single strongest predictor of team effectiveness. Blameless postmortems are a direct application of this finding. When engineers trust that they can describe their actions honestly, the quality of the postmortem improves dramatically. Details emerge that would otherwise stay hidden, and the resulting action items address root causes instead of symptoms.
+
+In our database migration scenario, a blameless approach might reveal that the engineer did check the migration in a staging environment, but the staging database had only 500 rows instead of 14 million. That is a systemic gap in how the team maintains staging data, and it would never surface if the engineer feared punishment for admitting they "only tested in staging."
+
+## Postmortem Structure
+
+A good postmortem follows a consistent structure. This makes it easier to write, easier to read, and easier to search later when someone asks, "Have we seen this kind of failure before?" The following sections form a complete template.
+
+### Summary
+
+The summary is a single paragraph that answers four questions: what happened, who was affected, how it was mitigated, and when service was restored. Think of it as the executive abstract; a reader should be able to understand the incident at a high level without reading further.
+
+Here is the summary for our scenario:
+
+> On March 10 at 09:14 UTC, a scheduled database migration on the production checkout database acquired a table-level lock on the `orders` table, blocking all write operations for 45 minutes. Approximately 1,200 customers encountered checkout failures during this period, with an estimated revenue impact of $38,000. The incident was mitigated at 09:59 UTC by killing the migration process and releasing the lock. Full service was restored by 10:02 UTC after connection pool recovery.
+
+### Impact
+
+The impact section quantifies the damage. Avoid vague language like "some customers were affected." Instead, provide numbers: error counts, failed transactions, duration, revenue impact, and whether any data was lost or corrupted.
+
+For our scenario:
+
+- **Duration:** 45 minutes (09:14 to 09:59 UTC)
+- **Checkout failure rate:** 100% of write operations to the orders table
+- **Affected customers:** approximately 1,200 unique sessions attempted checkout during the window
+- **Estimated revenue impact:** $38,000 based on average order value and historical conversion rates
+- **Data integrity:** no data loss or corruption; the migration was rolled back cleanly
+- **Support tickets:** 87 tickets opened; all resolved with a templated response after service restoration
+
+### Timeline
+
+The timeline is the backbone of the postmortem. It is a strict, chronological, timestamped sequence of events. We will discuss how to write a good one in the next section.
+
+### Contributing Factors
+
+Contributing factors are the conditions that allowed the incident to happen or made it worse. They are broader than the root cause. In our scenario, contributing factors include:
+
+- The staging database did not contain a representative volume of data
+- The migration tool's default behavior acquires exclusive locks without warning
+- The runbook for database migrations did not include a step to check lock behavior
+- Alerting on checkout success rate had a 10-minute delay before firing
+
+### Root Cause Analysis
+
+This section applies a structured technique (such as the 5 Whys) to trace the incident back to a systemic cause. We cover techniques in detail later in this chapter.
+
+### What Went Well
+
+It is important to acknowledge what worked. In our scenario, the on-call engineer identified the locked table within 8 minutes of the first alert, and the rollback procedure worked cleanly with no data loss. Recognizing strengths prevents the postmortem from becoming purely negative and helps the team understand which practices to preserve.
+
+### Action Items
+
+Action items are the entire point of the postmortem. They must be specific, owned, and tracked. We cover how to write effective action items later in this chapter.
+
+### Follow-Up
+
+The follow-up section records where action items are tracked (e.g., issue tracker links) and schedules a 30-day review to verify that the items were completed and that they had the intended effect.
+
+## Writing a Good Timeline
+
+The timeline is the section most likely to be done poorly. A good timeline is factual, timestamped, and free of editorializing. A bad timeline is vague, incomplete, or laced with judgment.
+
+### What to Include
+
+Every timeline entry should have three components: a timestamp, an actor (person or system), and an observable action or event. Here is a well-written timeline for our scenario:
+
+| Time (UTC) | Actor | Event |
+|---|---|---|
+| 09:12 | Engineer A | Initiated scheduled migration `add_index_orders_customer_id` via migration tool |
+| 09:14 | Database | `orders` table acquired exclusive lock; all pending write queries begin queueing |
+| 09:17 | Monitoring | Checkout success rate drops below 50%; alert suppressed by 10-min evaluation window |
+| 09:22 | Customer | First support ticket: "checkout page spinning" |
+| 09:24 | Monitoring | Alert fires: checkout success rate below threshold for 10 minutes |
+| 09:25 | On-call (Engineer B) | Acknowledged alert; began investigating dashboard |
+| 09:28 | Engineer B | Identified active migration holding lock on `orders` table via `pg_locks` query |
+| 09:31 | Engineer B | Paged Engineer A; confirmed migration was expected but lock duration was not |
+| 09:35 | Engineer B | Opened incident channel; declared SEV-1 |
+| 09:42 | Engineer A | Attempted graceful cancellation of migration; cancellation hung |
+| 09:51 | Engineer B | Escalated to DBA on-call for forced termination |
+| 09:59 | DBA | Killed migration backend process; lock released |
+| 10:02 | Monitoring | Checkout success rate returned to 99.9%; connection pool fully recovered |
+| 10:05 | Engineer B | Declared incident resolved; began postmortem notes |
+
+### Common Mistakes
+
+**Editorializing.** "Engineer A recklessly ran the migration without checking" is not a timeline entry. The timeline records what happened, not what should have happened. Save analysis for the contributing factors and root cause sections.
+
+**Missing timestamps.** "At some point the DBA was paged" is not useful. If the exact time is unknown, note that explicitly: "~09:51 (approximate)."
+
+**Skipping the boring parts.** The gap between detection and mitigation often contains the most valuable information. If 20 minutes pass between "identified the problem" and "fixed the problem," the timeline should explain what happened during those 20 minutes. That is where process improvements hide.
+
+<Aside type="note">
+During an active incident, assign a dedicated scribe whose only job is to record timestamped events in the incident channel. Reconstructing a timeline after the fact from memory and chat logs is far harder than capturing it in real time.
+</Aside>
+
+## Root Cause Analysis Techniques
+
+Identifying the root cause of an incident is harder than it sounds. The obvious answer ("someone ran a bad migration") is almost never the real root cause. Two structured techniques help teams dig deeper.
+
+### The 5 Whys
+
+The 5 Whys is a simple, iterative technique. You start with the observable problem and ask "why?" repeatedly until you reach a cause that is systemic and actionable. Five is a guideline, not a rule; some chains are shorter, and some are longer.
+
+Applied to our scenario:
+
+<Steps>
+1. **Why did checkout fail?** Because all write queries to the `orders` table were blocked by a lock.
+
+2. **Why was the table locked?** Because the migration tool acquired an exclusive lock to add an index on a 14-million-row table.
+
+3. **Why was an exclusive lock used?** Because the migration tool's default behavior uses `CREATE INDEX` (which locks) rather than `CREATE INDEX CONCURRENTLY` (which does not).
+
+4. **Why didn't the team use the concurrent option?** Because the migration runbook did not mention lock behavior, and the staging test completed in under one second (on 500 rows), so the lock was not noticeable.
+
+5. **Why didn't staging reveal the problem?** Because the staging database is seeded with minimal data and does not reflect production volume.
+</Steps>
+
+The root cause is not "the engineer ran a migration." The root cause is a combination of unsafe tool defaults and a staging environment that does not represent production. Those are systemic issues with systemic fixes.
+
+### Fishbone Diagram (Ishikawa)
+
+The fishbone diagram organizes contributing factors into categories. For infrastructure incidents, useful categories include:
+
+- **Process:** Was there a runbook? Was it followed? Was it complete?
+- **Tooling:** Did the tools behave as expected? Were defaults safe?
+- **Environment:** Did staging match production? Were there configuration differences?
+- **Monitoring:** Were alerts timely? Were dashboards available?
+- **People:** Was the right expertise available? Was communication clear?
+- **External:** Were there vendor issues, network problems, or third-party dependencies?
+
+For our scenario, the fishbone would show contributing factors in at least four categories (process, tooling, environment, and monitoring), which confirms that the incident was not caused by a single failure but by multiple gaps aligning at the same time.
+
+<Aside type="tip">
+The 5 Whys works well for linear cause chains. The fishbone diagram works better when multiple independent factors contributed to the incident. Many teams use both: the fishbone to identify all contributing factors, and the 5 Whys to drill into the most significant one.
+</Aside>
+
+## Action Items That Actually Get Done
+
+The most common failure mode of postmortems is not the analysis; it is the follow-through. Teams write thoughtful action items, put them in a document, and never look at them again. Three months later, the same incident happens for the same reason.
+
+### The SMART Framework
+
+Every action item should be SMART: Specific, Measurable, Achievable, Relevant, and Time-bound. Compare these two versions of the same action:
+
+**Weak:** "Improve staging data."
+
+**SMART:** "Implement a weekly anonymized production data snapshot for the staging checkout database, owned by the platform team, due within 14 days. Success metric: staging `orders` table contains at least 1 million rows."
+
+The SMART version can be verified. Either the staging database has a million rows in two weeks, or it does not.
+
+### Ownership and Deadlines
+
+Every action item needs a single owner (not a team, not "everyone") and a deadline. If an action item has no owner, it will not get done. If it has no deadline, it will be perpetually deprioritized.
+
+Here are the action items for our scenario:
+
+| # | Action | Owner | Priority | Due | Success Metric |
+|---|---|---|---|---|---|
+| 1 | Update migration tool config to default to `CREATE INDEX CONCURRENTLY` | Engineer A | P1 | 7 days | Tool config updated; verified in CI |
+| 2 | Add lock-check step to database migration runbook | Engineer B | P1 | 7 days | Runbook updated; reviewed by DBA |
+| 3 | Implement weekly anonymized production snapshot for staging DB | Platform lead | P1 | 14 days | Staging `orders` table has 1M+ rows |
+| 4 | Reduce checkout alert evaluation window from 10 min to 2 min | SRE on-call | P2 | 7 days | Alert fires within 2 min in test |
+| 5 | Add pre-migration checklist to CI pipeline (table size, lock type, estimated duration) | DBA | P2 | 21 days | CI check blocks unsafe migrations in test |
+
+### Prioritization
+
+Not all action items are equally urgent. A simple rubric helps:
+
+| Factor | High | Medium | Low |
+|---|---|---|---|
+| Customer impact reduction | Prevents complete outage | Reduces duration or blast radius | Cosmetic or minor improvement |
+| Recurrence likelihood | Same failure could happen this week | Same failure could happen this quarter | Unlikely to recur |
+| Implementation effort | Small (hours to days) | Medium (1-2 weeks) | Large (months) |
+
+Prioritize items that are high-impact and low-effort first. Avoid the trap of listing 15 action items; a team can realistically complete 3 to 5 items well. It is better to do three things thoroughly than to half-finish seven.
+
+## Stakeholder Communication During Incidents
+
+While engineers work to resolve an incident, other people need information. Customers want to know if the service is down and when it will be back. Executives want to know the business impact. Support teams want to know what to tell customers. Each audience needs different information at a different cadence.
+
+### The Stakeholder Matrix
+
+Before an incident happens, establish who needs to know what, through which channel, and how often.
+
+| Audience | Needs to Know | Channel | Cadence (SEV-1) |
+|---|---|---|---|
+| Customers | Is the service down? When will it be fixed? | Status page, social media | Every 30 min |
+| Executives | Business impact, risk level, ETA | Email or Slack summary | Every 30 min |
+| Support team | What to tell customers, known workarounds | Internal doc or channel | Every 15-30 min |
+| Engineering | Technical details, task assignments, next steps | Incident channel | Continuous |
+
+The key insight is that each audience needs a different level of detail. Customers need reassurance and an ETA. Executives need business context. Engineers need technical specifics. Sending the same message to all audiences serves none of them well.
+
+### Communication Roles
+
+During a significant incident, assign a dedicated communications lead. This person is not debugging; their job is to write and publish updates on a regular cadence. This separation is critical. Engineers under pressure will forget to communicate, and long silences erode trust faster than bad news does.
+
+<Aside type="caution">
+Silence is worse than bad news. If you have no new information, say so: "We are continuing to investigate. No new findings since the last update. Next update in 15 minutes." This tells stakeholders that the team is still working and that they have not been forgotten.
+</Aside>
+
+## Communication Templates
+
+Having pre-written templates dramatically reduces the time and cognitive effort needed to communicate during an incident. The following templates can be adapted to your organization.
+
+### Initial Internal Alert
+
+This goes to the engineering incident channel immediately after an incident is declared.
+
+> **SEV-1 declared: Checkout service down.**
+> Symptoms: 100% checkout write failures since 09:14 UTC. Cause under investigation; database migration may be involved.
+> Roles: IC: Engineer B. Comms: Engineer C. Scribe: Engineer D.
+> Next update in 15 minutes.
+
+The initial alert is short and structured. It names the severity, the symptoms, the assigned roles, and when the next update will arrive.
+
+### Periodic Internal Update
+
+These go to the incident channel at regular intervals.
+
+> **Update (09:42 UTC):** Confirmed exclusive table lock held by migration process on `orders` table. Attempting graceful cancellation. Checkout remains fully down. Escalating to DBA for forced termination if cancellation does not complete within 10 minutes. Next update in 10 minutes.
+
+Each update states what is known, what is being done, and when the next update will come.
+
+### Public Status Page (Initial)
+
+This goes on the external status page for customers.
+
+> **Investigating: Checkout Issues**
+> We are aware of an issue preventing customers from completing purchases. Our engineering team is actively investigating and working to restore service. We will provide an update within 30 minutes. We apologize for the inconvenience.
+
+Note the tone: calm, factual, and empathetic. No technical jargon. No speculation about causes. No promises about when it will be fixed (only when the next update will arrive).
+
+### Public Status Page (Update)
+
+> **Update: Checkout Issues**
+> Our team has identified the source of the checkout disruption and is working to resolve it. We expect service to be restored shortly. We will provide another update within 15 minutes.
+
+### Public Status Page (Resolution)
+
+> **Resolved: Checkout Issues**
+> The issue affecting checkout has been resolved as of 10:02 UTC. All customers should now be able to complete purchases normally. If you continue to experience problems, please contact support. We will publish a follow-up report with details on what happened and what we are doing to prevent recurrence.
+
+### Executive Summary (Post-Incident)
+
+This goes to leadership after the incident is resolved, typically within a few hours.
+
+> At 09:14 UTC on March 10, a database migration acquired an exclusive lock on the checkout orders table, blocking all purchase transactions for 45 minutes. Approximately 1,200 customers were unable to check out, with an estimated revenue impact of $38,000. The lock was released at 09:59 UTC by terminating the migration process, and full service was restored by 10:02 UTC. No data was lost or corrupted. We are implementing safer migration defaults, improving our staging environment, and reducing alert detection time from 10 minutes to 2 minutes. A full postmortem will be published internally by end of week.
+
+This summary answers every question an executive is likely to ask: what happened, how bad was it, is it fixed, and what are we doing about it.
+
+## Tabletop Exercises
+
+A tabletop exercise is a structured simulation of an incident. The team gathers (in person or virtually), receives a hypothetical scenario, and walks through their incident response process without touching any real systems. Think of it as a fire drill for infrastructure.
+
+### Why Practice?
+
+Incident response is a skill, and like all skills, it degrades without practice. If the first time your team uses the incident communication templates is during a real outage at 3 AM, the results will be poor. Tabletop exercises build muscle memory for the process: declaring an incident, assigning roles, communicating with stakeholders, and maintaining a timeline.
+
+They also reveal gaps in your process before a real incident exposes them. You might discover that your runbook references a dashboard that no longer exists, or that no one knows how to page the DBA on-call, or that your status page requires credentials that only one person has.
+
+### Running a Tabletop Exercise
+
+A tabletop exercise takes 20 to 30 minutes and involves 4 to 6 participants.
+
+<Steps>
+1. **Assign roles.** Designate an Incident Commander (IC), an Operations lead, a Communications lead, and a Scribe. If you have extra participants, assign them as subject-matter experts (e.g., database, networking).
+
+2. **Present the scenario.** The facilitator describes the initial conditions. For example: "It is 09:17 UTC. Your monitoring system has just fired an alert: checkout success rate has dropped to 0%. You have no other information yet."
+
+3. **Deliver injects.** Every 3 to 5 minutes, the facilitator introduces new information (called "injects") that the team must process and respond to. Injects simulate the evolving nature of a real incident.
+
+4. **Require outputs.** At specific points, ask the team to produce a concrete artifact: an internal update message, a public status page post, or a timeline entry. This forces the team to practice the communication skills, not just discuss them.
+
+5. **Debrief.** After the exercise, spend 5 to 10 minutes discussing what went well and what was confusing. Identify one or two process improvements.
+</Steps>
+
+### Sample Injects
+
+Here is a set of injects for a tabletop exercise based on our database migration scenario:
+
+| Time | Inject |
+|---|---|
+| T+0 min | Alert fires: checkout success rate at 0%. No other alerts. On-call engineer receives page. |
+| T+5 min | A team member notices a database migration was started 3 minutes before the alert. The migration is listed as "running" in the migration tool dashboard. |
+| T+10 min | Querying `pg_locks` reveals an exclusive lock on the `orders` table held by the migration process. The migration is 30% complete. |
+| T+15 min | An executive Slacks the IC directly: "Customers are complaining on social media. What is our ETA?" |
+| T+18 min | The support team reports 50+ tickets in the queue. They need a message to send customers. |
+| T+22 min | Graceful cancellation of the migration is attempted but hangs. The DBA on-call does not answer their page. |
+| T+25 min | The backup DBA answers and terminates the migration process. The lock is released. Checkout success rate begins recovering. |
+
+At each inject, the facilitator should ask: "What do you do next? Who do you communicate with? What do you write?"
+
+### Getting Value from Tabletop Exercises
+
+The most common mistake is treating the exercise as a test that the team can pass or fail. The goal is not to respond perfectly; the goal is to discover what you do not know. A tabletop that reveals three process gaps is more valuable than one where everything goes smoothly.
+
+Run tabletop exercises quarterly, or whenever significant changes happen to your infrastructure or team composition. Rotate roles so that everyone practices being the IC and the communications lead, not just the same senior engineer every time.
+
+<Aside type="note">
+Keep a log of findings from tabletop exercises alongside your postmortem library. Over time, patterns will emerge. If every tabletop reveals confusion about escalation paths, that tells you something important about your documentation.
+</Aside>
+
+## Putting It All Together
+
+Returning to our database migration incident, here is how all the pieces connect. The timeline captures exactly what happened and when. The 5 Whys analysis reveals that the root cause was not a careless engineer but a combination of unsafe tool defaults and an unrealistic staging environment. The action items are specific, owned, and time-bound. The communication templates ensured that customers, executives, and the support team all received appropriate, timely information. And the next quarter's tabletop exercise will use a variant of this scenario to ensure the team practices the improved process.
+
+Incidents are inevitable. Repeated incidents from the same root cause are not. A well-executed postmortem, combined with clear communication and disciplined follow-through, is what separates a team that learns from one that merely survives.

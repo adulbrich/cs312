@@ -1,0 +1,327 @@
+---
+title: 'Containerizing WordPress with Docker Compose'
+description: "Someone ran apt upgrade and PHP broke. Gerald says: can't you just put it in a box?"
+sidebar:
+  order: 4
+---
+
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+{/* LOs:
+- LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
+- LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
+*/}
+
+The website went down last Tuesday because someone ran `apt upgrade` and PHP broke. Gerald's exact words: "Can't you just put it in a box so this doesn't happen?" You are not sure he understands containers, but he is not wrong.
+
+Last lab, you installed Apache, PHP, MariaDB, and WordPress by hand: package by package, config file by config file. It took the entire session, and if you needed to do it again on a second server, you would have to repeat every step. Containers solve this problem. A container packages an application and all its dependencies into a single, portable unit that runs the same way everywhere. Docker is the tool that builds and runs containers, and Docker Compose lets you define multi-container applications (like WordPress + its database) in a single file. In this lab, you will replicate your entire Lab 2 setup in about ten lines of configuration.
+
+<Aside type="note">
+- This lab assignment will be turned in *on paper* during the lab itself.
+- Labs cannot be turned in outside of the actual lab time.
+- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
+</Aside>
+## Before You Start
+
+You need:
+- An AWS Academy Learner Lab environment
+- An SSH client on your laptop
+
+## Containers vs. Virtual Machines
+
+Before diving in, it helps to understand how containers differ from Virtual Machines (VMs). A VM runs a full operating system on top of a hypervisor: it includes its own kernel, init system, and package manager. A container, by contrast, shares the host operating system's kernel and only packages the application and its libraries. This makes containers much lighter (megabytes vs. gigabytes), faster to start (seconds vs. minutes), and more efficient with resources.
+
+The trade-off is isolation: VMs provide stronger boundaries (separate kernels), while containers share a kernel and rely on Linux namespace and cgroup features for isolation.
+
+## Questions
+
+Watch for the answers to these questions as you follow the tutorial.
+
+1. How many services are defined in your `docker-compose.yml`? What are their names and image tags? *(3 points)*
+2. After `docker compose down && docker compose up -d`, does your blog post still exist? What does this tell you about what `docker compose down` does to named volumes? *(5 points)*
+3. After `docker compose down -v && docker compose up -d`, does your blog post still exist? What does the `-v` flag do, and why is this dangerous in production? *(5 points)*
+4. After rebooting the EC2 instance, are the containers running? Write down the uptime shown by `docker ps`. What restart policy makes this possible? *(4 points)*
+5. What exact WordPress version is running inside the container? (Hint: check `wp-includes/version.php` with `docker exec`.) *(3 points)*
+6. Get your TA's initials showing WordPress loaded in your browser with your named blog post visible. *(5 points)*
+
+## Tutorial
+
+### Launching an Instance and Installing Docker
+
+<Steps>
+
+1. **Launch a fresh EC2 instance**
+
+   In the AWS Console, launch an Ubuntu Server 24.04 LTS instance (t3.micro). Use a Security Group that allows SSH (port 22) and HTTP (port 80). Connect via SSH:
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem ubuntu@<your-public-ip>
+   ```
+
+2. **Install Docker Engine**
+
+   Docker Engine is the runtime that builds and runs containers. Install it using Docker's official convenience script:
+
+   ```bash
+   curl -fsSL https://get.docker.com | sudo sh
+   ```
+
+   This script detects your Linux distribution and installs Docker Engine, the Docker CLI (Command-Line Interface), and the containerd runtime.
+
+3. **Add your user to the docker group**
+
+   By default, Docker commands require `sudo`. Adding your user to the `docker` group lets you run Docker commands without it:
+
+   ```bash
+   sudo usermod -aG docker ubuntu
+   ```
+
+   Log out and back in for the group change to take effect:
+
+   ```bash
+   exit
+   ```
+
+   Then reconnect via SSH.
+
+4. **Verify Docker is working**
+
+   ```bash
+   docker --version
+   docker run --rm hello-world
+   ```
+
+   The `hello-world` container should print a success message, confirming Docker can pull images and run containers.
+
+</Steps>
+
+### Writing the Docker Compose File
+
+Docker Compose is a tool for defining and running multi-container applications. You describe your services, networks, and volumes in a YAML (YAML Ain't Markup Language) file, and Compose handles creating and connecting everything.
+
+<Steps>
+
+1. **Create a project directory**
+
+   ```bash
+   mkdir ~/wordpress-lab && cd ~/wordpress-lab
+   ```
+
+2. **Create an environment file for credentials**
+
+   Hardcoding passwords in your Compose file is bad practice. Instead, store them in a `.env` file that Compose reads automatically:
+
+   ```bash
+   vim .env
+   ```
+
+   Add the following (choose your own passwords):
+
+   ```
+   MYSQL_ROOT_PASSWORD=rootpass123
+   MYSQL_DATABASE=wordpress
+   MYSQL_USER=wp_user
+   MYSQL_PASSWORD=wppass456
+   ```
+
+   <Aside type="caution">
+   In a real deployment, you would never commit a `.env` file to version control. Add it to your `.gitignore`. For this lab, keeping credentials in `.env` is sufficient.
+   </Aside>
+3. **Write the Compose file**
+
+   ```bash
+   vim docker-compose.yml
+   ```
+
+   Add the following:
+
+   ```yaml
+   services:
+     db:
+       image: mariadb:11
+       restart: unless-stopped
+       env_file: .env
+       volumes:
+         - db_data:/var/lib/mysql
+
+     wordpress:
+       image: wordpress:6
+       restart: unless-stopped
+       ports:
+         - "80:80"
+       environment:
+         WORDPRESS_DB_HOST: db
+         WORDPRESS_DB_USER: ${MYSQL_USER}
+         WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+         WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+       volumes:
+         - wp_content:/var/www/html/wp-content
+       depends_on:
+         - db
+
+   volumes:
+     db_data:
+     wp_content:
+   ```
+
+   Let's break this down:
+   - **`services`** defines two containers: `db` (MariaDB) and `wordpress`.
+   - **`image`** specifies which Docker image to use. The tag after the colon pins a major version.
+   - **`restart: unless-stopped`** tells Docker to automatically restart the container if it crashes or the host reboots, unless you explicitly stop it with `docker compose stop`.
+   - **`ports: "80:80"`** maps port 80 on the host to port 80 in the container.
+   - **`volumes`** mounts named volumes into the container. Named volumes persist data even when containers are removed.
+   - **`depends_on`** ensures the database starts before WordPress.
+   - The `volumes:` section at the bottom declares the named volumes.
+
+</Steps>
+
+### Running the Stack
+
+<Steps>
+
+1. **Start the containers**
+
+   ```bash
+   docker compose up -d
+   ```
+
+   The `-d` flag runs containers in detached mode (in the background). Docker will pull the MariaDB and WordPress images if you do not have them locally, then start both containers. This may take a minute on the first run.
+
+2. **Check the containers are running**
+
+   ```bash
+   docker compose ps
+   ```
+
+   You should see both `db` and `wordpress` with state "Up."
+
+3. **Access WordPress in your browser**
+
+   Open `http://<your-public-ip>` in your browser. You should see the WordPress installation wizard, the same one you saw in Lab 2, but this time you did not install Apache, PHP, or MariaDB manually. Complete the WordPress setup and create a blog post titled with **your name and today's date** (e.g., "Jane Smith - 2026-03-10"). You will use this post to test data persistence.
+
+</Steps>
+
+### Testing Data Persistence
+
+Volumes are the mechanism Docker uses to persist data beyond the life of a container. Understanding when data survives and when it does not is critical for operating containerized services.
+
+<Steps>
+
+1. **Stop and restart without removing volumes**
+
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
+
+   The `down` command stops and removes the containers, but **named volumes are preserved** by default. After restarting, check that your blog post still exists by visiting `http://<your-public-ip>` in your browser.
+
+   List the volumes:
+
+   ```bash
+   docker volume ls
+   ```
+
+   Note the exact volume names; they will be prefixed with your project directory name (e.g., `wordpress-lab_db_data`).
+
+2. **Stop and restart WITH volume removal**
+
+   Now run `down` with the `-v` flag, which removes named volumes:
+
+   ```bash
+   docker compose down -v
+   docker compose up -d
+   ```
+
+   Visit `http://<your-public-ip>` again. You should see the WordPress installation wizard, as if it were a fresh install. Your blog post is gone, because the database volume was deleted and recreated empty.
+
+   List the volumes again:
+
+   ```bash
+   docker volume ls
+   ```
+
+   The volume names are the same, but these are new, empty volumes. Compare this output to the previous step.
+
+   <Aside type="danger">
+   This is one of the most common mistakes in container operations: running `docker compose down -v` when you meant `docker compose down`. The `-v` flag permanently deletes all named volumes and the data they contain. There is no undo. In production, always have backups.
+   </Aside>
+3. **Recreate your blog post**
+
+   Complete the WordPress setup again and create a new blog post with your name and today's date. You will need this post for the remaining steps.
+
+</Steps>
+
+### Testing Restart Policies
+
+<Steps>
+
+1. **Verify the restart policy**
+
+   Your Compose file already specifies `restart: unless-stopped`. This means Docker will automatically restart your containers if the EC2 instance reboots.
+
+2. **Reboot the instance**
+
+   ```bash
+   sudo reboot
+   ```
+
+   Wait about 30 seconds, then reconnect via SSH.
+
+3. **Check that containers restarted**
+
+   ```bash
+   docker ps --format "table {{.Names}}\t{{.Status}}"
+   ```
+
+   You should see both containers running, with an uptime showing how long ago they started after the reboot. If the reboot was 60 seconds ago, you might see "Up 45 seconds."
+
+4. **Verify your data survived**
+
+   Visit `http://<your-public-ip>` and confirm your blog post is still there. The combination of named volumes (for data persistence) and restart policies (for automatic recovery) means your service survives a reboot without intervention.
+
+</Steps>
+
+### Exploring Inside a Container
+
+<Steps>
+
+1. **Open a shell inside the WordPress container**
+
+   The `docker exec` command runs a command inside a running container. The `-it` flags give you an interactive terminal:
+
+   ```bash
+   docker exec -it $(docker compose ps -q wordpress) bash
+   ```
+
+   You are now inside the WordPress container. Notice that this is a minimal Linux environment; many commands you are used to (like `vim` or `sudo`) are not installed. The container includes only what WordPress needs to run.
+
+2. **Find the WordPress version**
+
+   ```bash
+   cat /var/www/html/wp-includes/version.php | grep wp_version
+   ```
+
+   Record the exact version string for your lab questions.
+
+3. **Exit the container**
+
+   ```bash
+   exit
+   ```
+
+</Steps>
+
+### Clean Up
+
+When you are done with this lab, stop the containers to avoid unnecessary resource usage:
+
+```bash
+docker compose down
+```
+
+If you want to preserve the data volumes for a future session, do **not** add `-v`. If you are done with this lab permanently, you can also terminate the EC2 instance.
+
+---
+
+You have now replaced an entire manual LAMP stack setup with a single Compose file. The key lessons: containers are portable and reproducible, volumes persist data across container restarts, and restart policies provide basic self-healing. In the next lab, you will push container images to a private registry and practice backup and restore workflows.

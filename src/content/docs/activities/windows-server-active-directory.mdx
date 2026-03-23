@@ -1,0 +1,366 @@
+---
+title: "Windows Server and Active Directory on AWS"
+description: "Hands-on exercise: deploy a Windows Server domain controller and client on AWS, configure Active Directory, create users and OUs, and apply Group Policy."
+sidebar:
+  order: 2
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This activity puts into practice the concepts from the [Windows Server Administration and Active Directory](/lectures/windows-server-and-active-directory/) lecture. You will deploy two Windows Server instances on AWS, promote one to a domain controller, join the other as a client, create users and organizational units, and apply a Group Policy Object. By the end, you will have built a working Active Directory domain from scratch.
+
+<Aside type="tip">
+Read the [Windows Server Administration and Active Directory](/lectures/windows-server-and-active-directory/) lecture before starting. Each section below notes which lecture concept it exercises.
+</Aside>
+
+## What You Will Need
+
+- A laptop with a Remote Desktop client installed:
+  - **Windows:** Remote Desktop Connection (built-in, search "Remote Desktop" in the Start menu)
+  - **macOS:** [Microsoft Remote Desktop](https://apps.apple.com/us/app/microsoft-remote-desktop/id1295203466?mt=12) from the App Store
+  - **Linux:** [Remmina](https://remmina.org/) or another RDP client
+- An activated AWS Academy account with Learner Lab access
+- About 60-90 minutes
+
+<Aside type="caution">
+AWS resources cost money. The two `t3.small` Windows instances used in this activity cost approximately $0.05/hour combined in `us-west-2`. **Terminate both instances and delete the VPC when you are finished.**
+</Aside>
+
+## Set Up the Network (VPC)
+
+**Lecture concept:** The lecture emphasizes that Active Directory depends on network connectivity between the domain controller and all clients. This step creates the network that makes that possible.
+
+Before deploying any servers, you need a Virtual Private Cloud (VPC) with subnets in two Availability Zones. This mirrors a real deployment where domain controllers and clients may sit in different data center zones for resilience.
+
+<Steps>
+1. In the AWS Console, navigate to **VPC Dashboard** (make sure you are in the **Oregon / us-west-2** region).
+
+2. Click **Create VPC** and select **VPC and more** to create the VPC along with its subnets and routing in one step.
+
+3. Configure:
+   - **Name tag:** `ad-lab`
+   - **IPv4 CIDR block:** `10.3.12.0/22`
+   - **IPv6:** None
+   - **Tenancy:** Default
+   - **Availability Zones:** 2
+   - **Public subnets:** 2
+   - **Private subnets:** 0
+   - **NAT gateways:** None
+   - **VPC endpoints:** None
+
+4. Click **Create VPC** and wait for it to finish. Note the **VPC ID**.
+
+5. Navigate to **Security Groups** (under the Security section in the VPC sidebar). Find the **default** security group associated with your new VPC (match the VPC ID).
+
+6. Edit the **Inbound Rules** of that security group. Keep the existing rule (which allows traffic within the security group) and add a new rule:
+   - **Type:** RDP
+   - **Source:** Your current IP address (use "My IP" in the dropdown, or enter your campus/home CIDR if needed)
+
+   This allows you to connect via Remote Desktop from your machine.
+</Steps>
+
+<Aside type="note">
+**Why two Availability Zones?** In a production environment, you would place domain controllers in separate AZs so that a single data center failure does not take down authentication for the entire domain. We replicate that pattern here even though we are only deploying one DC.
+</Aside>
+
+## Deploy the Domain Controller
+
+**Lecture concept:** This exercises the *Promoting a Domain Controller* section from the lecture. You will install the AD DS role, run the promotion wizard, and see the server reboot into its new role.
+
+<Steps>
+1. Navigate to the **EC2 Dashboard**. Click **Launch Instance**.
+
+2. Configure the instance:
+   - **Name:** `DomainController`
+   - **AMI:** Microsoft Windows Server 2022 Base
+   - **Instance type:** `t3.small`
+   - **Key pair:** Create a new key pair (give it a name, download the `.pem` file, and keep it safe; you will need it to decrypt the Administrator password)
+
+3. Under **Network settings**, click **Edit**:
+   - **VPC:** Select `ad-lab-vpc`
+   - **Subnet:** Select the one ending in `us-west-2a`
+   - **Auto-assign public IP:** Enable
+   - **Firewall:** Select existing security group, choose the `default` group for your VPC
+
+4. Launch the instance.
+
+5. **Retrieve the Administrator password.** It takes a few minutes after launch before the password is available. Select the instance, click **Connect**, choose the **RDP client** tab, and click **Get password**. Upload your `.pem` key file and decrypt.
+
+   <Aside type="note">
+   **Lecture connection:** The lecture describes DSRM passwords and secure credential storage. AWS uses a similar principle here: the password is encrypted with your SSH key pair so that it is never transmitted or stored in plaintext. Only someone with the private key can retrieve it.
+   </Aside>
+
+6. **Connect via RDP.** Open your Remote Desktop client, enter the instance's **Public IPv4 address**, and log in as `Administrator` with the decrypted password.
+</Steps>
+
+### Install Active Directory Domain Services
+
+Once connected to the DomainController via RDP:
+
+<Steps>
+1. Open **Server Manager** (it should launch automatically; if not, find it in the Start menu).
+
+2. Click **Add roles and features** (option 2 on the dashboard).
+
+3. Walk through the wizard:
+   - Installation type: **Role-based or feature-based installation**
+   - Server selection: Select the current server
+   - Server Roles: Check **Active Directory Domain Services**. Accept the prompt to add required features.
+   - Click through the remaining pages and click **Install**. Wait for installation to complete.
+
+4. After installation, a warning flag appears in Server Manager's top menu. Click it and select **Promote this server to a domain controller**.
+
+5. In the promotion wizard:
+   - Select **Add a new forest**
+   - Root domain name: `cs312lab.local`
+
+   <Aside type="note">
+   **Lecture connection:** The lecture explains that the first domain you create automatically becomes the root of a new forest. The domain name `cs312lab.local` becomes both the domain and the forest root. The `.local` TLD is conventional for internal domains that are not publicly resolvable.
+   </Aside>
+
+6. Set a **Directory Services Restore Mode (DSRM) password** on the next page. This password is used for offline recovery of the AD database; in production, you would store it securely.
+
+7. Ignore the DNS delegation warning and click **Next**.
+
+8. Leave the NetBIOS name as the default: `CS312LAB`.
+
+9. Accept the default directories for the database, log files, and SYSVOL. Continue through the wizard and click **Install**.
+
+10. The server will **reboot automatically**. Wait a minute, then reconnect via RDP. The login will now show the domain: log in as `CS312LAB\Administrator`.
+</Steps>
+
+<Aside type="caution">
+The first login after promotion takes several minutes as Active Directory finishes initializing. This is normal. You can proceed to deploy the client machine while you wait.
+</Aside>
+
+## Deploy a Client Machine
+
+**Lecture concept:** This exercises the concept of *domain-joined machines* from the lecture. The client will authenticate against the domain controller rather than using local accounts.
+
+<Steps>
+1. Return to the **EC2 Dashboard** and launch a second instance:
+   - **Name:** `WindowsClient`
+   - **AMI:** Microsoft Windows Server 2022 Base
+   - **Instance type:** `t3.small`
+   - **Key pair:** Use the same key pair you created earlier
+
+2. Network settings:
+   - **VPC:** `ad-lab-vpc`
+   - **Subnet:** Select the one ending in `us-west-2b` (a different AZ from the DC)
+   - **Auto-assign public IP:** Enable
+   - **Security group:** Select the same `default` group
+
+3. Launch the instance and retrieve the Administrator password using the same key pair.
+
+4. Connect via RDP.
+</Steps>
+
+<Aside type="note">
+You might wonder why we use Windows Server as a "client" instead of Windows 10 or 11. AWS only allows server OS images on EC2. For our purposes, this does not matter: domain joining, Group Policy, and user authentication work identically on both server and desktop editions.
+</Aside>
+
+## Point the Client's DNS to the Domain Controller
+
+**Lecture concept:** The lecture's *DNS Dependency* section and its caution box explain why this step is critical. Active Directory relies entirely on DNS to locate domain controllers. If the client uses a public DNS server (like 8.8.8.8), it cannot resolve `cs312lab.local` and domain join will fail.
+
+On the **WindowsClient** machine:
+
+<Steps>
+1. Open **Ethernet settings** (search "ethernet" in the Start menu).
+
+2. Click **Change adapter options**.
+
+3. Right-click the Ethernet adapter and select **Properties**.
+
+4. Select **Internet Protocol Version 4 (TCP/IPv4)** and click **Properties**.
+
+5. Change to **Use the following DNS server addresses**:
+   - **Preferred DNS server:** Enter the **private IP** of your DomainController (find it in the EC2 console; it will be something like `10.3.12.x`)
+   - Leave the alternate DNS server blank
+
+6. Click **OK** to save.
+
+7. Verify DNS resolution by opening a **Command Prompt** and running:
+
+   ```
+   ping cs312lab.local
+   ```
+
+   You should see replies from your domain controller's private IP.
+</Steps>
+
+## Join the Client to the Domain
+
+<Steps>
+1. On the **WindowsClient**, search for "workgroup" in the Start menu and select **Change workgroup name**.
+
+2. In the System Properties dialog, click **Change**.
+
+3. Under "Member of", select **Domain** and enter `cs312lab.local`. Click **OK**.
+
+4. When prompted for credentials, enter the **DomainController's** administrator credentials:
+   - Username: `Administrator`
+   - Password: the DC's Administrator password
+
+5. You should see a **"Welcome to the cs312lab.local domain"** message. Click OK, close the dialogs, and **restart** the client.
+</Steps>
+
+<Aside type="note">
+**Lecture connection:** Behind the scenes, the domain join process created a computer object in Active Directory's default "Computers" container, registered DNS records, and established a trust relationship with the domain. This is the same process the lecture describes in the *Promoting a Domain Controller* section.
+</Aside>
+
+## Create an Organizational Unit, User, and Group
+
+**Lecture concept:** This exercises the *AD Building Blocks: Users, Groups, and Organizational Units* section from the lecture. You will create the kind of OU structure and group-based access model the lecture recommends.
+
+On the **DomainController**:
+
+<Steps>
+1. In **Server Manager**, click **Tools** > **Group Policy Management**.
+
+2. In the left sidebar, expand **Forest: cs312lab.local** > **Domains** > **cs312lab.local**.
+
+3. Right-click `cs312lab.local` and select **New Organizational Unit**. Name it `Lab Computers`. Click OK.
+
+   <Aside type="note">
+   **Lecture connection:** The lecture explains that OUs serve two purposes: organizing objects and serving as targets for Group Policy. You are creating this OU specifically so you can link a GPO to it in the next section.
+   </Aside>
+
+4. Right-click `cs312lab.local` again and select **Active Directory Users and Computers**.
+
+5. In the AD Users and Computers window, find the **Computers** container in the left sidebar. You should see your WindowsClient machine (with an auto-generated name like `EC2AMAZ-...`). Drag it into the **Lab Computers** OU.
+
+   AD will warn you about moving objects. Click OK. The computer is now in the OU where your GPO will apply.
+
+6. In the left sidebar, right-click the **Users** container. Select **New** > **User**.
+   - Set a first and last name of your choice
+   - **User logon name:** `student`
+   - Click Next, set a password, and uncheck "User must change password at next logon"
+   - Finish the wizard
+
+7. Right-click the new `student` user and select **Add to a group**. Type `Domain Admins` and click OK.
+
+   <Aside type="caution">
+   Adding a user to Domain Admins is done here for simplicity. In production, you would never grant Domain Admin to regular users. The lecture discusses least-privilege principles and fine-grained access control.
+   </Aside>
+</Steps>
+
+## Create and Apply a Group Policy Object
+
+**Lecture concept:** This exercises the *Group Policy Objects* section from the lecture. You will create a GPO, configure both computer and user settings, link it to an OU, and verify that LSDOU processing applies it correctly.
+
+<Steps>
+1. Back in **Group Policy Management**, right-click the **Lab Computers** OU and select **Create a GPO in this domain, and Link it here**. Name it `Lab Policy`.
+
+2. Right-click `Lab Policy` under the Lab Computers OU and select **Edit**. This opens the Group Policy Management Editor.
+
+3. **Disable local GPO overrides.** Navigate to:
+
+   `Computer Configuration` > `Policies` > `Administrative Templates` > `System` > `Group Policy`
+
+   Find **Turn off Local Group Policy Objects processing**. Double-click it, set to **Enabled**, and click OK.
+
+   <Aside type="note">
+   **Lecture connection:** The lecture explains LSDOU processing order (Local, Site, Domain, OU). By disabling local GPO processing, you ensure that only domain-level and OU-level policies take effect, preventing users from setting local policies that override your centralized configuration.
+   </Aside>
+
+4. **Enable loopback processing.** In the same folder, find **Configure user Group Policy loopback processing mode**. Set to **Enabled** with Mode set to **Replace**. Click OK.
+
+   This ensures that user settings applied to this OU's computers override user-specific settings from other OUs, which is important for shared or lab machines.
+
+5. **Add a system PATH entry.** Navigate to:
+
+   `Computer Configuration` > `Preferences` > `Windows Settings` > `Environment`
+
+   Right-click **Environment** and select **New** > **Environment Variable**. Configure:
+   - **Action:** Create
+   - Check **System Variable**
+   - Check the **PATH** checkbox (this sets the Name to PATH)
+   - Check **Partial** (append rather than replace)
+   - **Value:** `C:\Users\Public\cs312`
+
+   Click OK. This adds a directory to the system PATH on every computer in the OU, demonstrating how GPOs can push configuration changes across an entire fleet.
+
+6. Close the editor windows.
+</Steps>
+
+## Test the Domain Configuration
+
+<Steps>
+1. Connect to the **WindowsClient** via RDP. This time, log in with the domain account:
+   - Username: `CS312LAB\student`
+   - Password: the one you set when creating the user
+
+   <Aside type="tip">
+   If the RDP client does not show a domain login option, look for **More choices** or **Use a different account** to enter the domain-qualified username.
+   </Aside>
+
+2. The first login for a new domain user takes extra time as Windows creates the user profile. Be patient.
+
+3. Open a **Command Prompt** and verify your identity:
+
+   ```
+   whoami
+   ```
+
+   This should return `cs312lab\student`.
+
+4. Force Group Policy to apply immediately (rather than waiting up to 90 minutes for the automatic refresh):
+
+   ```
+   gpupdate /force
+   ```
+
+5. Verify the GPO took effect by checking the PATH:
+
+   ```
+   echo %PATH%
+   ```
+
+   You should see `C:\Users\Public\cs312` in the output.
+
+6. For a detailed report of which GPOs are applied to this machine, run:
+
+   ```
+   gpresult /r
+   ```
+
+   Look for `Lab Policy` under "Applied Group Policy Objects" in the Computer Settings section.
+</Steps>
+
+## Verify Your Understanding
+
+You have built a working Active Directory domain from scratch. Here is how each step maps to the lecture:
+
+| What you did | Lecture section |
+|---|---|
+| Created a VPC with two subnets across AZs | (AWS infrastructure; mirrors the lecture's discussion of network prerequisites) |
+| Installed AD DS and promoted to domain controller | Promoting a Domain Controller |
+| Set DSRM password during promotion | Promoting a Domain Controller |
+| Pointed client DNS to the DC's private IP | DNS Dependency (caution box) |
+| Joined the client to the domain | Active Directory Fundamentals (domain-joined machines) |
+| Created an OU and moved a computer into it | AD Building Blocks: Users, Groups, and Organizational Units |
+| Created a user and added to a group | AD Building Blocks + User and Group Management |
+| Created a GPO and linked it to an OU | Group Policy Objects |
+| Used `gpupdate /force` and `gpresult /r` | GPO Testing Strategy (tip box) |
+
+Consider the following questions:
+
+1. **DNS dependency:** What would happen if you pointed the client's DNS back to `8.8.8.8` after joining the domain? Would the user still be able to log in? Why or why not?
+2. **LSDOU processing:** You linked the GPO to the `Lab Computers` OU. If you also linked a conflicting GPO at the domain level, which one would win? Why?
+3. **OUs vs. groups:** You used an OU to target the GPO and a group (Domain Admins) for permission assignment. Could you swap these? Why are OUs and groups used for different purposes?
+4. **Linux parallel:** The lecture's comparison table maps GPOs to Ansible playbooks. In what ways is this analogy accurate, and where does it break down?
+
+## Cleanup
+
+<Aside type="caution">
+AWS charges for running instances even when you are not connected to them. Clean up promptly.
+</Aside>
+
+<Steps>
+1. In the **EC2 Dashboard**, select both instances (DomainController and WindowsClient). Click **Instance state** > **Terminate instance**.
+
+2. In the **VPC Dashboard**, delete the `ad-lab` VPC (this also removes its subnets, route tables, and internet gateway).
+
+3. Delete the key pair if you no longer need it.
+</Steps>
