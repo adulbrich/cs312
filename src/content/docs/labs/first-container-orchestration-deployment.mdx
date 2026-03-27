@@ -14,13 +14,14 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 
 Gerald went to a restaurant technology expo and came back saying "containers are the future." He means shipping containers. But the point still stands. The expo had a booth about Kubernetes, and Gerald picked up a brochure. He now wants "orchestration" for the three-location website expansion. You asked him what orchestration means to him. He said, "Like an orchestra. But for websites."
 
-Docker Compose works well on a single server, but what happens when your container crashes at 3 AM? You have to notice, SSH in, and restart it manually. Kubernetes (often abbreviated k8s) solves this by acting as an orchestrator, a system that continuously monitors your containers, restarts them if they fail, and manages networking, scaling, and configuration. In this lab, you will install k3s, a lightweight Kubernetes distribution designed for resource-constrained environments, and deploy an nginx web server using Kubernetes primitives: Deployments, Services, and ConfigMaps.
+Docker Compose handles a lot for you on a single server — it can even restart crashed containers automatically with a restart policy. But it only runs on one machine. What happens when Gerald's website needs to run across multiple servers, or you need to push an update without taking the site down, or a whole node fails? Kubernetes (often abbreviated k8s) solves this by acting as an orchestrator: a system that continuously monitors your workloads, replaces failed containers, manages multi-service networking, and rolls out updates without downtime. In this lab, you will install k3s, a lightweight Kubernetes distribution designed for resource-constrained environments, and deploy a WordPress site served through an nginx reverse proxy using Kubernetes primitives: Deployments, Services, ConfigMaps, and Secrets.
 
 <Aside type="note">
 - This lab assignment will be turned in *on paper* during the lab itself.
 - Labs cannot be turned in outside of the actual lab time.
 - Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
 </Aside>
+
 ## Before You Start
 
 You need:
@@ -29,7 +30,7 @@ You need:
 
 ## Why Kubernetes?
 
-When you used Docker Compose, *you* were the orchestrator. You ran `docker compose up`, checked if containers were healthy, and restarted them when needed. Kubernetes replaces that manual work with a **control loop**: you tell it "I want 2 copies of nginx running at all times," and Kubernetes continuously compares the desired state to the actual state, making corrections automatically. A container crashes? Kubernetes starts a new one. You push a new image? Kubernetes rolls out the update gracefully.
+When you used Docker Compose, it handled restarting crashed containers and wiring up networks on a single host. Kubernetes does the same thing, but across a cluster of machines, and it adds a **control loop**: you declare "I want 2 copies of WordPress running at all times," and Kubernetes continuously compares desired state to actual state, making corrections automatically. A container crashes? Kubernetes starts a new one. You push a new image? Kubernetes rolls out the update gracefully, one Pod at a time, so the site stays up.
 
 **k3s vs. full Kubernetes**: Standard Kubernetes is complex and resource-intensive. k3s is a certified Kubernetes distribution that strips out cloud-provider-specific components and bundles everything into a single binary. It runs comfortably on a t3.small instance and is ideal for learning, edge computing, and single-node deployments.
 
@@ -38,11 +39,12 @@ When you used Docker Compose, *you* were the orchestrator. You ran `docker compo
 Watch for the answers to these questions as you follow the tutorial.
 
 1. What k3s version is running on your node? Write down the node's INTERNAL-IP address. (Use `kubectl get nodes -o wide`.) *(4 points)*
-2. Write down the names and IP addresses of your two nginx Pods. (Use `kubectl get pods -o wide`.) *(4 points)*
-3. After applying your ConfigMap with your custom `index.html`, what does `curl http://localhost:<nodeport>` return? Verify your name and today's date appear. *(4 points)*
-4. After deleting one Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(5 points)*
-5. How do the endpoint IPs shown by `kubectl describe service nginx-service` relate to the Pod IPs from question 2? *(3 points)*
-6. Get your TA's initials showing your custom nginx page (with your name) accessible in a browser or via `curl`. *(5 points)*
+2. Write down the names and IP addresses of your two WordPress Pods. (Use `kubectl get pods -o wide`.) *(4 points)*
+3. Run `kubectl get secret mysql-secret -o jsonpath='{.data.mysql-password}' | base64 --decode`. What does it print? What does this tell you about how Secrets store values? *(4 points)*
+4. After configuring nginx as a reverse proxy, what does `curl -L http://localhost:30080` return? (A brief description is fine — you do not need to paste the full HTML.) *(4 points)*
+5. After deleting one WordPress Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(5 points)*
+6. How does nginx's `proxy_pass` directive reference WordPress — by IP address or by DNS name? Why does this matter when Pods restart and get new IP addresses? *(4 points)*
+7. Get your TA's initials showing the WordPress setup screen accessible via nginx in a browser or via `curl`. *(5 points)*
 
 ## Tutorial
 
@@ -100,21 +102,268 @@ Watch for the answers to these questions as you follow the tutorial.
 Before writing manifests, let's understand the building blocks:
 
 - **Pod**: The smallest unit in Kubernetes. A Pod runs one or more containers. You rarely create Pods directly.
-- **Deployment**: Manages a set of identical Pods. You tell it "run 2 replicas of nginx," and it ensures exactly 2 Pods are always running. If one dies, the Deployment creates a replacement.
-- **Service**: Provides a stable network endpoint for a set of Pods. Pods get random IP addresses that change when they restart, but a Service gives you a fixed way to reach them.
+- **Deployment**: Manages a set of identical Pods. You tell it "run 2 replicas of WordPress," and it ensures exactly 2 Pods are always running. If one dies, the Deployment creates a replacement.
+- **Service**: Provides a stable network endpoint for a set of Pods. Pods get random IP addresses that change when they restart, but a Service gives you a fixed DNS name and IP to reach them.
 - **ConfigMap**: Stores configuration data (like files or environment variables) separately from the container image. This lets you change configuration without rebuilding the image.
+- **Secret**: Like a ConfigMap, but for sensitive data such as passwords and API keys. Values are base64-encoded and can be restricted by Kubernetes RBAC. They are not encrypted at rest by default in k3s, but they keep credentials out of your manifest files and version control.
 
-### Deploying nginx
+### Storing Credentials with Secrets
+
+MySQL needs a password. Hardcoding it in a manifest is bad practice — it ends up in your version control. Instead, you will store it in a Kubernetes Secret and reference it by name from other manifests.
 
 <Steps>
 
-1. **Create a project directory**
+1. **Create a project directory and write the Secret**
 
    ```bash
    mkdir ~/k8s-lab && cd ~/k8s-lab
+   vim mysql-secret.yaml
    ```
 
-2. **Write the Deployment manifest**
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: mysql-secret
+   type: Opaque
+   stringData:
+     mysql-root-password: rootpassword
+     mysql-password: wordpresspassword
+   ```
+
+   Using `stringData` lets you write plain text; Kubernetes base64-encodes the values automatically when storing the Secret.
+
+2. **Apply the Secret**
+
+   ```bash
+   kubectl apply -f mysql-secret.yaml
+   ```
+
+3. **Inspect the stored value**
+
+   ```bash
+   kubectl get secret mysql-secret -o jsonpath='{.data.mysql-password}' | base64 --decode
+   ```
+
+   The value is stored encoded, but you can decode it with standard base64 tooling. Record this output for your lab questions.
+
+</Steps>
+
+### Deploying MySQL
+
+MySQL needs a stable DNS name so WordPress can reach it. You will create a Deployment and a ClusterIP Service — internal-only, with no NodePort — for MySQL.
+
+<Aside type="caution">
+This deployment uses ephemeral (in-container) storage. If the MySQL Pod is deleted, all database data is lost. In production, you would attach a **PersistentVolumeClaim** to give the database durable storage that outlives any individual Pod. For this lab, ephemeral storage is intentional — we are demonstrating orchestration, not data durability.
+</Aside>
+
+<Steps>
+
+1. **Write the MySQL Deployment**
+
+   ```bash
+   vim mysql-deployment.yaml
+   ```
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: mysql
+     labels:
+       app: mysql
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: mysql
+     template:
+       metadata:
+         labels:
+           app: mysql
+       spec:
+         containers:
+           - name: mysql
+             image: mysql:8.0
+             env:
+               - name: MYSQL_ROOT_PASSWORD
+                 valueFrom:
+                   secretKeyRef:
+                     name: mysql-secret
+                     key: mysql-root-password
+               - name: MYSQL_DATABASE
+                 value: wordpress
+               - name: MYSQL_USER
+                 value: wordpress
+               - name: MYSQL_PASSWORD
+                 valueFrom:
+                   secretKeyRef:
+                     name: mysql-secret
+                     key: mysql-password
+             ports:
+               - containerPort: 3306
+   ```
+
+   The `secretKeyRef` fields pull values from `mysql-secret` at runtime. The password never appears in plain text in the manifest.
+
+2. **Write the MySQL Service**
+
+   ```bash
+   vim mysql-service.yaml
+   ```
+
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: mysql-service
+   spec:
+     type: ClusterIP
+     selector:
+       app: mysql
+     ports:
+       - port: 3306
+         targetPort: 3306
+   ```
+
+   `ClusterIP` means this Service is only reachable from inside the cluster — MySQL should never be directly exposed to the internet.
+
+3. **Apply both manifests**
+
+   ```bash
+   kubectl apply -f mysql-deployment.yaml -f mysql-service.yaml
+   ```
+
+4. **Wait for MySQL to be ready**
+
+   ```bash
+   kubectl get pods -l app=mysql
+   ```
+
+   Wait until the MySQL Pod shows "Running." MySQL takes 20–30 seconds to initialize on first run. If the Pod shows "CrashLoopBackOff," wait another 30 seconds and check again — it typically self-corrects as MySQL finishes its initialization sequence.
+
+</Steps>
+
+### Deploying WordPress
+
+WordPress connects to MySQL using the Service DNS name `mysql-service`, which Kubernetes resolves to the MySQL Pod's IP automatically. This is why Services are essential: if WordPress referenced a Pod IP directly, that IP would change every time the MySQL Pod restarted.
+
+<Steps>
+
+1. **Write the WordPress Deployment**
+
+   ```bash
+   vim wordpress-deployment.yaml
+   ```
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: wordpress
+     labels:
+       app: wordpress
+   spec:
+     replicas: 2
+     selector:
+       matchLabels:
+         app: wordpress
+     template:
+       metadata:
+         labels:
+           app: wordpress
+       spec:
+         containers:
+           - name: wordpress
+             image: wordpress:6.5-php8.3-apache
+             env:
+               - name: WORDPRESS_DB_HOST
+                 value: mysql-service:3306
+               - name: WORDPRESS_DB_NAME
+                 value: wordpress
+               - name: WORDPRESS_DB_USER
+                 value: wordpress
+               - name: WORDPRESS_DB_PASSWORD
+                 valueFrom:
+                   secretKeyRef:
+                     name: mysql-secret
+                     key: mysql-password
+             ports:
+               - containerPort: 80
+   ```
+
+2. **Write the WordPress Service**
+
+   WordPress will not be exposed directly to the internet — nginx will sit in front of it — so a ClusterIP Service is sufficient.
+
+   ```bash
+   vim wordpress-service.yaml
+   ```
+
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: wordpress-service
+   spec:
+     type: ClusterIP
+     selector:
+       app: wordpress
+     ports:
+       - port: 80
+         targetPort: 80
+   ```
+
+3. **Apply both manifests**
+
+   ```bash
+   kubectl apply -f wordpress-deployment.yaml -f wordpress-service.yaml
+   ```
+
+4. **Verify the WordPress Pods**
+
+   ```bash
+   kubectl get pods -o wide
+   ```
+
+   You should see 2 WordPress Pods with status "Running" alongside the MySQL Pod. Note the names and IP addresses of the WordPress Pods for your lab questions.
+
+</Steps>
+
+### Deploying nginx as a Reverse Proxy
+
+nginx will be the only publicly-accessible entry point. It receives traffic on NodePort 30080 and forwards it to `wordpress-service`. The proxy configuration lives in a ConfigMap, so you can update routing rules without rebuilding the nginx image.
+
+<Steps>
+
+1. **Create the nginx ConfigMap**
+
+   ```bash
+   vim nginx-configmap.yaml
+   ```
+
+   ```yaml
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: nginx-config
+   data:
+     default.conf: |
+       server {
+           listen 80;
+
+           location / {
+               proxy_pass http://wordpress-service;
+               proxy_set_header Host $host;
+               proxy_set_header X-Real-IP $remote_addr;
+               proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           }
+       }
+   ```
+
+   `proxy_pass http://wordpress-service` tells nginx to forward all requests to the `wordpress-service` Service. Kubernetes DNS resolves `wordpress-service` to the Service's ClusterIP, which then load-balances across the 2 WordPress Pods.
+
+2. **Write the nginx Deployment**
 
    ```bash
    vim nginx-deployment.yaml
@@ -128,7 +377,7 @@ Before writing manifests, let's understand the building blocks:
      labels:
        app: nginx
    spec:
-     replicas: 2
+     replicas: 1
      selector:
        matchLabels:
          app: nginx
@@ -142,17 +391,18 @@ Before writing manifests, let's understand the building blocks:
              image: nginx:1.27
              ports:
                - containerPort: 80
+             volumeMounts:
+               - name: nginx-config-volume
+                 mountPath: /etc/nginx/conf.d
+         volumes:
+           - name: nginx-config-volume
+             configMap:
+               name: nginx-config
    ```
 
-   Let's break this down:
-   - `replicas: 2` tells Kubernetes to keep 2 copies of this Pod running at all times.
-   - `selector.matchLabels` tells the Deployment which Pods it manages (those with `app: nginx` label).
-   - `template` describes the Pod itself: one container running the `nginx:1.27` image, listening on port 80.
-   - We pin the image tag to `1.27` instead of using `latest`, because `latest` is mutable and makes deployments unpredictable.
+   The ConfigMap is mounted at `/etc/nginx/conf.d`, where nginx looks for virtual host files. The `default.conf` key in the ConfigMap becomes the file `/etc/nginx/conf.d/default.conf` inside the container.
 
-3. **Write the Service manifest**
-
-   A Service of type **NodePort** exposes the application on a static port on the node's IP, making it accessible from outside the cluster.
+3. **Write the nginx Service**
 
    ```bash
    vim nginx-service.yaml
@@ -173,137 +423,37 @@ Before writing manifests, let's understand the building blocks:
          nodePort: 30080
    ```
 
-   - `selector: app: nginx` routes traffic to all Pods with the `app: nginx` label.
-   - `nodePort: 30080` means you can access nginx at `http://<node-ip>:30080`. NodePorts must be in the range 30000-32767.
-
-4. **Apply both manifests**
+4. **Apply all three manifests**
 
    ```bash
-   kubectl apply -f nginx-deployment.yaml -f nginx-service.yaml
+   kubectl apply -f nginx-configmap.yaml -f nginx-deployment.yaml -f nginx-service.yaml
    ```
 
-   The `apply` command sends the manifests to the Kubernetes API server, which stores the desired state and begins working to achieve it.
-
-5. **Verify the Deployment**
+5. **Test the proxy**
 
    ```bash
-   kubectl get pods -o wide
+   curl -L http://localhost:30080
    ```
 
-   You should see 2 Pods with status "Running." Note the pod names, the node they are running on, and their IP addresses.
-
-6. **Test the Service**
-
-   ```bash
-   curl http://localhost:30080
-   ```
-
-   You should see the default nginx welcome page ("Welcome to nginx!"). You can also access it from your laptop browser at `http://<your-ec2-public-ip>:30080` (if your Security Group allows port 30080).
-
-</Steps>
-
-### Adding a ConfigMap
-
-A ConfigMap lets you inject configuration into your containers without modifying the image. You will create a custom `index.html` and mount it into the nginx containers.
-
-<Steps>
-
-1. **Create the ConfigMap**
-
-   ```bash
-   vim nginx-configmap.yaml
-   ```
-
-   ```yaml
-   apiVersion: v1
-   kind: ConfigMap
-   metadata:
-     name: nginx-html
-   data:
-     index.html: |
-       <!DOCTYPE html>
-       <html>
-       <head><title>CS 312 Lab</title></head>
-       <body>
-         <h1>Hello from Kubernetes!</h1>
-         <p>Name: YOUR_NAME_HERE</p>
-         <p>Date: TODAY_DATE_HERE</p>
-       </body>
-       </html>
-   ```
-
-   Replace `YOUR_NAME_HERE` and `TODAY_DATE_HERE` with your actual name and today's date.
-
-2. **Update the Deployment to mount the ConfigMap**
-
-   Edit `nginx-deployment.yaml` to add a volume and volume mount:
-
-   ```yaml
-   apiVersion: apps/v1
-   kind: Deployment
-   metadata:
-     name: nginx
-     labels:
-       app: nginx
-   spec:
-     replicas: 2
-     selector:
-       matchLabels:
-         app: nginx
-     template:
-       metadata:
-         labels:
-           app: nginx
-       spec:
-         containers:
-           - name: nginx
-             image: nginx:1.27
-             ports:
-               - containerPort: 80
-             volumeMounts:
-               - name: html-volume
-                 mountPath: /usr/share/nginx/html
-         volumes:
-           - name: html-volume
-             configMap:
-               name: nginx-html
-   ```
-
-   The `volumeMounts` section mounts the ConfigMap into the container at `/usr/share/nginx/html`, which is where nginx looks for files to serve. The `volumes` section declares that the volume comes from the `nginx-html` ConfigMap.
-
-3. **Apply the ConfigMap and updated Deployment**
-
-   ```bash
-   kubectl apply -f nginx-configmap.yaml -f nginx-deployment.yaml
-   ```
-
-   Kubernetes will perform a rolling update, replacing the old Pods with new ones that have the ConfigMap mounted.
-
-4. **Verify the custom page**
-
-   ```bash
-   curl http://localhost:30080
-   ```
-
-   You should see your custom HTML with your name and today's date. Record this output for your lab questions.
+   You should receive the WordPress installation wizard HTML. You can also open `http://<your-ec2-public-ip>:30080` in your browser to see it rendered. Record what you observe for your lab questions.
 
 </Steps>
 
 ### Testing Self-Healing
 
-One of Kubernetes' most important features is that it automatically replaces failed Pods to maintain the desired number of replicas.
+One of Kubernetes' most important features is that it automatically replaces failed Pods to maintain the desired replica count.
 
 <Steps>
 
-1. **List the running Pods**
+1. **List the running WordPress Pods**
 
    ```bash
-   kubectl get pods
+   kubectl get pods -l app=wordpress
    ```
 
    Note the names and AGE of both Pods.
 
-2. **Delete one Pod**
+2. **Delete one WordPress Pod**
 
    ```bash
    kubectl delete pod <pod-name>
@@ -316,29 +466,32 @@ One of Kubernetes' most important features is that it automatically replaces fai
    Immediately run:
 
    ```bash
-   kubectl get pods
+   kubectl get pods -l app=wordpress
    ```
 
-   You should see one Pod still running (the one you did not delete) and a new Pod being created (with a different name and a very recent AGE, like "3s"). The Deployment's control loop detected that the actual state (1 Pod) did not match the desired state (2 Pods) and created a replacement.
+   You should see one Pod still running and a new Pod being created with a very recent AGE. The Deployment's control loop detected that the actual state (1 Pod) did not match the desired state (2 Pods) and created a replacement.
 
-4. **Describe the Service endpoints**
+4. **Describe the WordPress Service endpoints**
 
    ```bash
-   kubectl describe service nginx-service
+   kubectl describe service wordpress-service
    ```
 
-   Find the "Endpoints" line. This shows the IP addresses of all Pods that the Service routes traffic to. Compare these IPs to the Pod IPs from `kubectl get pods -o wide`; they should match. When a Pod is replaced, its endpoint is automatically updated.
+   Find the "Endpoints" line. This shows the IP addresses of all Pods that the Service routes traffic to. When a Pod is replaced and gets a new IP, the endpoint list updates automatically — which is why nginx can use `proxy_pass http://wordpress-service` instead of a hardcoded Pod IP.
 
 </Steps>
 
 ### Clean Up
 
-If you plan to continue with Labs 8 and 9, leave k3s and the nginx deployment running. Otherwise:
+If you plan to continue with later labs, leave k3s running. Otherwise:
 
 ```bash
-kubectl delete -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml
+kubectl delete \
+  -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \
+  -f wordpress-deployment.yaml -f wordpress-service.yaml \
+  -f mysql-deployment.yaml -f mysql-service.yaml -f mysql-secret.yaml
 ```
 
 ---
 
-You now understand the core Kubernetes primitives: Deployments manage replica sets of Pods, Services provide stable networking, and ConfigMaps separate configuration from images. Most importantly, you experienced the self-healing control loop: Kubernetes automatically corrects drift between desired and actual state. In the next lab, you will add health checks, resource controls, and practice failure drills.
+You now understand how Kubernetes orchestrates a multi-service application. nginx acts as the public entry point, proxying traffic to WordPress, which connects to MySQL — all wired together through Services and their DNS names. Secrets kept credentials out of your manifests, and Deployments kept both nginx and WordPress running even when individual Pods failed. In the next lab, you will add health checks, resource limits, and practice failure drills.
