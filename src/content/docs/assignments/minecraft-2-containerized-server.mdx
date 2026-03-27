@@ -36,7 +36,7 @@ Your manual setup works, but it drifts every time someone touches it, upgrades b
 
 ## Requirements
 
-### Runtime Definition (Container + Service)
+### A. Runtime Definition (Container + Service)
 
 - Provide a container runtime definition that runs the Minecraft server on EC2.
   - `docker compose` is allowed but not required for a single container.
@@ -51,7 +51,7 @@ Your manual setup works, but it drifts every time someone touches it, upgrades b
   - Acceptable mechanisms include container restart policies and/or generated `systemd` units (`docker`/`podman` workflows).
   - You do **not** need to hand-write a `systemd` unit if your runtime tooling generates one.
 
-### State Boundary and Persistence
+### B. State Boundary and Persistence
 
 - World data is stored outside the container image (host volume or bind mount).
 - Demonstrate persistence by restarting/recreating the container while preserving world state.
@@ -62,7 +62,7 @@ Your manual setup works, but it drifts every time someone touches it, upgrades b
     4. Verify marker file still exists and `level.dat` timestamp is unchanged
 - Clearly document what is stateful vs immutable.
 
-### ECR Publishing and Version Discipline
+### C. ECR Publishing and Version Discipline
 
 - Publish your image to an ECR repository.
 - **Baseline approach**: Re-tag a trusted upstream Minecraft server image and publish it to your ECR repository.
@@ -71,7 +71,7 @@ Your manual setup works, but it drifts every time someone touches it, upgrades b
 - `latest` may exist, but deployments must pin a specific version tag.
 - You must have **at least two distinct versioned images** published to ECR to demonstrate upgrade and rollback.
 
-### Safe Upgrade and Rollback Workflow
+### D. Safe Upgrade and Rollback Workflow
 
 - Provide a pre-change checklist that includes:
   - Backup world data to S3 before any upgrade (mandatory).
@@ -80,14 +80,14 @@ Your manual setup works, but it drifts every time someone touches it, upgrades b
 - Perform rollback to the prior known-good image version without rebuilding from scratch.
 - Include post-change validation steps and expected healthy outcomes.
 
-### Backup/Restore to S3
+### E. Backup/Restore to S3
 
 - Create a backup artifact for world data and upload it to S3.
 - S3 bucket must be private.
 - Configure at least one S3 lifecycle rule (e.g., expire backups older than 7 days) and document why you chose that retention period.
 - Demonstrate restore from S3 backup onto the service.
 
-### Operator Documentation
+### F. Operator Documentation
 
 Your documentation must include:
 
@@ -97,24 +97,14 @@ Your documentation must include:
 - Backup and restore runbook for S3.
 - Upgrade and rollback runbook with explicit checks.
 
-<Aside type="note" title="Question 1">
-What happens to your world data if you accidentally run `docker system prune -a`? How would you recover?
-</Aside>
-<Aside type="note" title="Question 2">
-Why is tagging images as `latest` considered risky for production deployments?
-</Aside>
 ## What You'll Submit
 
-1. **Operator Runbook (PDF)** containing all required documentation sections and answers to the reflection questions above.
-2. **Container deployment definition** (`docker-compose.yml` or equivalent).
-3. **ECR reference + versioning policy** (repository URI and tag strategy), plus image provenance notes.
-4. **Narrated screen recording (max 3 minutes)** with a timestamp list for each checkpoint:
-   1. Show running container, `nmap` reachability on 25565/tcp, and reboot auto-recovery.
+1. **Operator Runbook (PDF)** containing all required documentation sections, the container deployment definition (`docker-compose.yml` or equivalent as a code block), and ECR repository URI with versioning policy and image provenance notes.
+2. **Narrated screen recording (max 3 minutes)**. Your server MOTD must include your name or student ID. Submit timestamps alongside the video (e.g., "Checkpoint 1: 0:00, Checkpoint 2: 0:38, ..."):
+   1. Show running container, `nmap` reachability on 25565/tcp and MOTD, and reboot auto-recovery.
    2. Persistence proof: place a marker, restart/recreate the container, show marker survives.
    3. Upgrade to a new ECR image version, then rollback to the previous version.
    4. S3 backup upload and restore demonstration.
-
-Your server MOTD must include your name or student ID. Submit timestamps alongside the video.
 
 ## Rubric
 

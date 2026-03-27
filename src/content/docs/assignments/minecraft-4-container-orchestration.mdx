@@ -71,16 +71,12 @@ You must demonstrate:
 
 ## What You'll Submit
 
-1. Terraform updates for k3s provisioning
-2. Kubernetes manifests (or Helm/Kustomize config)
-3. Narrated screen recording (max 3 minutes) with timestamps for 4 checkpoints:
-   1. `kubectl get nodes/pods` showing Minecraft running, `nmap` reachability on 25565/tcp
-   2. Persistence proof: delete the pod, show world data survives
-   3. Rollout to new version, then rollback to previous version
-   4. Execute failure drill: introduce failure, detect, recover
-4. Updated documentation (architecture + runbooks)
-
-Server MOTD must include student name/ID. Submit timestamps alongside the video.
+1. **PDF** containing: architecture diagram, runbook updates (persistence, backup/restore, rollout/rollback), failure drill report, and a link to your GitHub repository with Terraform and Kubernetes manifest changes.
+2. **Narrated screen recording (max 3 minutes)**. Your server MOTD must include your name or student ID. Submit timestamps alongside the video (e.g., "Checkpoint 1: 0:00, Checkpoint 2: 0:38, ..."):
+   1. `kubectl get nodes/pods` showing Minecraft running, `nmap` reachability on 25565/tcp and MOTD.
+   2. Persistence proof: delete the pod, show world data survives.
+   3. Rollout to new version, then rollback to previous version.
+   4. Execute failure drill: introduce failure, detect, recover.
 
 ## Minimal Contract (Acceptance)
 
@@ -91,15 +87,6 @@ A TA/operator must be able to:
 - Follow your runbook to roll forward and roll back.
 - Restore from S3 backup to recover the world.
 
-<Aside type="note" title="Question 1">
-Why is Kubernetes a better fit (or not) for this workload? Give two concrete operational benefits and one operational cost.
-</Aside>
-<Aside type="note" title="Question 2">
-How do your probes and resource settings reduce downtime or improve predictability?
-</Aside>
-<Aside type="note" title="Question 3">
-What is the single biggest failure mode in your persistence design? What is your mitigation?
-</Aside>
 ## Rubric (100 points)
 
 - **Kubernetes deployment correctness (25)**: server runs on k3s, reachable on 25565/tcp, config applied via ConfigMap/Secret.

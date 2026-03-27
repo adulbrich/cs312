@@ -39,7 +39,7 @@ Your stakeholders do not care *how* it runs; they care that it is reachable, sta
 
 ## Requirements
 
-### Infrastructure and Access
+### A. Infrastructure and Access
 
 - One Linux EC2 instance in a public subnet.
 - A Security Group that:
@@ -47,14 +47,14 @@ Your stakeholders do not care *how* it runs; they care that it is reachable, sta
   - Allows administrative access with a clear restriction strategy.
 - A dedicated `minecraft` operating system user.
 
-### Service Operation
+### B. Service Operation
 
 - A Minecraft Java Edition server (Paper recommended) runs as a managed service.
 - You may use any defensible process manager/init approach (e.g., `systemd`, `pm2`, or equivalent).
 - The server starts automatically on reboot and restarts on failure.
 - The world state persists across service restarts.
 
-### Documentation
+### C. Documentation
 
 Create an operator-facing, **step-by-step tutorial runbook** that includes:
 
@@ -69,28 +69,19 @@ Create an operator-facing, **step-by-step tutorial runbook** that includes:
 - How to apply updates safely.
 - A dedicated section: **Cost-Control Strategy** (instance sizing choice, stop schedule, and guardrails).
 
-<Aside type="note" title="Question 1">
-What would break if you had to rebuild this server from scratch tomorrow? What information would you need that isn't in your runbook?
-</Aside>
-<Aside type="note" title="Question 2">
-If two operators needed to manage this server simultaneously, what conflicts or risks would arise with your current setup?
-</Aside>
 ## What You'll Submit
 
-1. **Tutorial Runbook (PDF)** that is written as a reproducible step-by-step setup guide and includes:
+1. **Tutorial Runbook (PDF)** written as a reproducible step-by-step setup guide. Include:
    - setup from fresh EC2 to working service,
    - a **How to Connect** section,
    - the `nmap` connection test command and expected result,
    - a **Cost-Control Strategy** section,
-   - operations content required above,
-   - answers to the reflection questions above.
-2. **Narrated screen recording (max 3 minutes)** with a timestamp list for each checkpoint:
+   - all operations content required above.
+2. **Narrated screen recording (max 3 minutes)**. Your server MOTD must include your name or student ID. Submit timestamps alongside the video (e.g., "Checkpoint 1: 0:00, Checkpoint 2: 0:38, ..."):
    1. Show AWS console with account ID, SSH in, show dedicated `minecraft` user exists.
-   2. Reboot the instance, then run `nmap -sV -Pn -p T:25565 <public-ip>` showing the service is reachable.
+   2. Reboot the instance, then run `nmap -sV -Pn -p T:25565 <public-ip>` showing the service is reachable and the MOTD.
    3. Show systemd status (or equivalent) confirming auto-start after reboot.
    4. Demonstrate one stop/start cycle with health confirmation.
-
-Your server MOTD must include your name or student ID. Submit timestamps (e.g., "Checkpoint 1: 0:00, Checkpoint 2: 0:38, ...") alongside the video.
 
 ## Rubric
 

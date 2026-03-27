@@ -85,30 +85,14 @@ Your documentation must include:
 - A change process: how a teammate would propose and review infrastructure changes.
 - A teardown checklist to prevent runaway cost.
 
-## Reflection Questions
-
-<Aside type="note" title="Question 1">
-What parts of your system are intended to be immutable vs. mutable? Where does state live?
-</Aside>
-<Aside type="note" title="Question 2">
-If a teammate pushed an Ansible change that broke the server, how would you detect and revert the damage?
-</Aside>
-<Aside type="note" title="Question 3">
-What is your "minimum safe" Security Group policy, and what tradeoffs did you make?
-</Aside>
 ## What You'll Submit
 
-1. Terraform code and a brief design note.
-2. Ansible playbook(s) and inventory.
-3. GitHub Actions workflow file (`.github/workflows/`).
-4. Narrated screen recording (max 3 minutes) with timestamps for the following checkpoints:
+1. **PDF** containing: brief design note, architecture diagram, Terraform variables documentation, change process, teardown checklist, and a link to your GitHub repository with all Terraform, Ansible, and GitHub Actions code.
+2. **Narrated screen recording (max 3 minutes)**. Your server MOTD must include your name or student ID. Submit timestamps alongside the video (e.g., "Checkpoint 1: 0:00, Checkpoint 2: 0:38, ..."):
    1. Show `terraform apply` output and the Ansible playbook running against the instance.
-   2. `nmap` showing 25565/tcp reachable after automated deploy.
+   2. `nmap` showing 25565/tcp reachable after automated deploy, including MOTD.
    3. Show the GitHub Actions pipeline run (Actions tab or screenshot).
    4. `terraform destroy` then `terraform apply`: show the server comes back joinable.
-5. Documentation package.
-
-Server MOTD must include your student name/ID. Submit timestamps alongside the video.
 
 ## Minimal Contract (Acceptance)
 
