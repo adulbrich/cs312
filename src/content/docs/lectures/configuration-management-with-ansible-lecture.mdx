@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Imagine you are responsible for three web servers that must serve identical content behind a load balancer. On day one you log into each machine, install nginx, copy over a configuration file, and start the service. Everything works. A month later, a colleague patches one server but forgets the other two. Someone else tweaks a timeout setting on the third machine to debug a problem, then never reverts it. Before long, the three "identical" servers have quietly diverged. This phenomenon is called **configuration drift**, and it is one of the most common sources of mysterious, hard-to-reproduce bugs in production environments.
 
@@ -46,6 +47,10 @@ Ansible uses a declarative model. Rather than writing "run apt-get install nginx
 Ansible uses an **agentless** architecture. Unlike Puppet or Chef, which require a dedicated agent process on every managed machine, Ansible needs nothing on the target hosts beyond a standard SSH server and Python.
 
 The machine where you write and run your Ansible code is called the **control node**. The servers you manage are called **managed nodes**. When you execute an Ansible command, the control node connects to each managed node over SSH, pushes small Python scripts (called modules) to the remote machine, executes them, collects the results, and cleans up. No long-running daemon, no central database, no complicated certificate infrastructure.
+
+<HistoricalNote title="Ansible Was Named After a Sci-Fi Radio (2012)">
+Michael DeHaan created Ansible in 2012 after years of frustration with agent-based tools while working at Red Hat on Cobbler (a provisioning system) and Func (a remote execution framework). His goal was a tool with zero agent requirements: just SSH and Python, both already present on every managed Linux server. He named it after the ansible, a faster-than-light communication device from Ursula K. Le Guin's science fiction novels, later used by Orson Scott Card in Ender's Game. The name reflects the aspiration that configuration management should feel instantaneous. Ansible grew quickly in the open-source community; Red Hat acquired it in 2015 for roughly $150 million. It is now one of the most widely deployed automation tools in enterprise IT, notable for being the only major configuration management tool that requires nothing installed on the machines it manages.
+</HistoricalNote>
 
 ### System Requirements
 
@@ -113,7 +118,7 @@ ansible webservers -i hosts.ini -m ansible.builtin.service \
 
 The `ping` module does not send an ICMP ping; it verifies that Ansible can connect over SSH and execute Python. Ad-hoc commands are convenient for exploration and emergencies, but they are not repeatable or version-controlled. For anything you plan to do more than once, write a playbook.
 
-**Modules** (also called task plugins) are discrete units of code that perform a single action — installing a package, copying a file, managing a service. Ansible executes each module on the remote managed node and collects the return value. Modules are grouped into **Collections** and distributed through the Ansible community. To read the documentation for any module locally, use:
+**Modules** (also called task plugins) are discrete units of code that perform a single action: installing a package, copying a file, managing a service. Ansible executes each module on the remote managed node and collects the return value. Modules are grouped into **Collections** and distributed through the Ansible community. To read the documentation for any module locally, use:
 
 ```bash
 ansible-doc ansible.builtin.apt
@@ -284,7 +289,7 @@ Once a role is written and tested, any team member can apply it to any group of 
 ansible-galaxy collection install cisco.ios
 ```
 
-**Ansible Galaxy** (`galaxy.ansible.com`) is the community hub for sharing collections and standalone roles. Useful examples include collections for managing Cisco IOS network devices, macOS automation, and general Linux system administration. Before writing a complex role from scratch, check Galaxy — a well-maintained community collection may already exist.
+**Ansible Galaxy** (`galaxy.ansible.com`) is the community hub for sharing collections and standalone roles. Useful examples include collections for managing Cisco IOS network devices, macOS automation, and general Linux system administration. Before writing a complex role from scratch, check Galaxy; a well-maintained community collection may already exist.
 
 ## Protecting Sensitive Data with Ansible Vault
 

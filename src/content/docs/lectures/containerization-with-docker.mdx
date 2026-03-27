@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Suppose you have written a small Python Flask web application. It works perfectly on your laptop, but when you hand it to a teammate or deploy it to a server, something breaks: a missing library, a different Python version, a conflicting system package. This class of problem ("it works on my machine") has plagued software teams for decades. Containers solve it by packaging an application together with everything it needs to run (libraries, runtime, configuration) into a single, portable artifact that behaves the same everywhere.
 
@@ -34,7 +35,7 @@ The ideas behind containers were developed incrementally over decades.
 - **Accounting:** track how much CPU and memory a group has consumed.
 - **Control:** pause, checkpoint, or restart a process group.
 
-**Namespaces (2002–present):** Linux namespaces wrap a global resource so that processes within the namespace get their own isolated instance. A process in a PID namespace sees a different set of process IDs than the host; a process in a network namespace has its own network interfaces, routing table, and firewall rules. There are currently eight namespace types in the Linux kernel:
+**Namespaces (2002-present):** Linux namespaces wrap a global resource so that processes within the namespace get their own isolated instance. A process in a PID namespace sees a different set of process IDs than the host; a process in a network namespace has its own network interfaces, routing table, and firewall rules. There are currently eight namespace types in the Linux kernel:
 
 | Namespace | What it isolates |
 |-----------|-----------------|
@@ -49,15 +50,19 @@ The ideas behind containers were developed incrementally over decades.
 
 The network namespace deserves special attention: each container gets its own list of network interfaces, its own IP address space, its own routing table, its own sockets, and its own firewall rules. This is what allows multiple containers on the same host to each bind to port 80 without conflicting.
 
-**LXC — Linux Containers:** Combining cgroups and namespaces, LXC (Linux Containers) appeared around 2008 as a way to run a full "virtual operating system" without a hypervisor. An LXC container might run Ubuntu inside even though the host runs Debian. Both containers share the same host kernel — there is no separate "Ubuntu kernel." This makes LXC very resource-efficient, but because the kernel is shared, a kernel vulnerability could potentially be exploited across container boundaries, making LXC somewhat less isolated than a full VM.
+**LXC (Linux Containers):** Combining cgroups and namespaces, LXC (Linux Containers) appeared around 2008 as a way to run a full "virtual operating system" without a hypervisor. An LXC container might run Ubuntu inside even though the host runs Debian. Both containers share the same host kernel: there is no separate "Ubuntu kernel." This makes LXC very resource-efficient, but because the kernel is shared, a kernel vulnerability could potentially be exploited across container boundaries, making LXC somewhat less isolated than a full VM.
 
-**Docker's paradigm shift:** Earlier containerization approaches like LXC virtualized an entire OS environment. Docker's insight was to discard the OS portion entirely and virtualize only the single application you want to run. A Docker container is not "a small Ubuntu" — it is your application process, packaged with the user-space libraries it needs. Docker originally used LXC internally, but newer versions use **libcontainer** (now part of the `runc` project), a purpose-built library that directly uses cgroups and namespaces without needing the LXC userland tools.
+**Docker's paradigm shift:** Earlier containerization approaches like LXC virtualized an entire OS environment. Docker's insight was to discard the OS portion entirely and virtualize only the single application you want to run. A Docker container is not "a small Ubuntu"; it is your application process, packaged with the user-space libraries it needs. Docker originally used LXC internally, but newer versions use **libcontainer** (now part of the `runc` project), a purpose-built library that directly uses cgroups and namespaces without needing the LXC userland tools.
 
 <Aside type="note" title="Containers Are Not Lightweight VMs">
 A common misconception is that containers are "small VMs." They are not. A VM virtualizes hardware and runs a complete guest kernel. A container is a regular process (or group of processes) on the host, isolated through kernel namespaces (separate views of PIDs, network, filesystem) and constrained through cgroups (CPU, memory limits). The host kernel is shared, which is why you cannot run a Windows container on a Linux host without a VM intermediary.
 </Aside>
 
 The tradeoff is clear: containers offer speed and density at the cost of weaker isolation (shared kernel), while VMs offer stronger isolation at the cost of resource overhead. In practice, many organizations layer both: VMs provide the host baseline, and containers run application workloads on top.
+
+<HistoricalNote title="Docker's Five-Minute Lightning Talk (PyCon 2013)">
+Docker originated as a side project at dotCloud, a French-American platform-as-a-service startup. Solomon Hykes, dotCloud's founder, almost did not bother presenting it: he gave a five-minute lightning talk at PyCon Santa Clara in March 2013, half-expecting it to go unnoticed. The audience immediately understood why packaging an application together with its dependencies solved a real problem, and the GitHub repository hit 1,000 stars within 24 hours. Docker was open-sourced a few weeks later. dotCloud pivoted its entire business to Docker, renamed the company Docker Inc., and raised $15 million in Series B funding within months. The technology that would reshape how software is deployed globally began as an internal tool at a small company that nearly kept it to themselves.
+</HistoricalNote>
 
 ## Docker Architecture
 
@@ -267,7 +272,7 @@ docker rm my-flask
 docker rm -f my-flask
 ```
 
-The `docker exec` command is particularly useful for debugging. The `-it` flags allocate an interactive terminal, giving you a shell inside the running container. `docker stats` provides a real-time view of CPU and memory consumption — useful when diagnosing performance issues without installing extra tooling inside the container.
+The `docker exec` command is particularly useful for debugging. The `-it` flags allocate an interactive terminal, giving you a shell inside the running container. `docker stats` provides a real-time view of CPU and memory consumption, useful when diagnosing performance issues without installing extra tooling inside the container.
 
 <Aside type="caution" title="Containers Are Ephemeral">
 When you remove a container, any data written inside the container's filesystem is gone. Containers are designed to be disposable. If your application produces data that must survive container replacement (database files, uploaded images, logs), you need to use volumes or bind mounts, which are covered in the next section.
@@ -397,9 +402,9 @@ With `docker compose up --build`, both containers start, share a network, and th
 
 An image built on your laptop is only useful if you can share it. **Registries** are servers that store and distribute images. The most common are:
 
-- **Docker Hub** (`hub.docker.com`) — the default public registry; hosts official images for nginx, postgres, redis, and thousands of community images.
-- **GitHub Container Registry (GHCR)** (`ghcr.io`) — integrated with GitHub; useful when your source code is already on GitHub.
-- **Amazon ECR, Google Artifact Registry, Azure Container Registry** — cloud-provider registries for production deployments.
+- **Docker Hub** (`hub.docker.com`): the default public registry; hosts official images for nginx, postgres, redis, and thousands of community images.
+- **GitHub Container Registry (GHCR)** (`ghcr.io`): integrated with GitHub; useful when your source code is already on GitHub.
+- **Amazon ECR, Google Artifact Registry, Azure Container Registry**: cloud-provider registries for production deployments.
 
 ### Tagging Images
 
@@ -435,12 +440,12 @@ docker logout
 For GHCR, use `docker login ghcr.io` and authenticate with a GitHub personal access token. In CI/CD workflows, the `GITHUB_TOKEN` secret can be used directly (as shown in the GitHub Actions lecture), so no manual credentials are needed.
 
 <Aside type="caution">
-When pushing to a public repository, remember that the image layers are publicly accessible. Never bake secrets, passwords, or private keys into an image layer — even in an intermediate layer that was later overwritten. Use multi-stage builds and runtime secrets injection instead.
+When pushing to a public repository, remember that the image layers are publicly accessible. Never bake secrets, passwords, or private keys into an image layer, even in an intermediate layer that was later overwritten. Use multi-stage builds and runtime secrets injection instead.
 </Aside>
 
 ## Container Orchestration
 
-Managing a handful of containers manually works for development and small deployments. At scale, you need **container orchestration** — a system that automatically deploys, scales, heals, and load-balances containers across a cluster of machines.
+Managing a handful of containers manually works for development and small deployments. At scale, you need **container orchestration**: a system that automatically deploys, scales, heals, and load-balances containers across a cluster of machines.
 
 **Kubernetes** (abbreviated **K8s**, where 8 represents the eight letters between "K" and "s") is the dominant orchestration platform. A Kubernetes cluster consists of a control plane and worker nodes. You describe the desired state (run three replicas of this image, expose them on this port, restart if they fail) and Kubernetes continuously works to make reality match that description. Key capabilities include:
 

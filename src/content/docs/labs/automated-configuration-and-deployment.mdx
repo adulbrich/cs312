@@ -322,7 +322,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
    - **`hosts: webservers`**: targets every host in the `[webservers]` inventory group.
    - **`become: true`**: runs tasks with `sudo` (installing packages and managing Docker requires root).
    - **`vars:`**: defines variables used throughout the playbook. Changing a password here changes it everywhere it is referenced.
-   - **Tasks 1–5** install Docker Engine from the official Docker repository. The `creates:` argument on shell tasks makes them idempotent, Ansible skips the task if the file already exists.
+   - **Tasks 1-5** install Docker Engine from the official Docker repository. The `creates:` argument on shell tasks makes them idempotent, Ansible skips the task if the file already exists.
    - **Task 6** creates a directory for the Compose project.
    - **Task 7** writes a `docker-compose.yml` using Ansible's `copy` module with inline content. The `{{ variable }}` syntax is Jinja2 templating, Ansible substitutes the values from `vars`.
    - **Task 8** starts the Docker Compose stack using Ansible's `community.docker.docker_compose_v2` module, which is idempotent; if the stack is already running with the same configuration, it makes no changes.

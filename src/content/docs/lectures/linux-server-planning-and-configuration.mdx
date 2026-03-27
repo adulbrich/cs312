@@ -1,11 +1,12 @@
 ---
-title: Linux Server Planning & Configuration Essentials
+title: Linux Server Planning and Configuration Essentials
 description: "A comprehensive guide to planning, installing, and configuring a Linux server: from choosing a distribution to managing users, packages, services, networking, and storage."
 sidebar:
   order: 2
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Throughout this chapter, we will follow a single scenario: you have been asked to set up a fresh Ubuntu 24.04 LTS server to host a small web application backed by a database. Every concept we cover (choosing a distribution, planning resources, managing users, configuring services) will be grounded in that scenario so you can see how the pieces fit together in practice.
 
@@ -84,7 +85,7 @@ Understanding how a Linux server starts up helps you diagnose problems when it d
 
 **4. Init system (systemd).** Once the kernel has mounted the root filesystem, it starts PID 1: the init system. On virtually all modern distributions, this is `systemd`. Systemd reads its unit files, builds a dependency graph of services, and starts them in parallel. It brings the system to a defined "target" (analogous to the older concept of a runlevel). The default target for a server is `multi-user.target`, which provides a full multi-user environment without a graphical desktop.
 
-A few special process IDs are worth knowing. PID 0 is the scheduler and memory page daemon, a kernel-internal entity that never appears as a normal user-space process. PID 1 is `systemd` (or `init` on older systems), the first user-space process. PID 2 is typically `kthreadd`, which spawns kernel threads on demand — many of the low-level daemons visible in `ps` output are children of PID 2.
+A few special process IDs are worth knowing. PID 0 is the scheduler and memory page daemon, a kernel-internal entity that never appears as a normal user-space process. PID 1 is `systemd` (or `init` on older systems), the first user-space process. PID 2 is typically `kthreadd`, which spawns kernel threads on demand; many of the low-level daemons visible in `ps` output are children of PID 2.
 
 <Aside type="note">
 If your server hangs during boot, GRUB lets you interrupt the process and edit kernel parameters. Appending `systemd.unit=rescue.target` to the kernel command line boots into single-user rescue mode, which is invaluable for troubleshooting.
@@ -347,6 +348,10 @@ The `-f` flag follows the log output in real time, similar to `tail -f`.
 The `After=` directive controls ordering (what starts first), while `Requires=` controls dependency (if the dependency fails, this unit fails too). For most application services, `After=` is sufficient; use `Requires=` sparingly.
 </Aside>
 
+<HistoricalNote title="The Init Wars: SysV to systemd (2010-2015)">
+For most of Linux's first two decades, PID 1 was SysV init: a collection of shell scripts that started services one at a time in a fixed sequence. It was simple but slow; each service had to finish before the next could start, and dependency ordering was fragile and largely manual. In 2006 Apple released launchd for macOS, which parallelized service startup. Lennart Poettering proposed systemd for Linux in 2010, drawing on launchd's ideas. systemd parallelized startup using socket activation, managed logging through a unified journal, and eventually absorbed login sessions, device management, and dozens of other system functions that had previously required separate daemons. The adoption provoked significant debate. Critics argued it violated Unix's "do one thing well" philosophy and that its centralized scope made debugging harder. Despite the controversy, every major Linux distribution had made systemd its default by 2015.
+</HistoricalNote>
+
 ## Network Configuration Basics
 
 A server that cannot be reached over the network is not very useful. Let us configure networking for our Ubuntu web server.
@@ -456,7 +461,7 @@ The Filesystem Hierarchy Standard (FHS) defines where things live. The table bel
 | `/etc/apt/sources.list`| APT repository definitions (Debian/Ubuntu)                 |
 | `/etc/yum.repos.d/`    | YUM/DNF repository definitions (RHEL family)               |
 
-**`/dev` — device files.** In Linux, hardware devices are represented as files in `/dev`. Hard drives appear as `/dev/sda`, `/dev/sdb`, and so on (or `/dev/nvme0n1` for NVMe drives). In addition to real hardware, a few special pseudo-devices are useful in scripting:
+**`/dev`: device files.** In Linux, hardware devices are represented as files in `/dev`. Hard drives appear as `/dev/sda`, `/dev/sdb`, and so on (or `/dev/nvme0n1` for NVMe drives). In addition to real hardware, a few special pseudo-devices are useful in scripting:
 
 | Path           | Behavior                                                         |
 |----------------|------------------------------------------------------------------|
@@ -465,7 +470,7 @@ The Filesystem Hierarchy Standard (FHS) defines where things live. The table bel
 | `/dev/random`  | Returns cryptographically random bytes                          |
 | `/dev/tty`     | Refers to the current terminal; writing to it outputs to screen |
 
-**`/proc` — the process virtual filesystem.** `/proc` is not stored on disk; it is created and destroyed dynamically by the kernel. Each running process has a subdirectory `/proc/<PID>/` containing virtual files like `cmdline`, `status`, and the standard streams (`stdin`, `stdout`, `stderr`). The `/proc/sys/` subtree exposes many kernel tuning parameters. Because the data is hard to read directly, higher-level tools like `top`, `ps`, and `htop` parse it for you. For example, `/proc/1/stat` contains the state information for PID 1 (systemd).
+**`/proc`: the process virtual filesystem.** `/proc` is not stored on disk; it is created and destroyed dynamically by the kernel. Each running process has a subdirectory `/proc/<PID>/` containing virtual files like `cmdline`, `status`, and the standard streams (`stdin`, `stdout`, `stderr`). The `/proc/sys/` subtree exposes many kernel tuning parameters. Because the data is hard to read directly, higher-level tools like `top`, `ps`, and `htop` parse it for you. For example, `/proc/1/stat` contains the state information for PID 1 (systemd).
 
 For our web application, the application code will live in `/opt/webapp`, the database files will be managed by PostgreSQL under `/var/lib/postgresql`, and logs will accumulate in `/var/log`.
 

@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Imagine you have just provisioned a fresh Ubuntu server and attached it to a public IP address. Within minutes, automated scanners will discover it. Within hours, bots will begin probing SSH, HTTP, and any other open port for default credentials and known vulnerabilities. This is not hypothetical; it is the baseline reality of operating a public-facing server.
 
@@ -15,11 +16,11 @@ This chapter walks through the practical steps you would take to harden that ser
 
 Security failures have real consequences: data breaches expose private user information and intellectual property, extended downtime costs revenue and erodes trust, and ransomware can put a company out of business entirely. The motivating framework is the **CIA Triad**, which describes the three properties that every secure system must preserve.
 
-**Confidentiality** means that only authorized users and processes can access or modify data. Authentication (proving you are who you claim to be — passwords, biometrics, cryptographic keys) and authorization (verifying that you have the right to access what you are requesting — file permissions, access control lists) are the primary mechanisms. A data breach is a loss of confidentiality.
+**Confidentiality** means that only authorized users and processes can access or modify data. Authentication (proving you are who you claim to be: passwords, biometrics, cryptographic keys) and authorization (verifying that you have the right to access what you are requesting: file permissions, access control lists) are the primary mechanisms. A data breach is a loss of confidentiality.
 
 **Integrity** means that data is maintained in a correct state and cannot be improperly modified, either accidentally or maliciously. Read/write permissions, checksums, backups, and ECC RAM all protect integrity. Altering business records to influence decision-making or defacing a website's source code are examples of integrity violations.
 
-**Availability** means that authorized users can access data and services when they need to. Systems must handle expected load, hardware must be maintained, infrastructure must be monitored, and a Disaster Recovery (DR) plan must be in place. A Denial-of-Service (DoS) attack — or its distributed variant, DDoS, which floods a target with traffic from many sources — is a direct attack on availability.
+**Availability** means that authorized users can access data and services when they need to. Systems must handle expected load, hardware must be maintained, infrastructure must be monitored, and a Disaster Recovery (DR) plan must be in place. A Denial-of-Service (DoS) attack (or its distributed variant, DDoS, which floods a target with traffic from many sources) is a direct attack on availability.
 
 <Aside type="note">
 A useful illustration: an ATM covers all three CIA properties. It enforces confidentiality through two-factor authentication (card + PIN); it enforces integrity by ensuring that withdrawals are accurately reflected in your account balance; and it provides availability by being accessible in a public place even when the bank is closed.
@@ -33,7 +34,7 @@ Understanding the attack surface is the first step toward defending it. Common a
 - **Software vulnerabilities.** Unpatched bugs in the OS, libraries, or applications that allow an attacker to execute arbitrary code or escalate privileges.
 - **Distributed Denial-of-Service (DDoS).** Flooding a service with traffic from many sources (often a botnet) until it exhausts available bandwidth or server resources.
 - **Insider abuse.** Employees or contractors who misuse their legitimate access, whether for personal gain, espionage, or sabotage.
-- **Misconfiguration.** A database listening on a public IP with no authentication, an open S3 bucket, or a debug endpoint left exposed — these are responsible for a large fraction of real breaches.
+- **Misconfiguration.** A database listening on a public IP with no authentication, an open S3 bucket, or a debug endpoint left exposed; these are responsible for a large fraction of real breaches.
 - **Hardware-level attacks.** Side-channel attacks that extract secrets by monitoring power consumption, electromagnetic emissions, or CPU frequency/temperature behavior.
 
 ## The Threat Model for a Public Server
@@ -49,7 +50,7 @@ For a typical web-facing Ubuntu server, the most common attack vectors are:
 
 ## Defense in Depth
 
-No single security control is sufficient on its own. A layered approach — sometimes called "defense in depth" or **multi-layered security** — ensures that if one layer fails, others remain in place. A practical layering strategy combines:
+No single security control is sufficient on its own. A layered approach (sometimes called "defense in depth" or **multi-layered security**) ensures that if one layer fails, others remain in place. A practical layering strategy combines:
 
 - **Access control and authentication:** user management, multi-factor authentication (MFA), single sign-on (SSO), and strong password policies.
 - **Endpoint security:** anti-malware software, host-based firewalls, and patch management.
@@ -120,6 +121,10 @@ ssh-copy-id deploy@your-server-ip
 ```
 
 Verify that you can log in with the key before proceeding. If you disable password authentication before confirming key access, you will lock yourself out.
+
+<HistoricalNote title="SSH Was Written After a Password Sniffing Attack (1995)">
+SSH was written by Tatu Ylönen, a researcher at Helsinki University of Technology, in 1995, not out of academic interest but because his own accounts had just been compromised. A password-sniffing attack swept through the university network, capturing credentials transmitted in plaintext by telnet and rlogin, the standard remote login protocols at the time. Ylönen wrote the first version of SSH in a few months and released it for free in July 1995. It spread to tens of thousands of hosts within weeks. He founded SSH Communications Security to commercialize the protocol. When the company's licensing became restrictive in 1999, the OpenBSD project rewrote the entire codebase from scratch as OpenSSH, the version that ships with virtually every Linux and macOS system today. The protocol that secures billions of server connections worldwide was born entirely from one researcher getting hacked.
+</HistoricalNote>
 
 ### Hardening sshd_config
 
@@ -303,7 +308,7 @@ Zero Trust is built on three principles:
 3. **Assume breach.** Segment networks and workloads to minimize the blast radius of any compromise. Enforce end-to-end encryption and use analytics to detect lateral movement early.
 
 <Aside type="note">
-Zero Trust is not a single product — it is an architectural philosophy. It is now mandated for US federal agencies under White House memorandum M-22-09, and it underpins modern identity platforms like Microsoft Entra ID and Google BeyondCorp.
+Zero Trust is not a single product; it is an architectural philosophy. It is now mandated for US federal agencies under White House memorandum M-22-09, and it underpins modern identity platforms like Microsoft Entra ID and Google BeyondCorp.
 </Aside>
 
 ## Secrets Management with HashiCorp Vault
@@ -313,7 +318,7 @@ SSH keys, API tokens, database passwords, and TLS certificates are all secrets t
 Vault's key capabilities include:
 
 - **Secret engines** that store and serve different types of secrets (key/value pairs, PKI certificates, cloud provider credentials, etc.).
-- **Dynamic secrets** that are generated on demand and automatically expire — a database credential that exists for only 30 minutes dramatically reduces the window of exposure if it is leaked.
+- **Dynamic secrets** that are generated on demand and automatically expire: a database credential that exists for only 30 minutes dramatically reduces the window of exposure if it is leaked.
 - **Fine-grained policies** that determine which applications and identities can access which secrets.
 - **Audit logging** of every secret access event.
 
@@ -325,10 +330,10 @@ Hardening a server is not a one-time event. New vulnerabilities are disclosed co
 
 Authoritative sources for tracking security vulnerabilities:
 
-- **NVD (National Vulnerability Database)** at [nvd.nist.gov](https://nvd.nist.gov/) — the US government's catalog of known CVEs, with severity scores (CVSS).
-- **CVE (Common Vulnerabilities and Exposures)** at [cve.org](https://www.cve.org/) — the canonical identifier system for publicly known vulnerabilities.
-- **SecLists.Org** at [seclists.org](https://seclists.org/) — an archive of security mailing lists.
-- **Vendor security advisories** — Ubuntu Security Notices (USN), Red Hat Security Advisories (RHSA), and similar feeds from your OS and software vendors.
+- **NVD (National Vulnerability Database)** at [nvd.nist.gov](https://nvd.nist.gov/): the US government's catalog of known CVEs, with severity scores (CVSS).
+- **CVE (Common Vulnerabilities and Exposures)** at [cve.org](https://www.cve.org/): the canonical identifier system for publicly known vulnerabilities.
+- **SecLists.Org** at [seclists.org](https://seclists.org/): an archive of security mailing lists.
+- **Vendor security advisories**: Ubuntu Security Notices (USN), Red Hat Security Advisories (RHSA), and similar feeds from your OS and software vendors.
 - **Security blogs** such as Krebs on Security and the SANS Internet Storm Center for news and analysis.
 
 <Aside type="tip">
@@ -374,7 +379,7 @@ No technology, policy, or security control is more important than having a worki
 - **Comprehensive.** It must cover all data that cannot be easily recreated.
 - **Accessible.** The backup is worthless if restoring from it takes so long that the business cannot survive the downtime.
 - **Verifiable.** A backup that was never tested is an assumption, not a guarantee. Backups should report success or failure, and restoration should be tested periodically.
-- **Secured.** An infected or encrypted backup cannot save you. Backups must be stored separately from the live system — ideally off-site — and access-controlled so that ransomware spreading across the network cannot reach them.
+- **Secured.** An infected or encrypted backup cannot save you. Backups must be stored separately from the live system, ideally off-site, and access-controlled so that ransomware spreading across the network cannot reach them.
 
 <Aside type="caution">
 Cloud sync services (Dropbox, Google Drive) and version control (Git) are not backups. They are useful tools, but a ransomware infection that encrypts your files can propagate through a sync client and overwrite cloud copies within minutes. Proper off-site backups are a separate, purpose-built system.
@@ -445,8 +450,8 @@ No checklist can make a server perfectly secure. Security is an ongoing process 
 
 ## Summary
 
-This chapter traced the path from a freshly provisioned Ubuntu server to a hardened system ready for the public internet. The organizing frameworks are the CIA Triad (confidentiality, integrity, availability) and defense in depth — no single control is sufficient, so you layer them. The practical controls are: restrict network access with a default-deny firewall, authenticate with keys instead of passwords, run services with the minimum privileges they need, keep software patched, monitor logs continuously, and back up everything to a secured off-site location.
+This chapter traced the path from a freshly provisioned Ubuntu server to a hardened system ready for the public internet. The organizing frameworks are the CIA Triad (confidentiality, integrity, availability) and defense in depth: no single control is sufficient, so you layer them. The practical controls are: restrict network access with a default-deny firewall, authenticate with keys instead of passwords, run services with the minimum privileges they need, keep software patched, monitor logs continuously, and back up everything to a secured off-site location.
 
-Beyond individual server hardening, the Zero Trust model extends these principles to entire architectures: never assume a request is safe based on where it comes from; always verify identity and context. And the DevSecOps philosophy carries security left into the development pipeline itself — catching secrets, vulnerabilities in dependencies, and insecure code patterns before they ever reach production.
+Beyond individual server hardening, the Zero Trust model extends these principles to entire architectures: never assume a request is safe based on where it comes from; always verify identity and context. And the DevSecOps philosophy carries security left into the development pipeline itself, catching secrets, vulnerabilities in dependencies, and insecure code patterns before they ever reach production.
 
 Work from a checklist so you do not skip a step under pressure. These practices are not exotic or advanced; they are the baseline. Every server you deploy should start here.

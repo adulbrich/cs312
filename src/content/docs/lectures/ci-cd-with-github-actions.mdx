@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Imagine a team of developers working on a containerized web application. Every time someone merges a feature, a designated team member must pull the latest code, run the tests locally, build a Docker image, push it to a registry, and then SSH into a server to deploy the new version. This process is slow, error-prone, and utterly dependent on a single person remembering every step in the right order. If that person is sick, on vacation, or simply distracted, the release stalls or, worse, ships with a defect nobody caught.
 
@@ -13,12 +14,12 @@ Continuous Integration and Continuous Delivery (CI/CD) exist to solve exactly th
 
 ## Deployment Environments
 
-Before discussing CI/CD mechanics, it helps to understand the concept of **deployment environments** — the distinct places where code is deployed at different stages of its lifecycle.
+Before discussing CI/CD mechanics, it helps to understand the concept of **deployment environments**: the distinct places where code is deployed at different stages of its lifecycle.
 
 | Environment | Also called | Purpose |
 |-------------|-------------|---------|
 | Development | Dev | Individual developer's local machine or sandbox |
-| Test | — | Automated and manual testing |
+| Test | | Automated and manual testing |
 | Staging | Qualification / Pre-production | Production-like environment for final validation |
 | Acceptance | UAT | Business stakeholders verify requirements are met |
 | Production | Prod | The real world; live users and live data |
@@ -38,6 +39,10 @@ The acronym "CI/CD" actually covers three distinct practices, and it is worth se
 <Aside type="tip">
 Most teams start with continuous integration and continuous delivery. Continuous deployment is a maturity goal, not a prerequisite.
 </Aside>
+
+<HistoricalNote title="From CruiseControl to GitHub Actions (2001-2018)">
+The phrase "continuous integration" appeared in Grady Booch's 1994 object-oriented design book, though the practice he described was far less automated than modern CI. Kent Beck's Extreme Programming (1999) formalized it: merge small changes frequently, run tests immediately, fix failures before continuing. CruiseControl (2001) was the first open-source CI server. Jenkins (2011, a fork of the older Hudson project) became ubiquitous because it was free, self-hosted, and infinitely extensible with plugins. Travis CI (2011) changed the economics for open-source projects by offering hosted CI integrated directly with GitHub, with no server to maintain. GitHub Actions launched in 2018, bringing CI/CD infrastructure into the same interface where code already lived and eliminating the operational overhead of running a separate CI system. Most new projects today use a hosted service rather than managing their own CI infrastructure, a complete reversal from the Jenkins era.
+</HistoricalNote>
 
 ## The Feedback Loop
 
@@ -333,7 +338,7 @@ A matrix generates a maximum of 256 jobs per workflow run. By default, GitHub ma
 
 ## Service Containers
 
-Some jobs need a running service (a database, a cache, a message broker) available during the test steps. Rather than installing and starting these services manually in shell commands, GitHub Actions supports **service containers** — Docker containers that run alongside your job and are accessible by hostname within the same network.
+Some jobs need a running service (a database, a cache, a message broker) available during the test steps. Rather than installing and starting these services manually in shell commands, GitHub Actions supports **service containers**: Docker containers that run alongside your job and are accessible by hostname within the same network.
 
 ```yaml
 jobs:
@@ -419,6 +424,38 @@ jobs:
 ```
 
 If the "production" environment is configured to require approval from a designated reviewer, the `deploy-production` job will pause and wait for that approval before proceeding. This provides a human checkpoint at exactly the right moment: after all automated checks have passed but before the change reaches users.
+
+### Deployment Patterns
+
+The previous sections described *when* and *how* a pipeline triggers a deployment. A separate question is *how the new version is actually rolled out to running servers*. The answer matters because production systems cannot simply be turned off while you swap in a new version: users are active, requests are in flight, and any gap in availability is a real cost.
+
+The three patterns below represent a spectrum from simple to cautious.
+
+**Rolling deployment** replaces instances of the old version one at a time (or in small batches) while the rest of the fleet continues serving traffic. At any moment during the rollout, some instances run the old version and some run the new one. This is the default behavior for Kubernetes `Deployment` objects and most PaaS platforms. Rolling deployments are simple to operate and require no extra infrastructure, but because old and new versions coexist briefly, your code and database schema must be backwards-compatible during the transition.
+
+**Blue-green deployment** runs two identical environments side by side: the "blue" environment currently serves production traffic; the "green" environment receives the new version. Once the green environment passes health checks, a load balancer or DNS switch instantly redirects all traffic from blue to green. Because the switch is atomic, there is no period where old and new versions coexist. Rollback is equally instant: flip the switch back to blue. The cost is infrastructure: you need two full production environments running simultaneously, even if only one is serving users.
+
+```bash
+# Switch production traffic to the new (green) target group
+aws elbv2 modify-listener \
+  --listener-arn $LISTENER_ARN \
+  --default-actions Type=forward,TargetGroupArn=$GREEN_TARGET_GROUP
+
+# To roll back, flip back to blue
+aws elbv2 modify-listener \
+  --listener-arn $LISTENER_ARN \
+  --default-actions Type=forward,TargetGroupArn=$BLUE_TARGET_GROUP
+```
+
+**Canary deployment** sends a small fraction of real production traffic (say, 5%) to the new version while the remaining 95% continues hitting the old version. The name comes from the mining practice of carrying a canary into a coal mine: if the canary dies, something is wrong. You monitor error rates, latency, and business metrics on the canary. If everything looks healthy after a set period, you gradually shift more traffic over. If the metrics degrade, you pull all traffic back to the old version before most users were ever affected. Canary releases are more complex to implement (they require a traffic-splitting layer such as a load balancer with weighted routing or a service mesh) but give you real-world validation with limited blast radius.
+
+| Pattern | Downtime | Rollback speed | Infrastructure cost | Version coexistence |
+|---------|----------|----------------|---------------------|---------------------|
+| Rolling | None | Minutes (re-roll forward/back) | None | Yes, briefly |
+| Blue-green | None | Instant (traffic switch) | 2x production | No |
+| Canary | None | Fast (redirect traffic) | Moderate | Yes, intentionally |
+
+In practice, these patterns combine with the pipeline mechanics above. A typical setup uses a rolling or canary deployment to staging on every merge to `main`, then requires manual approval and performs a blue-green swap to production.
 
 ## A Complete Pipeline
 

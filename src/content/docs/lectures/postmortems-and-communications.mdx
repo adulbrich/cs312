@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Every production system will eventually fail. The defining characteristic of a mature engineering organization is not whether it experiences incidents, but how it responds to them, learns from them, and communicates about them. This chapter walks through the complete lifecycle of an incident: from the first alert through stakeholder communication, postmortem analysis, and follow-up actions that prevent recurrence.
 
@@ -44,6 +45,10 @@ Blameless does not mean "no one is responsible." People are still accountable fo
 Google's well-known Project Aristotle found that psychological safety (the belief that you will not be punished for making a mistake) was the single strongest predictor of team effectiveness. Blameless postmortems are a direct application of this finding. When engineers trust that they can describe their actions honestly, the quality of the postmortem improves dramatically. Details emerge that would otherwise stay hidden, and the resulting action items address root causes instead of symptoms.
 
 In our database migration scenario, a blameless approach might reveal that the engineer did check the migration in a staging environment, but the staging database had only 500 rows instead of 14 million. That is a systemic gap in how the team maintains staging data, and it would never surface if the engineer feared punishment for admitting they "only tested in staging."
+
+<HistoricalNote title="Blameless Postmortems Came from Aviation (1976-2009)">
+The modern engineering postmortem was largely popularized by John Allspaw and Paul Hammond's 2009 Velocity Conference talk, "10+ Deploys per Day: Dev and Ops Cooperation at Flickr." They argued that shipping frequently requires a culture where engineers can report mistakes honestly, which requires removing blame from incident reviews. Etsy's engineering blog documented their application of this philosophy throughout the early 2010s, and Google codified it in their 2016 Site Reliability Engineering book. The underlying idea is older: the aviation industry's Aviation Safety Reporting System (ASRS), created in 1976 by NASA, used confidential no-penalty incident reporting so that pilots and air traffic controllers could report close calls without fear. Aviation's safety record (the safest form of mass transportation) is partly a product of that reporting culture. Software engineering borrowed the same framework about 30 years later.
+</HistoricalNote>
 
 ## Postmortem Structure
 

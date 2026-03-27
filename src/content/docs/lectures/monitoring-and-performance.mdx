@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Every system feels healthy until a user tells you it is not. The goal of monitoring and performance management is to reverse that dynamic: you should know about problems before users do, understand what "normal" looks like so that "abnormal" is obvious, and have the data to diagnose issues quickly. This chapter covers the concepts, tools, and practices that make that possible.
 
@@ -29,9 +30,9 @@ A well-instrumented system uses all three. Metrics tell you *that* something is 
 
 Although metrics and logs are complementary, they have fundamentally different collection models that affect how you use each one.
 
-**Metrics** are collected at regular, predetermined intervals (typically every 15 to 60 seconds). Each data point is a numeric measurement — CPU utilization, memory usage, request count — stored in a time-series database. Because they are numeric and uniformly sampled, metrics are cheap to store, fast to query, and easy to aggregate across many instances.
+**Metrics** are collected at regular, predetermined intervals (typically every 15 to 60 seconds). Each data point is a numeric measurement (CPU utilization, memory usage, request count) stored in a time-series database. Because they are numeric and uniformly sampled, metrics are cheap to store, fast to query, and easy to aggregate across many instances.
 
-**Logs** are event-driven: a log entry is created when something happens (a request completes, an error is thrown, a configuration changes), not on a fixed schedule. This means logs have **high cardinality** — a single log line might contain a unique user ID, a specific IP address, an error message that appears once in a thousand requests. That richness is what makes logs indispensable for diagnosis, but it also makes them expensive to store and slow to search at scale compared to metrics.
+**Logs** are event-driven: a log entry is created when something happens (a request completes, an error is thrown, a configuration changes), not on a fixed schedule. This means logs have **high cardinality**: a single log line might contain a unique user ID, a specific IP address, an error message that appears once in a thousand requests. That richness is what makes logs indispensable for diagnosis, but it also makes them expensive to store and slow to search at scale compared to metrics.
 
 In practice: use metrics to detect that something is wrong and to quantify the scope. Use logs to understand what specifically happened and why.
 
@@ -120,6 +121,10 @@ scrape_configs:
 ```
 
 The pull model has a subtle advantage: if Prometheus cannot reach a target, the absence of data is itself a signal. A push-based system might silently lose data if the application crashes before sending its final batch.
+
+<HistoricalNote title="From MRTG to Prometheus: 30 Years of Metrics (1994-2015)">
+The first widely-used network monitoring tool was MRTG (Multi Router Traffic Grapher), written in 1994 by Tobias Oetiker to track bandwidth on university routers. It produced static PNG graphs updated every five minutes, primitive by today's standards, but the concept of visualizing metrics over time was radical. Nagios (1999) added alerting and service health checks. The next generation, including Graphite (2006, developed at Etsy) and StatsD (2011, also Etsy), introduced time-series databases purpose-built for metrics and made it trivial for application code to emit numbers. Prometheus was created at SoundCloud in 2012 by engineers who had previously worked at Google and missed Borgmon, Google's internal monitoring system. They open-sourced it in 2015; it became the default metrics layer for Kubernetes and cloud-native infrastructure. Grafana was written by Torkel Ödegaard in 2013 because he wanted better dashboards for Graphite than its built-in interface could provide. Both projects are now maintained under the Cloud Native Computing Foundation.
+</HistoricalNote>
 
 ### Metric types
 

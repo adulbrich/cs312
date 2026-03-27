@@ -1,5 +1,5 @@
 ---
-title: Windows Server Administration & Active Directory
+title: Windows Server Administration and Active Directory
 description: "Windows Server editions, Active Directory fundamentals, Group Policy, PowerShell management, file shares, and day-two operations: centralized identity for a growing organization."
 sidebar:
   order: 17
@@ -67,7 +67,7 @@ A **forest** is the top-level container in Active Directory. The first domain yo
 
 A **trust relationship** allows users in one domain to access resources in another. Within a forest, trusts are automatic and transitive. Between forests, trusts must be explicitly configured. For a small company, this concept becomes relevant only if Greenfield Engineering later merges with or acquires another company that has its own domain.
 
-**Kerberos authentication** is the protocol AD DS uses to verify identities. When a user logs in, the workstation contacts a Key Distribution Center (KDC) on the domain controller and proves the user's identity (via password hash). The KDC returns a **Ticket-Granting Ticket (TGT)** that is valid for a set period (typically 10 hours). When the user then needs to access a network resource (a file share, a web app), the workstation presents the TGT to the KDC and receives a **service ticket** for that specific resource — without re-entering credentials. The resource server validates the service ticket without contacting the KDC again. This mutual-authentication, ticket-based design means credentials are never sent over the network in the clear.
+**Kerberos authentication** is the protocol AD DS uses to verify identities. When a user logs in, the workstation contacts a Key Distribution Center (KDC) on the domain controller and proves the user's identity (via password hash). The KDC returns a **Ticket-Granting Ticket (TGT)** that is valid for a set period (typically 10 hours). When the user then needs to access a network resource (a file share, a web app), the workstation presents the TGT to the KDC and receives a **service ticket** for that specific resource, without re-entering credentials. The resource server validates the service ticket without contacting the KDC again. This mutual-authentication, ticket-based design means credentials are never sent over the network in the clear.
 
 **DNS dependency** is one of the most important things to understand about Active Directory. AD relies on DNS to locate domain controllers, services, and resources. When a workstation needs to find a domain controller, it queries DNS for SRV records (service locator records) that point to the right server. If DNS is broken, authentication fails, domain joins fail, and Group Policy cannot be applied. For this reason, the domain controller almost always runs the DNS Server role as well, and all domain-joined machines should point to internal DNS servers (not public resolvers) for name resolution.
 
@@ -224,7 +224,7 @@ Shared folders are one of the most common resources that Active Directory groups
 
 **Share permissions** apply only when a user accesses the folder over the network (via `\\server\sharename`). They are coarse-grained, offering only Full Control, Change, and Read. Best practice is to set share permissions to "Authenticated Users: Full Control" (or Change) and use NTFS permissions for fine-grained control. This simplifies troubleshooting because only one permission layer is doing the real work.
 
-**NTFS permissions** apply whether the user accesses the file locally or over the network. They are granular, supporting Read, Write, Modify, Read & Execute, List Folder Contents, and Full Control, among others. NTFS permissions also support **inheritance**: permissions set on a parent folder flow down to child folders and files unless explicitly broken.
+**NTFS permissions** apply whether the user accesses the file locally or over the network. They are granular, supporting Read, Write, Modify, Read and Execute, List Folder Contents, and Full Control, among others. NTFS permissions also support **inheritance**: permissions set on a parent folder flow down to child folders and files unless explicitly broken.
 
 The **effective permission** a user has is the most restrictive combination of share and NTFS permissions. If the share grants Change but NTFS grants only Read, the user gets Read. This is why setting the share permission broadly and relying on NTFS keeps things predictable.
 

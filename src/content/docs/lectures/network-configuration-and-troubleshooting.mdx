@@ -1,5 +1,5 @@
 ---
-title: Network Configuration & Troubleshooting
+title: Network Configuration and Troubleshooting
 description: "Systematic network troubleshooting: VLANs, Wi-Fi, DNS, DHCP, routing, firewalls, and packet capture."
 sidebar:
   order: 8
@@ -33,7 +33,7 @@ Large networks are difficult to manage as a single flat layer. The Cisco hierarc
 
 **The Distribution Layer** aggregates traffic from access switches and mediates between switching (layer 2) and routing (layer 3). It enforces policy-based security using access control lists (ACLs), provides routing between VLANs and between different routing domains, handles redundancy and load balancing, and controls broadcast domains (routers and layer-3 switches do not forward broadcast traffic, so the distribution layer acts as a boundary between broadcast domains). Route summarization here keeps the core routing tables compact: instead of advertising four `/24` subnets separately, the distribution layer can advertise a single `/22` summary route to the core.
 
-**The Core Layer** is the network backbone — the high-speed switching fabric interconnecting distribution devices. It prioritizes fast transport and fault tolerance over feature richness. CPU-intensive tasks (security inspection, QoS classification, deep packet inspection) are deliberately avoided at this layer; the goal is forwarding as fast as possible with maximum reliability.
+**The Core Layer** is the network backbone: the high-speed switching fabric interconnecting distribution devices. It prioritizes fast transport and fault tolerance over feature richness. CPU-intensive tasks (security inspection, QoS classification, deep packet inspection) are deliberately avoided at this layer; the goal is forwarding as fast as possible with maximum reliability.
 
 In small-to-medium networks, the distribution and core layers are often *collapsed* into a single layer-3 switch, reducing hardware cost while preserving the logical separation between access and routing functions.
 
@@ -43,7 +43,7 @@ Most production networks use VLANs (Virtual Local Area Networks) to divide a sin
 
 Every Ethernet frame on a VLAN-aware network can carry an 802.1Q tag, a small header inserted after the source MAC address that identifies which VLAN the frame belongs to. Switch ports operate in one of two modes.
 
-**Access ports** connect to end devices (servers, workstations, printers). The switch assigns all traffic on an access port to a single VLAN and strips the 802.1Q tag before delivering the frame to the device. The device never sees the tag. Traffic on an access port is *untagged* — no VLAN ID is present in the Ethernet frame, so untagged traffic on a port can only belong to one VLAN.
+**Access ports** connect to end devices (servers, workstations, printers). The switch assigns all traffic on an access port to a single VLAN and strips the 802.1Q tag before delivering the frame to the device. The device never sees the tag. Traffic on an access port is *untagged*: no VLAN ID is present in the Ethernet frame, so untagged traffic on a port can only belong to one VLAN.
 
 **Trunk ports** connect switches to each other or to routers. A trunk carries traffic for multiple VLANs simultaneously, preserving the 802.1Q tag (a 4-byte addition to each Ethernet frame containing the VLAN ID) so the receiving switch knows which VLAN each frame belongs to. Tagged frames are used to communicate between devices that are aware of VLAN segmentation. This is the only way to carry multiple VLANs on a single physical cable.
 
@@ -72,9 +72,9 @@ The 2.4 GHz band offers longer range but only three non-overlapping channels (1,
 
 When two nearby access points transmit on the same channel (or overlapping channels), they compete for airtime and degrade each other's performance. Channel allocation by band:
 
-- **2.4 GHz** — Only 3 non-overlapping channels in North America: 1, 6, and 11. Always use one of these three. Using channel 3 or 9 partially overlaps with adjacent channels and creates *worse* interference than sharing one of the standard three channels, because collisions affect both channels simultaneously.
-- **5 GHz** — 24 non-overlapping 20 MHz channels, substantially reducing co-channel interference in dense deployments.
-- **6 GHz** (Wi-Fi 6E / 802.11ax) — Up to 59 non-overlapping 20 MHz channels, with room for 29 non-overlapping 40 MHz channels, 14 non-overlapping 80 MHz channels, or 7 non-overlapping 160 MHz channels. The 6 GHz band is well suited to high-bandwidth applications such as HD video streaming and virtual reality, and is preferred in new dense deployments.
+- **2.4 GHz**: Only 3 non-overlapping channels in North America: 1, 6, and 11. Always use one of these three. Using channel 3 or 9 partially overlaps with adjacent channels and creates *worse* interference than sharing one of the standard three channels, because collisions affect both channels simultaneously.
+- **5 GHz**: 24 non-overlapping 20 MHz channels, substantially reducing co-channel interference in dense deployments.
+- **6 GHz** (Wi-Fi 6E / 802.11ax): Up to 59 non-overlapping 20 MHz channels, with room for 29 non-overlapping 40 MHz channels, 14 non-overlapping 80 MHz channels, or 7 non-overlapping 160 MHz channels. The 6 GHz band is well suited to high-bandwidth applications such as HD video streaming and virtual reality, and is preferred in new dense deployments.
 
 <Aside type="caution">
 Microwave ovens, Bluetooth devices, and cordless phones all operate near 2.4 GHz. If users report intermittent Wi-Fi problems in a break room or kitchen, interference from appliances is a likely culprit. Prefer 5 GHz or 6 GHz in those environments.
@@ -84,12 +84,12 @@ Microwave ovens, Bluetooth devices, and cordless phones all operate near 2.4 GHz
 
 When deploying wireless access points in a building:
 
-- **Survey the site** — Understand the physical layout, wall materials (concrete and metal attenuate signals significantly), and expected user density before placing APs.
-- **Use non-overlapping channels** — Separate adjacent APs onto different channels to avoid co-channel interference.
-- **Use the same SSID and credentials** across all APs — Clients will roam automatically to the nearest AP without the user noticing.
-- **Disable low data rates** — Some APs advertise low data rates (e.g., 1 or 2 Mbps) for backwards compatibility. Devices far from an AP may lock onto it at these low rates rather than roaming to a closer AP. Disabling the lowest data rates encourages clients to roam to a stronger signal.
-- **Account for user density** — A lecture hall needs more APs than an empty corridor. Many modern APs include automatic power and channel adjustment to adapt to congestion.
-- **Segment traffic by VLAN** — Use separate SSIDs mapped to separate VLANs for different user groups (staff, students, guests) to enforce network policies without running separate physical infrastructure.
+- **Survey the site**: Understand the physical layout, wall materials (concrete and metal attenuate signals significantly), and expected user density before placing APs.
+- **Use non-overlapping channels**: Separate adjacent APs onto different channels to avoid co-channel interference.
+- **Use the same SSID and credentials** across all APs: Clients will roam automatically to the nearest AP without the user noticing.
+- **Disable low data rates**: Some APs advertise low data rates (e.g., 1 or 2 Mbps) for backwards compatibility. Devices far from an AP may lock onto it at these low rates rather than roaming to a closer AP. Disabling the lowest data rates encourages clients to roam to a stronger signal.
+- **Account for user density**: A lecture hall needs more APs than an empty corridor. Many modern APs include automatic power and channel adjustment to adapt to congestion.
+- **Segment traffic by VLAN**: Use separate SSIDs mapped to separate VLANs for different user groups (staff, students, guests) to enforce network policies without running separate physical infrastructure.
 
 ### Enterprise wireless security
 
@@ -379,15 +379,15 @@ A VPN creates an encrypted tunnel between two endpoints over an untrusted networ
 
 Three common deployment patterns:
 
-- **Site-to-site VPN** — Connects two or more geographically separate offices, allowing their internal networks to communicate securely as if they were on the same LAN. The VPN is configured on the routers/firewalls at each site.
-- **Client-to-site (remote access) VPN** — Allows individual devices (remote workers' laptops) to securely connect to the corporate network. The user runs a VPN client; the organization runs a VPN server.
-- **Remote access VPN** — A variant of client-to-site where access is provided to specific services rather than the full network.
+- **Site-to-site VPN**: Connects two or more geographically separate offices, allowing their internal networks to communicate securely as if they were on the same LAN. The VPN is configured on the routers/firewalls at each site.
+- **Client-to-site (remote access) VPN**: Allows individual devices (remote workers' laptops) to securely connect to the corporate network. The user runs a VPN client; the organization runs a VPN server.
+- **Remote access VPN**: A variant of client-to-site where access is provided to specific services rather than the full network.
 
 Common VPN protocols:
 
-- **IPsec** — Built into most hardware routers and firewalls; leverages hardware acceleration for high throughput. Widely used in enterprise site-to-site deployments.
-- **OpenVPN** — Open-source, flexible, and easier to configure than IPsec. Runs over TCP or UDP; easy to tunnel through firewalls.
-- **WireGuard** — Modern, lean, and significantly faster than older protocols in benchmarks. Simpler code base (easier to audit). Less legacy hardware support, but increasingly adopted in new deployments.
+- **IPsec**: Built into most hardware routers and firewalls; leverages hardware acceleration for high throughput. Widely used in enterprise site-to-site deployments.
+- **OpenVPN**: Open-source, flexible, and easier to configure than IPsec. Runs over TCP or UDP; easy to tunnel through firewalls.
+- **WireGuard**: Modern, lean, and significantly faster than older protocols in benchmarks. Simpler code base (easier to audit). Less legacy hardware support, but increasingly adopted in new deployments.
 
 ## Firewall Types, Technologies, and Terminology
 
@@ -396,7 +396,7 @@ Common VPN protocols:
 Firewalls are categorized by where they sit in the network:
 
 - **Perimeter firewalls** sit between your internal network and the internet. Every packet crossing the boundary passes through them.
-- **Internal firewalls** separate network segments — for example, the corporate network from a production environment, or the access layer from the distribution layer. Data center firewalls enforce very specific rules for critical servers.
+- **Internal firewalls** separate network segments; for example, the corporate network from a production environment, or the access layer from the distribution layer. Data center firewalls enforce very specific rules for critical servers.
 - **Access layer firewalls** are deployed at the edge of high-risk environments or for IoT device segments.
 - **Web Application Firewalls (WAFs)** are placed in front of web applications. They inspect HTTP traffic to detect and block attacks like SQL injection, cross-site scripting (XSS), and session hijacking.
 - **Endpoint firewalls** run on the host itself (e.g., `iptables`/`nftables` on Linux, Windows Defender Firewall). They protect the device regardless of which network it is on.
@@ -409,12 +409,12 @@ Firewalls only inspect traffic that passes through them. Traffic that stays enti
 
 Modern firewalls combine multiple inspection techniques:
 
-- **Packet filtering** (OSI layer 3) — Allows or denies packets based on source/destination IP, protocol, and port number. Fast but cannot inspect connection state or payload.
-- **Stateful inspection** — Tracks the state of active connections in a session table. Return traffic for established connections is automatically allowed; unsolicited inbound packets are dropped.
-- **Proxy services** — The firewall acts as an intermediary: clients connect to the firewall, which makes the actual request on their behalf. Provides deep control but adds latency.
-- **Deep Packet Inspection (DPI)** — Inspects the packet payload, not just the header. Can detect malware signatures, unauthorized protocols, and data exfiltration. There is always a performance trade-off.
-- **Application-level filtering** (OSI layer 7) — Understands specific protocols (HTTP, FTP, DNS) and can make decisions based on application behavior, not just port numbers.
-- **Intrusion Prevention Systems (IPS)** — Active monitoring that detects and blocks vulnerability exploits using anomaly detection, signature matching, and policy rules.
+- **Packet filtering** (OSI layer 3): Allows or denies packets based on source/destination IP, protocol, and port number. Fast but cannot inspect connection state or payload.
+- **Stateful inspection**: Tracks the state of active connections in a session table. Return traffic for established connections is automatically allowed; unsolicited inbound packets are dropped.
+- **Proxy services**: The firewall acts as an intermediary: clients connect to the firewall, which makes the actual request on their behalf. Provides deep control but adds latency.
+- **Deep Packet Inspection (DPI)**: Inspects the packet payload, not just the header. Can detect malware signatures, unauthorized protocols, and data exfiltration. There is always a performance trade-off.
+- **Application-level filtering** (OSI layer 7): Understands specific protocols (HTTP, FTP, DNS) and can make decisions based on application behavior, not just port numbers.
+- **Intrusion Prevention Systems (IPS)**: Active monitoring that detects and blocks vulnerability exploits using anomaly detection, signature matching, and policy rules.
 
 ### Common Firewall Terminology
 
@@ -456,7 +456,7 @@ A NAS is a single device (or small cluster) that shares files over a standard TC
 | Storage type | Block | File |
 | Network | Fibre Channel / iSCSI | TCP/IP Ethernet |
 | Performance | High | Moderate |
-| Cost & complexity | High | Low |
+| Cost and complexity | High | Low |
 | Use case | Databases, VM datastores | File shares, backups, home directories |
 
 ## Putting it all together

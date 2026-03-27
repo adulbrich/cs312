@@ -1,11 +1,12 @@
 ---
-title: Shell Scripting & Automation Basics
+title: Shell Scripting and Automation Basics
 description: "Learn Bash scripting patterns to automate routine admin tasks: variables, conditionals, loops, functions, safe defaults, and scheduling with cron."
 sidebar:
   order: 7
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Every system administrator eventually faces tasks that must be done repeatedly: rotating log files, copying backups to a remote server, provisioning user accounts. When you perform these by hand, three problems emerge. First, the work is tedious; Google's SRE team calls this kind of repetitive, automatable operational work *toil*. Second, manual work is inconsistent; you will eventually forget a step or mistype a path. Third, manual processes are not repeatable in any verifiable way.
 
@@ -41,6 +42,10 @@ The first line is the *shebang* (sometimes called a hashbang). It tells the oper
 </Steps>
 
 Without the `chmod` step, the kernel will refuse to execute the file. You can also run a script explicitly with `bash backup.sh`, which bypasses the permission check, but making scripts executable is the conventional approach.
+
+<HistoricalNote title="bash Is a Pun, and the Shebang Has a Name (1979-1989)">
+The first widely-used Unix shell was written by Stephen Bourne at Bell Labs in 1979. When the GNU Project needed a free replacement in 1989, Brian Fox wrote the Bourne-Again Shell (bash) as a deliberate pun on Bourne's name. bash added command history, tab completion, job control, and arrays to the Bourne shell's feature set and became the default shell on most Linux distributions. The shebang line (`#!`) predates bash: it was added to the Unix kernel in 1980 so that scripts could declare their own interpreter rather than relying on the calling shell to guess. The name "shebang" is a contraction of "hash bang." macOS used bash as its default shell until Catalina (2019), when Apple switched to zsh, not for technical reasons but because bash 3.2 is the last version under the permissive GPLv2 license, and Apple preferred not to ship the newer GPLv3-licensed versions.
+</HistoricalNote>
 
 ## Variables and Quoting
 
@@ -349,7 +354,7 @@ This script ties together every concept from the chapter: safe defaults, functio
 
 ## Regular Expressions
 
-Regular expressions (REs) are a concise language for describing patterns in text. They were invented by Stephen Kleene in the 1950s and are used by a wide range of Unix tools — `grep`, `sed`, `awk`, `vi` — as well as most scripting languages (Python, Perl, Ruby). Understanding regular expressions is essential for filtering logs, validating input, and extracting data in shell scripts.
+Regular expressions (REs) are a concise language for describing patterns in text. They were invented by Stephen Kleene in the 1950s and are used by a wide range of Unix tools (`grep`, `sed`, `awk`, `vi`) as well as most scripting languages (Python, Perl, Ruby). Understanding regular expressions is essential for filtering logs, validating input, and extracting data in shell scripts.
 
 ### Basic Operators
 

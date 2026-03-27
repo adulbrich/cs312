@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Imagine you need to deploy a web server. You log in to the AWS console, click through a dozen screens, choose an AMI, configure a security group, attach a key pair, and launch the instance. A week later a colleague needs an identical server in a different region. Can you reproduce exactly what you did? Probably not with perfect fidelity, and certainly not quickly.
 
@@ -25,7 +26,7 @@ It helps to think of infrastructure work in two distinct phases, each with diffe
 
 **Ongoing maintenance** is the operational phase: updating software versions, deploying new application releases, scaling resources up or down, changing network configuration, and recovering from failures.
 
-The same tools do not always serve both phases equally well. Terraform excels at provisioning and lifecycle management of infrastructure objects. Ansible is better suited for configuration management and application deployment onto already-running servers. CI/CD pipelines handle continuous deployment of application code. In practice, combining tools is common — for example, Terraform provisions an EC2 instance, Ansible installs and configures the application, and GitHub Actions deploys updates automatically.
+The same tools do not always serve both phases equally well. Terraform excels at provisioning and lifecycle management of infrastructure objects. Ansible is better suited for configuration management and application deployment onto already-running servers. CI/CD pipelines handle continuous deployment of application code. In practice, combining tools is common; for example, Terraform provisions an EC2 instance, Ansible installs and configures the application, and GitHub Actions deploys updates automatically.
 
 ## Declarative vs. Imperative Approaches
 
@@ -38,6 +39,10 @@ Terraform is declarative. You write configuration files that describe the end st
 <Aside type="tip">
 Declarative tools tend to be safer for teams because the configuration file always represents the intended state. You never have to wonder "which script was run last?"
 </Aside>
+
+<HistoricalNote title="Infrastructure as Code Before Terraform (1993-2014)">
+Configuration management has older roots than most practitioners realize. CFEngine, written by Mark Burgess in 1993, introduced desired-state convergence, the idea that you describe what a system should look like and the tool reconciles reality with the description, a full decade before Puppet or Chef. Puppet (2005) and Chef (2009) brought the approach to a wider audience but focused on configuring already-running servers. Terraform arrived in 2014, created by Mitchell Hashimoto at HashiCorp with a key insight: the same declarative model that worked for software configuration could be applied to provisioning the infrastructure itself. Terraform's provider model (treating any API as a source of manageable resources) is why a single tool can manage AWS instances, Cloudflare DNS records, GitHub repositories, and Kubernetes objects from the same configuration language.
+</HistoricalNote>
 
 ## Terraform Architecture
 
@@ -448,12 +453,12 @@ A good rule of thumb: if you find yourself copying and pasting a block of resour
 
 Terraform is not the only tool in this space. The ecosystem includes several alternatives worth knowing:
 
-- **OpenTofu** — a community-maintained, open-source fork of Terraform created after HashiCorp changed Terraform's license in 2023. OpenTofu is a drop-in replacement with identical HCL syntax and is the choice for teams that require a fully open-source license.
-- **Pulumi** — lets you write infrastructure definitions in general-purpose programming languages (TypeScript, Python, Go, C#) rather than a domain-specific language like HCL. This can lower the barrier for developers already fluent in those languages.
-- **AWS CloudFormation** — AWS's native IaC service. It uses JSON or YAML templates and integrates tightly with the AWS ecosystem, but it is cloud-specific.
-- **Azure Resource Manager (ARM) / Bicep** — Microsoft's equivalent for Azure infrastructure. Bicep is a more readable DSL that compiles down to ARM JSON.
-- **OpenStack Heat** — the orchestration service for OpenStack private clouds.
-- **Ansible** — primarily a configuration management tool, but it can also provision infrastructure resources through its cloud modules. The overlap with Terraform is real, but the tools approach the problem differently: Ansible is procedural and agent-less; Terraform is declarative and state-driven.
+- **OpenTofu**: a community-maintained, open-source fork of Terraform created after HashiCorp changed Terraform's license in 2023. OpenTofu is a drop-in replacement with identical HCL syntax and is the choice for teams that require a fully open-source license.
+- **Pulumi**: lets you write infrastructure definitions in general-purpose programming languages (TypeScript, Python, Go, C#) rather than a domain-specific language like HCL. This can lower the barrier for developers already fluent in those languages.
+- **AWS CloudFormation**: AWS's native IaC service. It uses JSON or YAML templates and integrates tightly with the AWS ecosystem, but it is cloud-specific.
+- **Azure Resource Manager (ARM) / Bicep**: Microsoft's equivalent for Azure infrastructure. Bicep is a more readable DSL that compiles down to ARM JSON.
+- **OpenStack Heat**: the orchestration service for OpenStack private clouds.
+- **Ansible**: primarily a configuration management tool, but it can also provision infrastructure resources through its cloud modules. The overlap with Terraform is real, but the tools approach the problem differently: Ansible is procedural and agent-less; Terraform is declarative and state-driven.
 
 <Aside type="tip">
 Many tools overlap in capability without being identical. Terraform + Ansible is a common pairing: Terraform provisions infrastructure objects, Ansible configures the software running on them. Learning one tool deeply makes learning the others significantly easier, since the underlying concepts (desired state, idempotency, providers, inventory) recur across the whole ecosystem.
@@ -509,7 +514,7 @@ This convention is not enforced by Terraform (it loads all `.tf` files in a dire
 
 ## Summary
 
-Infrastructure as Code transforms infrastructure management from a manual, error-prone process into a disciplined engineering practice. Terraform, with its declarative approach and broad provider ecosystem, is a powerful tool for this purpose. The broader IaC ecosystem includes OpenTofu (an open-source Terraform fork), Pulumi, CloudFormation, and others — the concepts transfer directly across all of them. The key ideas to carry forward are:
+Infrastructure as Code transforms infrastructure management from a manual, error-prone process into a disciplined engineering practice. Terraform, with its declarative approach and broad provider ecosystem, is a powerful tool for this purpose. The broader IaC ecosystem includes OpenTofu (an open-source Terraform fork), Pulumi, CloudFormation, and others; the concepts transfer directly across all of them. The key ideas to carry forward are:
 
 - **Declarative configuration** describes the desired end state; Terraform calculates how to get there.
 - **The plan/apply workflow** gives you a preview before any change takes effect, reducing risk.

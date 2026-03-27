@@ -1,11 +1,12 @@
 ---
-title: Cloud Computing & VM Deployment
+title: Cloud Computing and VM Deployment
 description: "Cloud service models, AWS core infrastructure (EC2, VPC, S3, IAM, ECR), and practical patterns for launching, securing, and managing cloud workloads."
 sidebar:
   order: 10
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Cloud computing replaces the capital expense of buying and maintaining physical servers with on-demand, pay-as-you-go infrastructure accessed over the Internet. For a system administrator, this shift changes the daily work surface: instead of racking hardware and running cables, you provision resources through APIs, web consoles, and infrastructure-as-code tools. The underlying principles (networking, storage, security, capacity planning) remain the same, but the speed of provisioning and the scale of available resources increase dramatically.
 
@@ -33,7 +34,7 @@ These models are not mutually exclusive. A single organization typically uses al
 
 The simplest path to cloud infrastructure is to rent it from a public provider. You pay money, the provider gives you API access to virtualized servers, storage, and networking, and you can instantly launch resources as needed. AWS, Azure, GCP, and similar providers all follow this model.
 
-Alternatively, organizations can build a private cloud using on-premises servers and software like OpenStack or Proxmox VE. This requires a higher initial investment — servers, network and power and cooling infrastructure, and engineers who know how to operate it — but gives you full control and can be cost-effective at large scale.
+Alternatively, organizations can build a private cloud using on-premises servers and software like OpenStack or Proxmox VE. This requires a higher initial investment (servers, network and power and cooling infrastructure, and engineers who know how to operate it) but gives you full control and can be cost-effective at large scale.
 
 <Aside type="caution" title="Cloud Does Not Mean Cheap">
 Public cloud costs scale with consumption. Forgetting to shut down unused instances, choosing oversized instance types, or not using storage lifecycle policies can result in unexpectedly large bills. Always set billing alerts and review costs regularly.
@@ -50,6 +51,10 @@ The **shared responsibility model** defines who secures what. AWS is responsible
 <Aside type="caution" title="A Common Misconception">
 "It's in the cloud, so AWS handles security" is dangerously wrong. The majority of cloud security incidents stem from customer misconfigurations, not AWS infrastructure failures. You must actively manage your side of the shared responsibility model.
 </Aside>
+
+<HistoricalNote title="AWS Started as an Internal Headache (2002-2006)">
+AWS did not begin as a product. In the early 2000s, Amazon's engineering teams were struggling to build new features quickly because every new service had to provision its own infrastructure from scratch. In 2002, Andy Jassy (now Amazon's CEO) was tasked with solving the problem by building standardized infrastructure services (storage, compute, databases) that any team could consume via API. The platform worked well enough internally that someone noticed: if it was useful to Amazon's own engineers, it would be useful to developers everywhere. Amazon S3 launched publicly in March 2006; EC2 followed in August 2006. The initial EC2 offering included a single instance type (roughly equivalent to a 1.7 GHz Xeon, 1.75 GB RAM) at $0.10 per hour. Google and Microsoft did not launch comparable public cloud services until 2008 and 2010 respectively, giving AWS a first-mover advantage it has never fully relinquished.
+</HistoricalNote>
 
 ## Compute: EC2 Instances
 

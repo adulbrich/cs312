@@ -132,13 +132,13 @@ A course of this length cannot cover everything. Three areas are particularly wo
 
 ### GitOps
 
-GitOps is a methodology for managing infrastructure and application deployments using Git as the single source of truth. In a GitOps workflow, all changes to the system — whether to application code, configuration files, or infrastructure definitions — are made through Git commits and pull requests. An automated agent (such as Argo CD or Flux) continuously reconciles the live system state with the desired state stored in the repository, applying changes automatically when the repository is updated.
+GitOps is a methodology for managing infrastructure and application deployments using Git as the single source of truth. In a GitOps workflow, all changes to the system (whether to application code, configuration files, or infrastructure definitions) are made through Git commits and pull requests. An automated agent (such as Argo CD or Flux) continuously reconciles the live system state with the desired state stored in the repository, applying changes automatically when the repository is updated.
 
 The practical consequence is that every change is reviewed, versioned, and auditable before it reaches production. Rolling back means reverting a commit, not manually undoing changes on a server. GitOps is a natural extension of the infrastructure-as-code and CI/CD practices covered earlier in the course.
 
 ### Service meshes
 
-As architectures decompose into microservices, inter-service communication becomes a significant operational challenge. A **service mesh** is a dedicated infrastructure layer — deployed as lightweight sidecar proxies alongside each service — that handles communication concerns including load balancing, retries, circuit breaking, mutual TLS between services, and distributed tracing.
+As architectures decompose into microservices, inter-service communication becomes a significant operational challenge. A **service mesh** is a dedicated infrastructure layer, deployed as lightweight sidecar proxies alongside each service, that handles communication concerns including load balancing, retries, circuit breaking, mutual TLS between services, and distributed tracing.
 
 Istio and Linkerd are the most widely used open-source service meshes. Rather than requiring each development team to implement these concerns in application code, a service mesh provides them as platform-level features, which makes the system easier to observe and operate at scale.
 

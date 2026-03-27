@@ -1,19 +1,22 @@
 ---
-title: Virtualization & Virtual Machines
+title: Virtualization and Virtual Machines
 description: "A guide to hypervisors, virtual hardware, resource allocation, snapshots, live migration, and how VMs relate to containers and serverless."
 sidebar:
   order: 5
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 {/* TODO: demonstrate everything using UTM on macOS or similar, use Starlight's Tabs to show how to do things in different Hypervisors and hosts, choose a guest OS that works on ARM and x86 */}
 
 {/* TODO: group some headings into subheadings */}
 
-Virtualization lets you run multiple isolated operating systems (guests) on the same physical computer (host) by inserting a thin control layer called a hypervisor between software and hardware. Instead of dedicating a whole server to one workload, you carve the machine into slices of CPU time, memory, storage, and network interfaces that each guest believes are "its" hardware. This matters because it multiplies flexibility: you can prototype quickly, recover from mistakes by rolling back snapshots, and drive hardware utilization closer to what you paid for. 
+Suppose you need to test a risky kernel upgrade before touching your production server. Or you need three environments (Ubuntu, AlmaLinux, and Debian) to verify your deployment scripts work across distributions. Or you want to give each developer on your team an isolated sandbox so that a misconfiguration in one environment cannot affect another. Buying separate physical hardware for every scenario is slow and expensive; rebuilding from scratch after every mistake wastes hours. Virtualization solves all three problems by letting you run multiple isolated operating systems on the same physical machine simultaneously, and roll back any of them to a clean state in seconds.
 
-In modern operations, virtualization underpins public clouds, private labs, disaster recovery strategies, and reproducible development environments. You will use it to practice risky configuration changes safely and to host services whose operating systems differ from your laptop's. Building on these fundamentals prepares you for adjacent abstractions like containers, Functions-as-a-Service (serverless), and Infrastructure as Code (IaC). 
+Virtualization inserts a thin control layer called a hypervisor between software and hardware. Instead of dedicating a whole server to one workload, you carve the machine into slices of CPU time, memory, storage, and network interfaces that each guest believes are "its" hardware. This multiplies flexibility: you can prototype quickly, recover from mistakes by rolling back snapshots, and drive hardware utilization closer to what you paid for.
+
+In modern operations, virtualization underpins public clouds, private labs, disaster recovery strategies, and reproducible development environments. You will use it to practice risky configuration changes safely and to host services whose operating systems differ from your laptop's. Building on these fundamentals prepares you for adjacent abstractions like containers, Functions-as-a-Service (serverless), and Infrastructure as Code (IaC).
 
 By the end of this lecture you should be able to explain how hypervisors schedule work, choose sensible virtual hardware sizes, take and manage snapshots, and judge when a VM versus a container makes sense.
 
@@ -91,7 +94,7 @@ Full virtualization completely emulates the underlying hardware, defining virtua
 Paravirtualization requires modifying the guest OS so it is aware of its virtualized state and actively cooperates with the hypervisor. The hypervisor presents a set of well-defined APIs, and the guest calls those APIs instead of issuing raw hardware instructions. This approach offers better performance and efficiency than full virtualization because there is less intercepted work. It was popularized by the Xen hypervisor. With the widespread adoption of hardware-assisted virtualization, pure paravirtualization is less common, but paravirtualized *drivers* remain important (see below).
 
 ### Hardware-Assisted Virtualization
-Generalized in 2004–2005 by Intel (VT-x) and AMD (AMD-V) for the x86 architecture, hardware-assisted virtualization is today's baseline. The CPU and memory controller manage virtualization in hardware under the hypervisor's control, allowing guest code to run near native speed. Guests do not know they are running on a virtualized CPU. Additional hardware (the rest of the system's devices) still requires full or paravirtualization, so the two approaches are often mixed.
+Generalized in 2004-2005 by Intel (VT-x) and AMD (AMD-V) for the x86 architecture, hardware-assisted virtualization is today's baseline. The CPU and memory controller manage virtualization in hardware under the hypervisor's control, allowing guest code to run near native speed. Guests do not know they are running on a virtualized CPU. Additional hardware (the rest of the system's devices) still requires full or paravirtualization, so the two approaches are often mixed.
 
 ### Paravirtualized Drivers
 Paravirtualized drivers complement hardware-assisted virtualization. All operating systems allow add-on drivers, and hypervisor projects provide high-performance drivers for common devices:
@@ -103,17 +106,21 @@ Paravirtualized drivers complement hardware-assisted virtualization. All operati
 Installing these drivers inside the guest instead of accepting the default fully-emulated devices can dramatically improve throughput and reduce CPU overhead. Some components (such as the interrupt controller or BIOS resources) cannot be fully covered by drivers and still require partial emulation.
 
 <Aside type="tip" title="Virtualization Today">
-In practice, modern stacks use a mix of hardware-assisted virtualization, paravirtualized drivers, and a small amount of paravirtualized code in guest kernels. Pure full emulation of every device is rare. The hypervisor negotiates the best available approach for each component automatically, so you rarely need to choose manually — but installing the vendor's guest tools or virtio drivers makes a measurable difference.
+In practice, modern stacks use a mix of hardware-assisted virtualization, paravirtualized drivers, and a small amount of paravirtualized code in guest kernels. Pure full emulation of every device is rare. The hypervisor negotiates the best available approach for each component automatically, so you rarely need to choose manually; but installing the vendor's guest tools or virtio drivers makes a measurable difference.
 </Aside>
 
 ## Hypervisor Types (and Why the Distinction Blurs)
 Historically we labeled hypervisors as Type-1 (bare-metal: Proxmox VE / KVM, VMware ESXi, Microsoft Hyper-V, Xen) and Type-2 (hosted: VirtualBox, VMware Workstation, UTM, Parallels). Type-1 runs directly on hardware and includes only what it needs to schedule guests; Type-2 runs within a general OS as an application. In practice the lines blur: KVM is a Linux kernel module, so is Linux plus KVM a host OS with a Type-2 VMM, or a Type-1 platform? The distinction is still useful when choosing tooling: bare-metal hypervisors offer centralized, headless management and consistent performance; hosted hypervisors offer convenience, UI, and better desktop hardware integration (sound, USB, clipboard) for learning labs. Focus less on purity and more on operational fit, licensing model, and ecosystem support.
 
+<HistoricalNote title="From IBM Mainframes to VMware on x86 (1972-1998)">
+The idea of running multiple operating systems on a single machine dates to 1972, when IBM shipped the VM/370 mainframe OS. VM/370 let customers run multiple isolated copies of their existing software, critical when time on the machine cost thousands of dollars per hour. The concept then largely disappeared as the PC era pushed toward single-user machines. VMware reinvented it for commodity x86 hardware in 1998. Founded by Diane Greene and Mendel Rosenblum (a Stanford professor), VMware shipped a hypervisor at a time when Intel and AMD CPUs had no hardware virtualization support; it had to binary-translate privileged instructions in software. The product was initially dismissed as a curiosity; server consolidation proved the business case, and VMware became one of the most profitable software companies in enterprise IT history before Broadcom's 2023 acquisition fundamentally changed its licensing model.
+</HistoricalNote>
+
 **Common Pitfalls**
 - Treating Type-2 as "not real" virtualization (they still use hardware assist and can be performant).
 - Overindexing on taxonomy instead of management capabilities (e.g. clustering, APIs).
 
-## Virtual Hardware & Resource Allocation
+## Virtual Hardware and Resource Allocation
 When defining a VM you declare a bundle of virtual hardware: number of vCPUs, memory size, virtual disks, network adapters, firmware (BIOS vs UEFI), and ancillary devices (TPM, GPU). The goal is sufficiency with observability, not speculative overprovisioning. Start small, watch utilization inside (guest metrics) and outside (host hypervisor statistics), then resize. Capacity planning is iterative: predict → measure → adjust. Every resource has its own tuning levers and overcommit risks, so we explore them separately below.
 
 ### CPU Scheduling
@@ -130,7 +137,7 @@ Memory is harder to overcommit safely because swapping (paging to disk) is order
 - Ignoring sustained host swap activity (a siren of overload).
 - Confusing guest "free" memory (which may be used as cache) with waste.
 
-### Storage & Disk Images
+### Storage and Disk Images
 Virtual disks are files (qcow2, vmdk, vdi) or block devices (LVM volumes, ZFS zvols). Thin-provisioned (sparse) images allocate physical blocks on demand, conserving space but risking fragmentation and overcommit (host runs out of space unexpectedly). Thick (preallocated) images reserve space upfront, improving predictability for I/O intensive apps. Formats like qcow2 add features (snapshots, compression, encryption) at some performance cost relative to raw. Place performance-sensitive workloads on faster storage (NVMe, RAID10, ZFS with appropriate cache devices) and separate VM images from host OS partitions to simplify growth and monitoring. Align backup strategy: snapshots are not backups until copied off the storage pool.
 
 **Common Pitfalls**
@@ -144,11 +151,11 @@ Hypervisors expose virtual NICs that connect guests to virtual switches or host 
 - Choosing bridged mode on a Wi-Fi that blocks unknown MACs (guest appears "offline").
 - Forgetting firewall adjustments when a service moves from host to guest network identity.
 
-## Operations & Advanced Features
+## Operations and Advanced Features
 
 Once a VM is created and resourced, day-to-day management and advanced capabilities become essential for reliability, automation, and scale. This section explores the operational tools and features that make virtualization practical in real environments: taking and managing snapshots, automating VM lifecycles, measuring and tuning performance, enforcing security and isolation, and enabling live migration or high availability. Mastery of these features lets you move beyond basic VM setup to robust, repeatable, and secure infrastructure operations.
 
-### Snapshots & Clones
+### Snapshots and Clones
 Snapshots capture a point-in-time state: the base disk becomes read-only and new writes go into a delta file; optionally memory and device state are stored so you can resume a paused execution. They are excellent for short-lived safety nets during upgrades, schema migrations, or risky configuration edits. Long chains degrade performance because reads must traverse layers; consolidate once a change proves stable. Clones create an independent copy of a VM (linked clones share base blocks; full clones duplicate). Use snapshots for rollback windows; use image backups and configuration management for long-term recoverability.
 
 <Aside type="tip" icon="star" title="Example: Safe Package Upgrade">
@@ -162,7 +169,7 @@ Snapshots capture a point-in-time state: the base disk becomes read-only and new
 - Using snapshots as "backups" and losing data when the datastore fails.
 - Keeping dozens of forgotten snapshots, inflating storage usage.
 
-### VM Lifecycle & Automation
+### VM Lifecycle and Automation
 Manually clicking through wizards does not scale. Templates (golden images) and cloud-init (or ignition on Fedora CoreOS) let you parameterize hostnames, users, SSH keys, and packages at first boot. API tooling (e.g. `virsh`, `govc` for vSphere, Proxmox API, Terraform providers) enables scripted provisioning and teardown. Combine Infrastructure as Code (IaC) (Terraform) with configuration management (Ansible) to converge VM state repeatably. Version control the template build steps (Packer) so you can rebuild on security patch day rather than nurse snowflake images.
 
 **Common Pitfalls**
@@ -171,21 +178,21 @@ Manually clicking through wizards does not scale. Templates (golden images) and 
 
 Infrastructure as Code and Configuration Management will be covered in later lectures.
 
-### Performance & Measurement
+### Performance and Measurement
 Treat performance empirically. Baseline: record CPU ready time (wait to be scheduled), memory balloon size, disk latency (ms), and network throughput for a healthy VM. Use synthetic load (e.g. `fio` for disk, `iperf3` for network, stress tools) in a lab to understand ceilings. Investigate slowdowns by checking host contention first; a guest perceiving slowness may just be starved for CPU cycles. Align storage format to workload: databases benefit from low latency (often raw or preallocated volumes); log servers tolerate sparse images. Track growth of thin-provisioned disks to forecast expansion needs. Automate periodic reports.
 
 **Common Pitfalls**
 - Blaming the guest OS for latency when host is CPU saturated.
 - Ignoring disk write amplification on copy-on-write formats for heavy random I/O.
 
-### Security & Isolation
+### Security and Isolation
 VMs isolate kernel faults and many user-space compromises, but side-channel attacks (e.g. speculative execution vulnerabilities) can pierce isolation if unpatched. Harden hosts: minimal install, timely microcode and hypervisor updates, restricted management interfaces (firewall + MFA), signed images, and principle of least privilege for orchestration credentials. Leverage virtualization for defense in depth: separate roles (database vs web) into distinct VMs to limit lateral movement. Use virtual TPM and secure boot features where supported to attest guest integrity. Encrypt disk images at rest (e.g. LUKS inside guest or at storage layer) when threat models include physical access or multi-tenant storage.
 
 **Common Pitfalls**
 - Believing a VM boundary replaces network segmentation or logging.
 - Skipping firmware updates that include virtualization security mitigations.
 
-### Live Migration & High Availability
+### Live Migration and High Availability
 Live migration copies a running VM's memory to a target host while it continues executing; iterative pre-copy phases reduce the final pause to milliseconds-seconds. This enables non-disruptive hardware maintenance, load balancing, and evacuation prior to predicted failures. High availability (HA) layers monitor hosts; if one dies they restart (not migrate) affected VMs elsewhere using shared storage. Design constraints: shared or replicated storage accessible from both hosts, compatible CPU families (or CPU masking), and sufficient destination capacity. Measure acceptable downtime budgets to decide between pure restart vs seamless migration.
 
 **Common Pitfalls**

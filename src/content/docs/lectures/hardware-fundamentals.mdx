@@ -6,11 +6,14 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 import FigureWithCaption from '/src/components/FigureWithCaption.astro';
 
 import StorageLayers from './hardware-components/StorageLayers.astro';
 
-Modern computers look simple on the outside, but they are built from a few well-defined parts that must match one another in socket, speed, and power. In this lecture, you will learn how the motherboard, central processing unit (CPU), memory, storage, graphics, power, and cooling fit together and what "compatibility" really means in practice. We will favor plain language first, then introduce the necessary terms such as socket, chipset, PCIe lanes, and TDP with short glosses. By the end, you should be able to read a spec sheet, choose parts that make sense for a goal (e.g., a quiet student workstation or a small home server), and assemble a system that boots on the first try. You will also practice the "first boot" validation routine that separates a confident builder from a frustrated one. Building on this foundation, later lectures on networking and operating systems assume you can reliably bring bare metal to life.
+A server randomly reboots under load: is it the PSU, faulty RAM, or a thermal issue? A new workstation will not POST. A storage upgrade doubles cost but only marginally improves throughput because the bottleneck is elsewhere in the system. As a system administrator, these are the hardware situations that will land on your desk. You do not need to be a hardware engineer, but you do need enough understanding of how the components fit together to diagnose failures, spec appropriate machines, and have an informed conversation with vendors or your operations team.
+
+Modern computers are built from a small set of well-defined parts that must match one another in socket, speed, and power budget. In this lecture you will learn how the motherboard, CPU, memory, storage, graphics card, power supply, and cooling fit together and what "compatibility" really means in practice. We will favor plain language first, then introduce the necessary terms (socket, chipset, PCIe lanes, TDP) with short glosses. By the end you should be able to read a spec sheet, choose parts that make sense for a given goal (a quiet student workstation, a home lab server, a cost-optimized cloud instance), and assemble a system that boots on the first try. Building on this foundation, later lectures on networking and operating systems assume you can reliably bring bare metal to life.
 
 <Aside type="note" title="2025 Hardware Trends and Future-Proofing">
 As of 2025, the job market expects familiarity with the latest standards: DDR5 memory, PCI Express (PCIe) 5.0 for graphics and storage, Gen5 NVMe SSDs, and ATX 3.1 power supplies (PSUs) that support new power delivery and efficiency requirements. When planning a build, look for these features to ensure your system is ready for current and near-future workloads. Always leave budget for a quality PSU and cooling; these are critical for reliability and upgradability. Sustainability is also a growing concern: favor modular, repairable designs and consider e-waste when replacing parts.
@@ -39,7 +42,7 @@ import MBCaseConnectorsImage from './hardware-components/motherboard-case-connec
 The CPU you choose locks in the socket and often the memory generation; for example, an "AM5" AMD CPU demands an AM5 board and DDR5 memory. **Thermal Design Power (TDP)** is a planning number for heat and power (not a strict cap), so cooling and power choices must assume real workloads. Some CPUs include integrated graphics for display output; if yours does not, a discrete GPU is required for video. Building on this platform is about matching the socket, chipset features, and physical layout to your goals and case size. A clear map of these relationships helps you reason about performance ceilings and upgrade paths. As platforms evolve, expect more features to move on-die (integrated into the CPU), and for new standards like PCIe 6.0 to appear on high-end boards first.
 
 <Aside type="note" title="Chipset Evolution: Northbridge, Southbridge, and Modern PCH/FCH">
-Older motherboard designs (circa 2007 and earlier) split the chipset into two chips: the **Northbridge**, which handled high-speed components (RAM, PCIe x16 for the GPU), and the **Southbridge**, which handled slower peripherals (SATA, USB, audio, PCI). Communication between them was a bottleneck. AMD integrated the memory controller directly into the CPU in **2003** with its K8 (Athlon 64) architecture; Intel followed in **2008** with Nehalem. Today, the CPU handles RAM and the primary PCIe lanes directly. What remains of the traditional chipset is now a single **Platform Controller Hub** — called **PCH** by Intel and **FCH** (Fusion Controller Hub) by AMD — which manages secondary PCIe lanes, SATA, USB, and audio. This integration reduces latency and is why modern motherboards look much simpler than their predecessors.
+Older motherboard designs (circa 2007 and earlier) split the chipset into two chips: the **Northbridge**, which handled high-speed components (RAM, PCIe x16 for the GPU), and the **Southbridge**, which handled slower peripherals (SATA, USB, audio, PCI). Communication between them was a bottleneck. AMD integrated the memory controller directly into the CPU in **2003** with its K8 (Athlon 64) architecture; Intel followed in **2008** with Nehalem. Today, the CPU handles RAM and the primary PCIe lanes directly. What remains of the traditional chipset is now a single **Platform Controller Hub**, called **PCH** by Intel and **FCH** (Fusion Controller Hub) by AMD, which manages secondary PCIe lanes, SATA, USB, and audio. This integration reduces latency and is why modern motherboards look much simpler than their predecessors.
 </Aside>
 
 - Read the board's CPU support list and memory Qualified Vendor List (QVL) before buying.
@@ -73,6 +76,10 @@ import CaseImage from './hardware-components/case.png';
 **ATX** is not just a motherboard size: it is a **standard** that enforces the placement and dimensions of mounting holes, rear I/O shield cutouts, expansion slot alignment, and power connectors. This ensures that any ATX-compliant motherboard will fit in any ATX-compliant case, and that power supplies, expansion cards, and other components will line up correctly. ATX also defines the standard 24-pin power connector, rear I/O layout, and slot spacing, making it possible to mix and match parts from different vendors with confidence.
 
 The name **AT** comes from IBM's second-generation PC, the IBM PC/AT, where AT stands for "Advanced Technology." **ATX** (Advanced Technology eXtended) is the modern, extended successor to the AT standard. In addition to physical dimensions and mounting, ATX standardizes the DC voltages a PSU must supply: **+12 V** (GPU and drives), **+5 V** (motherboard logic, some drives), **+3.3 V** (RAM and some expansion slots), **−12 V** (backward compatibility for some legacy serial and analog devices), and **+5 VSB** (Stand-By, so components like the real-time clock remain active when the system is powered off). The main board connector is 24-pin; an additional 4- or 8-pin EPS connector delivers a stable +12 V feed directly to the CPU.
+
+<HistoricalNote title="Why ATX Replaced AT (1995)">
+The ATX specification was published by Intel in 1995 to replace the aging AT form factor inherited from IBM's PC/AT (1984). AT-era motherboards had two fundamental problems: the power supply delivered voltage to the board even when the machine appeared to be "off" (making software-controlled shutdown impossible), and the CPU socket sat directly in front of the expansion slots (blocking airflow and making cooler installation awkward). ATX moved the CPU to the upper-left corner away from the slots, introduced a standby voltage rail so the OS could trigger a software shutdown, and standardized the rear I/O cutout so that cases and motherboards from different vendors were mechanically interchangeable. Nearly every desktop PC and server motherboard manufactured in the 30 years since has been ATX-compatible.
+</HistoricalNote>
 
 Common motherboard **form factors**, such as Extended ATX (E-ATX), ATX, microATX, and Mini-ITX, scale down slot count and header real estate as they shrink, so choosing smaller always trades expansion and sometimes ease of building for footprint. 
 
@@ -195,10 +202,10 @@ Distinguishing these layers helps you predict compatibility: a USB-C shaped port
 |---|---|
 | USB 1.1 | 12 Mb/s |
 | USB 2.0 | 480 Mb/s |
-| USB 3.x | 5–20 Gb/s (Gen 1 / Gen 2 / Gen 2×2) |
-| USB 4 / Thunderbolt | 20–80 Gb/s |
+| USB 3.x | 5-20 Gb/s (Gen 1 / Gen 2 / Gen 2×2) |
+| USB 4 / Thunderbolt | 20-80 Gb/s |
 
-With USB 3.2 and USB 4, only the USB-C connector is not deprecated for high-speed transfers. Note that USB marketing names (e.g., "USB 3.2 Gen 2×2") describe both speed tier and connector expectations — always verify both when purchasing cables or hubs.
+With USB 3.2 and USB 4, only the USB-C connector is not deprecated for high-speed transfers. Note that USB marketing names (e.g., "USB 3.2 Gen 2×2") describe both speed tier and connector expectations; always verify both when purchasing cables or hubs.
 
 Legacy interfaces like **RS-232** (serial) and **VGA** (analog video) persist for diagnostics and KVM switches even if they are no longer performance-relevant. They are another good example of how standards and physical connectors differ. RS-232 can use DE-9 or DB-25 connectors, while VGA uses a DE-15 connector even though early days also used DE-9.
 
@@ -214,7 +221,7 @@ The table below compares the peak theoretical speeds of common interfaces. Real-
 | SAS | 22.5 Gb/s |
 | NVMe (PCIe) | 128 Gb/s |
 | PCI Express | 968 Gb/s |
-| NVLink (GPU–GPU) | 1.2 Tb/s |
+| NVLink (GPU-GPU) | 1.2 Tb/s |
 | USB 4 / Thunderbolt | 80 Gb/s |
 | HDMI | 48 Gb/s |
 | Ethernet | 400 Gb/s |
@@ -283,7 +290,7 @@ You notice an SSD's SMART "media errors" count jump from 0 to 8 within a week wh
 
 **Graphics Processing Units (GPUs)** evolved from fixed-function pipelines into massively parallel processors optimized for throughput on vectorizable workloads. 
 
-For desktops they render frames; for compute they accelerate machine learning, scientific simulation, and video transcoding. Performance depends on shader count, memory bandwidth, and driver/runtime stack; bottlenecks arise when feeding data across a limited PCIe link or from insufficient system RAM. A GPU can be bottlenecked by a slow CPU (the CPU cannot prepare draw calls or data fast enough) and conversely a very fast GPU may idle waiting on a weak CPU — this CPU–GPU imbalance is commonly called a "bottleneck" and is worth checking when selecting parts for gaming or compute builds.
+For desktops they render frames; for compute they accelerate machine learning, scientific simulation, and video transcoding. Performance depends on shader count, memory bandwidth, and driver/runtime stack; bottlenecks arise when feeding data across a limited PCIe link or from insufficient system RAM. A GPU can be bottlenecked by a slow CPU (the CPU cannot prepare draw calls or data fast enough) and conversely a very fast GPU may idle waiting on a weak CPU; this CPU-GPU imbalance is commonly called a "bottleneck" and is worth checking when selecting parts for gaming or compute builds.
 
 import RTX5080Image from './hardware-components/rtx5080.png';
 
@@ -350,7 +357,7 @@ Consumer and business-class components share the same fundamental architecture b
 
 - **Remote management** features such as **Intel vPro** and **AMD PRO** platforms, which allow IT staff to remotely power cycle, update firmware, or diagnose systems even when the OS is unresponsive or the machine is powered off.
 - **Hardware security add-ons**: hardware-backed encryption keys, firmware integrity verification, and platform attestation features built into the CPU and chipset.
-- **Extended warranty and service contracts**: consumer-grade drives typically carry 2–5 year warranties; enterprise drives often have 5-year warranties and rated duty cycles suited for 24/7 operation.
+- **Extended warranty and service contracts**: consumer-grade drives typically carry 2-5 year warranties; enterprise drives often have 5-year warranties and rated duty cycles suited for 24/7 operation.
 - **ISV (independent software vendor) certifications**: workstations from Dell, HP, and Lenovo with certified drivers for CAD, medical imaging, or financial software.
 
 The practical implication is that enterprise platforms simplify large-scale deployments and reduce the cost of unplanned downtime, but carry a price premium. For a sysadmin, understanding these features helps justify hardware selection to stakeholders and enables faster troubleshooting through remote management tooling.
@@ -380,7 +387,7 @@ Knowing how to diagnose and repair hardware is a core sysadmin skill. Before ord
 | AIDA64 | System information, hardware sensor monitoring, stability tests |
 | Vendor tools | Most server vendors (Dell iDRAC, HP iLO) ship their own diagnostic suites |
 
-**General approach**: check logs, note any diagnostic LED codes or beep codes at POST, measure temperatures and utilization, inspect for physical damage and loose connections, then use the tools above to isolate the failing component. Always start by verifying the basics — power, seating, and connections — before running software diagnostics.
+**General approach**: check logs, note any diagnostic LED codes or beep codes at POST, measure temperatures and utilization, inspect for physical damage and loose connections, then use the tools above to isolate the failing component. Always start by verifying the basics (power, seating, and connections) before running software diagnostics.
 
 ## Assembly To First Boot
 
@@ -422,10 +429,10 @@ You build on an mATX board and get no video. The board's "DRAM" LED is lit. Remo
 - Match platform trio (CPU socket, chipset feature set, memory generation) early; verify BIOS support and lane sharing.
 - The ATX standard (descended from the IBM PC/AT) defines physical dimensions, power voltages (+12 V, +5 V, +3.3 V, −12 V, +5 VSB), and connectors; modern CPUs integrate the memory controller and PCIe lanes that used to live in the Northbridge.
 - Right-size and validate memory (dual channel, stability first, then XMP/EXPO; consider ECC for reliability-critical systems).
-- Plan storage & expansion holistically: NVMe (preferably Gen4/Gen5) for active workloads, monitored redundancy plus separate backups for resilience.
+- Plan storage and expansion holistically: NVMe (preferably Gen4/Gen5) for active workloads, monitored redundancy plus separate backups for resilience.
 - Distinguish protocol vs. connector to avoid hidden bandwidth bottlenecks and lane-sharing surprises; USB and PCIe generation matter as much as physical shape.
 - Treat physical constraints (case, PSU form factor, cooler/GPU clearance) and airflow as core design inputs; provide power/cooling headroom.
-- Check GPU–CPU balance when selecting parts for performance workloads.
+- Check GPU-CPU balance when selecting parts for performance workloads.
 - For enterprise and business hardware, evaluate remote management (vPro/AMD PRO), extended warranties, and vendor diagnostics as part of total cost of ownership.
 - Use systematic diagnostics (MemTest86, S.M.A.R.T., OS logs, vendor tools) before replacing hardware.
 - Prefer modular, repairable, and upgradable components to support sustainability and reduce e-waste.

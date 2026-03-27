@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Every server you provision, every container you deploy, and every cloud instance you launch depends on a network to be useful. In this chapter we will build a mental model of how networks operate by following a single scenario throughout: you have been asked to network a small office of 20 employees that needs internal file sharing, a web application server, DNS, DHCP, and reliable internet access. By the end you should be able to trace a packet from a user's laptop to the public internet and back, read a subnet mask, interpret a routing table, and use command-line tools to diagnose the most common connectivity failures. The concepts here apply equally to a physical office wired with Ethernet and to a cloud Virtual Private Cloud (VPC), because the protocols and addressing rules are the same in both environments.
 
@@ -36,7 +37,7 @@ A network topology describes how nodes (devices) are connected to each other. Th
 | **Mesh** | Every node connects to every other node | Maximum redundancy; expensive and complex, used in military and critical infrastructure |
 | **Tree (star-bus / hierarchical)** | Star networks linked via a bus structure | Scalable and fault-tolerant at the branch level; failure of the main trunk isolates entire branches |
 
-Modern enterprise networks most commonly use a hierarchical tree topology (see Network Configuration & Troubleshooting for the Access / Distribution / Core model).
+Modern enterprise networks most commonly use a hierarchical tree topology (see Network Configuration and Troubleshooting for the Access / Distribution / Core model).
 
 ## IP Addressing and Subnetting
 
@@ -58,9 +59,9 @@ Before CIDR, IPv4 addresses were divided into fixed classes based on the value o
 
 | Class | Range | Default Mask | Usable Hosts |
 |-------|-------|-------------|-------------|
-| A | 1.0.0.0 – 127.255.255.255 | /8 (255.0.0.0) | 16,777,214 |
-| B | 128.0.0.0 – 191.255.255.255 | /16 (255.255.0.0) | 65,534 |
-| C | 192.0.0.0 – 223.255.255.255 | /24 (255.255.255.0) | 254 |
+| A | 1.0.0.0 - 127.255.255.255 | /8 (255.0.0.0) | 16,777,214 |
+| B | 128.0.0.0 - 191.255.255.255 | /16 (255.255.0.0) | 65,534 |
+| C | 192.0.0.0 - 223.255.255.255 | /24 (255.255.255.0) | 254 |
 
 The "-2" for usable hosts accounts for the network address (first IP in the block) and the broadcast address (last IP), which cannot be assigned to devices.
 
@@ -123,6 +124,10 @@ dig +short wiki.office.local
 nslookup wiki.office.local
 ```
 
+<HistoricalNote title="DNS Was Designed to Replace a Text File (1983)">
+Before DNS, every computer on ARPANET maintained a flat file called HOSTS.TXT, downloaded periodically from a server at SRI International in California. By 1983 the file was being updated multiple times per week, and propagating changes across the network took days. Paul Mockapetris, a researcher at USC/Information Sciences Institute, was asked to design a replacement. His key insight was delegation: instead of one authoritative list, authority for each domain could be handed off to whoever owned it. He designed the system over about 18 months and wrote the first implementation in 1984. The .com, .net, .org, .gov, .edu, and .mil top-level domains were added in 1985. The entire architecture (recursive resolvers, zone files, authoritative nameservers) has remained structurally stable for 40 years. Today DNS handles over a trillion queries per day worldwide, on an architecture Mockapetris designed to replace a 10,000-line text file.
+</HistoricalNote>
+
 ### NAT (Network Address Translation)
 
 Our office uses private addresses in the `10.0.0.0/8` range, but these addresses are not routable on the public internet. **NAT** solves this by having the router rewrite the source address of outgoing packets from the private address (e.g., `10.0.1.10`) to the router's public address (e.g., `203.0.113.5`). When replies come back, the router reverses the translation and forwards the packet to the correct internal host. This allows all 20 employees to share a single public IP address for internet access.
@@ -131,9 +136,9 @@ NAT is so fundamental that most home and office routers perform it transparently
 
 There are three common NAT variants:
 
-- **PAT (Port Address Translation) / Overload** — The most common form. A single public IP address is used for all outbound connections, differentiated by port number. The router maintains a table mapping each private `address:port` pair to the corresponding public `address:port`. This is how home and small-office routers work.
-- **Dynamic NAT** — The organization purchases a pool of public IP addresses. Each private host is assigned the first available public address from the pool (rather than always sharing one). Less common because PAT is more efficient.
-- **Static NAT** — A one-to-one permanent mapping between a specific private address and a specific public address. Used for servers that must be consistently reachable from the internet under the same public IP.
+- **PAT (Port Address Translation) / Overload**: The most common form. A single public IP address is used for all outbound connections, differentiated by port number. The router maintains a table mapping each private `address:port` pair to the corresponding public `address:port`. This is how home and small-office routers work.
+- **Dynamic NAT**: The organization purchases a pool of public IP addresses. Each private host is assigned the first available public address from the pool (rather than always sharing one). Less common because PAT is more efficient.
+- **Static NAT**: A one-to-one permanent mapping between a specific private address and a specific public address. Used for servers that must be consistently reachable from the internet under the same public IP.
 
 <Aside type="caution" title="When NAT Breaks Things">
 NAT works well for outbound connections, but it complicates inbound connections. If you need an external user to reach your office web server, you must configure **port forwarding** (also called DNAT) on the router to send incoming traffic on a specific port to the correct internal server. In cloud environments, you would instead place the server in a public subnet with a public IP, or use a load balancer.
@@ -143,10 +148,10 @@ NAT works well for outbound connections, but it complicates inbound connections.
 
 Peer-to-peer and real-time applications (VoIP, video conferencing, online gaming) need to establish direct connections between two hosts that are both behind NAT. Several techniques exist:
 
-- **UPnP (Universal Plug and Play)** — Allows a device to automatically create a port mapping on the router, so external hosts can initiate connections.
-- **STUN (Session Traversal Utilities for NAT)** — A client queries a public STUN server to discover its public IP address and the type of NAT it is behind, then uses that information to negotiate direct connections.
-- **TURN (Traversal Using Relays around NAT)** — A fallback when direct connection fails; a public relay server forwards traffic between the two peers.
-- **ICE (Interactive Connectivity Establishment)** — A framework (used by WebRTC, Zoom, etc.) that systematically tries direct, STUN, and TURN paths to find the best available route.
+- **UPnP (Universal Plug and Play)**: Allows a device to automatically create a port mapping on the router, so external hosts can initiate connections.
+- **STUN (Session Traversal Utilities for NAT)**: A client queries a public STUN server to discover its public IP address and the type of NAT it is behind, then uses that information to negotiate direct connections.
+- **TURN (Traversal Using Relays around NAT)**: A fallback when direct connection fails; a public relay server forwards traffic between the two peers.
+- **ICE (Interactive Connectivity Establishment)**: A framework (used by WebRTC, Zoom, etc.) that systematically tries direct, STUN, and TURN paths to find the best available route.
 
 ## Routing Basics
 
@@ -197,10 +202,10 @@ A **switch** operates at layer 2 and connects devices within a single network se
 
 Switches come in two broad categories:
 
-- **Unmanaged switches** require no configuration — you plug them in and they start forwarding traffic immediately. They support only simple topologies and have no remote management, VLAN, or QoS capabilities. Use them where simplicity matters and advanced features are not needed.
+- **Unmanaged switches** require no configuration; you plug them in and they start forwarding traffic immediately. They support only simple topologies and have no remote management, VLAN, or QoS capabilities. Use them where simplicity matters and advanced features are not needed.
 - **Managed switches** add remote management, software-defined networking support, Quality of Service (QoS) to prioritize traffic (e.g., VoIP over bulk transfers), security features (port security, 802.1X authentication, ARP inspection), and VLAN configuration. They are standard in any environment requiring segmentation or centralized control.
 
-Managed switches can also create **VLANs** (Virtual LANs), logically separating traffic on the same physical switch into distinct broadcast domains, which is another way to segment our workstation and server traffic without needing separate physical switches. VLANs are discussed in detail in Network Configuration & Troubleshooting.
+Managed switches can also create **VLANs** (Virtual LANs), logically separating traffic on the same physical switch into distinct broadcast domains, which is another way to segment our workstation and server traffic without needing separate physical switches. VLANs are discussed in detail in Network Configuration and Troubleshooting.
 
 A **router** operates at layer 3 and forwards packets between different subnets or networks based on IP addresses. Our office router connects the workstation subnet, the server subnet, and the ISP uplink. It runs DHCP, performs NAT, and maintains the routing table.
 
@@ -278,9 +283,9 @@ This design maps directly to cloud concepts. In AWS, the overall `10.0.1.0/24` b
 
 Linux provides several different tools and frameworks for network configuration, and which one applies depends on the distribution:
 
-- **ifupdown** (Debian/Ubuntu) — Configuration lives in `/etc/network/interfaces`. Simple and declarative, but lacks dynamic management.
-- **NetworkManager** (common on AlmaLinux, Fedora, and RHEL) — A daemon that manages connections dynamically. Configured via the `nmcli` command-line utility or `nmtui` text UI.
-- **systemd-networkd** — Increasingly used on server distributions; configuration files live in `/etc/systemd/network/`.
+- **ifupdown** (Debian/Ubuntu): Configuration lives in `/etc/network/interfaces`. Simple and declarative, but lacks dynamic management.
+- **NetworkManager** (common on AlmaLinux, Fedora, and RHEL): A daemon that manages connections dynamically. Configured via the `nmcli` command-line utility or `nmtui` text UI.
+- **systemd-networkd**: Increasingly used on server distributions; configuration files live in `/etc/systemd/network/`.
 
 The `ip` command (part of iproute2) is the current standard for viewing and modifying network state:
 
@@ -306,9 +311,9 @@ Changes made with `ip addr` and `ip route` commands are not persistent. They dis
 
 Enterprise networks face requirements that differ significantly from a small office: higher bandwidth demands, multiple administrative domains, and a strong need for uptime.
 
-- **Bandwidth** — Enterprise links commonly use fiber optics rather than copper for backbone connections. **Link Aggregation (LAG)** combines multiple physical links between switches or servers into a single logical interface, increasing total throughput beyond what a single cable can carry and providing redundancy: if one physical link fails, the others continue forwarding traffic.
-- **Scale and delegation** — A large organization like Oregon State University might own an entire /16 address block (e.g., `128.193.0.0/16`, providing 65,536 addresses) and delegate sub-ranges to individual departments, each with its own network administrators.
-- **Redundancy and dynamic routing** — Critical networks use redundant paths to the internet so that if a cable is physically cut, traffic automatically reroutes via a different path. This relies on dynamic routing protocols (see below) that exchange route information and converge on a new path within seconds.
+- **Bandwidth**: Enterprise links commonly use fiber optics rather than copper for backbone connections. **Link Aggregation (LAG)** combines multiple physical links between switches or servers into a single logical interface, increasing total throughput beyond what a single cable can carry and providing redundancy: if one physical link fails, the others continue forwarding traffic.
+- **Scale and delegation**: A large organization like Oregon State University might own an entire /16 address block (e.g., `128.193.0.0/16`, providing 65,536 addresses) and delegate sub-ranges to individual departments, each with its own network administrators.
+- **Redundancy and dynamic routing**: Critical networks use redundant paths to the internet so that if a cable is physically cut, traffic automatically reroutes via a different path. This relies on dynamic routing protocols (see below) that exchange route information and converge on a new path within seconds.
 
 ## Practical Diagnostic Tools
 

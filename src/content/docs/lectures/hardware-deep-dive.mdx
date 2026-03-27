@@ -8,7 +8,9 @@ sidebar:
 import { Aside, Steps } from '@astrojs/starlight/components';
 import StorageLayers from './hardware-components/StorageLayers.astro';
 
-Modern computer hardware is evolving at a rapid pace, shaped by the demands of artificial intelligence (AI), sustainability, and ever-increasing performance needs. Today's systems (from personal computers to hyperscale data centers) are more integrated, intelligent, and efficient than ever before. As a result, understanding the architecture and best practices behind CPUs, memory, storage, and server design is essential for anyone entering the field. This chapter will guide you through the latest trends and foundational concepts, focusing on how hardware choices impact reliability, scalability, and real-world job skills. By the end, you'll be able to read a spec sheet, spot common pitfalls, and make informed decisions about modern platforms, whether you're building a workstation, deploying servers, or planning for the cloud.
+By this point in the course you have deployed servers, written automation, containerized services, and debugged incidents. You have been treating hardware mostly as an abstraction: instances launch, disks mount, networks connect. But as you take on more responsibility, operational questions with hardware-level answers start appearing: Why is this database query slow even though CPU utilization looks fine? Should the new log server use NVMe or SATA? Why does one node in the cluster randomly miss health checks? A deeper model of what is happening inside the machine lets you answer those questions instead of guessing.
+
+This lecture revisits the physical layer with the full-stack context you have built throughout the course. Modern hardware is also evolving rapidly, shaped by AI workloads, sustainability requirements, and tighter integration between CPU, memory, and accelerators. These trends directly affect the servers and cloud instances you will operate. By the end you should be able to read a server spec sheet critically, spot the hardware pitfalls that cause real production problems, and make informed decisions about modern platforms, whether you are sizing a workstation, selecting instance types, or planning a data-center deployment.
 
 ## Big Picture Trends
 
@@ -77,7 +79,7 @@ Understanding the physical characteristics of storage devices helps you make app
 
 ### Hard Disk Drives (HDDs)
 
-An HDD stores data magnetically on a **stack of spinning platters** read and written by ultra-precise **read/write heads** mounted on the end of a movable **actuator arm**. Modern drives position the heads only a few nanometers above the platter surface. Any foreign object or sudden shock can cause the head to contact the platter — a **head crash** — which permanently damages the magnetic surface and is typically unrecoverable. Modern drives mitigate this with lubricant and carbon protective layers on platters and free-fall sensors that park the heads automatically.
+An HDD stores data magnetically on a **stack of spinning platters** read and written by ultra-precise **read/write heads** mounted on the end of a movable **actuator arm**. Modern drives position the heads only a few nanometers above the platter surface. Any foreign object or sudden shock can cause the head to contact the platter (a **head crash**), which permanently damages the magnetic surface and is typically unrecoverable. Modern drives mitigate this with lubricant and carbon protective layers on platters and free-fall sensors that park the heads automatically.
 
 Common spindle speeds are **5,400 RPM** (quiet, energy-efficient, common in laptops and cold-storage drives) and **7,200 RPM** (mainstream desktop and server performance). Higher speeds exist for enterprise drives. Failures arise from mechanical wear (actuator, spindle motor), surface degradation, power component failure, or physical shock.
 
@@ -99,22 +101,22 @@ SSDs fail primarily from **power component failure** or **flash cell wear-out**:
 
 ### Drive Failure Rates and Warranty
 
-Expected useful lifetime under continuous use is hard to predict. Studies (including a widely cited Google Labs study and ongoing Backblaze data) show **roughly 2–9% of drives fail per year** during the first three years, with a pattern of elevated early "infant mortality," a stable middle period, and rising wear-out failure rates thereafter. Burn-in testing (running drives under load shortly after purchase) can catch early defects before deployment.
+Expected useful lifetime under continuous use is hard to predict. Studies (including a widely cited Google Labs study and ongoing Backblaze data) show **roughly 2-9% of drives fail per year** during the first three years, with a pattern of elevated early "infant mortality," a stable middle period, and rising wear-out failure rates thereafter. Burn-in testing (running drives under load shortly after purchase) can catch early defects before deployment.
 
-Consumer-grade drive warranties are typically only **2–5 years**; enterprise drives often carry 5-year warranties and are rated for higher duty cycles. Warranty length is not a reliability guarantee but is a signal of the manufacturer's confidence in the product tier.
+Consumer-grade drive warranties are typically only **2-5 years**; enterprise drives often carry 5-year warranties and are rated for higher duty cycles. Warranty length is not a reliability guarantee but is a signal of the manufacturer's confidence in the product tier.
 
 ### Physical Form Factors
 
 HDD and SSD physical dimensions are standardized by platter size (for HDDs) and have carried over to SSDs:
 
 - **3.5-inch** (actual ~4 × 5.75 × 1 inch): desktop and server drives.
-- **2.5-inch** (actual ~2.75 × 3.94 × 0.275–0.75 inch): laptops and 2.5" server bays. Both HDDs and SSDs use this form factor.
+- **2.5-inch** (actual ~2.75 × 3.94 × 0.275-0.75 inch): laptops and 2.5" server bays. Both HDDs and SSDs use this form factor.
 - **mSATA**: a miniaturized SATA SSD form factor, now obsolete, that was a precursor to M.2.
-- **M.2**: a PCB-only standard (no enclosure) supporting widths from 12 to 30 mm and lengths from 30 to 110 mm (common sizes: 2242, 2260, 2280). M.2 slots can carry different interfaces — PCIe/NVMe, SATA, or even USB — depending on the slot's key (B, M, or B+M) and the board's wiring.
+- **M.2**: a PCB-only standard (no enclosure) supporting widths from 12 to 30 mm and lengths from 30 to 110 mm (common sizes: 2242, 2260, 2280). M.2 slots can carry different interfaces (PCIe/NVMe, SATA, or even USB) depending on the slot's key (B, M, or B+M) and the board's wiring.
 
 ### NVMe and the M.2 Ecosystem
 
-Before NVMe, some high-end SSDs used PCIe electrically but with non-standard, vendor-specific drivers. **NVMe (Non-Volatile Memory Express)** standardized the host interface for PCIe-attached SSDs, so operating systems need only one common driver for all NVMe drives — analogous to how USB mass storage works across all USB devices. This standardization also freed SSD manufacturers from writing custom drivers for each product.
+Before NVMe, some high-end SSDs used PCIe electrically but with non-standard, vendor-specific drivers. **NVMe (Non-Volatile Memory Express)** standardized the host interface for PCIe-attached SSDs, so operating systems need only one common driver for all NVMe drives, analogous to how USB mass storage works across all USB devices. This standardization also freed SSD manufacturers from writing custom drivers for each product.
 
 ### Storage Hierarchy: How Pieces Fit Together
 
@@ -126,18 +128,18 @@ When setting up storage, components are organized in layers:
 4. **RAID arrays**: collections of disks configured for redundancy, speed, or both, appearing to the OS as single (or multiple) logical devices
 5. **Filesystems**: translate the raw block storage exposed by a partition, volume, or array into the file and directory interface programs expect
 
-When adding a new drive, always verify its identity (manufacturer, size, model) before any destructive operation — newly added drives are not necessarily the highest-numbered device, and some systems renumber existing drives after a reboot.
+When adding a new drive, always verify its identity (manufacturer, size, model) before any destructive operation; newly added drives are not necessarily the highest-numbered device, and some systems renumber existing drives after a reboot.
 
 ## Data Integrity: RAID, ZFS, Btrfs, and Secure Storage Practices
 
 Storing data reliably is a core challenge in modern computing. Storage stacks are built in layers, with each layer adding isolation or resilience. Traditional **Redundant Array of Independent Disks (RAID)** combines multiple drives for redundancy or performance, but does not provide end-to-end data integrity; silent errors can go undetected, especially during rebuilds. Modern filesystems like **ZFS** and **Btrfs** use copy-on-write and checksumming to detect and correct errors, offer built-in redundancy, and support features like snapshots and scrubbing for ongoing health checks.
 
 **RAID levels** serve different goals:
-- **RAID 0** (striping): data is split across drives for speed — no redundancy; any drive failure loses all data.
-- **RAID 1** (mirroring): identical data on two or more drives — full redundancy but capacity equals the smallest drive.
-- **RAID 5** (striping with parity): data and a single parity block are distributed across three or more drives — survives one drive failure.
-- **RAID 6**: like RAID 5 but with two parity blocks — survives two simultaneous drive failures.
-- **RAID 10** (1+0): mirrored pairs that are then striped — good performance and redundancy but requires at least four drives and wastes half capacity.
+- **RAID 0** (striping): data is split across drives for speed, with no redundancy; any drive failure loses all data.
+- **RAID 1** (mirroring): identical data on two or more drives; full redundancy but capacity equals the smallest drive.
+- **RAID 5** (striping with parity): data and a single parity block are distributed across three or more drives; survives one drive failure.
+- **RAID 6**: like RAID 5 but with two parity blocks; survives two simultaneous drive failures.
+- **RAID 10** (1+0): mirrored pairs that are then striped; good performance and redundancy but requires at least four drives and wastes half capacity.
 
 **How parity works (RAID 5/6)**: parity is computed using XOR across the data blocks on each stripe. If drive B fails, its content can be reconstructed as XOR(block A, block C, parity). For example, if bit 1 of block A is 1, block C is 1, and parity is 0, then the missing bit 1 of block B = XOR(1, 1, 0) = 0. RAID with a single parity disk tolerates one failure; double parity (RAID 6) tolerates two.
 
@@ -165,7 +167,7 @@ Software RAID is often the better choice for home labs and small deployments usi
 | **Redundancy**             | Yes (RAID 1/5/6/10)   | Yes (mirrors, RAID-Z, etc.)  |
 | **Performance**            | Yes (RAID 0/10)       | Yes (varies by config)       |
 | **Checksumming**           | No                    | Yes (detects/corrects errors)|
-| **Silent Data Corruption** | Possible              | Detected & self-healed       |
+| **Silent Data Corruption** | Possible              | Detected and self-healed       |
 | **Snapshots**              | No                    | Yes                          |
 | **Online Expansion**       | Limited               | Yes (with caveats)           |
 | **Ease of Management**     | Moderate              | Moderate (learning curve)    |
@@ -182,7 +184,7 @@ Secure decommissioning is essential when retiring drives. For SSDs, use controll
 
 A Google Labs study found that a nonzero value in any of these fields raises the probability of drive failure within 60 days by a factor of **39×**, **14×**, **21×**, or **16×** respectively. Monitor trends over time rather than reacting to isolated single values; a steadily climbing count warrants a fresh backup and a replacement plan. Tools: [`smartmontools`](https://www.smartmontools.org/) on Linux/macOS, or vendor-supplied utilities.
 
-**Drive wiping**: deleting a file merely marks its blocks as free — the data remains on the drive and can be recovered with standard tools. A quick format is not a secure erase. Proper methods:
+**Drive wiping**: deleting a file merely marks its blocks as free; the data remains on the drive and can be recovered with standard tools. A quick format is not a secure erase. Proper methods:
 - **ATA Secure Erase** (HDDs): performs as many overwrite passes as the drive's firmware requires to eliminate magnetic remnants.
 - **ATA Sanitize / NVMe Format** (SSDs): resets the controller's internal flash mapping, effectively making all data unreadable.
 - **Software overwrite** (HDDs): writing zeros or random data across the entire drive is usually sufficient for compliance; however, this may miss remapped (reallocated) sectors.
@@ -214,7 +216,7 @@ The three main storage interfaces have different performance, cost, and use-case
 | Interface | Pros | Cons |
 |---|---|---|
 | **SATA** | Low cost; widely available; both HDD and SSD support | Slower (up to ~6 Gb/s); limited scalability |
-| **SAS** | Lower latency; high performance (12–22.5 Gb/s); full-duplex; better RAID efficiency | More expensive than SATA; rare in consumer hardware (requires a SAS controller) |
+| **SAS** | Lower latency; high performance (12-22.5 Gb/s); full-duplex; better RAID efficiency | More expensive than SATA; rare in consumer hardware (requires a SAS controller) |
 | **PCIe (NVMe)** | Very low latency; very high performance (32 Gb/s+) | More expensive; high-end drives require active cooling |
 
 **Full-duplex** means SAS can read and write simultaneously on the same link, unlike SATA which is half-duplex. This matters in high-throughput server workloads where concurrent reads and writes are common.
@@ -274,7 +276,7 @@ Key concepts include N+1 redundancy (extra power/fan units for resilience), hot-
 <p class="text-center italic text-sm m-0 p-0">Server Racks Organisation to Maximize Airflow</p>
 
 <Aside type="tip" icon="star" title="Example: Lab Rack Power Budget">
-On a 208 V 30 A circuit (≈6.2 kVA), using the 80% continuous guideline gives ~5 kW usable. If a 2U storage server draws 350 W and each compute node 400 W, you can fit (5,000 − 350)/400 ≈ 11 nodes in theory, but should deploy 8–9 to allow for growth and power spikes.
+On a 208 V 30 A circuit (≈6.2 kVA), using the 80% continuous guideline gives ~5 kW usable. If a 2U storage server draws 350 W and each compute node 400 W, you can fit (5,000 − 350)/400 ≈ 11 nodes in theory, but should deploy 8-9 to allow for growth and power spikes.
 </Aside>
 
 **Common Pitfalls**
@@ -304,15 +306,15 @@ A university research cluster might use liquid-cooled racks filled with AI accel
 - Modern hardware is shaped by AI, integration, and sustainability trends.
 - CPU and chipset choices set hard limits on system capabilities and upgradability.
 - ECC and RDIMM are essential for data integrity in servers; UMA is common in SoCs.
-- HDDs use spinning platters and are vulnerable to physical shock; SSDs use flash with no moving parts. Both fail — plan for it.
-- Drive failure rates are roughly 2–9%/year; consumer warranties are 2–5 years. Monitor SMART trends and act before failure.
+- HDDs use spinning platters and are vulnerable to physical shock; SSDs use flash with no moving parts. Both fail; plan for it.
+- Drive failure rates are roughly 2-9%/year; consumer warranties are 2-5 years. Monitor SMART trends and act before failure.
 - RAID provides redundancy (or speed) but not backup; ZFS and Btrfs add checksumming and self-healing that traditional RAID lacks.
 - RAID parity uses XOR to reconstruct a failed drive; software RAID is flexible and free, hardware RAID offers performance and boot support.
 - SATA is cheap and common; SAS is full-duplex and lower-latency for servers; PCIe/NVMe is fastest but most expensive.
 - DAS is fastest and simplest; NAS adds network-accessible file sharing; SAN provides block-level storage over a dedicated fabric.
-- Secure drive disposal requires ATA Secure Erase or physical destruction — a quick format leaves data recoverable.
+- Secure drive disposal requires ATA Secure Erase or physical destruction; a quick format leaves data recoverable.
 - Connector speeds matter; always match components to real workloads.
-- Data centers require racks, structured cabling, cooling, UPS, network fabric, and servers — plan all layers together.
+- Data centers require racks, structured cabling, cooling, UPS, network fabric, and servers; plan all layers together.
 - Server and data center design prioritize availability, manageability, and efficiency.
 - AI accelerators and sustainable practices are now core job skills in hardware roles.
 
