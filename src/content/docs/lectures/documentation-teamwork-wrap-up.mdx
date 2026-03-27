@@ -138,7 +138,7 @@ The practical consequence is that every change is reviewed, versioned, and audit
 
 ### Service meshes
 
-As architectures decompose into microservices, inter-service communication becomes a significant operational challenge. A **service mesh** is a dedicated infrastructure layer, deployed as lightweight sidecar proxies alongside each service, that handles communication concerns including load balancing, retries, circuit breaking, mutual TLS between services, and distributed tracing.
+As architectures decompose into microservices, inter-service communication becomes a significant operational challenge. A **service mesh** is a dedicated infrastructure layer, deployed as lightweight sidecar proxies (small helper processes that run beside each service container and intercept its network traffic) alongside each service, that handles communication concerns including load balancing, retries, circuit breaking (automatically stopping requests to a failing service to prevent cascading failures), mutual TLS between services (where both sides authenticate each other, not just the server), and distributed tracing.
 
 Istio and Linkerd are the most widely used open-source service meshes. Rather than requiring each development team to implement these concerns in application code, a service mesh provides them as platform-level features, which makes the system easier to observe and operate at scale.
 
@@ -160,7 +160,7 @@ The **system administrator** role remains the foundation. Sysadmins manage serve
 
 **DevOps engineers** bridge the gap between development and operations. They build and maintain CI/CD pipelines, automate infrastructure provisioning, and work closely with developers to improve deployment velocity and reliability. The DevOps role emphasizes automation, collaboration, and iterative improvement.
 
-**Site Reliability Engineers (SREs)** apply software engineering practices to operations problems. The SRE model, popularized by Google, defines reliability in terms of Service Level Objectives and error budgets, and treats operational work as engineering work. SREs write code to eliminate manual labor (called "toil"), build monitoring and alerting systems, and participate in on-call rotations.
+**Site Reliability Engineers (SREs)** apply software engineering practices to operations problems. The SRE model, popularized by Google, defines reliability in terms of Service Level Objectives and error budgets, and treats operational work as engineering work. SREs write code to eliminate manual labor (called "toil," the repetitive, automatable operational work that scales with service growth rather than with engineering investment), build monitoring and alerting systems, and participate in on-call rotations.
 
 **Platform engineers** build internal platforms that other teams use to deploy and operate their services. Instead of managing individual applications, platform engineers create self-service tools, shared infrastructure (such as Kubernetes clusters or CI/CD systems), and developer-facing APIs. The goal is to make it easy for application teams to do the right thing by default.
 

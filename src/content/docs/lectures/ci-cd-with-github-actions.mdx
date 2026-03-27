@@ -21,7 +21,7 @@ Before discussing CI/CD mechanics, it helps to understand the concept of **deplo
 | Development | Dev | Individual developer's local machine or sandbox |
 | Test | | Automated and manual testing |
 | Staging | Qualification / Pre-production | Production-like environment for final validation |
-| Acceptance | UAT | Business stakeholders verify requirements are met |
+| Acceptance | UAT (User Acceptance Testing) | Business stakeholders verify requirements are met |
 | Production | Prod | The real world; live users and live data |
 
 The production environment is the most complex. It handles real users, real data, and real consequences. Breaking production is expensive, so we validate code in progressively more production-like environments before it reaches end users. CI/CD pipelines automate the journey through these environments, providing gates and checks at each stage.
@@ -447,7 +447,7 @@ aws elbv2 modify-listener \
   --default-actions Type=forward,TargetGroupArn=$BLUE_TARGET_GROUP
 ```
 
-**Canary deployment** sends a small fraction of real production traffic (say, 5%) to the new version while the remaining 95% continues hitting the old version. The name comes from the mining practice of carrying a canary into a coal mine: if the canary dies, something is wrong. You monitor error rates, latency, and business metrics on the canary. If everything looks healthy after a set period, you gradually shift more traffic over. If the metrics degrade, you pull all traffic back to the old version before most users were ever affected. Canary releases are more complex to implement (they require a traffic-splitting layer such as a load balancer with weighted routing or a service mesh) but give you real-world validation with limited blast radius.
+**Canary deployment** sends a small fraction of real production traffic (say, 5%) to the new version while the remaining 95% continues hitting the old version. The name comes from the mining practice of carrying a canary into a coal mine: if the canary dies, something is wrong. You monitor error rates, latency, and business metrics on the canary. If everything looks healthy after a set period, you gradually shift more traffic over. If the metrics degrade, you pull all traffic back to the old version before most users were ever affected. Canary releases are more complex to implement (they require a traffic-splitting layer such as a load balancer with weighted routing or a service mesh, a dedicated infrastructure layer that manages traffic between microservices) but give you real-world validation with limited blast radius.
 
 | Pattern | Downtime | Rollback speed | Infrastructure cost | Version coexistence |
 |---------|----------|----------------|---------------------|---------------------|

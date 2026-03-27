@@ -16,7 +16,7 @@ Linux servers run on bare metal (a physical machine you can touch), inside a vir
 
 For the purposes of this chapter, we assume you have a fresh Ubuntu 24.04 LTS installation with SSH access. Any of the following will work:
 
-- **Cloud instance (easiest to start).** Launch a `t3.micro` or `t3.small` EC2 instance with the Ubuntu 24.04 LTS AMI. You get a running server in under a minute and can tear it down when you are done.
+- **Cloud instance (easiest to start).** Launch a `t3.micro` or `t3.small` EC2 (Elastic Compute Cloud, AWS's virtual machine service) instance with the Ubuntu 24.04 LTS AMI (Amazon Machine Image, a pre-built OS snapshot used to launch instances). You get a running server in under a minute and can tear it down when you are done.
 - **Local VM.** Create a virtual machine in VirtualBox or UTM (macOS) with 2 GB of RAM and 20 GB of disk. Download the Ubuntu Server 24.04 ISO and install from it. This gives you the full installation experience including the boot process, partitioning, and first-boot configuration.
 - **Bare metal.** If you have a spare physical machine, install Ubuntu Server directly. This is the most complete experience (you will see real firmware, real disk detection, real network interfaces), but it requires dedicated hardware.
 
@@ -55,7 +55,7 @@ Resist the urge to boot the installer immediately. A few minutes of planning wil
 
 Start by writing down what the server will do. In our scenario, the server will run three services: an Nginx reverse proxy, a Node.js application, and a PostgreSQL database. This tells us we need enough CPU for request handling, enough RAM for the database buffer pool and the application runtime, and enough disk for the OS, application code, database files, and logs.
 
-A reasonable starting point for a small web application might be 2 vCPUs, 4 GB of RAM, and a 40 GB root disk. You can always resize later (especially in the cloud), but having a baseline prevents both over-provisioning (wasting money) and under-provisioning (dropping requests under load).
+A reasonable starting point for a small web application might be 2 vCPUs (virtual CPUs, the share of a physical processor allocated to a VM or cloud instance), 4 GB of RAM, and a 40 GB root disk. You can always resize later (especially in the cloud), but having a baseline prevents both over-provisioning (wasting money) and under-provisioning (dropping requests under load).
 
 ### Naming Conventions
 
@@ -172,7 +172,7 @@ Choosing the right filesystem for your workload matters more on Linux than on mo
 - **Data integrity**: ZFS checksums all data and metadata, detecting and automatically repairing silent corruption (bit rot). This self-healing property sets it apart from traditional filesystems.
 - **Storage pools (zpools)**: instead of formatting individual disks, you add disks to a pool and ZFS manages the allocation. Pools can grow dynamically by adding more disks.
 - **Snapshots and clones**: point-in-time read-only snapshots can be created almost instantly and take up minimal space initially (only changed blocks consume additional space). Writable clones derive from snapshots.
-- **RAID-Z**: ZFS's own RAID implementation that avoids the RAID-5 write-hole vulnerability.
+- **RAID-Z**: ZFS's own RAID (Redundant Array of Independent Disks, a technique for spreading data across multiple drives for redundancy or performance) implementation that avoids the RAID-5 write-hole vulnerability.
 - **Compression and deduplication**: both happen transparently on the fly.
 - **Native encryption**: introduced in later OpenZFS versions.
 
@@ -241,7 +241,7 @@ These formats trade some efficiency for portability. On a server, distribution p
 
 ### Repositories and Pinning
 
-Sometimes the version of a package in the default repositories is not the one you need. You can add third-party repositories (called PPAs on Ubuntu) to get newer or specialized builds:
+Sometimes the version of a package in the default repositories is not the one you need. You can add third-party repositories (called PPAs, or Personal Package Archives, on Ubuntu) to get newer or specialized builds:
 
 ```bash
 # Example: adding the official Node.js 22.x repository on Ubuntu

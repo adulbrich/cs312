@@ -27,17 +27,19 @@ The table below maps each learning outcome to the labs and assignments where it 
 | LO | Description | Labs | Assignments |
 |----|-------------|------|-------------|
 | 1 | Build a functioning general-purpose computer from scratch. | Lab 1a (Bare Metal) | - |
-| 2 | Plan, install, and troubleshoot a LAN, connecting it to a WAN. | Lab 1b (AWS Onboarding), Lab 2 (WordPress) | A1 (Manual Minecraft) |
-| 3 | Manage a server: services, user accounts, resources, security. | Lab 1b (AWS Onboarding), Lab 2 (WordPress), Lab 3 (Docker Compose), Lab 4 (ECR/S3), Lab 7 (k3s), Lab 8 (k8s Ops) | A1 (Manual Minecraft), A2 (Docker), A4 (k3s Migration) |
-| 4 | Maintain devices using remote management tools. | Lab 6 (Ansible + CI/CD) | A3 (Terraform/Ansible/CI) |
-| 5 | Plan tasks and time so services meet an SLA. | Lab 4 (ECR/S3), Lab 8 (k8s Ops), Lab 9 (Observability) | A2 (Docker), A4 (k3s Migration), A5 (Observability) |
-| 6 | Produce written documentation of problems, solutions, and procedures. | Lab 1a (Bare Metal) | A1 (Manual Minecraft), A3 (Terraform/Ansible/CI), A5 (Observability) |
-| 7 | Create programs and tools that automate sysadmin tasks. | Lab 3 (Docker Compose), Lab 5 (Terraform), Lab 6 (Ansible + CI/CD), Lab 7 (k3s), Lab 9 (Observability) | A2 (Docker), A3 (Terraform/Ansible/CI), A4 (k3s Migration), A5 (Observability) |
-| 8 | Participate effectively in a team environment. | - | A4 (k3s Migration), A5 (Observability) |
+| 2 | Plan, install, and troubleshoot a LAN, connecting it to a WAN. | Lab 1b (AWS Setup), Lab 2 (WordPress on EC2) | A1 (Manual Minecraft) |
+| 3 | Manage a server: services, user accounts, resources, security. | Lab 1b (AWS Setup), Lab 2 (WordPress), Lab 3 (Docker Compose), Lab 4 (ECR/S3), Lab 7 (k3s), Lab 8 (k8s Ops) | A1 (Manual Minecraft), A2 (Containerized), A4 (Orchestration) |
+| 4 | Maintain devices using remote management tools. | Lab 6 (Ansible + CI/CD), Lab 7 (k3s), Lab 8 (k8s Ops) | A3 (Automation), A4 (Orchestration) |
+| 5 | Plan tasks and time so services meet an SLA. | Lab 4 (ECR/S3), Lab 8 (k8s Ops), Lab 9 (Observability) | A2 (Containerized), A4 (Orchestration), A5 (Observability) |
+| 6 | Produce written documentation of problems, solutions, and procedures. | Lab 1a (Bare Metal) | A1 (Manual Minecraft), A3 (Automation), A5 (Observability) |
+| 7 | Create programs and tools that automate sysadmin tasks. | Lab 3 (Docker Compose), Lab 5 (Terraform), Lab 6 (Ansible + CI/CD), Lab 7 (k3s), Lab 9 (Observability) | A2 (Containerized), A3 (Automation), A4 (Orchestration), A5 (Observability) |
+| 8 | Participate effectively in a team environment. | - | A4 (Orchestration), A5 (Observability) |
 
-<Aside type="note" title="Coverage gaps">
-- **LO1** (hardware) is only assessed in Lab 1a. This is by design; subsequent work is entirely cloud-based, but students carry the mental model of physical hardware into every virtual instance they launch.
-- **LO8** (teamwork) appears in the later assignments where incident drills and on-call documentation require coordination. Consider whether earlier assignments should include pair or team components.
+<Aside type="note" title="Coverage notes">
+- **LO1** (hardware) is assessed only in Lab 1a. This is intentional; subsequent work is cloud-based, but the physical-hardware mental model applies every time a student reasons about CPU, RAM, or storage on a virtual instance.
+- **LO4** (remote management) now encompasses both Ansible-based configuration management (Lab 6, A3) and `kubectl`-based container orchestration (Lab 7, Lab 8, A4). Both are forms of managing infrastructure remotely through a control plane rather than direct shell access.
+- **LO7** (automation) is where deployment strategies appear: rolling updates and rollbacks are practiced in Lab 8 (Cluster Operations), building on the rolling, blue-green, and canary patterns introduced in the CI/CD lecture.
+- **LO8** (teamwork) is concentrated in the second half of the course where incident drills, shared on-call runbooks, and postmortem writing require coordination between team members.
 </Aside>
 {/* Updated Proposal */}
 

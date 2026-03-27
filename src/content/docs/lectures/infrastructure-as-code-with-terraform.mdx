@@ -8,7 +8,7 @@ sidebar:
 import { Aside, Steps } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
-Imagine you need to deploy a web server. You log in to the AWS console, click through a dozen screens, choose an AMI, configure a security group, attach a key pair, and launch the instance. A week later a colleague needs an identical server in a different region. Can you reproduce exactly what you did? Probably not with perfect fidelity, and certainly not quickly.
+Imagine you need to deploy a web server. You log in to the AWS console, click through a dozen screens, choose an AMI (Amazon Machine Image, a pre-built OS snapshot used to launch instances), configure a security group, attach a key pair, and launch the instance. A week later a colleague needs an identical server in a different region. Can you reproduce exactly what you did? Probably not with perfect fidelity, and certainly not quickly.
 
 This scenario illustrates the core problem that Infrastructure as Code (IaC) solves. When infrastructure is provisioned by hand, three risks emerge:
 
@@ -30,7 +30,7 @@ The same tools do not always serve both phases equally well. Terraform excels at
 
 ## Declarative vs. Imperative Approaches
 
-There are two broad philosophies for automating infrastructure. In an **imperative** approach, you write a sequence of steps: "create a VPC, then create a subnet, then launch an instance." Shell scripts and SDK-based tools work this way; the code describes *how* to reach the desired state.
+There are two broad philosophies for automating infrastructure. In an **imperative** approach, you write a sequence of steps: "create a VPC (Virtual Private Cloud, an isolated network you control within AWS), then create a subnet, then launch an instance." Shell scripts and SDK-based tools work this way; the code describes *how* to reach the desired state.
 
 In a **declarative** approach, you describe *what* the desired state looks like: "there should be a VPC with one public subnet and one EC2 instance." The tool figures out how to make reality match the declaration.
 
@@ -50,7 +50,7 @@ Terraform's design is built around four key concepts.
 
 ### Providers
 
-A **provider** is a plugin that teaches Terraform how to talk to a particular platform or service. The AWS provider knows how to create EC2 instances and S3 buckets; the Google Cloud provider knows how to create Compute Engine VMs and Cloud Storage buckets. Providers are distributed independently from Terraform itself through the Terraform Registry.
+A **provider** is a plugin that teaches Terraform how to talk to a particular platform or service. The AWS provider knows how to create EC2 instances and S3 buckets (Simple Storage Service, AWS's object storage service); the Google Cloud provider knows how to create Compute Engine VMs and Cloud Storage buckets. Providers are distributed independently from Terraform itself through the Terraform Registry.
 
 ### Resources
 
@@ -274,7 +274,7 @@ By default, Terraform writes state to a file called `terraform.tfstate` in the p
 
 ### Remote State
 
-For any shared project you should store state in a **remote backend**. AWS S3 with DynamoDB locking is one common pattern:
+For any shared project you should store state in a **remote backend**. AWS S3 with DynamoDB (AWS's managed key-value database, used here for distributed locking) locking is one common pattern:
 
 ```hcl
 terraform {
@@ -342,7 +342,7 @@ You would then use `var.ssh_cidrs` in the security group's `cidr_blocks` argumen
 
 Terraform automatically infers dependencies between resources based on references. In our example, `aws_instance.web` references `aws_security_group.web_sg.id`, so Terraform knows it must create the security group before the instance. This is called an **implicit dependency**.
 
-Occasionally you need a dependency that is not visible in the configuration. For example, suppose you have an IAM role that must exist before an instance can assume it, but the instance references the role by name (a string) rather than by Terraform attribute. In this case you can declare an **explicit dependency**:
+Occasionally you need a dependency that is not visible in the configuration. For example, suppose you have an IAM (Identity and Access Management, AWS's system for controlling who can do what) role that must exist before an instance can assume it, but the instance references the role by name (a string) rather than by Terraform attribute. In this case you can declare an **explicit dependency**:
 
 ```hcl
 resource "aws_instance" "web" {
@@ -361,7 +361,7 @@ Prefer implicit dependencies (through attribute references) whenever possible. T
 
 ## Evolving the Configuration: Adding a Database Tier
 
-Let us extend our running example. A real web application typically needs a database. We will add an RDS instance and a second security group that allows the web server to connect on port 5432 (PostgreSQL).
+Let us extend our running example. A real web application typically needs a database. We will add an RDS (Relational Database Service, AWS's managed database offering) instance and a second security group that allows the web server to connect on port 5432 (PostgreSQL).
 
 Add the following to `main.tf`:
 

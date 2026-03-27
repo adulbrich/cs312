@@ -11,7 +11,7 @@ import FigureWithCaption from '/src/components/FigureWithCaption.astro';
 
 import StorageLayers from './hardware-components/StorageLayers.astro';
 
-A server randomly reboots under load: is it the PSU, faulty RAM, or a thermal issue? A new workstation will not POST. A storage upgrade doubles cost but only marginally improves throughput because the bottleneck is elsewhere in the system. As a system administrator, these are the hardware situations that will land on your desk. You do not need to be a hardware engineer, but you do need enough understanding of how the components fit together to diagnose failures, spec appropriate machines, and have an informed conversation with vendors or your operations team.
+A server randomly reboots under load: is it the PSU, faulty RAM, or a thermal issue? A new workstation will not POST (Power-On Self-Test, the firmware's initial hardware check that must succeed before the OS loads). A storage upgrade doubles cost but only marginally improves throughput because the bottleneck is elsewhere in the system. As a system administrator, these are the hardware situations that will land on your desk. You do not need to be a hardware engineer, but you do need enough understanding of how the components fit together to diagnose failures, spec appropriate machines, and have an informed conversation with vendors or your operations team.
 
 Modern computers are built from a small set of well-defined parts that must match one another in socket, speed, and power budget. In this lecture you will learn how the motherboard, CPU, memory, storage, graphics card, power supply, and cooling fit together and what "compatibility" really means in practice. We will favor plain language first, then introduce the necessary terms (socket, chipset, PCIe lanes, TDP) with short glosses. By the end you should be able to read a spec sheet, choose parts that make sense for a given goal (a quiet student workstation, a home lab server, a cost-optimized cloud instance), and assemble a system that boots on the first try. Building on this foundation, later lectures on networking and operating systems assume you can reliably bring bare metal to life.
 
@@ -96,7 +96,7 @@ import ATXSFXPSUImage from './hardware-components/atx-sfx-psu.png';
 
 Front panel connectors (power/reset switches, LEDs, USB headers, audio) must be matched to the board's pin layout; miswiring can cause mysterious no-boot or instant shutdown behavior. Treat clearances (CPU cooler height, radiator thickness, GPU slot width) as first-class constraints you verify from spec sheets; don't assume "standard" parts fit.
 
-- Map required PCIe cards (GPU, NIC, HBA) before choosing a compact form factor.
+- Map required PCIe cards (GPU, NIC (Network Interface Card), HBA (Host Bus Adapter, used to connect storage fabrics like SAS or Fibre Channel)) before choosing a compact form factor.
 - Confirm maximum GPU length and cooler height vs. your chosen components.
 - Use all supplied standoffs only where the board has holes; extras can short traces.
 
@@ -112,7 +112,7 @@ You plan a quiet Mini-ITX build with a 240 mm AIO, a 3-slot GPU, and two NVMe dr
 - Assuming any "120 mm radiator support" implies room for push/pull or thick radiators.
 - Buying a large triple-slot GPU that blocks necessary airflow or the only remaining PCIe slot.
 
-## Memory (RAM): Capacity, Channels, and ECC
+## Memory (RAM): Capacity, Channels, and ECC (Error-Correcting Code)
 
 Building on the socket and chipset foundation, memory (RAM) determines how much active working data the system can keep close to the processor and how quickly it can be accessed. **Random Access Memory (RAM)** is where active programs and data live; more capacity prevents slow disk swapping and higher effective speed lowers latency.
 
@@ -207,7 +207,7 @@ Distinguishing these layers helps you predict compatibility: a USB-C shaped port
 
 With USB 3.2 and USB 4, only the USB-C connector is not deprecated for high-speed transfers. Note that USB marketing names (e.g., "USB 3.2 Gen 2×2") describe both speed tier and connector expectations; always verify both when purchasing cables or hubs.
 
-Legacy interfaces like **RS-232** (serial) and **VGA** (analog video) persist for diagnostics and KVM switches even if they are no longer performance-relevant. They are another good example of how standards and physical connectors differ. RS-232 can use DE-9 or DB-25 connectors, while VGA uses a DE-15 connector even though early days also used DE-9.
+Legacy interfaces like **RS-232** (serial) and **VGA** (analog video) persist for diagnostics and KVM (Keyboard-Video-Mouse) switches, which let one keyboard and monitor control multiple servers, even if they are no longer performance-relevant. They are another good example of how standards and physical connectors differ. RS-232 can use DE-9 or DB-25 connectors, while VGA uses a DE-15 connector even though early days also used DE-9.
 
 import SerialConnectorsImage from './hardware-components/serial-connectors.png';
 

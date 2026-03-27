@@ -93,7 +93,7 @@ When deploying wireless access points in a building:
 
 ### Enterprise wireless security
 
-For organizational networks, WPA2-Enterprise or WPA3-Enterprise is the standard. These protocols authenticate each user individually via 802.1X and a RADIUS server, rather than sharing a single pre-shared key (PSK) across all users. Individual authentication means you can revoke access for a single person without changing the password for everyone.
+For organizational networks, WPA2-Enterprise or WPA3-Enterprise is the standard. These protocols authenticate each user individually via 802.1X and a RADIUS server (Remote Authentication Dial-In User Service, a centralized protocol for verifying network access credentials), rather than sharing a single pre-shared key (PSK) across all users. Individual authentication means you can revoke access for a single person without changing the password for everyone.
 
 If your organization still uses WPA2-PSK (a shared password), rotate the key regularly and treat it as a credential that must be protected. WPA3-SAE improves on PSK by providing forward secrecy and resistance to offline dictionary attacks, but enterprise authentication remains the gold standard.
 
@@ -385,9 +385,9 @@ Three common deployment patterns:
 
 Common VPN protocols:
 
-- **IPsec**: Built into most hardware routers and firewalls; leverages hardware acceleration for high throughput. Widely used in enterprise site-to-site deployments.
+- **IPsec** (Internet Protocol Security, a suite of protocols that encrypts and authenticates each IP packet): Built into most hardware routers and firewalls; leverages hardware acceleration for high throughput. Widely used in enterprise site-to-site deployments.
 - **OpenVPN**: Open-source, flexible, and easier to configure than IPsec. Runs over TCP or UDP; easy to tunnel through firewalls.
-- **WireGuard**: Modern, lean, and significantly faster than older protocols in benchmarks. Simpler code base (easier to audit). Less legacy hardware support, but increasingly adopted in new deployments.
+- **WireGuard**: A modern VPN protocol that uses state-of-the-art cryptography and a much smaller code base than IPsec or OpenVPN, making it easier to audit and often faster in benchmarks. Less legacy hardware support, but increasingly adopted in new deployments.
 
 ## Firewall Types, Technologies, and Terminology
 

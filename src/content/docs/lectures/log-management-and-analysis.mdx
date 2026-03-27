@@ -142,7 +142,7 @@ The timestamp (`Mar 15 03:04:12`), host (`web-prod-01`), and process (`nginx[284
 Structured logs are easier to parse programmatically and work well with centralized logging systems. The tradeoff is that they are harder to read with the naked eye compared to a single line of syslog.
 
 <Aside type="note">
-Timestamps are the single most important field in any log entry. Without consistent, accurate timestamps, you cannot reconstruct a timeline. Make sure your servers synchronize time via NTP, and prefer timestamps that include the year and timezone (ISO 8601 format, such as `2026-03-15T03:04:12Z`).
+Timestamps are the single most important field in any log entry. Without consistent, accurate timestamps, you cannot reconstruct a timeline. Make sure your servers synchronize time via NTP (Network Time Protocol, which keeps system clocks accurate by querying time servers), and prefer timestamps that include the year and timezone (ISO 8601 format, such as `2026-03-15T03:04:12Z`).
 </Aside>
 
 ## Searching and filtering logs
@@ -288,7 +288,7 @@ Let us return to the 3 AM scenario and walk through a realistic investigation.
    journalctl -p warning --since "2026-03-15 02:50:00" --until "2026-03-15 03:02:00" | grep -i "memory\|oom\|kill"
    ```
 
-   You find the OOM killer was invoked. Something consumed enough memory to starve the application.
+   You find the OOM killer (Out-Of-Memory killer, the Linux kernel mechanism that terminates processes when the system runs out of RAM) was invoked. Something consumed enough memory to starve the application.
 
 5. **Identify the culprit.** Check what else was running. A `cron` job kicked off at 03:00:
 

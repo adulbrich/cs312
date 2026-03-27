@@ -76,7 +76,7 @@ The system has four main components:
 
 **Images** are read-only templates that contain a filesystem snapshot plus metadata (default command, environment variables, exposed ports). An image is the blueprint; a container is a running instance of that blueprint.
 
-**Registries** are servers that store and distribute images. Docker Hub is the default public registry, but organizations often use private registries such as GitHub Container Registry (GHCR), Amazon ECR, or a self-hosted registry. When you `docker pull nginx`, the client asks the daemon to download the `nginx` image from Docker Hub.
+**Registries** are servers that store and distribute images. Docker Hub is the default public registry, but organizations often use private registries such as GitHub Container Registry (GHCR), Amazon ECR (Elastic Container Registry, AWS's managed image storage service), or a self-hosted registry. When you `docker pull nginx`, the client asks the daemon to download the `nginx` image from Docker Hub.
 
 <Aside type="tip" title="Verifying Your Docker Installation">
 After installing Docker, confirm everything is working:
@@ -447,7 +447,7 @@ When pushing to a public repository, remember that the image layers are publicly
 
 Managing a handful of containers manually works for development and small deployments. At scale, you need **container orchestration**: a system that automatically deploys, scales, heals, and load-balances containers across a cluster of machines.
 
-**Kubernetes** (abbreviated **K8s**, where 8 represents the eight letters between "K" and "s") is the dominant orchestration platform. A Kubernetes cluster consists of a control plane and worker nodes. You describe the desired state (run three replicas of this image, expose them on this port, restart if they fail) and Kubernetes continuously works to make reality match that description. Key capabilities include:
+**Kubernetes** (abbreviated **K8s**, where 8 represents the eight letters between "K" and "s") is the dominant orchestration platform. A Kubernetes cluster consists of a control plane (the set of components that make scheduling and management decisions) and worker nodes (the machines that actually run your containers). You describe the desired state (run three replicas of this image, expose them on this port, restart if they fail) and Kubernetes continuously works to make reality match that description. Key capabilities include:
 
 - Automated deployment and rollback
 - Horizontal scaling (add more replicas under load)
@@ -455,7 +455,7 @@ Managing a handful of containers manually works for development and small deploy
 - Load balancing across replicas
 - Rolling updates with zero downtime
 
-Docker's own simpler orchestration tool is **Docker Swarm**, which is easier to set up but less capable than Kubernetes. For most new projects, Kubernetes (or a managed version like Amazon EKS, Google GKE, or Azure AKS) is the industry standard.
+Docker's own simpler orchestration tool is **Docker Swarm**, which is easier to set up but less capable than Kubernetes. For most new projects, Kubernetes (or a managed version like Amazon EKS, Google GKE, or Azure AKS, where the cloud provider operates the control plane for you) is the industry standard.
 
 ## Best Practices
 

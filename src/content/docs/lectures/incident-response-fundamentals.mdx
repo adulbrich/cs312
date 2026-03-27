@@ -49,7 +49,7 @@ The best detection systems are layered. No single method catches everything, so 
 
 **Alerting on metrics** is the most common approach. A monitoring system like Prometheus scrapes your application's health endpoint every 15 seconds and evaluates alert rules against the collected data. When the error rate exceeds a threshold, it sends a notification through a tool like PagerDuty or Opsgenie, which pages the on-call engineer.
 
-**Synthetic monitoring** simulates real user behavior. A probe running outside your infrastructure attempts to load the homepage, log in, and complete a purchase every minute. If any step fails, the probe raises an alert. Synthetic checks are especially valuable because they catch problems that internal metrics might miss, such as DNS failures or CDN misconfigurations.
+**Synthetic monitoring** simulates real user behavior. A probe running outside your infrastructure attempts to load the homepage, log in, and complete a purchase every minute. If any step fails, the probe raises an alert. Synthetic checks are especially valuable because they catch problems that internal metrics might miss, such as DNS failures or CDN (Content Delivery Network, a geographically distributed system that caches content closer to users) misconfigurations.
 
 **Log anomaly detection** watches for unusual patterns in your application and system logs. A sudden spike in "connection refused" errors from the database, or a flood of "out of memory" kernel messages, can signal trouble before it becomes user-visible.
 
@@ -350,7 +350,7 @@ An incident response program is not something you build during an outage. It is 
 
 Someone must always be reachable when things break. An on-call rotation distributes this responsibility fairly across the team, typically in one-week shifts. A good on-call program has several properties.
 
-**Clear expectations.** On-call engineers should know their response time SLA (for example, acknowledge a SEV-1 page within 5 minutes), what tools they need access to, and who to escalate to if they cannot resolve the issue alone.
+**Clear expectations.** On-call engineers should know their response time SLA (Service Level Agreement, the contractual or internal commitment for response times; for example, acknowledge a SEV-1 page within 5 minutes), what tools they need access to, and who to escalate to if they cannot resolve the issue alone.
 
 **Reasonable workload.** If the on-call engineer is getting paged multiple times per night, the system has too many reliability problems to sustain a healthy rotation. Track the number of pages per shift and treat a high page count as a signal to invest in reliability improvements.
 

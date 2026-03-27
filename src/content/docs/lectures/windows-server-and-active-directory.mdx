@@ -28,7 +28,7 @@ Active Directory premiered with Windows 2000 Server in 1999. Desktop and server 
 
 Microsoft ships Windows Server in two main editions: **Standard** and **Datacenter**. Both share the same feature set for Active Directory, DNS, file services, and most server roles. The key difference is virtualization licensing. Standard edition includes licenses for up to two virtual machines (VMs) running Windows Server on the same physical host. Datacenter edition allows unlimited VMs per host, making it the right choice for dense virtualization environments. For Greenfield Engineering's modest infrastructure (a few physical servers), Standard edition is the practical and cost-effective choice.
 
-Beyond edition selection, administrators choose between two installation modes. **Desktop Experience** (sometimes called the GUI install) provides the familiar Windows graphical interface with Server Manager, the MMC snap-ins, and a taskbar. **Server Core** strips away the graphical shell entirely, leaving only a command prompt and PowerShell. Server Core uses less disk space, has a smaller attack surface (fewer components means fewer vulnerabilities), and requires fewer patches. The tradeoff is that all configuration happens through the command line or remote management tools.
+Beyond edition selection, administrators choose between two installation modes. **Desktop Experience** (sometimes called the GUI install) provides the familiar Windows graphical interface with Server Manager, the MMC (Microsoft Management Console) snap-ins, and a taskbar. **Server Core** strips away the graphical shell entirely, leaving only a command prompt and PowerShell. Server Core uses less disk space, has a smaller attack surface (fewer components means fewer vulnerabilities), and requires fewer patches. The tradeoff is that all configuration happens through the command line or remote management tools.
 
 <Aside type="tip" title="When to Choose Server Core">
 For domain controllers and infrastructure servers that rarely need interactive login, Server Core is the recommended choice. You can manage it remotely using tools like Remote Server Administration Tools (RSAT) from a workstation with Desktop Experience, or through Windows Admin Center in a browser. Reserve Desktop Experience for servers where you genuinely need a local GUI, such as a jump box or a training environment.
@@ -114,7 +114,7 @@ A freshly installed Windows Server is just a member server. To make it a domain 
 5. The server reboots. When it comes back up, it is a domain controller hosting the AD database (stored in `C:\Windows\NTDS\`) and the SYSVOL share (which holds Group Policy files and logon scripts).
 </Steps>
 
-After promotion, the domain controller handles Kerberos authentication, responds to LDAP queries, serves DNS for the domain, and replicates its database to any additional domain controllers. For resilience, production environments should always have at least two domain controllers; if one fails, the other continues to authenticate users.
+After promotion, the domain controller handles Kerberos authentication, responds to LDAP (Lightweight Directory Access Protocol, the standard query protocol used to look up users and groups in a directory) queries, serves DNS for the domain, and replicates its database to any additional domain controllers. For resilience, production environments should always have at least two domain controllers; if one fails, the other continues to authenticate users.
 
 In PowerShell, the entire promotion can be scripted:
 
@@ -287,7 +287,7 @@ dcdiag /v
 
 The `repadmin` tool shows whether replication is succeeding or failing between DC pairs. The `dcdiag` utility runs dozens of tests covering DNS registration, Kerberos authentication, SYSVOL replication, and more. Run both regularly and after any changes to the environment.
 
-**Monitoring AD health** also means watching the Windows Event Logs. The Directory Service log (in Event Viewer) records replication events, schema changes, and errors. The DNS Server log tracks query failures and zone transfer issues. Centralized log collection (using Windows Event Forwarding or a SIEM) ensures you catch problems before users report them.
+**Monitoring AD health** also means watching the Windows Event Logs. The Directory Service log (in Event Viewer) records replication events, schema changes, and errors. The DNS Server log tracks query failures and zone transfer issues. Centralized log collection (using Windows Event Forwarding or a SIEM, Security Information and Event Management platform that aggregates and correlates logs from multiple sources) ensures you catch problems before users report them.
 
 Other day-two concerns include managing the **AD Recycle Bin** (enable it so that accidentally deleted objects can be recovered without a full restore), monitoring **FSMO roles** (Flexible Single Master Operations, the five special roles distributed among DCs), and reviewing **stale computer and user accounts** that should be disabled or removed.
 
@@ -308,7 +308,7 @@ Get-ADComputer -Filter {LastLogonDate -lt $cutoff} -Properties LastLogonDate |
 
 Students in this course work with both Linux and Windows servers, and it is worth stepping back to compare the two approaches. The underlying goals are identical: manage identities, enforce security, control access to resources, and keep services running. The tools and philosophies differ.
 
-In Linux, identity management is typically local (`/etc/passwd`, `/etc/shadow`, `/etc/group`) unless you integrate with a directory service like FreeIPA or join the machine to an Active Directory domain using SSSD or Winbind. Configuration is done through text files, and automation tools like Ansible push changes declaratively. The administrator composes small, focused tools (`useradd`, `chmod`, `systemctl`, `iptables`) into scripts or playbooks.
+In Linux, identity management is typically local (`/etc/passwd`, `/etc/shadow`, `/etc/group`) unless you integrate with a directory service like FreeIPA or join the machine to an Active Directory domain using SSSD (System Security Services Daemon, a Linux service that connects to remote identity providers including Active Directory) or Winbind. Configuration is done through text files, and automation tools like Ansible push changes declaratively. The administrator composes small, focused tools (`useradd`, `chmod`, `systemctl`, `iptables`) into scripts or playbooks.
 
 In Windows with Active Directory, identity is centralized from the start. Group Policy pushes configuration to machines automatically, replacing the need for an external automation tool for many tasks. PowerShell provides a consistent, object-oriented scripting environment that can manage local and remote systems. The administrator works within a more integrated (and more opinionated) ecosystem where Microsoft provides the tooling.
 

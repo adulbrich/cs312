@@ -562,7 +562,7 @@ Systemd timers have several advantages over cron. The `Persistent=true` option m
 
 Bash is an excellent tool for automating tasks on a single machine, but it has limits. As your scripts grow in complexity, watch for these warning signs:
 
-**You are managing multiple hosts.** A Bash script that SSHs into a dozen servers in a loop is brittle. Connection failures, partial runs, and inconsistent state are hard to handle. Configuration management tools like Ansible were designed for exactly this problem. Ansible is agentless (it uses SSH, just like your script), but it adds idempotence, inventory management, and error handling that would take hundreds of lines of Bash to replicate.
+**You are managing multiple hosts.** A Bash script that SSHs into a dozen servers in a loop is brittle. Connection failures, partial runs, and inconsistent state are hard to handle. Configuration management tools like Ansible were designed for exactly this problem. Ansible is agentless (it uses SSH, just like your script), but it adds idempotence (the property that running a command multiple times produces the same result as running it once, with no unintended side effects), inventory management, and error handling that would take hundreds of lines of Bash to replicate.
 
 **You are parsing structured data.** Bash can manipulate strings, but parsing JSON, YAML, or XML in Bash is painful and error-prone. Python, with libraries like `json`, `pyyaml`, and `requests`, handles structured data naturally. If your script has more than one or two calls to `jq` or `awk`, consider rewriting it in Python.
 

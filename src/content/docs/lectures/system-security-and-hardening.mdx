@@ -44,7 +44,7 @@ Before locking anything down, it helps to think clearly about what you are defen
 For a typical web-facing Ubuntu server, the most common attack vectors are:
 
 - **Credential stuffing and brute force.** Automated tools try thousands of username/password combinations against SSH, database ports, and web login forms.
-- **Exploitation of unpatched software.** Public vulnerability databases (CVEs) are monitored by attackers just as they are monitored by defenders. A known vulnerability in an outdated package is low-hanging fruit.
+- **Exploitation of unpatched software.** Public vulnerability databases (CVEs, Common Vulnerabilities and Exposures, the standard identifiers for publicly known security flaws) are monitored by attackers just as they are monitored by defenders. A known vulnerability in an outdated package is low-hanging fruit.
 - **Misconfigured services.** A database listening on 0.0.0.0 with no authentication, or a web server exposing a debug panel, can be discovered and exploited within hours.
 - **Privilege escalation.** Once an attacker gains any foothold on the system (even as a low-privilege user), they will attempt to escalate to root.
 
@@ -304,7 +304,7 @@ Traditional network security assumed that everything inside the corporate perime
 Zero Trust is built on three principles:
 
 1. **Verify explicitly.** Always authenticate and authorize based on all available context: user identity, device health, location, data classification, and behavioral anomalies. Do not rely on network location as a proxy for trust.
-2. **Use least-privilege access.** Grant just-in-time, just-enough access (JIT/JEA) rather than broad standing permissions. Apply risk-based adaptive policies that can tighten access when anomalies are detected.
+2. **Use least-privilege access.** Grant just-in-time, just-enough access (JIT/JEA: credentials that are issued on demand and expire automatically) rather than broad standing permissions. Apply risk-based adaptive policies that can tighten access when anomalies are detected.
 3. **Assume breach.** Segment networks and workloads to minimize the blast radius of any compromise. Enforce end-to-end encryption and use analytics to detect lateral movement early.
 
 <Aside type="note">
@@ -330,7 +330,7 @@ Hardening a server is not a one-time event. New vulnerabilities are disclosed co
 
 Authoritative sources for tracking security vulnerabilities:
 
-- **NVD (National Vulnerability Database)** at [nvd.nist.gov](https://nvd.nist.gov/): the US government's catalog of known CVEs, with severity scores (CVSS).
+- **NVD (National Vulnerability Database)** at [nvd.nist.gov](https://nvd.nist.gov/): the US government's catalog of known CVEs, with severity scores (CVSS, Common Vulnerability Scoring System, a 0-10 numeric scale rating vulnerability severity).
 - **CVE (Common Vulnerabilities and Exposures)** at [cve.org](https://www.cve.org/): the canonical identifier system for publicly known vulnerabilities.
 - **SecLists.Org** at [seclists.org](https://seclists.org/): an archive of security mailing lists.
 - **Vendor security advisories**: Ubuntu Security Notices (USN), Red Hat Security Advisories (RHSA), and similar feeds from your OS and software vendors.

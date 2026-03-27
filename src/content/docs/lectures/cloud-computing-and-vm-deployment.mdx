@@ -46,7 +46,7 @@ AWS organizes its global infrastructure into **regions**, each of which is a geo
 
 Why does this matter for Greenfield? If they deploy their application in a single AZ and that facility loses power, their application goes down. By spreading resources across two or three AZs within the same region, they gain resilience against localized failures without the complexity of multi-region networking. Region selection also affects latency (choose a region close to your users), regulatory compliance (some data must stay within certain jurisdictions), and cost (pricing varies by region).
 
-The **shared responsibility model** defines who secures what. AWS is responsible for the security *of* the cloud: the physical data centers, the hypervisor layer, the global network backbone, and the managed services' underlying infrastructure. You are responsible for security *in* the cloud: your operating system patches, application code, firewall rules, IAM policies, and data encryption choices. This division means that even though AWS physically secures the building, a misconfigured security group that exposes your database to the Internet is your problem, not theirs.
+The **shared responsibility model** defines who secures what. AWS is responsible for the security *of* the cloud: the physical data centers, the hypervisor layer, the global network backbone, and the managed services' underlying infrastructure. You are responsible for security *in* the cloud: your operating system patches, application code, firewall rules, IAM (Identity and Access Management) policies, and data encryption choices. This division means that even though AWS physically secures the building, a misconfigured security group that exposes your database to the Internet is your problem, not theirs.
 
 <Aside type="caution" title="A Common Misconception">
 "It's in the cloud, so AWS handles security" is dangerously wrong. The majority of cloud security incidents stem from customer misconfigurations, not AWS infrastructure failures. You must actively manage your side of the shared responsibility model.
@@ -189,7 +189,7 @@ Greenfield's closet server used a single physical disk for everything. In AWS, s
 
 **EBS** provides network-attached block storage volumes that you attach to EC2 instances. An EBS volume behaves like a raw, unformatted disk that you can format with a filesystem and mount. EBS volumes persist independently of the instance lifecycle; if you stop or terminate an instance, the volume can survive (depending on the "delete on termination" setting).
 
-EBS volume types offer different performance characteristics. General Purpose SSD (`gp3`) provides a good baseline for most workloads and lets you independently configure IOPS and throughput. Provisioned IOPS SSD (`io2`) is designed for latency-sensitive databases. Throughput Optimized HDD (`st1`) suits sequential-access workloads like log processing. Each instance's root volume is an EBS volume, and you can attach additional volumes for data separation.
+EBS volume types offer different performance characteristics. General Purpose SSD (`gp3`) provides a good baseline for most workloads and lets you independently configure IOPS (Input/Output Operations Per Second, a measure of storage performance) and throughput. Provisioned IOPS SSD (`io2`) is designed for latency-sensitive databases. Throughput Optimized HDD (`st1`) suits sequential-access workloads like log processing. Each instance's root volume is an EBS volume, and you can attach additional volumes for data separation.
 
 ```bash
 # Create a 50 GB gp3 volume
@@ -212,7 +212,7 @@ After attaching, you would SSH into the instance, create a filesystem on the dev
 
 **S3** is object storage, fundamentally different from block storage. Instead of mounting a filesystem, you store and retrieve objects (files) via HTTP APIs, organized into **buckets**. Each object is identified by a key (essentially a path-like string) and can range from a few bytes to 5 terabytes.
 
-S3 is ideal for backups, static assets, log archives, and data that does not require POSIX filesystem semantics. Greenfield might use S3 to store nightly database backups, user-uploaded files, and application build artifacts.
+S3 is ideal for backups, static assets, log archives, and data that does not require POSIX (Portable Operating System Interface, the standard that defines traditional Unix filesystem behaviors like file locking and directory traversal) filesystem semantics. Greenfield might use S3 to store nightly database backups, user-uploaded files, and application build artifacts.
 
 ```bash
 # Create a bucket

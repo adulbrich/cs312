@@ -33,7 +33,7 @@ A 2025 workstation for data science might pair a multi-core CPU with a dedicated
 
 ## CPU Sockets, Chipsets, and Platform Evolution
 
-At the heart of every computer is the **central processing unit (CPU)**, which connects to the rest of the system through a **socket** and **chipset**. The socket (such as LGA or PGA) determines which CPUs are compatible with a motherboard, while the chipset manages communication between the CPU, memory, storage, and peripherals. Over the past decade, the industry has shifted from split northbridge/southbridge architectures to highly integrated platforms, with memory controllers and PCI Express (PCIe) lanes now built directly into the CPU. This integration reduces latency and increases performance, but also means that the choice of CPU and chipset sets hard limits on system capabilities.
+At the heart of every computer is the **central processing unit (CPU)**, which connects to the rest of the system through a **socket** and **chipset**. The socket (such as LGA, Land Grid Array, where pins are on the motherboard, or PGA, Pin Grid Array, where pins are on the CPU) determines which CPUs are compatible with a motherboard, while the chipset manages communication between the CPU, memory, storage, and peripherals. Over the past decade, the industry has shifted from split northbridge/southbridge architectures to highly integrated platforms, with memory controllers and PCI Express (PCIe) lanes now built directly into the CPU. This integration reduces latency and increases performance, but also means that the choice of CPU and chipset sets hard limits on system capabilities.
 
 <div class="**:mx-auto">
   ![](./hardware-components/chipset.jpg)
@@ -95,7 +95,7 @@ As of 2024, high-end NVMe SSDs exceed **5,000 MB/s** sequential read and prices 
 When evaluating SSDs, the flash memory controller is often more predictive of real-world reliability and performance than brand or model name alone. Researching the controller (e.g., Phison, Silicon Motion, In-house controllers from Samsung or WD) provides better signal than marketing specs.
 </Aside>
 
-SSDs fail primarily from **power component failure** or **flash cell wear-out**: each cell can only be programmed and erased a finite number of times. Firmware-level **wear leveling** spreads write operations across the entire drive to delay wear-out, and the **TRIM** command (issued by the OS) informs the SSD which blocks are no longer in use, allowing the controller to pre-erase them and maintain write performance over time.
+SSDs fail primarily from **power component failure** or **flash cell wear-out**: each cell can only be programmed and erased a finite number of times. Firmware-level **wear leveling** spreads write operations across the entire drive to delay wear-out, and the **TRIM** command (issued by the OS to tell the SSD which blocks are no longer in use, allowing the controller to pre-erase them) maintains write performance over time.
 
 **Fragmentation** is only relevant to HDDs: because the head must physically seek to non-contiguous locations, fragmented files slow random access. SSDs have no moving heads so fragmentation has no performance impact; in fact, defragmenting an SSD unnecessarily wears flash cells and should be avoided.
 
@@ -229,7 +229,7 @@ PCIe/NVMe drives operate at full PCIe speeds; they are almost always SSDs. SATA 
 
 - **Direct-Attached Storage (DAS)**: storage connected directly to a single host (internal drives, external USB/eSATA enclosures). Fastest access; no network overhead; accessible only to the attached host.
 - **Network-Attached Storage (NAS)**: a device (or system) that presents storage over a network as a file server (SMB, NFS). Multiple clients can access the same data; simpler to manage than a SAN; slightly higher latency than DAS.
-- **Storage Area Network (SAN)**: a dedicated high-speed network (Fibre Channel, iSCSI, NVMe-oF) connecting hosts to block-level storage. Appears to each host as a locally attached disk; used in enterprise environments for virtualization, databases, and high-availability clustering.
+- **Storage Area Network (SAN)**: a dedicated high-speed network (Fibre Channel, iSCSI (iSCSI tunnels SCSI storage commands over standard TCP/IP networks), or NVMe-oF (NVMe over Fabrics, which extends NVMe's protocol across a network)) connecting hosts to block-level storage. Appears to each host as a locally attached disk; used in enterprise environments for virtualization, databases, and high-availability clustering.
 
 It's important to match your components to your actual workload. Upgrading to a faster SSD won't help if your data source is still limited by SATA speeds. Similarly, high-speed USB and Thunderbolt ports are only as fast as the devices you connect.
 
@@ -245,7 +245,7 @@ A complete data center deployment involves more than just servers. The full hard
 
 - **Racks** (typically 42U standard enclosures)
 - **Cabling** (structured copper and fiber runs, cable management arms)
-- **Cooling and ventilation** (CRAC units, hot/cold aisle containment, liquid cooling)
+- **Cooling and ventilation** (CRAC units, Computer Room Air Conditioners that recirculate and cool data center air, hot/cold aisle containment, liquid cooling)
 - **Power**: branch circuits, PDUs (power distribution units), and **Uninterruptible Power Supplies (UPS)** to bridge brief outages and give systems time for a clean shutdown during extended ones
 - **Network infrastructure** (top-of-rack switches, spine/leaf fabric, out-of-band management network)
 - **Servers** themselves (compute, storage, and GPU nodes)
@@ -288,7 +288,7 @@ On a 208 V 30 A circuit (≈6.2 kVA), using the 80% continuous guideline gives ~
 
 ## AI Accelerators and Sustainable Hardware
 
-AI and machine learning workloads are now a major driver of hardware innovation. Dedicated accelerators (such as NVIDIA Tensor Core GPUs, Google TPUs, and custom ASICs) are increasingly common in both workstations and servers. These devices require high-bandwidth memory, fast PCIe or NVMe interconnects, and robust cooling solutions. As a result, system design must account for the power, thermal, and data movement needs of these accelerators.
+AI and machine learning workloads are now a major driver of hardware innovation. Dedicated accelerators (such as NVIDIA Tensor Core GPUs, Google TPUs (Tensor Processing Units, chips designed specifically for matrix math operations central to machine learning), and custom ASICs (Application-Specific Integrated Circuits, chips built for one narrow task)) are increasingly common in both workstations and servers. These devices require high-bandwidth memory, fast PCIe or NVMe interconnects, and robust cooling solutions. As a result, system design must account for the power, thermal, and data movement needs of these accelerators.
 
 Sustainability is also at the forefront of hardware design. Energy-efficient CPUs and GPUs, liquid cooling, and recyclable materials are now standard in enterprise deployments. Data centers are adopting renewable energy, optimizing airflow, and using advanced monitoring to reduce their carbon footprint. For job seekers, familiarity with these trends is a valuable skill.
 
