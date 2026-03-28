@@ -476,7 +476,7 @@ A **VirtualHost** is Apache's way of serving different websites from the same se
    curl -s -o /dev/null -w "%{http_code}" http://localhost
    ```
 
-   This should return `200`, meaning the server responded successfully.
+   This should return `302`, meaning WordPress is running and redirecting to the setup wizard. That is expected: WordPress redirects the root URL until installation is complete, and continues redirecting afterward to enforce the configured site URL.
 
 </Steps>
 
@@ -496,7 +496,7 @@ A health check is a simple automated test that runs periodically to confirm your
 
    ```bash
    #!/bin/bash
-   STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost)
+   STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L http://localhost)
    echo "$(date '+%Y-%m-%d %H:%M:%S') - HTTP status: $STATUS" >> /var/log/wordpress-health.log
    ```
 
@@ -555,7 +555,7 @@ A health check is a simple automated test that runs periodically to confirm your
    cat /var/log/wordpress-health.log
    ```
 
-   You should see entries appearing every minute with HTTP status 200.
+   You should see entries appearing every minute with HTTP status `302` (or `200` if you have configured your WordPress instance).
 
 </Steps>
 
@@ -623,7 +623,7 @@ A health check is a simple automated test that runs periodically to confirm your
 
 <Aside type="danger" title="Do not skip this step">
 Terminate all resources you created in this lab to avoid charges:
-- **Option A students:** Go to RDS → Databases → select your instance → Actions → Delete. Uncheck "Create final snapshot" and confirm.
+- **Option A students:** Go to RDS → Databases → select your instance → Actions → Delete. Uncheck "Create final snapshot" and uncheck "Retain automated backups", then confirm.
 - **Option B students:** Go to EC2 → Instances → select `cs312-wordpress-db` → Instance state → Terminate.
 - **Both options:** Terminate the `cs312-wordpress` EC2 instance as well.
 </Aside>
