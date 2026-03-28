@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+import LabSubmissionNote from '/src/components/LabSubmissionNote.astro';
 
 {/* LOs:
 - LO2: Demonstrate how to plan, install, and troubleshoot a Local Area Network, connecting it to a Wide Area Network.
@@ -17,11 +18,7 @@ Gerald wants a website. "Like a blog. For the specials. My daughter says WordPre
 
 Today you are building a real, multi-tier web application from scratch: a WordPress site served by Apache and PHP on one EC2 instance, connected to a MariaDB database running on a **separate** server. You will set up the networking between these two tiers yourself, using security groups to control which traffic can flow between them. Every package, every config file, every firewall rule: you will create it all by hand. This is how system administrators operated before automation tools existed, and understanding this process is essential before you learn to automate it.
 
-<Aside type="note">
-- This lab assignment will be turned in *on paper* during the lab itself.
-- Labs cannot be turned in outside of the actual lab time.
-- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
-</Aside>
+<LabSubmissionNote />
 ## Before You Start
 
 You need:
@@ -122,7 +119,7 @@ You have two options for setting up your database. **Read both before choosing.*
 | **Maintenance** | AWS handles backups, patching, failover | You handle everything |
 | **Learning focus** | Managed services, VPC networking | Full-stack administration, manual DB hardening |
 | **Difficulty** | Easier: fewer steps | Harder: more configuration |
-| **Cost** | RDS Free Tier eligible (db.t3.micro) | Another t3.micro EC2 (free tier eligible) |
+| **Cost** | db.t3.micro RDS instance | Another t3.micro EC2 |
 
 <Aside type="tip" title="Recommendation">
 **Option A (RDS) is recommended.** It is the industry-standard approach for production databases and will take less time, leaving you more time to explore WordPress itself. Option B is for students who want deeper hands-on experience with database administration.

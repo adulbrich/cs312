@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
+import LabSubmissionNote from '/src/components/LabSubmissionNote.astro';
 
 {/* LOs:
 - LO3: Demonstrate how to manage a server for the purposes of providing specific services to a collection of users and devices, including manipulation of user accounts, resource management, and security.
@@ -14,13 +15,9 @@ import { Steps, Aside } from '@astrojs/starlight/components';
 
 Gerald went to a restaurant technology expo and came back saying "containers are the future." He means shipping containers. But the point still stands. The expo had a booth about Kubernetes, and Gerald picked up a brochure. He now wants "orchestration" for the three-location website expansion. You asked him what orchestration means to him. He said, "Like an orchestra. But for websites."
 
-Docker Compose handles a lot for you on a single server — it can even restart crashed containers automatically with a restart policy. But it only runs on one machine. What happens when Gerald's website needs to run across multiple servers, or you need to push an update without taking the site down, or a whole node fails? Kubernetes (often abbreviated k8s) solves this by acting as an orchestrator: a system that continuously monitors your workloads, replaces failed containers, manages multi-service networking, and rolls out updates without downtime. In this lab, you will install k3s, a lightweight Kubernetes distribution designed for resource-constrained environments, and deploy a WordPress site served through an nginx reverse proxy using Kubernetes primitives: Deployments, Services, ConfigMaps, and Secrets.
+Docker Compose handles a lot for you on a single server: it can even restart crashed containers automatically with a restart policy. But it only runs on one machine. What happens when Gerald's website needs to run across multiple servers, or you need to push an update without taking the site down, or a whole node fails? Kubernetes (often abbreviated k8s) solves this by acting as an orchestrator: a system that continuously monitors your workloads, replaces failed containers, manages multi-service networking, and rolls out updates without downtime. In this lab, you will install k3s, a lightweight Kubernetes distribution designed for resource-constrained environments, and deploy a WordPress site served through an nginx reverse proxy using Kubernetes primitives: Deployments, Services, ConfigMaps, and Secrets.
 
-<Aside type="note">
-- This lab assignment will be turned in *on paper* during the lab itself.
-- Labs cannot be turned in outside of the actual lab time.
-- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
-</Aside>
+<LabSubmissionNote />
 
 ## Before You Start
 
@@ -41,9 +38,9 @@ Watch for the answers to these questions as you follow the tutorial.
 1. What k3s version is running on your node? Write down the node's INTERNAL-IP address. (Use `kubectl get nodes -o wide`.) *(4 points)*
 2. Write down the names and IP addresses of your two WordPress Pods. (Use `kubectl get pods -o wide`.) *(4 points)*
 3. Run `kubectl get secret mysql-secret -o jsonpath='{.data.mysql-password}' | base64 --decode`. What does it print? What does this tell you about how Secrets store values? *(4 points)*
-4. After configuring nginx as a reverse proxy, what does `curl -L http://localhost:30080` return? (A brief description is fine — you do not need to paste the full HTML.) *(4 points)*
+4. After configuring nginx as a reverse proxy, what does `curl -L http://localhost:30080` return? (A brief description is fine; you do not need to paste the full HTML.) *(4 points)*
 5. After deleting one WordPress Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(5 points)*
-6. How does nginx's `proxy_pass` directive reference WordPress — by IP address or by DNS name? Why does this matter when Pods restart and get new IP addresses? *(4 points)*
+6. How does nginx's `proxy_pass` directive reference WordPress: by IP address or by DNS name? Why does this matter when Pods restart and get new IP addresses? *(4 points)*
 7. Get your TA's initials showing the WordPress setup screen accessible via nginx in a browser or via `curl`. *(5 points)*
 
 ## Tutorial
@@ -109,7 +106,7 @@ Before writing manifests, let's understand the building blocks:
 
 ### Storing Credentials with Secrets
 
-MySQL needs a password. Hardcoding it in a manifest is bad practice — it ends up in your version control. Instead, you will store it in a Kubernetes Secret and reference it by name from other manifests.
+MySQL needs a password. Hardcoding it in a manifest is bad practice; it ends up in your version control. Instead, you will store it in a Kubernetes Secret and reference it by name from other manifests.
 
 <Steps>
 
@@ -151,10 +148,10 @@ MySQL needs a password. Hardcoding it in a manifest is bad practice — it ends 
 
 ### Deploying MySQL
 
-MySQL needs a stable DNS name so WordPress can reach it. You will create a Deployment and a ClusterIP Service — internal-only, with no NodePort — for MySQL.
+MySQL needs a stable DNS name so WordPress can reach it. You will create a Deployment and a ClusterIP Service (internal-only, with no NodePort) for MySQL.
 
 <Aside type="caution">
-This deployment uses ephemeral (in-container) storage. If the MySQL Pod is deleted, all database data is lost. In production, you would attach a **PersistentVolumeClaim** to give the database durable storage that outlives any individual Pod. For this lab, ephemeral storage is intentional — we are demonstrating orchestration, not data durability.
+This deployment uses ephemeral (in-container) storage. If the MySQL Pod is deleted, all database data is lost. In production, you would attach a **PersistentVolumeClaim** to give the database durable storage that outlives any individual Pod. For this lab, ephemeral storage is intentional: we are demonstrating orchestration, not data durability.
 </Aside>
 
 <Steps>
@@ -226,7 +223,7 @@ This deployment uses ephemeral (in-container) storage. If the MySQL Pod is delet
          targetPort: 3306
    ```
 
-   `ClusterIP` means this Service is only reachable from inside the cluster — MySQL should never be directly exposed to the internet.
+   `ClusterIP` means this Service is only reachable from inside the cluster; MySQL should never be directly exposed to the internet.
 
 3. **Apply both manifests**
 
@@ -240,7 +237,7 @@ This deployment uses ephemeral (in-container) storage. If the MySQL Pod is delet
    kubectl get pods -l app=mysql
    ```
 
-   Wait until the MySQL Pod shows "Running." MySQL takes 20–30 seconds to initialize on first run. If the Pod shows "CrashLoopBackOff," wait another 30 seconds and check again — it typically self-corrects as MySQL finishes its initialization sequence.
+   Wait until the MySQL Pod shows "Running." MySQL takes 20–30 seconds to initialize on first run. If the Pod shows "CrashLoopBackOff," wait another 30 seconds and check again; it typically self-corrects as MySQL finishes its initialization sequence.
 
 </Steps>
 
@@ -294,7 +291,7 @@ WordPress connects to MySQL using the Service DNS name `mysql-service`, which Ku
 
 2. **Write the WordPress Service**
 
-   WordPress will not be exposed directly to the internet — nginx will sit in front of it — so a ClusterIP Service is sufficient.
+   WordPress will not be exposed directly to the internet (nginx will sit in front of it), so a ClusterIP Service is sufficient.
 
    ```bash
    vim wordpress-service.yaml
@@ -477,7 +474,7 @@ One of Kubernetes' most important features is that it automatically replaces fai
    kubectl describe service wordpress-service
    ```
 
-   Find the "Endpoints" line. This shows the IP addresses of all Pods that the Service routes traffic to. When a Pod is replaced and gets a new IP, the endpoint list updates automatically — which is why nginx can use `proxy_pass http://wordpress-service` instead of a hardcoded Pod IP.
+   Find the "Endpoints" line. This shows the IP addresses of all Pods that the Service routes traffic to. When a Pod is replaced and gets a new IP, the endpoint list updates automatically, which is why nginx can use `proxy_pass http://wordpress-service` instead of a hardcoded Pod IP.
 
 </Steps>
 
@@ -494,4 +491,4 @@ kubectl delete \
 
 ---
 
-You now understand how Kubernetes orchestrates a multi-service application. nginx acts as the public entry point, proxying traffic to WordPress, which connects to MySQL — all wired together through Services and their DNS names. Secrets kept credentials out of your manifests, and Deployments kept both nginx and WordPress running even when individual Pods failed. In the next lab, you will add health checks, resource limits, and practice failure drills.
+You now understand how Kubernetes orchestrates a multi-service application. nginx acts as the public entry point, proxying traffic to WordPress, which connects to MySQL, all wired together through Services and their DNS names. Secrets kept credentials out of your manifests, and Deployments kept both nginx and WordPress running even when individual Pods failed. In the next lab, you will add health checks, resource limits, and practice failure drills.

@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
+import LabSubmissionNote from '/src/components/LabSubmissionNote.astro';
 import LetterList from '@components/LetterList.astro';
 
 {/* LOs:
@@ -17,19 +18,15 @@ Welcome to your first day as an intern at **Pinnacle Provisions**, a regional re
 
 Before you can do anything useful at this company, you need to understand what you are working with. In your team, you will perform a full disassembly of this business-class PC, identifying every component, from the CPU to the power supply, and then put it all back together.
 
-<Aside type="note">
-- This lab assignment will be turned in *on paper* during the lab itself.
-- Labs cannot be turned in outside of the actual lab time.
-- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
-</Aside>
+<LabSubmissionNote />
 The machine is on the table. Your task is a complete disassembly followed by a meticulous reconstruction. Each body is different, and these proprietary cases have their own unique anatomy. We've provided some diagrams, but you'll need to rely on your training and the provided texts for the rest. You have about 45 minutes before Gerald comes back to check on your progress. Let's see clean work and no leftover parts.
 
 ## Before You Start
 
 Read the following rules carefully:
 
-1.  Pull plugs straight up and out -- try not to bend them too far out of alignment. That said, a little wiggle can help unseat them.
-2.  Some of these connectors are tight -- resist the urge to pull on the cables: **only pull on the plugs!**
+1.  Pull plugs straight up and out; try not to bend them too far out of alignment. That said, a little wiggle can help unseat them.
+2.  Some of these connectors are tight; resist the urge to pull on the cables: **only pull on the plugs!**
 3.  Try not to touch the electrical pins and connectors on the edges of RAM, cards, and the CPU.
 4.  Carefully cut any zip ties that are tying a cable bundle to the side of the case. **DO NOT** cut zip ties that hold a bundle of cables together.
 5.  Hang loose cables out of the case as much as possible.
@@ -129,7 +126,7 @@ You will be first disassembling the computer, then reassembling it. The reassemb
     <LetterList start={3}>
     * Disconnect the white plug (labeled P3) from the PWRCPU jack on the MOBO by holding in the little white retention clip and then pulling straight up. The other end of this wire goes to the PSU.
     * Remove the black plastic shield that is attached on the blade end of the CPU heatsink fan by pulling it straight up.
-    * Remove the audio cable that connects the front panel audio jacks to the motherboard header labeled FRONT AUD (with a blue plug) by pulling it straight up (this cable is in your way -- it's not part of the PSU).
+    * Remove the audio cable that connects the front panel audio jacks to the motherboard header labeled FRONT AUD (with a blue plug) by pulling it straight up (this cable is in your way and is not part of the PSU).
     * Disconnect the white power switch command plug (labeled P2) from the white MOBO header labeled PWRCMD. The other end of this wire goes to the PSU.
     * Disconnect the white main power plug (labeled P1) from the white MOBO jack labeled PWR. The other end of this wire goes to the PSU.
     * Using a screwdriver, unscrew the three screws from the back of the PSU on the outside of the case that hold the PSU to the case.
@@ -144,7 +141,7 @@ You will be first disassembling the computer, then reassembling it. The reassemb
     </LetterList>
     ![](./the-bare-metal/step-8-1.jpeg)
     <LetterList start={2}>
-    * Squeeze the two green HDD caddy handles inwards, and pull both up to remove the drive caddy from the case. Be careful -- HDDs are extremely sensitive to being dropped!
+    * Squeeze the two green HDD caddy handles inwards, and pull both up to remove the drive caddy from the case. Be careful: HDDs are extremely sensitive to being dropped!
     * Squeeze the smaller black handles that keep the small HDD in the larger caddy, and carefully remove the HDD from the caddy.
     </LetterList>
     ![](./the-bare-metal/step-8-3.jpeg)
@@ -183,7 +180,7 @@ You will be first disassembling the computer, then reassembling it. The reassemb
     ![](./the-bare-metal/step-10-6.jpeg)
     <LetterList start={6}>
     * Gently, holding it only by the edges, being careful not to touch the pads on the bottom side, lift the CPU as straight up as you can. Put it on a paper towel upside down (contact pad side up) after cleaning any residual thermal paste off the top with a paper towel.
-    * Push the hold-down back into place, and re-secure the retention lever. Be really careful not to touch the pins in the CPU socket on the MOBO -- if you bend just one of them, the entire MOBO is garbage. MOBOs normally ship with a little plastic shield in place of a CPU just to protect the pins.
+    * Push the hold-down back into place, and re-secure the retention lever. Be really careful not to touch the pins in the CPU socket on the MOBO; if you bend just one of them, the entire MOBO is garbage. MOBOs normally ship with a little plastic shield in place of a CPU just to protect the pins.
     </LetterList>
 
 11. **Remove the MOBO from the case**
@@ -193,7 +190,7 @@ You will be first disassembling the computer, then reassembling it. The reassemb
     * Note that you already removed the audio cable that connects the front panel audio jacks to the MOBO header labeled FRONT AUD (with a blue plug). This was in your way when removing the PSU.
     * Disconnect the yellow plug, of the black cable coming from the front panel's USB 2.0 jacks, from the MOBO jack labeled FRONT USB.
     * Disconnect the large black and blue plug, of the black cable coming from the front panel's USB 3.0 jacks, from the blue MOBO jack labeled FRONT USB 3.0. It won't be easy, so rock it ever so slightly back and forth, long-ways.
-    * Disconnect the small white plug, with the red and black wires coming out of it that lead to the speaker in the front of the case, from the tan jack on the board labeled SPKR. This will be hard -- try to get a finger nail in between the plug and the jack. Resist the urge to pull on the wires: they will break and separate from the plug!
+    * Disconnect the small white plug, with the red and black wires coming out of it that lead to the speaker in the front of the case, from the tan jack on the board labeled SPKR. This will be hard; try to get a finger nail in between the plug and the jack. Resist the urge to pull on the wires: they will break and separate from the plug!
     * Find and then remove the 8 large screws that are holding the MOBO to the case. Do not remove the three screws around the CPU socket: they are only used to secure the CPU hold-down to the MOBO.
     * Unseat the MOBO from the case by pulling the edge closest to the front of the case up and towards the front. When it snaps loose, pull it up and out. As you pull the MOBO away from the back of the case, watch out for the metal “fingers” on the inside of the back of the case that push against the primary external jack blocks on that edge of the MOBO. Carefully put the MOBO on the desk right side up, and touch it only on the outer edge.
     </LetterList>

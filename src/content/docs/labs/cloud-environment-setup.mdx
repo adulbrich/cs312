@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Steps, Aside } from '@astrojs/starlight/components';
+import LabSubmissionNote from '/src/components/LabSubmissionNote.astro';
 
 {/* LOs:
 - LO2: Demonstrate how to plan, install, and troubleshoot a Local Area Network, connecting it to a Wide Area Network.
@@ -16,11 +17,7 @@ The back-office PC did not survive reassembly. Gerald took this as a sign. His n
 
 In this lab, you will launch a virtual server in Amazon Web Services (AWS), connect to it remotely over Secure Shell (SSH), and learn how Security Groups act as virtual firewalls controlling who can talk to your server and on which ports. By the end, you will have a web server running in the cloud that the entire internet can reach; and you will have toggled that access on and off with a few clicks.
 
-<Aside type="note">
-- This lab assignment will be turned in *on paper* during the lab itself.
-- Labs cannot be turned in outside of the actual lab time.
-- Scanning and uploading your TA-validated answers in PDF on Canvas can be done after the lab.
-</Aside>
+<LabSubmissionNote />
 ## Before You Start
 
 <Steps>
@@ -74,7 +71,7 @@ Watch for the answers to these questions as you follow the tutorial below.
 
 5. **Check your region**
 
-   In the top-right corner of the console, you will see a region name (e.g., "N. Virginia"). AWS operates data centers in many geographic **Regions** around the world, and each Region contains multiple **Availability Zones (AZs)** -- physically separate data centers. Your Learner Lab defaults to **us-east-1 (N. Virginia)**. Leave it set to this region for this lab.
+   In the top-right corner of the console, you will see a region name (e.g., "N. Virginia"). AWS operates data centers in many geographic **Regions** around the world, and each Region contains multiple **Availability Zones (AZs)**, physically separate data centers. Your Learner Lab defaults to **us-east-1 (N. Virginia)**. Leave it set to this region for this lab.
 
 </Steps>
 
@@ -100,11 +97,11 @@ Elastic Compute Cloud (EC2) is the AWS service that lets you rent virtual server
 
    An AMI is a template that contains the operating system and any pre-installed software for your instance. Think of it as a snapshot you clone to create a new server.
 
-   Under **Application and OS Images**, make sure **Amazon Linux** is selected. Choose **Amazon Linux 2023 AMI** (it should be the default and marked "Free tier eligible"). This is Amazon's own Linux distribution, optimized for cloud workloads.
+   Under **Application and OS Images**, make sure **Amazon Linux** is selected. Choose **Amazon Linux 2023 AMI** (it should be the default). This is Amazon's own Linux distribution, optimized for cloud workloads.
 
 5. **Choose an Instance Type**
 
-   The instance type determines the hardware specs (CPU, memory, network) of your virtual server. Select **t3.micro** (2 vCPUs, 1 GiB memory). This is a small, general-purpose instance that is free-tier eligible and perfect for learning.
+   The instance type determines the hardware specs (CPU, memory, network) of your virtual server. Select **t3.micro** (2 vCPUs, 1 GiB memory). This is a small, general-purpose instance that works well for learning.
 
 6. **Create a Key Pair**
 
@@ -114,18 +111,18 @@ Elastic Compute Cloud (EC2) is the AWS service that lets you rent virtual server
    - Name it something like `cs312-key`.
    - Key pair type: **RSA**.
    - Private key file format: Choose **.pem** (for macOS/Linux) or **.ppk** (if you plan to use PuTTY on Windows).
-   - Click **Create key pair**. Your browser will download the private key file. **Save this file somewhere safe** -- you cannot download it again.
+   - Click **Create key pair**. Your browser will download the private key file. **Save this file somewhere safe**; you cannot download it again.
 
    <Aside type="caution">
    Never share your private key file with anyone. Anyone who has this file can log into your server. If you lose it, you will need to create a new key pair and launch a new instance.
    </Aside>
 7. **Network settings**
 
-   Under **Network settings**, click **Edit**. Your instance will be placed in the **default Virtual Private Cloud (VPC)**. A VPC is an isolated virtual network within AWS -- think of it as your own private section of the cloud.
+   Under **Network settings**, click **Edit**. Your instance will be placed in the **default Virtual Private Cloud (VPC)**. A VPC is an isolated virtual network within AWS: think of it as your own private section of the cloud.
 
    For now, ensure the following:
    - **Auto-assign public IP** is set to **Enable**. This gives your instance a public IP address so you can reach it from the internet.
-   - Under **Firewall (security groups)**, select **Create security group**. Name it `cs312-sg`. The wizard will add a rule allowing SSH (port 22) from anywhere by default. Leave this for now -- we will modify Security Groups later.
+   - Under **Firewall (security groups)**, select **Create security group**. Name it `cs312-sg`. The wizard will add a rule allowing SSH (port 22) from anywhere by default. Leave this for now; we will modify Security Groups later.
 
 8. **Leave everything else as default and launch**
 
@@ -193,7 +190,7 @@ SSH (Secure Shell) is a protocol for securely connecting to a remote computer ov
 
 ### Creating a Security Group Rule for HTTP
 
-A **Security Group (SG)** acts as a virtual firewall for your EC2 instance. It contains **inbound rules** (what traffic can reach your instance) and **outbound rules** (what traffic can leave). By default, all outbound traffic is allowed but inbound traffic is blocked unless you create a rule for it. Right now, your SG only allows SSH on port 22 -- we need to add HTTP on port 80 so web browsers can reach your server.
+A **Security Group (SG)** acts as a virtual firewall for your EC2 instance. It contains **inbound rules** (what traffic can reach your instance) and **outbound rules** (what traffic can leave). By default, all outbound traffic is allowed but inbound traffic is blocked unless you create a rule for it. Right now, your SG only allows SSH on port 22; we need to add HTTP on port 80 so web browsers can reach your server.
 
 <Steps>
 
@@ -238,7 +235,7 @@ A **Security Group (SG)** acts as a virtual firewall for your EC2 instance. It c
 
 7. **Verify from your browser**
 
-   Refresh `http://<your-public-ip>` in your browser. You should now see the **Apache HTTP Server Test Page** -- a page with "It works!" or the Amazon Linux test page. Congratulations, your server is live on the internet.
+   Refresh `http://<your-public-ip>` in your browser. You should now see the **Apache HTTP Server Test Page**, a page with "It works!" or the Amazon Linux test page. Congratulations, your server is live on the internet.
 
 </Steps>
 
@@ -286,11 +283,11 @@ EC2 instances have two ways to shut down, and they are very different.
 
 3. **Check the public IP**
 
-   Once the instance is stopped, look at the **Public IPv4 address** field in the instance details. It should now be blank or show a dash. When you stop an instance, AWS releases the public IP address back to its pool.
+   Once the instance is stopped, note the **Public IPv4 address** shown in the instance details. When you stop an instance, AWS releases that public IP back to its pool, but the console may still display the old address until the instance starts again.
 
 4. **Start it again**
 
-   Select the instance and click **Instance state > Start instance**. Wait for it to reach "Running" again. Check the public IP -- it will be a **new, different** IP address. This is why Elastic IPs exist (a static IP you can reserve), but that is a topic for another day.
+   Select the instance and click **Instance state > Start instance**. Wait for it to reach "Running" again. Check the public IP: it will be a **new, different** IP address. This is why Elastic IPs exist (a static IP you can reserve), but that is a topic for another day.
 
 5. **Record your findings**
 
@@ -304,14 +301,8 @@ EC2 instances have two ways to shut down, and they are very different.
 
 ### Cost Awareness
 
-<Steps>
+In the EC2 Console, click on your instance, then look at the **Instance type** in the details (e.g., `t3.micro`). Open a new tab and search for "EC2 pricing" or navigate to the [EC2 On-Demand Pricing page](https://aws.amazon.com/ec2/pricing/on-demand/). Find the hourly price for a `t3.micro` in the `us-east-1` region. It should be around $0.0104/hour (about one penny per hour).
 
-1. **Find your instance's hourly cost**
-
-   In the EC2 Console, click on your instance, then look at the **Instance type** in the details (e.g., `t3.micro`). Open a new tab and search for "EC2 pricing" or navigate to the [EC2 On-Demand Pricing page](https://aws.amazon.com/ec2/pricing/on-demand/). Find the hourly price for a `t3.micro` in the `us-east-1` region. It should be around $0.0104/hour -- about one penny per hour.
-
-   Being aware of costs is a critical system administration skill. Cloud bills can grow quickly if instances are left running or if you accidentally launch expensive instance types.
-
-</Steps>
+Being aware of costs is a critical system administration skill. Cloud bills can grow quickly if instances are left running or if you accidentally launch expensive instance types.
 
 You have now launched your first cloud server, connected to it remotely, served a web page to the world, and learned how Security Groups act as firewalls. These are foundational skills for every lab that follows.
