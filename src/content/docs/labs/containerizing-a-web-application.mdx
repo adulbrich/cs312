@@ -49,7 +49,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
 1. **Launch a fresh EC2 instance**
 
-   In the AWS Console, launch an Ubuntu Server 24.04 LTS instance (t3.micro). Use a Security Group that allows SSH (port 22) and HTTP (port 80). Connect via SSH:
+   In the AWS Console, launch an Ubuntu Server 24.04 LTS instance (t3.micro). Reuse your existing key pair (`cs312-key`) and Security Group (`cs312-wordpress-sg`, which already allows SSH on port 22 and HTTP on port 80). Connect via SSH:
 
    ```bash
    ssh -i ~/Downloads/cs312-key.pem ubuntu@<your-public-ip>
@@ -243,6 +243,23 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
    <Aside type="danger">
    This is one of the most common mistakes in container operations: running `docker compose down -v` when you meant `docker compose down`. The `-v` flag permanently deletes all named volumes and the data they contain. There is no undo. In production, always have backups.
    </Aside>
+
+   <Aside type="note" title="External volumes (optional)">
+   Named volumes defined inside a Compose file are owned by that Compose project and removed by `down -v`. If you need data to survive even that, you can use an **external volume**: one you create manually and declare as external in the Compose file so Compose never manages its lifecycle.
+
+   ```bash
+   docker volume create wordpress_db_data
+   ```
+
+   ```yaml
+   volumes:
+     db_data:
+       external: true
+       name: wordpress_db_data
+   ```
+
+   External volumes are never touched by `down -v` or any Compose command. You would need to run `docker volume rm wordpress_db_data` explicitly to delete them. This is the typical pattern for production databases where accidental deletion would be catastrophic.
+   </Aside>
 3. **Recreate your blog post**
 
    Complete the WordPress setup again and create a new blog post with your name and today's date. You will need this post for the remaining steps.
@@ -291,6 +308,14 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
    docker exec -it $(docker compose ps -q wordpress) bash
    ```
 
+   <Aside type="note">
+   The `$(docker compose ps -q wordpress)` subshell resolves to the container ID. This only works when run from the `~/wordpress-lab` directory where your `docker-compose.yml` lives. Alternatively, use `docker ps` to find the container name and pass it directly:
+
+   ```bash
+   docker exec -it <container-name> bash
+   ```
+   </Aside>
+
    You are now inside the WordPress container. Notice that this is a minimal Linux environment; many commands you are used to (like `vim` or `sudo`) are not installed. The container includes only what WordPress needs to run.
 
 2. **Find the WordPress version**
@@ -317,7 +342,7 @@ When you are done with this lab, stop the containers to avoid unnecessary resour
 docker compose down
 ```
 
-If you want to preserve the data volumes for a future session, do **not** add `-v`. If you are done with this lab permanently, you can also terminate the EC2 instance.
+If you want to preserve the data volumes for a future session, do **not** add `-v`. The next lab will build on this one, so you can keep instance around (**stop** instance) and reuse it. If you want to start fresh next time, you can terminate the EC2 instance. You will have to launch a new one and repeat the Docker installation step, but you can reuse your existing key pair and security group.
 
 ---
 
