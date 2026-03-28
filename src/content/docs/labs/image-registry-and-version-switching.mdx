@@ -23,8 +23,11 @@ In this lab, you will use Amazon Elastic Container Registry (ECR) to host your W
 You need:
 - An AWS Academy Learner Lab environment
 - An SSH client on your laptop
-- Docker installed on an EC2 instance (from Lab 3, or install fresh)
-- The AWS Command Line Interface (CLI) is pre-installed on Ubuntu AMIs in AWS Academy
+- Docker installed on an EC2 instance (from Lab 3, or install fresh with a **20 GiB** root volume)
+
+<Aside type="note">
+If you skipped the Lab 3 cleanup step, run `docker system prune -a` before continuing to ensure you have enough disk space. Named volumes are unaffected.
+</Aside>
 
 ## Questions
 
@@ -46,9 +49,57 @@ Amazon ECR is a fully managed container image registry. It integrates with AWS I
 
 <Steps>
 
-1. **Create a repository via the CLI**
+1. **Install the AWS CLI**
 
-   SSH into your EC2 instance and run:
+   SSH into your EC2 instance and install the AWS CLI v2 using the official installer:
+
+   ```bash
+   sudo apt install -y unzip
+   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+   unzip awscliv2.zip
+   sudo ./aws/install
+   ```
+
+   Verify it works:
+
+   ```bash
+   aws --version
+   ```
+
+2. **Configure AWS credentials**
+
+   The CLI needs credentials to talk to AWS. In AWS Academy Learner Lab, these are temporary and must be copied from the portal each session:
+
+   1. In the Learner Lab portal, click **AWS Details**
+   2. Click **Show** next to **AWS CLI**
+   3. Copy the credentials block (it contains `aws_access_key_id`, `aws_secret_access_key`, and `aws_session_token`)
+   4. On your EC2 instance, paste them into the credentials file:
+
+   ```bash
+   mkdir -p ~/.aws
+   vim ~/.aws/credentials
+   ```
+
+   The file should look like this (with your actual values from the portal):
+
+   ```ini
+   [default]
+   aws_access_key_id=ASIA...
+   aws_secret_access_key=...
+   aws_session_token=...
+   ```
+
+   Also set the default region:
+
+   ```bash
+   aws configure set region us-east-1
+   ```
+
+   <Aside type="caution">
+   AWS Academy credentials expire when your Learner Lab session ends. Each time you start a new lab session, you must repeat this step with the fresh credentials shown in the portal.
+   </Aside>
+
+3. **Create a repository via the CLI**
 
    ```bash
    aws ecr create-repository --repository-name cs312-wordpress-lab --region us-east-1
@@ -166,6 +217,8 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
    ```
 
    Visit `http://<your-public-ip>`, complete WordPress setup, and create a blog post with your name and today's date. This post is your test data.
+
+   Then switch to a theme that works across both WordPress versions. In the WordPress admin (**Appearance → Themes**), activate **Twenty Twenty-Four**. This avoids a crash when rolling back to 6.4, because the Twenty Twenty-Five theme (bundled with 6.5) uses an API that does not exist in 6.4.
 
 3. **Switch to version 2**
 

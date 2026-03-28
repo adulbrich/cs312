@@ -49,7 +49,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
 1. **Launch a fresh EC2 instance**
 
-   In the AWS Console, launch an Ubuntu Server 24.04 LTS instance (t3.micro). Reuse your existing key pair (`cs312-key`) and Security Group (`cs312-wordpress-sg`, which already allows SSH on port 22 and HTTP on port 80). Connect via SSH:
+   In the AWS Console, launch an Ubuntu Server 24.04 LTS instance (t3.micro). Reuse your existing key pair (`cs312-key`) and Security Group (`cs312-wordpress-sg`, which already allows SSH on port 22 and HTTP on port 80). Under **Configure storage**, increase the root volume to **20 GiB** (the default 8 GiB fills up quickly when pulling multiple Docker images). Connect via SSH:
 
    ```bash
    ssh -i ~/Downloads/cs312-key.pem ubuntu@<your-public-ip>
@@ -336,13 +336,16 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
 ### Clean Up
 
-When you are done with this lab, stop the containers to avoid unnecessary resource usage:
+When you are done with this lab, stop the containers and remove unused images to free disk space for the next lab:
 
 ```bash
-docker compose down
+docker compose down -v
+docker system prune -a
 ```
 
-If you want to preserve the data volumes for a future session, do **not** add `-v`. The next lab will build on this one, so you can keep instance around (**stop** instance) and reuse it. If you want to start fresh next time, you can terminate the EC2 instance. You will have to launch a new one and repeat the Docker installation step, but you can reuse your existing key pair and security group.
+`docker system prune -a` removes all stopped containers, unused networks, and images not referenced by a running container. Your named volumes are unaffected (omit `-v` to keep them).
+
+The next lab builds on this one, so keep the instance around: **stop** it in the EC2 console rather than terminating it. If you want to start fresh, you can terminate and relaunch, reusing your existing key pair and security group.
 
 ---
 
