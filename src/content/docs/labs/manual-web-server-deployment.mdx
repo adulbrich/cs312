@@ -51,7 +51,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    - Name: `cs312-wordpress`
    - Instance type: **t3.micro**
-   - Key pair: use your existing key from Lab 1b
+   - Key pair: use your existing key from the [Cloud Environment Setup](/labs/cloud-environment-setup/) lab
    - Security Group: create a new one named `cs312-wordpress-sg` with inbound rules for **SSH (port 22)** and **HTTP (port 80)**, both from Anywhere-IPv4
 
    Click **Launch instance** and wait for it to reach "Running."
@@ -68,7 +68,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
 ### Installing the Web Stack (WordPress Instance)
 
-A WordPress site requires three software components working together, often called the **LAMP stack**: **L**inux (the OS), **A**pache (the web server), **M**ariaDB (the database), and **P**HP (the programming language that WordPress is written in). You already have Linux. In this lab the database will run on a **separate server**, so on this instance you only install Apache and PHP.
+A WordPress site requires three software components working together, often called the **LAMP stack**: **L**inux (the OS), **A**pache (the web server), **M**ySQL (the database), and **P**HP (the programming language that WordPress is written in). You already have Linux. In this lab the database will run on a **separate server**, so on this instance you only install Apache and PHP.
 
 <Steps>
 
@@ -146,8 +146,8 @@ You have two options for setting up your database. **Read both before choosing.*
 
    Go to **RDS → Create database**:
    - Creation method: **Standard create**
-   - Engine: **MariaDB**
-   - Templates: **Free tier**
+   - Engine: **MariaDB** (a drop-in fork of MySQL; compatible with WordPress and what `apt` ships for Ubuntu)
+   - Templates: **Sandbox** (or whatever is the smallest/cheapest option available)
    - DB instance identifier: `cs312-wordpress-db`
    - Master username: `admin`
    - Master password: choose a strong password and **write it down**
@@ -228,7 +228,7 @@ Your database endpoint for `wp-config.php` will be:
    - Name: `cs312-wordpress-db`
    - AMI: **Ubuntu Server 24.04 LTS**
    - Instance type: **t3.micro**
-   - Key pair: use your existing key from Lab 1b
+   - Key pair: use your existing key from [Lab 1b](/labs/cloud-environment-setup/)
    - Network: same VPC and **same subnet** as your WordPress instance
    - Security group: select **existing** → `cs312-db-sg`
 
@@ -244,7 +244,7 @@ Your database endpoint for `wp-config.php` will be:
    ssh -i ~/Downloads/cs312-key.pem ubuntu@<db-public-ip>
    ```
 
-   Update packages and install MariaDB:
+   Update packages and install MariaDB (the LAMP stack traditionally uses MySQL; MariaDB is a drop-in fork that ships with Ubuntu and is fully compatible with WordPress):
 
    ```bash
    sudo apt update && sudo apt upgrade -y
@@ -391,9 +391,37 @@ Your database host for `wp-config.php` will be:
    - **Option A (RDS):** the RDS endpoint (e.g., `cs312-wordpress-db.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com`)
    - **Option B (EC2):** the private IP of your database instance (e.g., `172.31.42.10`)
 
+   **Option A only:** RDS requires SSL for all connections. Add this line immediately after `DB_HOST`:
+
+   ```php
+   define('MYSQL_CLIENT_FLAGS', MYSQLI_CLIENT_SSL);
+   ```
+
+
    <Aside type="caution">
    In a production environment, you would never store database credentials in a plain-text config file on disk. You would use environment variables or a secrets manager. For this lab, editing the file directly is fine.
    </Aside>
+
+5. **Set the authentication keys and salts**
+
+   Below the database settings in `wp-config.php` is a block of eight lines that look like this:
+
+   ```php
+   define('AUTH_KEY',         'put your unique phrase here');
+   define('SECURE_AUTH_KEY',  'put your unique phrase here');
+   // ...and so on
+   ```
+
+   These keys and salts are used to sign and verify WordPress authentication cookies. If they are left at their default values, any attacker who knows the defaults (they are public) can forge a valid session cookie and log in as any user — including the admin — without knowing the password. Unique, secret values mean that even if a cookie is stolen, it cannot be reused on a different installation, and rotating the keys instantly invalidates all active sessions.
+
+   Generate a fresh set in one command:
+
+   ```bash
+   curl -s https://api.wordpress.org/secret-key/1.1/salt/
+   ```
+
+   The output is eight ready-to-use `define(...)` lines. In `wp-config.php`, delete the entire existing block from `AUTH_KEY` through `NONCE_SALT` and paste the output in its place. Each value is a long random string unique to your installation.
+
 </Steps>
 
 ### Configuring the Apache VirtualHost
