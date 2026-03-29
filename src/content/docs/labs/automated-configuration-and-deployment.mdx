@@ -543,6 +543,37 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
 
 </Steps>
 
+### Clean Up
+
+<Steps>
+
+1. **Destroy the AWS infrastructure**
+
+   From your laptop, in the Terraform project directory:
+
+   ```bash
+   cd ~/terraform-lab
+   terraform destroy -var="key_name=cs312-key"
+   ```
+
+   Type `yes` to confirm. This removes the two EC2 instances, both security groups, and the ECR repository. The ECR destroy will fail if the repository still contains images; delete them first via the AWS Console (ECR > Repositories > `cs312-wordpress-lab` > select all images > Delete) or with the CLI:
+
+   ```bash
+   aws ecr batch-delete-image \
+     --repository-name cs312-wordpress-lab \
+     --image-ids "$(aws ecr list-images \
+       --repository-name cs312-wordpress-lab \
+       --query 'imageIds' --output json)"
+   ```
+
+   Then re-run `terraform destroy`.
+
+2. **Delete the GitHub repository**
+
+   Delete the pipeline repository from GitHub: go to the repository, then **Settings > Danger Zone > Delete this repository**.
+
+</Steps>
+
 ---
 
 You have now automated both sides of the deployment pipeline: Ansible configures servers from a blank instance to a running service, and GitHub Actions builds and publishes new images automatically. In the next lab, you will move from single-server Docker deployments to Kubernetes, where an orchestrator manages your containers for you.
