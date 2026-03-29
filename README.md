@@ -6,6 +6,7 @@ This repository contains the source code for the CS312 website.
 
 Watch https://www.youtube.com/watch?v=Cpy20DnIDTI
 
+- [ ] Do we cover emails at all? (i.e., mail in lab with builtin cron + email server, or just talk about it in lectures? see previous scheduling lab)
 - [ ] Focus on the process, less than the tools. Offer different tooling options but let students choose, note https://www.tigerdata.com/blog/its-2026-just-use-postgres
 - [ ] Improve project rubric
 - [ ] Check linux sysadmin handbook for key contents
@@ -17,13 +18,13 @@ Watch https://www.youtube.com/watch?v=Cpy20DnIDTI
 
 Every term:
 
-- [ ] Update the version of this repository if making changes (`package.json`)
-- [ ] Add TAs to Canvas
-- [ ] Create team **Bookings** page for assignment demo and set up slots (**not working**, creating individual pages instead)
-- [ ] Update Bookings link in Canvas
-- [ ] Create **GitHub Classroom** class and add TAs
+- [x] Create **AWS Academy** class
+- [x] Add TAs to AWS Academy
+- [ ] Add students to AWS Academy
+- [x] Add TAs to Canvas
+- [ ] Create **GitHub Classroom** class and add TAs (optional for students)
 - [ ] Update GitHub Classroom link in Canvas
-- [ ] Create form for random team assignment for final project and add to Canvas
+- [ ] Update the version of this repository if making changes (`package.json`)
 
 ## PDFs
 

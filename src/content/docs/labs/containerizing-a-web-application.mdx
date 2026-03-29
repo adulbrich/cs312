@@ -81,6 +81,10 @@ Watch for the answers to these questions as you follow the tutorial.
 
    Then reconnect via SSH.
 
+   <Aside type="caution" title="Security implication">
+   Membership in the `docker` group is effectively root access. A user in this group can mount the host filesystem into a container and modify it without a password; there is no meaningful difference from running `sudo` freely. On a shared or production server, you would not do this; you would require explicit `sudo docker` invocations so that privilege escalation is intentional and auditable. This is acceptable here only because your EC2 instance is single-user and disposable.
+   </Aside>
+
 4. **Verify Docker is working**
 
    ```bash

@@ -135,23 +135,25 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
 1. **Pull and tag version 1**
 
-   Pull a specific WordPress version from Docker Hub, tag it for your ECR repository, and push it:
+   Pull a specific WordPress version from Docker Hub, verify it, tag it for your ECR repository, and push it:
 
    ```bash
-   docker pull wordpress:6.4
-   docker tag wordpress:6.4 <your-repo-uri>:wp-6.4-v1
+   docker pull wordpress:6.4.3
+   docker run --rm wordpress:6.4.3 grep wp_version /usr/src/wordpress/wp-includes/version.php
+   docker tag wordpress:6.4.3 <your-repo-uri>:wp-6.4-v1
    docker push <your-repo-uri>:wp-6.4-v1
    ```
 
-   Replace `<your-repo-uri>` with your full ECR repository URI.
+   Replace `<your-repo-uri>` with your full ECR repository URI. The `grep` line confirms the image actually contains the version you expect before pushing; minor version tags like `6.4` are floating and can drift to newer patches over time. The WordPress entrypoint only copies files to `/var/www/html` when starting Apache, so the pre-push check reads directly from `/usr/src/wordpress`, where the image stores its source files.
 
 2. **Pull and tag version 2**
 
    Repeat with a different WordPress version:
 
    ```bash
-   docker pull wordpress:6.5
-   docker tag wordpress:6.5 <your-repo-uri>:wp-6.5-v2
+   docker pull wordpress:6.5.5
+   docker run --rm wordpress:6.5.5 grep wp_version /usr/src/wordpress/wp-includes/version.php
+   docker tag wordpress:6.5.5 <your-repo-uri>:wp-6.5-v2
    docker push <your-repo-uri>:wp-6.5-v2
    ```
 
@@ -200,6 +202,8 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
          WORDPRESS_DB_USER: ${MYSQL_USER}
          WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
          WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
+         WORDPRESS_CONFIG_EXTRA: |
+           define('WP_AUTO_UPDATE_CORE', false);
        volumes:
          - wp_content:/var/www/html/wp-content
        depends_on:
@@ -209,6 +213,8 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
      db_data:
      wp_content:
    ```
+
+   The `WORDPRESS_CONFIG_EXTRA` line disables WordPress's built-in auto-update mechanism. Without it, WordPress silently upgrades itself to the latest version shortly after startup, which would defeat the purpose of pinning image versions. This is correct practice for containerized deployments: in the container model, you never update software inside a running container. Version changes happen by pulling a new image and redeploying, the approach you are practicing in this lab. (On a non-containerized WordPress server, you would leave minor and security auto-updates enabled.)
 
 2. **Start the stack and create content**
 
@@ -228,13 +234,14 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
    vim docker-compose.yml
    ```
 
-   Then apply the change:
+   Then pull the new image from ECR and apply the change:
 
    ```bash
-   docker compose up -d
+   docker compose pull
+   docker compose up -d -V
    ```
 
-   Docker Compose detects that the image has changed and recreates the WordPress container while leaving the database container untouched. Visit your site; your blog post should still be there because the data is in the database volume, not the container.
+   Two flags matter here. `docker compose pull` fetches the image from ECR rather than using whatever is cached locally. The `-V` (`--renew-anon-volumes`) flag tells Compose to discard the anonymous volume at `/var/www/html` that the WordPress image creates behind the scenes. Without `-V`, Docker copies the old container's anonymous volume data into the new container, and the WordPress entrypoint sees the old version's files already in place and skips the update. Your named volumes (`db_data` and `wp_content`) are unaffected by `-V`, so your blog post and database survive the switch.
 
    Verify the WordPress version inside the container:
 
@@ -248,7 +255,8 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
    Change the image tag back to `wp-6.4-v1` in your Compose file and run:
 
    ```bash
-   docker compose up -d
+   docker compose pull
+   docker compose up -d -V
    ```
 
    Verify the version again with the same `docker exec` command. You have just performed a rollback, a critical skill for recovering from a bad deployment.
@@ -275,14 +283,13 @@ Amazon S3 is an object storage service designed for durability (99.999999999%, o
 
    ```bash
    docker exec $(docker compose ps -q db) \
-     mysqldump -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" wordpress \
-     > backup.sql
+     mariadb-dump -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" wordpress > backup.sql
    ```
 
    This creates a SQL file on your EC2 instance containing every table, row, and setting in the WordPress database.
 
    <Aside type="tip">
-   Check the backup is not empty: `wc -l backup.sql` should show hundreds or thousands of lines. If it shows 0, your mysqldump command had an error; check the password.
+   Check the backup is not empty: `wc -l backup.sql` should show hundreds or thousands of lines. If it shows fewer than 10, your dump command had an error (check the password) or WordPress has not been set up yet (complete the installation wizard first).
    </Aside>
 3. **Upload to S3**
 
@@ -349,8 +356,7 @@ A backup you have never tested is not a backup; it is a hope. This section prove
 
    ```bash
    docker exec -i $(docker compose ps -q db) \
-     mysql -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" wordpress \
-     < restore.sql
+     mariadb -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" wordpress < restore.sql
    ```
 
 5. **Verify the restore**
@@ -367,7 +373,7 @@ When you are done:
 docker compose down
 ```
 
-Optionally delete the ECR repository and S3 bucket to avoid charges:
+Delete the ECR repository and S3 bucket as well to avoid charges:
 
 ```bash
 aws ecr delete-repository --repository-name cs312-wordpress-lab --force --region us-east-1
