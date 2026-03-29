@@ -17,6 +17,7 @@ Pinnacle Provisions is opening a second location. Gerald asked if you can "copy 
 Infrastructure as Code (IaC) solves this by letting you define your infrastructure in configuration files that can be stored in Git, reviewed in pull requests, and applied repeatably. Terraform, created by HashiCorp, is the most widely used IaC tool in the industry. In this lab, you will write Terraform configurations that provision the same resources you have been creating by hand, and then destroy them with a single command.
 
 <LabSubmissionNote />
+
 ## Before You Start
 
 You need:
@@ -32,12 +33,13 @@ Terraform uses a **declarative** approach: you describe the desired end state ("
 
 Watch for the answers to these questions as you follow the tutorial.
 
-1. How many resources does `terraform plan` say it will create? List the resource types (e.g., `aws_instance`, `aws_security_group`). *(5 points)*
-2. After `terraform apply`, write down the **public IP** and **Instance ID** from the Terraform outputs. Verify you can SSH in. *(5 points)*
-3. When you changed the instance type from t3.micro to t3.small, did `terraform plan` show "destroy and recreate" or "update in-place"? Why does this distinction matter? *(5 points)*
-4. Find the `"arn"` of your EC2 instance in `terraform.tfstate`. Write down the 12-digit AWS account ID embedded in the ARN (Amazon Resource Name). *(3 points)*
-5. After `terraform destroy`, what does `terraform show` display? *(2 points)*
-6. Get your TA's initials showing a successful SSH session into your Terraform-provisioned instance. *(5 points)*
+1. How many resources does `terraform plan` say it will create? List every resource type. *(4 points)*
+2. After `terraform apply`, write down the **public IPs** of both instances from the Terraform outputs. Verify you can SSH into the control node. *(5 points)*
+3. What is the difference between the two security groups? Why does the managed node's security group reference the control node's security group instead of `0.0.0.0/0` for SSH? *(5 points)*
+4. When you changed the instance type from t3.micro to t3.small, did `terraform plan` show "destroy and recreate" or "update in-place"? Why does this distinction matter? *(4 points)*
+5. Find the `"arn"` of the managed node in `terraform.tfstate`. Write down the 12-digit AWS account ID embedded in the ARN. *(3 points)*
+6. After `terraform destroy`, what does `terraform show` display? *(2 points)*
+7. Get your TA's initials showing a successful SSH session into your Terraform-provisioned control node. *(2 points)*
 
 ## Tutorial
 
@@ -84,7 +86,7 @@ Watch for the answers to these questions as you follow the tutorial.
    vim ~/.aws/credentials
    ```
 
-   The file should look like:
+   If you only use AWS for this course, paste the credentials under the `[default]` profile:
 
    ```ini
    [default]
@@ -93,14 +95,36 @@ Watch for the answers to these questions as you follow the tutorial.
    aws_session_token=...
    ```
 
+   If you already use the AWS CLI for another account (personal projects, a job, etc.), use a named profile instead to avoid overwriting your existing credentials:
+
+   ```ini
+   [cs312]
+   aws_access_key_id=ASIA...
+   aws_secret_access_key=...
+   aws_session_token=...
+   ```
+
+   With a named profile, you must tell Terraform which profile to use. Add a `profile` argument to the provider block in `main.tf`:
+
+   ```hcl
+   provider "aws" {
+     region  = "us-east-1"
+     profile = "cs312"
+   }
+   ```
+
+   You can also set the `AWS_PROFILE=cs312` environment variable instead of hardcoding it in the provider block.
+
    <Aside type="caution">
-   AWS Academy credentials are temporary and rotate each time you start a new Learner Lab session. If Terraform commands fail with "ExpiredToken," get fresh credentials from the Learner Lab page.
+   AWS Academy credentials are temporary and rotate each time you start a new Learner Lab session. Each time you restart the lab, paste the fresh credentials block into `~/.aws/credentials` under whichever profile you chose (`default` or `cs312`). If Terraform commands fail with "ExpiredToken," this is why.
    </Aside>
 </Steps>
 
 ### Writing the Terraform Configuration
 
 Terraform configurations are written in HashiCorp Configuration Language (HCL). You will create three files: `main.tf` (resources), `variables.tf` (inputs), and `outputs.tf` (values to display after apply).
+
+The stack you are about to define provisions two EC2 instances and two security groups. This is intentional: the next lab (Lab 6) introduces Ansible, a tool that configures servers remotely over SSH. Ansible requires one machine to act as the **control node** (where you run Ansible commands) and one or more **managed nodes** (the servers being configured). Provisioning both now means you will have a working environment ready when you get to Lab 6, and you will see how a realistic multi-server stack is expressed in Terraform.
 
 <Steps>
 
@@ -130,6 +154,7 @@ Terraform configurations are written in HashiCorp Configuration Language (HCL). 
 
    provider "aws" {
      region = "us-east-1"
+     # If you configured a named profile above, add: profile = "cs312"
    }
 
    # Use the default VPC instead of creating a new one
@@ -137,10 +162,10 @@ Terraform configurations are written in HashiCorp Configuration Language (HCL). 
      default = true
    }
 
-   # Security Group allowing SSH and HTTP
-   resource "aws_security_group" "web" {
-     name        = "cs312-tf-sg"
-     description = "Allow SSH and HTTP"
+   # Security Group for the control node: SSH access from your laptop
+   resource "aws_security_group" "control" {
+     name        = "cs312-tf-control-sg"
+     description = "Control node: SSH only"
      vpc_id      = data.aws_vpc.default.id
 
      ingress {
@@ -149,6 +174,32 @@ Terraform configurations are written in HashiCorp Configuration Language (HCL). 
        to_port     = 22
        protocol    = "tcp"
        cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     egress {
+       from_port   = 0
+       to_port     = 0
+       protocol    = "-1"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     tags = {
+       Name = "cs312-tf-control-sg"
+     }
+   }
+
+   # Security Group for the managed node: SSH from control node only, HTTP from anywhere
+   resource "aws_security_group" "managed" {
+     name        = "cs312-tf-managed-sg"
+     description = "Managed node: SSH from control node, HTTP from anywhere"
+     vpc_id      = data.aws_vpc.default.id
+
+     ingress {
+       description     = "SSH from control node"
+       from_port       = 22
+       to_port         = 22
+       protocol        = "tcp"
+       security_groups = [aws_security_group.control.id]
      }
 
      ingress {
@@ -167,55 +218,54 @@ Terraform configurations are written in HashiCorp Configuration Language (HCL). 
      }
 
      tags = {
-       Name = "cs312-tf-sg"
+       Name = "cs312-tf-managed-sg"
      }
    }
 
-   # IAM role for ECR read access
-   resource "aws_iam_role" "ec2_ecr" {
-     name = "cs312-tf-ec2-ecr-role"
-
-     assume_role_policy = jsonencode({
-       Version = "2012-10-17"
-       Statement = [{
-         Action = "sts:AssumeRole"
-         Effect = "Allow"
-         Principal = {
-           Service = "ec2.amazonaws.com"
-         }
-       }]
-     })
-   }
-
-   resource "aws_iam_role_policy_attachment" "ecr_readonly" {
-     role       = aws_iam_role.ec2_ecr.name
-     policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-   }
-
-   resource "aws_iam_instance_profile" "ec2_profile" {
-     name = "cs312-tf-ec2-profile"
-     role = aws_iam_role.ec2_ecr.name
-   }
-
-   # EC2 instance
-   resource "aws_instance" "web" {
+   # Control node: you SSH here from your laptop; Ansible runs from here
+   resource "aws_instance" "control" {
      ami                    = var.ami_id
      instance_type          = var.instance_type
      key_name               = var.key_name
-     vpc_security_group_ids = [aws_security_group.web.id]
-     iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+     vpc_security_group_ids = [aws_security_group.control.id]
+     iam_instance_profile   = "LabInstanceProfile"
 
      tags = {
-       Name = "cs312-tf-instance"
+       Name = "cs312-tf-control"
+     }
+   }
+
+   # Managed node: Ansible configures this instance; WordPress runs here
+   resource "aws_instance" "managed" {
+     ami                    = var.ami_id
+     instance_type          = var.instance_type
+     key_name               = var.key_name
+     vpc_security_group_ids = [aws_security_group.managed.id]
+     iam_instance_profile   = "LabInstanceProfile"
+
+     tags = {
+       Name = "cs312-tf-managed"
+     }
+   }
+
+   # ECR repository for the CI/CD pipeline in Lab 6
+   resource "aws_ecr_repository" "wordpress" {
+     name                 = "cs312-wordpress-lab"
+     image_tag_mutability = "MUTABLE"
+
+     image_scanning_configuration {
+       scan_on_push = false
      }
    }
    ```
 
    Let's walk through this:
    - The `terraform` block specifies which providers (plugins) to use. The AWS provider lets Terraform manage AWS resources.
-   - The `data` block reads existing resources (the default VPC) without creating them.
-   - Each `resource` block declares a resource Terraform should manage. The first argument is the resource type, the second is a local name.
-   - The IAM (Identity and Access Management) role and instance profile give the EC2 instance permission to pull images from ECR without hardcoding credentials.
+   - The `data` block reads an existing resource (the default VPC) without creating it. References like `data.aws_vpc.default.id` let other resources use the value Terraform read.
+   - The two `aws_security_group` resources have different rules. The control node's SG allows SSH from anywhere (your laptop). The managed node's SG uses `security_groups = [aws_security_group.control.id]` to allow SSH only from instances in the control SG, and HTTP from anywhere for WordPress. This reference also tells Terraform that `managed` depends on `control` and must be created after it.
+   - The two `aws_instance` resources use different security groups, placing each instance in a distinct network boundary.
+   - `iam_instance_profile = "LabInstanceProfile"` attaches a pre-existing IAM role to each instance, granting it permissions (including ECR access) without hardcoding credentials. AWS Academy Learner Labs provide this profile automatically; creating IAM roles is not permitted in the sandbox environment.
+   - The `aws_ecr_repository` resource creates the private container registry that the CI/CD pipeline in Lab 6 will push images to. Creating it here ensures it exists when the pipeline runs.
 
 3. **Write `variables.tf`**
 
@@ -245,11 +295,16 @@ Terraform configurations are written in HashiCorp Configuration Language (HCL). 
    ```
 
    <Aside type="tip">
-   The `ami_id` default may need updating; AMI IDs change over time and vary by region. To find the current Ubuntu 24.04 AMI in us-east-1, search for it in the EC2 launch wizard or run:
+   The `ami_id` default may need updating; AMI IDs change over time and vary by region. To find the current Ubuntu 24.04 LTS AMI in us-east-1, open the EC2 Console, click **Launch instance**, search for "Ubuntu 24.04", and copy the AMI ID from the results without actually launching anything. It will look like `ami-0a0e5d9c7acc336f1`. Paste it as the default in `variables.tf`.
+
+   If you have the AWS CLI configured, you can also retrieve it programmatically (add `--profile cs312` if you are using a named profile):
    ```bash
-   aws ec2 describe-images --owners 099720109477 \
+   aws ec2 describe-images \
      --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
-     --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' --output text
+               "Name=architecture,Values=x86_64" \
+               "Name=state,Values=available" \
+     --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
+     --output text --region us-east-1
    ```
    </Aside>
 4. **Write `outputs.tf`**
@@ -261,14 +316,24 @@ Terraform configurations are written in HashiCorp Configuration Language (HCL). 
    ```
 
    ```hcl
-   output "instance_public_ip" {
-     description = "Public IP address of the EC2 instance"
-     value       = aws_instance.web.public_ip
+   output "control_node_public_ip" {
+     description = "Public IP of the control node: SSH here from your laptop"
+     value       = aws_instance.control.public_ip
    }
 
-   output "instance_id" {
-     description = "Instance ID"
-     value       = aws_instance.web.id
+   output "managed_node_public_ip" {
+     description = "Public IP of the managed node: WordPress will be accessible here"
+     value       = aws_instance.managed.public_ip
+   }
+
+   output "managed_node_private_ip" {
+     description = "Private IP of the managed node: use this in the Ansible inventory"
+     value       = aws_instance.managed.private_ip
+   }
+
+   output "ecr_repository_url" {
+     description = "ECR repository URL: use this in the GitHub Actions workflow"
+     value       = aws_ecr_repository.wordpress.repository_url
    }
    ```
 
@@ -353,7 +418,7 @@ Terraform configurations are written in HashiCorp Configuration Language (HCL). 
    cat terraform.tfstate | python3 -m json.tool | head -80
    ```
 
-   Find the `"arn"` field for your EC2 instance. An ARN (Amazon Resource Name) is a globally unique identifier for any AWS resource. It contains your account ID, the region, and the resource ID.
+   Find the `"arn"` field for the managed node (`cs312-tf-managed`). An ARN (Amazon Resource Name) is a globally unique identifier for any AWS resource. It contains your account ID, the region, and the resource ID.
 
    <Aside type="danger">
    The state file contains sensitive data (resource IDs, IP addresses, and potentially secrets). Never commit it to a public Git repository. In production, teams store state remotely using an S3 backend with encryption.
@@ -380,8 +445,14 @@ Terraform configurations are written in HashiCorp Configuration Language (HCL). 
 
    This should display an empty state. You can also check the EC2 console to confirm the instance is terminated.
 
+   <Aside type="note">
+   You will need both instances running for the Ansible lab. After completing this destroy exercise, re-run `terraform apply -var="key_name=cs312-key"` to bring them back up before starting Lab 6.
+   </Aside>
+
 </Steps>
 
 ---
 
-You have now defined infrastructure as code, provisioned it with a single command, previewed changes before applying them, and destroyed everything cleanly. In the next lab, you will combine Terraform (which creates infrastructure) with Ansible (which configures it) and a CI/CD pipeline (which automates image builds).
+You have now defined infrastructure as code, provisioned two EC2 instances with distinct security group boundaries, previewed changes before applying them, and destroyed everything cleanly. These two instances (a control node and a managed node) are the foundation for the next lab, where Ansible will configure the managed node automatically over SSH.
+
+Before starting the Ansible lab, re-run `terraform apply -var="key_name=cs312-key"` to bring the instances back up. The state file on your laptop remembers exactly what was provisioned, so Terraform recreates identical infrastructure in under a minute.

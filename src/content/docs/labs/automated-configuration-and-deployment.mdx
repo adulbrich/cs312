@@ -42,23 +42,36 @@ Ansible's control node **must be Linux or macOS**: it cannot run natively on Win
   from your laptop                     up running here
 ```
 
-<Aside type="tip" title="Alternative: Run Ansible from Your Laptop">
-If you are on **macOS**, you can install Ansible locally with `brew install ansible` and skip launching the control node. If you are on **Linux** (including WSL2 on Windows), use `sudo apt update && sudo apt install -y ansible`. In that case, use your laptop as the control node and your single EC2 instance as the managed node. The rest of the lab works the same; just adjust the SSH key paths accordingly. The EC2 control node approach described below works for everyone regardless of operating system.
+<Aside type="note" title="Alternative: Run Ansible from Your Laptop">
+If you prefer to run Ansible directly from your laptop instead of SSH-ing into the control node, you can (but support varies by OS):
+
+- **macOS**: `brew install ansible`. Use your laptop as the control node and only the managed node EC2 instance.
+- **Linux**: `sudo apt update && sudo apt install -y ansible`. Same as macOS.
+- **WSL2 on Windows**: Install Ansible inside WSL2 the same way as Linux. Your `.pem` key is likely in the Windows filesystem; reference it with a WSL2 path like `/mnt/c/Users/<you>/Downloads/cs312-key.pem`.
+- **Windows (native)**: Ansible does not run natively on Windows. Use WSL2, or use the EC2 control node approach described in this lab.
+
+If using your laptop, skip the "Setting Up the Control Node" section and use the managed node's **public IP** (instead of private IP) in your inventory, since you will not be on the same VPC. All other steps are identical.
 </Aside>
 
-### Launching the Instances
+### Using Your Terraform Infrastructure
 
-<Steps>
+Your two EC2 instances were provisioned by the Terraform configuration in the previous lab. From your laptop, re-apply if the instances are not already running:
 
-1. **Managed node**: If you still have the Ubuntu instance from Lab 5 (Terraform), you can reuse it. Otherwise, launch a new `t2.micro` Ubuntu instance. Make sure its security group allows:
-   - **SSH (port 22)** from anywhere (or your IP)
-   - **HTTP (port 80)** from anywhere (so you can view WordPress later)
+```bash
+cd ~/terraform-lab
+terraform apply -var="key_name=cs312-key"
+```
 
-2. **Control node**: Launch a second `t2.micro` Ubuntu instance in the **same VPC**. This instance only needs SSH (port 22) open. It does not need HTTP.
+The outputs will show four values you will need throughout this lab:
 
-3. **SSH key**: Use the same `.pem` key pair for both instances (your existing `vockey` or `cs312-key`). You will need this key file on the control node so it can SSH into the managed node.
+```
+control_node_public_ip  = "54.x.x.x"
+managed_node_public_ip  = "54.x.x.x"
+managed_node_private_ip = "172.x.x.x"
+ecr_repository_url      = "471112664344.dkr.ecr.us-east-1.amazonaws.com/cs312-wordpress-lab"
+```
 
-</Steps>
+The **control node** is where you will install Ansible and run playbooks. The **managed node** is what Ansible will configure; WordPress will run there. Both instances use your `cs312-key.pem` key pair. The **ECR repository URL** is needed in Part B when configuring the GitHub Actions pipeline.
 
 ## Questions
 
@@ -71,7 +84,7 @@ Watch for the answers to these questions as you follow the tutorial.
 5. After the pipeline runs, does the new image tag appear in your ECR repository? Write down the tag name. *(4 points)*
 6. Get your TA's initials showing WordPress loaded via the Ansible-configured server. *(3 points)*
 
-## Part A: Ansible (60 minutes)
+## Part A: Ansible
 
 ### Understanding Ansible
 
@@ -88,7 +101,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
    From your laptop, connect to the control node instance:
 
    ```bash
-   ssh -i ~/Downloads/labsuser.pem ubuntu@<control-node-public-ip>
+   ssh -i ~/Downloads/cs312-key.pem ubuntu@<control-node-public-ip>
    ```
 
 2. **Install Ansible**
@@ -110,13 +123,13 @@ The key concept is **idempotency**: each task checks whether the desired state a
    Ansible needs the `.pem` key file to SSH into the managed node. From a **new terminal on your laptop** (not the control node SSH session), copy the key using `scp`:
 
    ```bash
-   scp -i ~/Downloads/labsuser.pem ~/Downloads/labsuser.pem ubuntu@<control-node-public-ip>:~/labsuser.pem
+   scp -i ~/Downloads/cs312-key.pem ~/Downloads/cs312-key.pem ubuntu@<control-node-public-ip>:~/cs312-key.pem
    ```
 
    Then, back on the **control node**, set the correct permissions (SSH refuses to use key files that are too permissive):
 
    ```bash
-   chmod 400 ~/labsuser.pem
+   chmod 400 ~/cs312-key.pem
    ```
 
 4. **Verify SSH connectivity to the managed node**
@@ -124,7 +137,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
    Before involving Ansible at all, confirm you can SSH from the control node to the managed node:
 
    ```bash
-   ssh -i ~/labsuser.pem ubuntu@<managed-node-private-ip>
+   ssh -i ~/cs312-key.pem ubuntu@<managed-node-private-ip>
    ```
 
    <Aside type="tip">
@@ -152,7 +165,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
    Create a file named `ansible.cfg` in your project directory. This tells Ansible to skip host key verification (since these are ephemeral lab instances) and where to find the inventory:
 
    ```bash
-   nano ansible.cfg
+   vim ansible.cfg
    ```
 
    ```ini
@@ -170,12 +183,12 @@ The key concept is **idempotency**: each task checks whether the desired state a
    The inventory tells Ansible which servers to manage and how to connect. Create a file named `inventory`:
 
    ```bash
-   nano inventory
+   vim inventory
    ```
 
    ```ini
    [webservers]
-   wordpress ansible_host=<managed-node-private-ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/labsuser.pem
+   wordpress ansible_host=<managed-node-private-ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/cs312-key.pem
    ```
 
    Replace `<managed-node-private-ip>` with the managed node's actual private IP address.
@@ -205,7 +218,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
    This is not an ICMP ping, Ansible's `ping` module connects over SSH, runs a small Python script, and confirms it can execute code on the managed node. A green `SUCCESS` with `"pong"` means Ansible is fully working.
 
    <Aside type="caution">
-   If you see "UNREACHABLE," double-check: (1) the private IP in your inventory, (2) the key file path, (3) that the managed node's security group allows SSH from the control node.
+   If you see "UNREACHABLE," double-check: (1) the private IP in your inventory, (2) the key file path, (3) that the managed node's security group allows SSH from the control node's security group.
    </Aside>
 
 5. **Write the playbook**
@@ -213,7 +226,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
    Now for the main event. Create a file named `configure.yml`:
 
    ```bash
-   nano configure.yml
+   vim configure.yml
    ```
 
    ```yaml
@@ -290,7 +303,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
                    - db_data:/var/lib/mysql
 
                wordpress:
-                 image: wordpress:6.4
+                 image: wordpress:6.4.3
                  restart: unless-stopped
                  ports:
                    - "80:80"
@@ -299,6 +312,8 @@ The key concept is **idempotency**: each task checks whether the desired state a
                    WORDPRESS_DB_USER: "{{ mysql_user }}"
                    WORDPRESS_DB_PASSWORD: "{{ mysql_password }}"
                    WORDPRESS_DB_NAME: "{{ mysql_database }}"
+                   WORDPRESS_CONFIG_EXTRA: |
+                     define('WP_AUTO_UPDATE_CORE', false);
                  volumes:
                    - wp_content:/var/www/html/wp-content
                  depends_on:
@@ -319,6 +334,10 @@ The key concept is **idempotency**: each task checks whether the desired state a
    - **`hosts: webservers`**: targets every host in the `[webservers]` inventory group.
    - **`become: true`**: runs tasks with `sudo` (installing packages and managing Docker requires root).
    - **`vars:`**: defines variables used throughout the playbook. Changing a password here changes it everywhere it is referenced.
+
+   <Aside type="caution">
+   Hardcoding passwords directly in a playbook is acceptable for a lab but is a serious security risk in production. Anyone with read access to the file can see the credentials, and they end up in Git history if the file is committed. The proper solution is **Ansible Vault**, which encrypts sensitive values so you can safely commit them. A simpler alternative is to pass variables at runtime with `-e "mysql_root_password=..."` so they never touch disk. For this lab, plaintext vars are fine.
+   </Aside>
    - **Tasks 1-5** install Docker Engine from the official Docker repository. The `creates:` argument on shell tasks makes them idempotent, Ansible skips the task if the file already exists.
    - **Task 6** creates a directory for the Compose project.
    - **Task 7** writes a `docker-compose.yml` using Ansible's `copy` module with inline content. The `{{ variable }}` syntax is Jinja2 templating, Ansible substitutes the values from `vars`.
@@ -367,7 +386,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
 </Steps>
 
-## Part B: GitHub Actions CI/CD Pipeline (50 minutes)
+## Part B: GitHub Actions CI/CD Pipeline
 
 ### Understanding CI/CD
 
@@ -393,7 +412,7 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
    This Dockerfile extends the official WordPress image with a custom health check page:
 
    ```bash
-   nano Dockerfile
+   vim Dockerfile
    ```
 
    ```dockerfile
@@ -409,7 +428,7 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
 
    ```bash
    mkdir -p .github/workflows
-   nano .github/workflows/build-push.yml
+   vim .github/workflows/build-push.yml
    ```
 
    ```yaml
