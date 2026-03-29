@@ -37,7 +37,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
 1. What k3s version is running on your node? Write down the node's INTERNAL-IP address. (Use `kubectl get nodes -o wide`.) *(4 points)*
 2. Write down the names and IP addresses of your two WordPress Pods. (Use `kubectl get pods -o wide`.) *(4 points)*
-3. Run `kubectl get secret mysql-secret -o jsonpath='{.data.mysql-password}' | base64 --decode`. What does it print? What does this tell you about how Secrets store values? *(4 points)*
+3. Run `kubectl get secret db-secret -o jsonpath='{.data.db-password}' | base64 --decode`. What does it print? What does this tell you about how Secrets store values, and why base64 encoding is not the same as encryption? *(4 points)*
 4. After configuring nginx as a reverse proxy, what does `curl -L http://localhost:30080` return? (A brief description is fine; you do not need to paste the full HTML.) *(4 points)*
 5. After deleting one WordPress Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(5 points)*
 6. How does nginx's `proxy_pass` directive reference WordPress: by IP address or by DNS name? Why does this matter when Pods restart and get new IP addresses? *(4 points)*
@@ -102,11 +102,11 @@ Before writing manifests, let's understand the building blocks:
 - **Deployment**: Manages a set of identical Pods. You tell it "run 2 replicas of WordPress," and it ensures exactly 2 Pods are always running. If one dies, the Deployment creates a replacement.
 - **Service**: Provides a stable network endpoint for a set of Pods. Pods get random IP addresses that change when they restart, but a Service gives you a fixed DNS name and IP to reach them.
 - **ConfigMap**: Stores configuration data (like files or environment variables) separately from the container image. This lets you change configuration without rebuilding the image.
-- **Secret**: Like a ConfigMap, but for sensitive data such as passwords and API keys. Values are base64-encoded and can be restricted by Kubernetes RBAC. They are not encrypted at rest by default in k3s, but they keep credentials out of your manifest files and version control.
+- **Secret**: Like a ConfigMap, but for sensitive data such as passwords and API keys. Values are base64-encoded, **not encrypted**: anyone who can read the Secret object can decode them instantly with `base64 --decode`. The value of Secrets is not confidentiality against cluster access, but rather keeping credentials out of your manifest files and Git history, and enabling RBAC to restrict which Pods and users can read which Secrets. In production, encrypted storage requires tools like HashiCorp Vault or the AWS Secrets Manager integration, which are outside the scope of this lab.
 
 ### Storing Credentials with Secrets
 
-MySQL needs a password. Hardcoding it in a manifest is bad practice; it ends up in your version control. Instead, you will store it in a Kubernetes Secret and reference it by name from other manifests.
+MariaDB needs a password. Hardcoding it in a manifest is bad practice; it ends up in your version control. Instead, you will store it in a Kubernetes Secret and reference it by name from other manifests.
 
 <Steps>
 
@@ -114,18 +114,18 @@ MySQL needs a password. Hardcoding it in a manifest is bad practice; it ends up 
 
    ```bash
    mkdir ~/k8s-lab && cd ~/k8s-lab
-   vim mysql-secret.yaml
+   vim db-secret.yaml
    ```
 
    ```yaml
    apiVersion: v1
    kind: Secret
    metadata:
-     name: mysql-secret
+     name: db-secret
    type: Opaque
    stringData:
-     mysql-root-password: rootpassword
-     mysql-password: wordpresspassword
+     db-root-password: rootpassword
+     db-password: wordpresspassword
    ```
 
    Using `stringData` lets you write plain text; Kubernetes base64-encodes the values automatically when storing the Secret.
@@ -133,61 +133,65 @@ MySQL needs a password. Hardcoding it in a manifest is bad practice; it ends up 
 2. **Apply the Secret**
 
    ```bash
-   kubectl apply -f mysql-secret.yaml
+   kubectl apply -f db-secret.yaml
    ```
 
 3. **Inspect the stored value**
 
    ```bash
-   kubectl get secret mysql-secret -o jsonpath='{.data.mysql-password}' | base64 --decode
+   kubectl get secret db-secret -o jsonpath='{.data.db-password}' | base64 --decode
    ```
 
    The value is stored encoded, but you can decode it with standard base64 tooling. Record this output for your lab questions.
 
+   <Aside type="caution">
+   Base64 is encoding, not encryption. It is trivially reversible by anyone with access to the cluster. Kubernetes Secrets protect against credentials appearing in your YAML files and Git history, but they do not protect against a user or process that has permission to read Secrets in the cluster. In a production environment, restrict Secret access with RBAC and consider encrypting Secrets at rest using a KMS provider.
+   </Aside>
+
 </Steps>
 
-### Deploying MySQL
+### Deploying MariaDB
 
-MySQL needs a stable DNS name so WordPress can reach it. You will create a Deployment and a ClusterIP Service (internal-only, with no NodePort) for MySQL.
+MariaDB needs a stable DNS name so WordPress can reach it. You will create a Deployment and a ClusterIP Service (internal-only, with no NodePort) for MariaDB.
 
 <Aside type="caution">
-This deployment uses ephemeral (in-container) storage. If the MySQL Pod is deleted, all database data is lost. In production, you would attach a **PersistentVolumeClaim** to give the database durable storage that outlives any individual Pod. For this lab, ephemeral storage is intentional: we are demonstrating orchestration, not data durability.
+This deployment uses ephemeral (in-container) storage. If the MariaDB Pod is deleted, all database data is lost. In production, you would attach a **PersistentVolumeClaim** to give the database durable storage that outlives any individual Pod. For this lab, ephemeral storage is intentional: we are demonstrating orchestration, not data durability.
 </Aside>
 
 <Steps>
 
-1. **Write the MySQL Deployment**
+1. **Write the MariaDB Deployment**
 
    ```bash
-   vim mysql-deployment.yaml
+   vim mariadb-deployment.yaml
    ```
 
    ```yaml
    apiVersion: apps/v1
    kind: Deployment
    metadata:
-     name: mysql
+     name: mariadb
      labels:
-       app: mysql
+       app: mariadb
    spec:
      replicas: 1
      selector:
        matchLabels:
-         app: mysql
+         app: mariadb
      template:
        metadata:
          labels:
-           app: mysql
+           app: mariadb
        spec:
          containers:
-           - name: mysql
-             image: mysql:8.0
+           - name: mariadb
+             image: mariadb:11
              env:
                - name: MYSQL_ROOT_PASSWORD
                  valueFrom:
                    secretKeyRef:
-                     name: mysql-secret
-                     key: mysql-root-password
+                     name: db-secret
+                     key: db-root-password
                - name: MYSQL_DATABASE
                  value: wordpress
                - name: MYSQL_USER
@@ -195,55 +199,55 @@ This deployment uses ephemeral (in-container) storage. If the MySQL Pod is delet
                - name: MYSQL_PASSWORD
                  valueFrom:
                    secretKeyRef:
-                     name: mysql-secret
-                     key: mysql-password
+                     name: db-secret
+                     key: db-password
              ports:
                - containerPort: 3306
    ```
 
-   The `secretKeyRef` fields pull values from `mysql-secret` at runtime. The password never appears in plain text in the manifest.
+   The `secretKeyRef` fields pull values from `db-secret` at runtime. The password never appears in plain text in the manifest.
 
-2. **Write the MySQL Service**
+2. **Write the MariaDB Service**
 
    ```bash
-   vim mysql-service.yaml
+   vim mariadb-service.yaml
    ```
 
    ```yaml
    apiVersion: v1
    kind: Service
    metadata:
-     name: mysql-service
+     name: mariadb-service
    spec:
      type: ClusterIP
      selector:
-       app: mysql
+       app: mariadb
      ports:
        - port: 3306
          targetPort: 3306
    ```
 
-   `ClusterIP` means this Service is only reachable from inside the cluster; MySQL should never be directly exposed to the internet.
+   `ClusterIP` means this Service is only reachable from inside the cluster; MariaDB should never be directly exposed to the internet.
 
 3. **Apply both manifests**
 
    ```bash
-   kubectl apply -f mysql-deployment.yaml -f mysql-service.yaml
+   kubectl apply -f mariadb-deployment.yaml -f mariadb-service.yaml
    ```
 
-4. **Wait for MySQL to be ready**
+4. **Wait for MariaDB to be ready**
 
    ```bash
-   kubectl get pods -l app=mysql
+   kubectl get pods -l app=mariadb
    ```
 
-   Wait until the MySQL Pod shows "Running." MySQL takes 20–30 seconds to initialize on first run. If the Pod shows "CrashLoopBackOff," wait another 30 seconds and check again; it typically self-corrects as MySQL finishes its initialization sequence.
+   Wait until the MariaDB Pod shows "Running." MariaDB takes 20–30 seconds to initialize on first run. If the Pod shows "CrashLoopBackOff," wait another 30 seconds and check again; it typically self-corrects as MariaDB finishes its initialization sequence.
 
 </Steps>
 
 ### Deploying WordPress
 
-WordPress connects to MySQL using the Service DNS name `mysql-service`, which Kubernetes resolves to the MySQL Pod's IP automatically. This is why Services are essential: if WordPress referenced a Pod IP directly, that IP would change every time the MySQL Pod restarted.
+WordPress connects to MariaDB using the Service DNS name `mariadb-service`, which Kubernetes resolves to the MariaDB Pod's IP automatically. This is why Services are essential: if WordPress referenced a Pod IP directly, that IP would change every time the MariaDB Pod restarted.
 
 <Steps>
 
@@ -272,10 +276,10 @@ WordPress connects to MySQL using the Service DNS name `mysql-service`, which Ku
        spec:
          containers:
            - name: wordpress
-             image: wordpress:6.5-php8.3-apache
+             image: wordpress:6.5.5-php8.3-apache
              env:
                - name: WORDPRESS_DB_HOST
-                 value: mysql-service:3306
+                 value: mariadb-service:3306
                - name: WORDPRESS_DB_NAME
                  value: wordpress
                - name: WORDPRESS_DB_USER
@@ -283,8 +287,10 @@ WordPress connects to MySQL using the Service DNS name `mysql-service`, which Ku
                - name: WORDPRESS_DB_PASSWORD
                  valueFrom:
                    secretKeyRef:
-                     name: mysql-secret
-                     key: mysql-password
+                     name: db-secret
+                     key: db-password
+               - name: WORDPRESS_CONFIG_EXTRA
+                 value: "define('WP_AUTO_UPDATE_CORE', false);"
              ports:
                - containerPort: 80
    ```
@@ -323,13 +329,21 @@ WordPress connects to MySQL using the Service DNS name `mysql-service`, which Ku
    kubectl get pods -o wide
    ```
 
-   You should see 2 WordPress Pods with status "Running" alongside the MySQL Pod. Note the names and IP addresses of the WordPress Pods for your lab questions.
+   You should see 2 WordPress Pods with status "Running" alongside the MariaDB Pod. Note the names and IP addresses of the WordPress Pods for your lab questions.
 
 </Steps>
 
 ### Deploying nginx as a Reverse Proxy
 
 nginx will be the only publicly-accessible entry point. It receives traffic on NodePort 30080 and forwards it to `wordpress-service`. The proxy configuration lives in a ConfigMap, so you can update routing rules without rebuilding the nginx image.
+
+The WordPress image used in this lab (`wordpress:6.5.5-php8.3-apache`) runs **Apache** internally as the PHP application server. nginx's role here is purely as a **reverse proxy**: it terminates the incoming connection, forwards the request to WordPress over the cluster network, and returns the response. The request flow is:
+
+```
+Browser → nginx Pod (port 30080) → wordpress-service → WordPress Pod (Apache + PHP) → mariadb-service → MariaDB Pod
+```
+
+This separation is common in production: nginx handles TLS termination, load balancing across multiple upstream servers, and connection management, while the application server focuses on running application code.
 
 <Steps>
 
@@ -420,6 +434,10 @@ nginx will be the only publicly-accessible entry point. It receives traffic on N
          nodePort: 30080
    ```
 
+   <Aside type="note">
+   Kubernetes NodePorts must be in the range 30000–32767. This range exists because lower-numbered ports require root privileges on the host OS, and Kubernetes worker nodes run as non-root processes. Port 30080 is therefore not a mistake; it is a constraint of the NodePort service type. In production on a cloud provider (AWS EKS, Google GKE, etc.), you would use a `LoadBalancer` service, which automatically provisions an external load balancer on port 80. Alternatively, an **Ingress controller** like Traefik or nginx-ingress maps hostnames and paths to internal services on port 80 without requiring a cloud load balancer.
+   </Aside>
+
 4. **Apply all three manifests**
 
    ```bash
@@ -486,9 +504,9 @@ If you plan to continue with later labs, leave k3s running. Otherwise:
 kubectl delete \
   -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \
   -f wordpress-deployment.yaml -f wordpress-service.yaml \
-  -f mysql-deployment.yaml -f mysql-service.yaml -f mysql-secret.yaml
+  -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml
 ```
 
 ---
 
-You now understand how Kubernetes orchestrates a multi-service application. nginx acts as the public entry point, proxying traffic to WordPress, which connects to MySQL, all wired together through Services and their DNS names. Secrets kept credentials out of your manifests, and Deployments kept both nginx and WordPress running even when individual Pods failed. In the next lab, you will add health checks, resource limits, and practice failure drills.
+You now understand how Kubernetes orchestrates a multi-service application. nginx acts as the public entry point, proxying traffic to WordPress (which runs Apache internally), which connects to MariaDB, all wired together through Services and their DNS names. Secrets kept credentials out of your manifests, and Deployments kept both nginx and WordPress running even when individual Pods failed. In the next lab, you will add health checks, resource limits, and practice failure drills.
