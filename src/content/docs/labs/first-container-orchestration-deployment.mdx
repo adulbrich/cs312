@@ -351,7 +351,7 @@ Traefik is k3s's built-in **ingress controller** and is the component actually l
 The WordPress image used in this lab (`wordpress:6.5.5-php8.3-apache`) runs **Apache** internally as the PHP application server. nginx's role here is purely as a **reverse proxy**: it accepts the request from Traefik, forwards it to WordPress over the cluster network, and returns the response. The request flow is:
 
 ```mermaid
-flowchart LR
+flowchart TB
   browser[Browser]
 
   subgraph edge[Cluster Edge]
