@@ -1,0 +1,153 @@
+---
+title: "Hardware Build Specification"
+description: "Specify and justify compatible PC components for a given use case using PCPartPicker or Newegg PC Builder."
+sidebar:
+  order: 1
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
+
+This activity puts into practice the concepts from the [Hardware Fundamentals](/lectures/hardware-fundamentals/) lecture. You will build a real parts list for a specific use case, making the same compatibility decisions a sysadmin makes when speccing a new machine. Along the way you will read manufacturer spec sheets, check a motherboard's CPU support list and memory QVL, and use PCPartPicker's compatibility checker to catch issues before a real purchase.
+
+<Aside type="tip">
+Keep the [Hardware Fundamentals](/lectures/hardware-fundamentals/) lecture open as a reference. Each step below maps to a section of that lecture.
+</Aside>
+
+## What You Will Need
+
+- [PCPartPicker](https://pcpartpicker.com) (recommended; create a free account to save and share your build) or [Newegg PC Builder](https://www.newegg.com/tools/custom-pc-builder) (no account required)
+- The Hardware Fundamentals lecture open as a reference
+
+## Your Scenario
+
+Choose **one** of the following:
+
+**A. Home Lab Server:** A student wants a small server to run 4-6 virtual machines at home for practicing system administration. Budget: $600. Needs to be quiet enough for a bedroom. No discrete GPU required.
+
+**B. Developer Workstation:** A software engineer needs a desktop for compiling code, running Docker containers, and occasional light gaming. Budget: $1,200. Needs a discrete GPU.
+
+**C. Edge Compute Node:** A company wants a small-form-factor machine to run in a remote office. It must tolerate variable conditions, have no moving parts in storage, and run 24/7. Budget: $800.
+
+Open PCPartPicker (or Newegg PC Builder) and start a new build. Keep it in a browser tab and add parts to it as you work through the steps below.
+
+## Building Your Parts List
+
+<Steps>
+
+1. **CPU**
+
+   The processor locks in your platform: socket, memory generation, and chipset options all follow from this choice. On PCPartPicker, browse **CPUs** filtered to your budget. You can also browse by socket on [AMD's product page](https://www.amd.com/en/processors/ryzen) or use Intel's [ARK database](https://ark.intel.com) to search by socket and find compatible motherboards.
+
+   **Scenario A:** Prioritize core count over clock speed. Each virtual machine claims a vCPU, so a 6- or 8-core processor keeps multiple VMs running without contention. A mid-range AMD Ryzen 5 or Intel Core i5 in the $150-200 range is a reasonable target.
+
+   **Scenario B:** Balance single-thread and multi-thread performance. Compilation is multi-threaded; interactive tasks (IDE, browser) depend on single-thread speed. A Ryzen 7 or Core i7 with 8 or more cores addresses both.
+
+   **Scenario C:** Prioritize low TDP and platform stability. An Intel Core i3 or AMD Ryzen 5 in a compact, efficient configuration keeps heat and power draw manageable for an unattended machine.
+
+   <ActivityQuestion>
+   Why does picking your CPU first constrain your motherboard choices? Name the specific characteristic that links the two.
+   </ActivityQuestion>
+
+2. **Motherboard**
+
+   Matching socket names is necessary but not sufficient. A CPU released after the board was manufactured may require a BIOS update before it will POST, and you may not be able to perform that update without a compatible older CPU already in hand. Find your board's **CPU Support List** on the manufacturer's website ([ASUS](https://www.asus.com), [MSI](https://www.msi.com), [Gigabyte](https://www.gigabyte.com), and [ASRock](https://www.asrock.com) all publish these) and confirm your CPU is listed. If it requires a BIOS update, check whether the board ships with a BIOS version that already includes it.
+
+   Also locate the board's **Memory QVL** (Qualified Vendor List) on the same page. You will need it in the next step.
+
+   **Scenario A:** A B-series chipset (AMD B650 or Intel B760) provides the right features at a lower cost than the enthusiast X- or Z-series boards. Confirm the board has at least two DIMM slots and one M.2 slot.
+
+   **Scenario B:** A B-series board is again sufficient unless you need overclocking, in which case AMD X670 or Intel Z790 unlocks that option.
+
+   **Scenario C:** Check the form factor carefully. Mini-ITX boards fit the smallest cases but typically provide only two DIMM slots and one M.2 slot. If the machine will live in a rack, note whether the board supports IPMI or out-of-band management.
+
+   <ActivityQuestion>
+   Open your chosen motherboard's CPU support list on the manufacturer's website. Is your CPU listed? If it requires a BIOS update, which version introduced support for it?
+   </ActivityQuestion>
+
+3. **RAM**
+
+   RAM has three dimensions that matter independently: generation (DDR4 vs. DDR5, set by your CPU and board), capacity, and speed. Within a generation, faster kits carry a price premium for gains that rarely translate to real-world performance in server or general-purpose workloads.
+
+   Find your board's Memory QVL and check whether the kit you are considering is listed. A QVL-listed kit eliminates one variable at first boot.
+
+   **Scenario A:** Capacity matters more than speed. 32 GB lets you run 4-6 modest VMs without swapping to disk. Buy two sticks rather than one: dual-channel mode doubles the memory bandwidth available to the CPU.
+
+   **Scenario B:** 32 GB is a comfortable baseline; 64 GB is worth considering if you regularly run large Docker builds or multiple VMs simultaneously.
+
+   **Scenario C:** 16-32 GB is sufficient for most edge workloads. If your board supports ECC (Error-Correcting Code) memory, it is worth using: ECC silently detects and corrects single-bit memory errors, which matters on a machine running unattended for extended periods.
+
+   <ActivityQuestion>
+   Is your RAM kit on the motherboard's QVL? How did you check? What would you do if your exact kit was not listed but a similar kit from the same manufacturer was?
+   </ActivityQuestion>
+
+4. **Storage**
+
+   For the OS and applications, an NVMe SSD connected over PCIe offers significantly lower latency than a SATA SSD and is the right default for any new build today. Before picking a drive, check your motherboard's manual for the M.2 slot specifications: not all M.2 slots run at PCIe speeds, and many boards share lanes between M.2 slots and SATA ports: enabling a second M.2 slot may disable one or more SATA connectors. Gigabyte, ASUS, MSI, and ASRock all document this in the lane-sharing table in their manuals.
+
+   **Scenario A:** A single 500 GB or 1 TB NVMe SSD for the OS and VM images. A secondary 2.5" SATA SSD for bulk VM storage is optional if your case has drive bays.
+
+   **Scenario B:** A 1 TB NVMe SSD for the OS, plus a second drive for project files and container images if the budget allows.
+
+   **Scenario C:** NVMe only: no spinning hard drives. Moving parts are a reliability concern in unattended or environmentally variable deployments. A 500 GB NVMe SSD is sufficient for most edge workloads.
+
+   <ActivityQuestion>
+   Look up your motherboard's M.2 specification in its manual or on the product page. Does enabling a second M.2 slot (if applicable) disable any SATA ports? Does this affect your build?
+   </ActivityQuestion>
+
+5. **Power Supply**
+
+   Add the TDP of your CPU and GPU (if any), then add roughly 50-75 W for the rest of the system (motherboard, storage, fans). Multiply by 1.4 to leave headroom and keep the PSU in its efficient operating range. Newegg and PCPartPicker both let you filter by wattage and efficiency rating. [Seasonic](https://seasonic.com), [Corsair](https://www.corsair.com), and [be quiet!](https://www.bequiet.com) publish detailed spec sheets for their units, including connector listings.
+
+   Look for at least 80 Plus Bronze. For an always-on machine (Scenarios A and C), 80 Plus Gold or better pays for itself in lower electricity costs over two or three years.
+
+   Confirm the unit has every connector your build requires: the 24-pin ATX main connector, the 8-pin (or 4+4-pin) EPS CPU connector, PCIe power connectors for the GPU if applicable, and SATA power for any 2.5" drives.
+
+   <ActivityQuestion>
+   What is the TDP of your CPU? Where did you find that number: the manufacturer's product page, ARK, or somewhere else? If your build includes a GPU, what is its rated power draw? What total wattage did you calculate, and what did you choose for your PSU?
+   </ActivityQuestion>
+
+6. **Case**
+
+   The case enforces the remaining mechanical constraints: motherboard form factor, maximum GPU length, maximum CPU cooler height, and radiator support. All of these are listed in the case specifications on Newegg or on the manufacturer's site. [Fractal Design](https://www.fractal-design.com), [be quiet!](https://www.bequiet.com), [NZXT](https://www.nzxt.com), and [Corsair](https://www.corsair.com) all publish detailed spec pages with exact clearances.
+
+   **Scenario A:** A mid-tower ATX or compact microATX case gives room for future storage expansion and good airflow without a large footprint.
+
+   **Scenario B:** A full or mid-tower with good airflow, since a discrete GPU under sustained load generates significant heat. Check that the case is long enough for your GPU.
+
+   **Scenario C:** A Mini-ITX case or a 1U/2U rackmount enclosure if the machine will live in a rack. Confirm the maximum cooler height; compact cases often limit you to low-profile coolers.
+
+   <ActivityQuestion>
+   Find the maximum CPU cooler height in your case's specifications. Does your chosen cooler (or the stock cooler that ships with your CPU) fit within that limit?
+   </ActivityQuestion>
+
+7. **Connectivity and Management**
+
+   Motherboard specifications list the rear I/O and onboard networking, but these details rarely surface in PCPartPicker's compatibility checks. Review the board's product page directly for what is actually present.
+
+   **Ethernet speed:** Most consumer boards now ship with a 2.5 Gigabit NIC; some budget boards still include only 1 Gigabit. Check the motherboard's spec sheet under "LAN."
+
+   **Scenario A:** 2.5GbE is worthwhile if you access a NAS or move VM disk images between machines. Running VM storage over a 1GbE link is a common and easily avoided bottleneck.
+
+   **Scenario B:** 2.5GbE as a minimum. If the board includes Thunderbolt 4 (Intel) or USB4, it opens the door to external NVMe enclosures (3-4 GB/s), docks, and 10GbE adapters without adding a PCIe card. USB 3.2 Gen 2x2 (20 Gbps) is the next tier down and sufficient for most external drives. Note whether the rear I/O includes USB-C in addition to USB-A, as most current NVMe enclosures and docks use USB-C.
+
+   **Scenario C:** Confirm the machine has wired Ethernet rather than relying on Wi-Fi for an always-on deployment. A second NIC or a USB Ethernet adapter is easy to add if the board only has one port and your network requires it.
+
+   **Out-of-band management:** Out-of-band management lets you remotely power on, reboot, and access a console even when the operating system is unresponsive or not yet installed. PCPartPicker does not flag whether a build supports this; it requires manual verification.
+
+   - **Intel vPro / AMT (Active Management Technology):** Requires a vPro-eligible CPU, a compatible chipset, and a supported NIC. All three must be present. Verify the CPU on Intel's [ARK database](https://ark.intel.com) by filtering for "Intel vPro Platform Eligible." An AMT-enabled machine can be controlled over the network at the firmware level, independently of the OS.
+   - **AMD PRO:** AMD's equivalent platform, offering remote management via AMD DASH (Desktop and mobile Architecture for System Hardware). Check the CPU's product page on [AMD's site](https://www.amd.com/en/processors/ryzen-pro) for the PRO designation.
+   - **IPMI / BMC:** Server-grade motherboards from vendors such as [Supermicro](https://www.supermicro.com) or the ASUS Pro WS line include an IPMI controller with a dedicated management port and full KVM-over-IP. This is the strongest option for Scenario A if you use server hardware, but it is not found on consumer boards.
+   - **Wake-on-LAN:** Supported by almost all consumer boards via a BIOS setting. A remote machine receives a "magic packet" over the network and powers on. The OS must be running before you can interact with it, so it is not true out-of-band management, but it costs nothing and covers the most common home lab use case.
+
+   <ActivityQuestion>
+   Does your chosen CPU and motherboard combination support any form of out-of-band management: Wake-on-LAN only, Intel vPro/AMD PRO, or IPMI? How did you verify this? Does it matter for your scenario?
+   </ActivityQuestion>
+
+</Steps>
+
+## Compatibility Check
+
+On PCPartPicker, open the **Compatibility** tab at the top of your build. PCPartPicker flags common issues automatically: socket mismatches, RAM generation conflicts, form factor incompatibilities, and missing power connectors.
+
+Review every warning it raises, but note that the checker does not catch everything. It will not know whether your CPU is on the board's support list, whether your RAM kit is on the QVL, whether enabling a second M.2 slot disables a SATA port you are counting on, or whether your build supports vPro. Those require the manual cross-checks you performed above.
