@@ -51,6 +51,41 @@ Watch for the answers to these questions as you follow the tutorial.
 
 ## Tutorial
 
+### Resize the EC2 Instance to t3.large
+
+Before installing the monitoring stack, resize your EC2 instance. `kube-prometheus-stack` is heavy enough that smaller instance types often time out during CRD installation or make the API server unresponsive.
+
+<Steps>
+
+1. **Open the EC2 instance in the AWS Console**
+
+   In AWS Console, go to **EC2 > Instances** and select your lab instance.
+
+2. **Stop the instance**
+
+   Choose **Instance state > Stop instance** and wait until the instance state is `stopped`.
+
+3. **Change the instance type**
+
+   With the instance selected, choose **Actions > Instance settings > Change instance type**. Select **t3.large** and save.
+
+4. **Start the instance again**
+
+   Choose **Instance state > Start instance** and wait for both status checks to pass.
+
+5. **Reconnect over SSH and verify the cluster**
+
+   If your instance uses an auto-assigned public IP, it may have changed after stop/start. Reconnect using the current public IP, then verify Kubernetes is responding:
+
+   ```bash
+   kubectl get nodes -o wide
+   kubectl get pods -A
+   ```
+
+   Continue only after the node is `Ready` and system pods are back up.
+
+</Steps>
+
 ### Installing Helm
 
 <Steps>
@@ -92,13 +127,15 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
      --set grafana.service.type=NodePort \
      --set grafana.service.nodePort=31000 \
      --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
-     --set prometheus.prometheusSpec.ruleSelectorNilUsesHelmValues=false
+     --set prometheus.prometheusSpec.ruleSelectorNilUsesHelmValues=false \
+     --set grafana.sidecar.image.tag=1.28.0
    ```
 
    This command:
    - Installs the chart with the release name `monitoring` in a new `monitoring` namespace
    - Exposes Grafana on NodePort 31000 so you can access it from your browser
    - Configures Prometheus to pick up ServiceMonitors and PrometheusRules from all namespaces (not just the monitoring namespace)
+   - Pins the Grafana sidecar image to `1.28.0` to avoid a known broken image tag in the latest chart release
 
    <Aside type="note">
    The installation takes 2-3 minutes. Helm downloads container images for Prometheus, Grafana, kube-state-metrics, and Node Exporter.
@@ -113,30 +150,36 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
 
 4. **Access Grafana**
 
-   If your Security Group allows port 31000, open Grafana directly in your browser:
+   On the EC2 instance, run:
+
+   ```bash
+   kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80 --address 127.0.0.1
+   ```
+
+   Keep that terminal open. On your laptop, create an SSH tunnel to that forwarded port:
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem -N -L 3000:127.0.0.1:3000 ec2-user@<your-public-ip>
+   ```
+
+   Then open `http://localhost:3000` in your browser.
+
+   Optional direct access (requires Security Group inbound rule for TCP 31000):
 
    ```
    http://<your-ec2-public-ip>:31000
    ```
 
-   If port 31000 is not open in your Security Group, use SSH port forwarding from your laptop:
+   If access still fails, verify in order:
+   - `kubectl -n monitoring get pods` shows Grafana as Running/Ready
+   - `kubectl -n monitoring get svc monitoring-grafana` shows the expected port
+   - the two port-forward commands above are still running with no errors
 
-   ```bash
-   ssh -i ~/Downloads/cs312-key.pem -L 3000:localhost:31000 ec2-user@<your-public-ip>
-   ```
+   The username is `admin`. Retrieve the generated password with:
 
-   Then open `http://localhost:3000` in your browser.
-
-   The default login credentials are:
-   - Username: `admin`
-   - Password: `prom-operator`
-
-   <Aside type="tip">
-   If you cannot remember the Grafana password, retrieve it with:
    ```bash
    kubectl get secret -n monitoring monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d
    ```
-   </Aside>
 </Steps>
 
 ### Exploring Default Dashboards
@@ -289,13 +332,19 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
 3. **Verify in Prometheus**
 
-   You can check that Prometheus loaded the rules by port-forwarding to the Prometheus UI:
+   You can check that Prometheus loaded the rules by port-forwarding to the Prometheus UI. Open a second SSH session to the EC2 instance and run:
 
    ```bash
-   kubectl port-forward svc/monitoring-kube-prometheus-prometheus -n monitoring 9090:9090 &
+   kubectl port-forward svc/monitoring-kube-prometheus-prometheus -n monitoring 9091:9090 --address 127.0.0.1
    ```
 
-   Then visit `http://localhost:9090/alerts` (or `http://<public-ip>:9090/alerts` if the port is open). You should see your three alerts listed in "Inactive" state.
+   Keep that session open (Ctrl+C stops the tunnel). On your laptop, create an SSH tunnel:
+
+   ```bash
+   ssh -i ~/Downloads/cs312-key.pem -N -L 9091:127.0.0.1:9091 ec2-user@<your-public-ip>
+   ```
+
+   Then open `http://localhost:9091/alerts` in your browser. You should see your three alerts listed in "Inactive" state.
 
 </Steps>
 
@@ -309,16 +358,16 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
    ```bash
    for i in $(seq 1 5); do
-     kubectl exec $(kubectl get pods -l app=nginx -o jsonpath='{.items[0].metadata.name}') -- kill 1
-     sleep 5
+     kubectl exec $(kubectl get pods -l app=nginx -o jsonpath='{.items[0].metadata.name}') -- nginx -s stop
+     sleep 10
    done
    ```
 
-   This kills the nginx process 5 times. Each kill causes the container to exit, and Kubernetes restarts it. After several restarts in 5 minutes, the `PodCrashLooping` alert should fire.
+   This stops the nginx process 5 times. Each stop causes the container to exit, and Kubernetes restarts it within the same Pod. After several restarts in 5 minutes, the `PodCrashLooping` alert should fire.
 
 2. **Watch the alert status**
 
-   Check the alert in Prometheus (refresh `http://localhost:9090/alerts`) or in Grafana (**Alerting > Alert rules**). The alert will transition from Inactive to Pending (condition is true but `for` duration has not elapsed) to Firing.
+   Check the alert in Prometheus (refresh `http://localhost:9091/alerts`) or in Grafana (**Alerting > Alert rules**). The alert will transition from Inactive to Pending (condition is true but `for` duration has not elapsed) to Firing.
 
    Record how many minutes it took for the alert to fire.
 
