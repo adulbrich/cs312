@@ -38,10 +38,12 @@ Watch for the answers to these questions as you follow the tutorial.
 1. What k3s version is running on your node? Write down the node's INTERNAL-IP address. (Use `kubectl get nodes -o wide`.) *(4 points)*
 2. Write down the names and IP addresses of your two WordPress Pods. (Use `kubectl get pods -o wide`.) *(4 points)*
 3. Run `kubectl get secret db-secret -o jsonpath='{.data.db-password}' | base64 --decode`. What does it print? What does this tell you about how Secrets store values, and why base64 encoding is not the same as encryption? *(4 points)*
-4. After configuring nginx as a reverse proxy, what does `curl -L http://localhost:30080` return? (A brief description is fine; you do not need to paste the full HTML.) *(4 points)*
+4. After configuring nginx as a reverse proxy and the Ingress, what does `curl -L http://localhost` return? Describe the redirect chain: what responds first, what does it redirect to, and what serves the final response? *(4 points)*
 5. After deleting one WordPress Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(5 points)*
 6. How does nginx's `proxy_pass` directive reference WordPress: by IP address or by DNS name? Why does this matter when Pods restart and get new IP addresses? *(4 points)*
-7. Get your TA's initials showing the WordPress setup screen accessible via nginx in a browser or via `curl`. *(5 points)*
+7. When you first encountered the `?reauth=1` redirect loop, what command showed that no `WORDPRESS_AUTH_KEY` environment variables were set in the Pod? What is the root cause of the loop with two replicas? *(4 points)*
+8. After applying the updated Secret and Deployment, what did `kubectl rollout status deployment/wordpress` report? How does a rolling update keep the site available during the update? *(4 points)*
+9. Get your TA's initials showing the WordPress admin dashboard (past the login screen) accessible via nginx in a browser. *(5 points)*
 
 ## Tutorial
 
@@ -51,16 +53,22 @@ Watch for the answers to these questions as you follow the tutorial.
 
 1. **Launch an EC2 instance**
 
-   In the AWS Console, launch an Ubuntu 24.04 instance. Use **t3.small** (2 vCPU, 2 GiB RAM); k3s runs on t3.micro but performs better with a bit more memory. Create a Security Group that allows:
+   In the AWS Console, launch a **SUSE Linux Enterprise Server 16** instance (available in the Quick Start AMIs). Use **t3.small** (2 vCPU, 2 GiB RAM); k3s runs on t3.micro but performs better with a bit more memory. Create a Security Group that allows:
    - SSH (port 22) from Anywhere
    - HTTP (port 80) from Anywhere
    - Custom TCP (ports 30000-32767) from Anywhere (this is the NodePort range Kubernetes uses)
 
-   Connect via SSH:
+   Connect via SSH. SLES uses `ec2-user` as the default username:
 
    ```bash
-   ssh -i ~/Downloads/cs312-key.pem ubuntu@<your-public-ip>
+   ssh -i ~/Downloads/cs312-key.pem ec2-user@<your-public-ip>
    ```
+
+   <Aside type="caution">
+   Some terminals and developer tools (Warp, VS Code Remote SSH, and others) open multiple SSH channels simultaneously for features like AI assistance, port forwarding, or remote file access. SLES ships with a stricter default sshd configuration than Ubuntu or Amazon Linux and rejects these extra channel requests, causing an immediate disconnect with a stream of `channel X: open failed` errors. This did not occur in earlier labs because Ubuntu and Amazon Linux accept those extra channels silently by default. If you see this error, switch to a standard terminal that opens a single plain SSH session: Terminal.app, iTerm2, Ghostty, or Windows Terminal.
+   </Aside>
+
+   You are now on a SUSE Linux Enterprise Server. k3s is a Rancher project, and Rancher was acquired by SUSE in 2020, so you are running k3s on its home operating system. The package manager here is `zypper` rather than `apt`, though you will not need it much in these labs since k3s and all workloads install via scripts and container images.
 
 2. **Install k3s**
 
@@ -83,6 +91,10 @@ Watch for the answers to these questions as you follow the tutorial.
    export KUBECONFIG=~/.kube/config
    echo 'export KUBECONFIG=~/.kube/config' >> ~/.bashrc
    ```
+
+   <Aside type="caution">
+   This approach copies the cluster-admin kubeconfig to your home directory for convenience. The file contains a certificate with full control over the cluster, equivalent to root access. In production, `/etc/rancher/k3s/k3s.yaml` stays root-owned, and administrators run `sudo kubectl` for cluster-admin operations. Individual operators receive scoped kubeconfig files backed by Role-Based Access Control (RBAC) service accounts with only the permissions their role requires, not a personal copy of the cluster-admin certificate.
+   </Aside>
 
 4. **Verify the cluster**
 
@@ -145,7 +157,7 @@ MariaDB needs a password. Hardcoding it in a manifest is bad practice; it ends u
    The value is stored encoded, but you can decode it with standard base64 tooling. Record this output for your lab questions.
 
    <Aside type="caution">
-   Base64 is encoding, not encryption. It is trivially reversible by anyone with access to the cluster. Kubernetes Secrets protect against credentials appearing in your YAML files and Git history, but they do not protect against a user or process that has permission to read Secrets in the cluster. In a production environment, restrict Secret access with RBAC and consider encrypting Secrets at rest using a KMS provider.
+   Base64 is encoding, not encryption. It is trivially reversible by anyone with access to the cluster. Kubernetes Secrets protect against credentials appearing in your YAML files and Git history, but they do not protect against a user or process that has permission to read Secrets in the cluster. In a production environment, restrict Secret access with Role-Based Access Control (RBAC) and consider encrypting Secrets at rest using a Key Management Service (KMS) provider.
    </Aside>
 
 </Steps>
@@ -329,21 +341,21 @@ WordPress connects to MariaDB using the Service DNS name `mariadb-service`, whic
    kubectl get pods -o wide
    ```
 
-   You should see 2 WordPress Pods with status "Running" alongside the MariaDB Pod. Note the names and IP addresses of the WordPress Pods for your lab questions.
+   You should see 2 WordPress Pods with status "Running" alongside the MariaDB Pod. Note the names and IP addresses of both WordPress Pods for your lab questions.
 
 </Steps>
 
 ### Deploying nginx as a Reverse Proxy
 
-nginx will be the only publicly-accessible entry point. It receives traffic on NodePort 30080 and forwards it to `wordpress-service`. The proxy configuration lives in a ConfigMap, so you can update routing rules without rebuilding the nginx image.
+nginx will be the only publicly-accessible entry point. It forwards requests from Traefik (k3s's built-in ingress controller, running on port 80) to `wordpress-service`. The proxy configuration lives in a ConfigMap, so you can update routing rules without rebuilding the nginx image.
 
 The WordPress image used in this lab (`wordpress:6.5.5-php8.3-apache`) runs **Apache** internally as the PHP application server. nginx's role here is purely as a **reverse proxy**: it terminates the incoming connection, forwards the request to WordPress over the cluster network, and returns the response. The request flow is:
 
 ```
-Browser → nginx Pod (port 30080) → wordpress-service → WordPress Pod (Apache + PHP) → mariadb-service → MariaDB Pod
+Browser → port 80 → Traefik (Ingress) → nginx-service → nginx Pod → wordpress-service → WordPress Pod (Apache + PHP) → mariadb-service → MariaDB Pod
 ```
 
-This separation is common in production: nginx handles TLS termination, load balancing across multiple upstream servers, and connection management, while the application server focuses on running application code.
+This separation is common in production: nginx handles load balancing across multiple upstream servers and connection management, while the application server focuses on running application code. Traefik handles the public port 80 entry point via an Ingress resource.
 
 <Steps>
 
@@ -365,14 +377,17 @@ This separation is common in production: nginx handles TLS termination, load bal
 
            location / {
                proxy_pass http://wordpress-service;
-               proxy_set_header Host $host;
+               proxy_set_header Host $http_host;
                proxy_set_header X-Real-IP $remote_addr;
                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+               proxy_set_header X-Forwarded-Proto $scheme;
            }
        }
    ```
 
    `proxy_pass http://wordpress-service` tells nginx to forward all requests to the `wordpress-service` Service. Kubernetes DNS resolves `wordpress-service` to the Service's ClusterIP, which then load-balances across the 2 WordPress Pods.
+
+   `proxy_set_header Host $http_host` passes the full `host:port` from the original request to WordPress. Using `$host` instead would strip the port, causing WordPress to generate redirect and asset URLs without the correct port, which breaks CSS and redirects.
 
 2. **Write the nginx Deployment**
 
@@ -425,32 +440,224 @@ This separation is common in production: nginx handles TLS termination, load bal
    metadata:
      name: nginx-service
    spec:
-     type: NodePort
+     type: ClusterIP
      selector:
        app: nginx
      ports:
        - port: 80
          targetPort: 80
-         nodePort: 30080
    ```
+
+   nginx is a ClusterIP Service: it is reachable only from inside the cluster. External traffic reaches it through the Ingress you will create next, not directly.
 
    <Aside type="note">
-   Kubernetes NodePorts must be in the range 30000–32767. This range exists because lower-numbered ports require root privileges on the host OS, and Kubernetes worker nodes run as non-root processes. Port 30080 is therefore not a mistake; it is a constraint of the NodePort service type. In production on a cloud provider (AWS EKS, Google GKE, etc.), you would use a `LoadBalancer` service, which automatically provisions an external load balancer on port 80. Alternatively, an **Ingress controller** like Traefik or nginx-ingress maps hostnames and paths to internal services on port 80 without requiring a cloud load balancer.
+   Kubernetes also supports NodePort services (range 30000–32767), which expose a port directly on the host. NodePorts are useful for debugging but awkward for real web apps: the non-standard port appears in every URL, and applications like WordPress that generate absolute URLs break when redirected to a port they don't expect. The Ingress approach used here is the standard production pattern: Traefik (or another ingress controller) owns port 80 and routes to internal ClusterIP services by hostname or path.
    </Aside>
 
-4. **Apply all three manifests**
+4. **Write the Ingress**
+
+   k3s ships with Traefik as the default ingress controller. It is already running and bound to port 80 on the host. An Ingress resource tells Traefik which Service to route traffic to.
 
    ```bash
-   kubectl apply -f nginx-configmap.yaml -f nginx-deployment.yaml -f nginx-service.yaml
+   vim wordpress-ingress.yaml
    ```
 
-5. **Test the proxy**
+   ```yaml
+   apiVersion: networking.k8s.io/v1
+   kind: Ingress
+   metadata:
+     name: wordpress-ingress
+   spec:
+     rules:
+     - http:
+         paths:
+         - path: /
+           pathType: Prefix
+           backend:
+             service:
+               name: nginx-service
+               port:
+                 number: 80
+   ```
+
+   No `host:` field is set, so this rule matches any hostname. Traefik receives all HTTP traffic on port 80 and forwards it to `nginx-service`, which forwards it to WordPress.
+
+5. **Apply all four manifests**
 
    ```bash
-   curl -L http://localhost:30080
+   kubectl apply -f nginx-configmap.yaml -f nginx-deployment.yaml -f nginx-service.yaml -f wordpress-ingress.yaml
    ```
 
-   You should receive the WordPress installation wizard HTML. You can also open `http://<your-ec2-public-ip>:30080` in your browser to see it rendered. Record what you observe for your lab questions.
+6. **Test the proxy**
+
+   ```bash
+   curl -L http://localhost
+   ```
+
+   You should be redirected to `/wp-admin/install.php` and receive the WordPress installation wizard HTML. You can also open `http://<your-ec2-public-ip>` in your browser (no port needed) to see it rendered. Record what you observe for your lab questions.
+
+</Steps>
+
+### Configure WordPress
+
+<Steps>
+
+1. **Open the setup wizard**
+
+   Open `http://<your-ec2-public-ip>` in a browser. You will be redirected to `/wp-admin/install.php`. Complete the WordPress installation:
+   - Site Title: anything you like
+   - Username: `admin` (or your choice)
+   - Password: a password you will remember
+   - Email: any email address
+
+   Click **Install WordPress**.
+
+2. **Log in**
+
+   After installation completes, click **Log In** and enter your credentials.
+
+3. **Trigger the authentication loop**
+
+   Once logged in to the dashboard, try navigating to **Posts**, **Settings**, or any other admin page. You will be redirected back to `wp-login.php?reauth=1` and asked to log in again, only to be redirected back again immediately. The site is stuck in an infinite loop.
+
+</Steps>
+
+### Diagnosing Multi-Replica Authentication Failure
+
+The WordPress Docker image generates a random set of authentication keys (`AUTH_KEY`, `SECURE_AUTH_KEY`, `LOGGED_IN_KEY`, `NONCE_KEY`, and four corresponding salt values) at container startup. With two replicas, Pod A and Pod B each generate their own independent set of keys. When you log in and nginx routes your session to Pod A, WordPress signs your session cookie using Pod A's keys. Your next request may go to Pod B, which has entirely different keys and cannot validate the cookie. WordPress treats the cookie as invalid and redirects you to `wp-login.php?reauth=1`. Every subsequent request has the same problem, producing the infinite loop.
+
+<Steps>
+
+1. **Confirm both Pods are running**
+
+   ```bash
+   kubectl get pods -l app=wordpress
+   ```
+
+   Note the two Pod names. They have different names and different IP addresses.
+
+2. **Check logs from both Pods simultaneously**
+
+   ```bash
+   kubectl logs -l app=wordpress --prefix
+   ```
+
+   The `--prefix` flag prepends the Pod name to each log line. Refresh the WordPress page a few times. You will see requests served by alternating Pods, confirming that nginx is distributing traffic between them.
+
+3. **Confirm no auth keys are set**
+
+   ```bash
+   kubectl exec $(kubectl get pods -l app=wordpress -o jsonpath='{.items[0].metadata.name}') -- env | grep WORDPRESS_AUTH
+   ```
+
+   You will see no output. No auth key environment variables were set, so each Pod is using its own randomly-generated values. This is the root cause.
+
+</Steps>
+
+### Fixing Multi-Replica Authentication
+
+The fix is to generate a consistent set of auth keys once, store them in the Secret, and inject them into every WordPress Pod as environment variables. With all replicas using the same keys, any Pod can validate any cookie.
+
+<Steps>
+
+1. **Generate the eight auth keys**
+
+   ```bash
+   for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
+     echo "$key: $(openssl rand -base64 48)"
+   done
+   ```
+
+   Copy all eight lines of output. You will paste each value into the Secret.
+
+2. **Update the Secret**
+
+   Edit `db-secret.yaml` to add the eight keys. Replace each placeholder with the actual generated value:
+
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: db-secret
+   type: Opaque
+   stringData:
+     db-root-password: rootpassword
+     db-password: wordpresspassword
+     auth-key: "<paste AUTH_KEY value>"
+     secure-auth-key: "<paste SECURE_AUTH_KEY value>"
+     logged-in-key: "<paste LOGGED_IN_KEY value>"
+     nonce-key: "<paste NONCE_KEY value>"
+     auth-salt: "<paste AUTH_SALT value>"
+     secure-auth-salt: "<paste SECURE_AUTH_SALT value>"
+     logged-in-salt: "<paste LOGGED_IN_SALT value>"
+     nonce-salt: "<paste NONCE_SALT value>"
+   ```
+
+3. **Update the WordPress Deployment**
+
+   Edit `wordpress-deployment.yaml` and add these entries to the `env` section of the WordPress container, after the existing environment variables:
+
+   ```yaml
+               - name: WORDPRESS_AUTH_KEY
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: auth-key
+               - name: WORDPRESS_SECURE_AUTH_KEY
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: secure-auth-key
+               - name: WORDPRESS_LOGGED_IN_KEY
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: logged-in-key
+               - name: WORDPRESS_NONCE_KEY
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: nonce-key
+               - name: WORDPRESS_AUTH_SALT
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: auth-salt
+               - name: WORDPRESS_SECURE_AUTH_SALT
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: secure-auth-salt
+               - name: WORDPRESS_LOGGED_IN_SALT
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: logged-in-salt
+               - name: WORDPRESS_NONCE_SALT
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: nonce-salt
+   ```
+
+4. **Apply the changes**
+
+   ```bash
+   kubectl apply -f db-secret.yaml -f wordpress-deployment.yaml
+   kubectl rollout status deployment/wordpress
+   ```
+
+   Kubernetes performs a **rolling update**: it starts a new Pod with the updated environment variables, waits for it to become ready, then terminates an old Pod, and repeats. At no point are all running Pods shut down simultaneously, so the site stays available throughout. Record what `kubectl rollout status` reports for your lab questions.
+
+5. **Verify the fix**
+
+   ```bash
+   kubectl get pods -l app=wordpress
+   ```
+
+   Both Pods will have a recent AGE, showing they were replaced during the rollout.
+
+   Open the WordPress admin in your browser. Log in and navigate between pages. The `reauth=1` loop should be gone: because every Pod now uses the same keys, any Pod can validate any session cookie.
 
 </Steps>
 
@@ -506,6 +713,7 @@ If you have completed all three labs and are permanently done, you can tear ever
 
 ```bash
 kubectl delete \
+  -f wordpress-ingress.yaml \
   -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \
   -f wordpress-deployment.yaml -f wordpress-service.yaml \
   -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml
@@ -513,4 +721,4 @@ kubectl delete \
 
 ---
 
-You now understand how Kubernetes orchestrates a multi-service application. nginx acts as the public entry point, proxying traffic to WordPress (which runs Apache internally), which connects to MariaDB, all wired together through Services and their DNS names. Secrets kept credentials out of your manifests, and Deployments kept both nginx and WordPress running even when individual Pods failed. In the next lab, you will add health checks, resource limits, and practice failure drills.
+You now understand how Kubernetes orchestrates a multi-service application. Traefik receives public traffic on port 80 and routes it via the Ingress to nginx, which proxies to WordPress (running Apache internally), which connects to MariaDB, all wired together through Services and their DNS names. Secrets kept credentials out of your manifests, and Deployments kept both nginx and WordPress running even when individual Pods failed. In the next lab, you will add health checks, resource limits, and practice failure drills.

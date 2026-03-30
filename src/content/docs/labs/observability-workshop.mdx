@@ -36,7 +36,7 @@ If you ended your AWS Academy session, restart it. The EC2 instance and cluster 
 
 **PromQL** (Prometheus Query Language): The query language for selecting and aggregating Prometheus metrics. For example, `rate(http_requests_total[5m])` computes the per-second rate of HTTP requests over the last 5 minutes.
 
-**Helm**: A package manager for Kubernetes. Helm **charts** bundle Kubernetes manifests, default configuration, and dependencies into installable packages, similar to how `apt` packages software for Ubuntu.
+**Helm**: A package manager for Kubernetes. Helm **charts** bundle Kubernetes manifests, default configuration, and dependencies into installable packages, similar to how `zypper` packages software for SUSE Linux or `apt` packages software for Debian-based systems.
 
 ## Questions
 
@@ -122,7 +122,7 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
    If port 31000 is not open in your Security Group, use SSH port forwarding from your laptop:
 
    ```bash
-   ssh -i ~/Downloads/cs312-key.pem -L 3000:localhost:31000 ubuntu@<your-public-ip>
+   ssh -i ~/Downloads/cs312-key.pem -L 3000:localhost:31000 ec2-user@<your-public-ip>
    ```
 
    Then open `http://localhost:3000` in your browser.
