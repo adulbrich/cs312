@@ -21,10 +21,10 @@ Gerald's investor visited last week and asked, "How do you know your systems are
 ## Before You Start
 
 You need:
-- The k3s cluster from Labs 7–8 with all workloads still running: nginx (reverse proxy), WordPress, and MariaDB
+- The k3s cluster from Labs 7-8 with all workloads still running: nginx (reverse proxy), WordPress, and MariaDB
 - SSH access to your EC2 instance
 
-If you ended your AWS Academy session, restart it. The EC2 instance and cluster will still be there. If you deleted the resources from Labs 7–8, re-apply all manifests from those labs before starting.
+If you ended your AWS Academy session, restart it. The EC2 instance and cluster will still be there. If you deleted the resources from Labs 7-8, re-apply all manifests from those labs before starting.
 
 ## Key Concepts
 
@@ -395,7 +395,7 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
 ### Clean Up
 
-When you are done with all three labs (Labs 7–9), uninstall the monitoring stack and remove all workloads:
+When you are done with all three labs (Labs 7-9), uninstall the monitoring stack and remove all workloads:
 
 ```bash
 helm uninstall monitoring -n monitoring
@@ -407,6 +407,8 @@ kubectl delete \
   -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml \
   -f mariadb-pvc.yaml
 ```
+
+You can also terminate the EC2 instance if you no longer need it.
 
 If you just need to pause, end your AWS Academy Learner Lab session instead. Everything persists on the EC2 instance.
 

@@ -252,7 +252,7 @@ This deployment uses ephemeral (in-container) storage. If the MariaDB Pod is del
    kubectl get pods -l app=mariadb
    ```
 
-   Wait until the MariaDB Pod shows "Running." MariaDB takes 20–30 seconds to initialize on first run. If the Pod shows "CrashLoopBackOff," wait another 30 seconds and check again; it typically self-corrects as MariaDB finishes its initialization sequence.
+   Wait until the MariaDB Pod shows "Running." MariaDB takes 20-30 seconds to initialize on first run. If the Pod shows "CrashLoopBackOff," wait another 30 seconds and check again; it typically self-corrects as MariaDB finishes its initialization sequence.
 
 </Steps>
 
@@ -481,7 +481,7 @@ This separation is common in production: the ingress controller handles cluster 
    nginx is a ClusterIP Service: it is reachable only from inside the cluster. External traffic reaches it through the Ingress you will create next, not directly.
 
    <Aside type="note">
-   Kubernetes also supports NodePort services (range 30000–32767), which expose a port directly on the host. NodePorts are useful for debugging but awkward for real web apps: the non-standard port appears in every URL, and applications like WordPress that generate absolute URLs break when redirected to a port they don't expect. The Ingress approach used here is the standard production pattern: Traefik (or another ingress controller) owns port 80 and routes to internal ClusterIP services by hostname or path.
+   Kubernetes also supports NodePort services (range 30000-32767), which expose a port directly on the host. NodePorts are useful for debugging but awkward for real web apps: the non-standard port appears in every URL, and applications like WordPress that generate absolute URLs break when redirected to a port they don't expect. The Ingress approach used here is the standard production pattern: Traefik (or another ingress controller) owns port 80 and routes to internal ClusterIP services by hostname or path.
    </Aside>
 
 4. **Write the Ingress**
