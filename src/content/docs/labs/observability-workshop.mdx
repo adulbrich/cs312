@@ -352,9 +352,11 @@ When you are done with all three labs (Labs 7–9), uninstall the monitoring sta
 helm uninstall monitoring -n monitoring
 kubectl delete namespace monitoring
 kubectl delete \
+  -f wordpress-ingress.yaml \
   -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \
   -f wordpress-deployment.yaml -f wordpress-service.yaml \
-  -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml
+  -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml \
+  -f mariadb-pvc.yaml
 ```
 
 If you just need to pause, end your AWS Academy Learner Lab session instead. Everything persists on the EC2 instance.

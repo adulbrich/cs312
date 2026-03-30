@@ -35,14 +35,14 @@ When you used Docker Compose, it handled restarting crashed containers and wirin
 
 Watch for the answers to these questions as you follow the tutorial.
 
-1. What k3s version is running on your node? Write down the node's INTERNAL-IP address. (Use `kubectl get nodes -o wide`.) *(4 points)*
-2. Write down the names and IP addresses of your two WordPress Pods. (Use `kubectl get pods -o wide`.) *(4 points)*
-3. Run `kubectl get secret db-secret -o jsonpath='{.data.db-password}' | base64 --decode`. What does it print? What does this tell you about how Secrets store values, and why base64 encoding is not the same as encryption? *(4 points)*
-4. After configuring nginx as a reverse proxy and the Ingress, what does `curl -L http://localhost` return? Describe the redirect chain: what responds first, what does it redirect to, and what serves the final response? *(4 points)*
-5. After deleting one WordPress Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(5 points)*
-6. How does nginx's `proxy_pass` directive reference WordPress: by IP address or by DNS name? Why does this matter when Pods restart and get new IP addresses? *(4 points)*
-7. When you first encountered the `?reauth=1` redirect loop, what command showed that no `WORDPRESS_AUTH_KEY` environment variables were set in the Pod? What is the root cause of the loop with two replicas? *(4 points)*
-8. After applying the updated Secret and Deployment, what did `kubectl rollout status deployment/wordpress` report? How does a rolling update keep the site available during the update? *(4 points)*
+1. What k3s version is running on your node? Write down the node's INTERNAL-IP address. (Use `kubectl get nodes -o wide`.) *(2 points)*
+2. Write down the names and IP addresses of your two WordPress Pods. (Use `kubectl get pods -o wide`.) *(2 points)*
+3. Run `kubectl get secret db-secret -o jsonpath='{.data.db-password}' | base64 --decode`. What does it print? What does this tell you about how Secrets store values, and why base64 encoding is not the same as encryption? *(3 points)*
+4. After configuring nginx as a reverse proxy and the Ingress, what does `curl -L http://localhost` return? Describe the redirect chain: what responds first, what does it redirect to, and what serves the final response? *(3 points)*
+5. After deleting one WordPress Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(2 points)*
+6. How does nginx's `proxy_pass` directive reference WordPress: by IP address or by DNS name? Why does this matter when Pods restart and get new IP addresses? *(2 points)*
+7. When you first encountered the `?reauth=1` redirect loop, what command showed that no `WORDPRESS_AUTH_KEY` environment variables were set in the Pod? What is the root cause of the loop with two replicas? *(3 points)*
+8. After applying the updated Secret and Deployment, what did `kubectl rollout status deployment/wordpress` report? How does a rolling update keep the site available during the update? *(3 points)*
 9. Get your TA's initials showing the WordPress admin dashboard (past the login screen) accessible via nginx in a browser. *(5 points)*
 
 ## Tutorial

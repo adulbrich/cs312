@@ -15,7 +15,7 @@ import LabSubmissionNote from '/src/components/LabSubmissionNote.astro';
 
 The lunch rush crashed the website at all three locations simultaneously. Gerald called it "a digital fire." He wants "those health check things" and a plan for when things break. You asked who would be on call. Gerald said, "You're on call." You asked when. He said, "Always."
 
-Your WordPress stack (nginx → WordPress → MariaDB) is running, but Kubernetes does not yet know whether your application is actually healthy; it only knows whether the container processes are running. A container can be running but completely broken (returning errors, stuck in a loop, out of memory). In this lab, you will add health probes that let Kubernetes make smarter decisions, set resource limits so one container cannot starve the node, practice rolling updates and rollbacks on the nginx reverse proxy, and intentionally break things to learn how to diagnose and recover from failures.
+Your WordPress stack (nginx → WordPress → MariaDB) is running, but Kubernetes does not yet know whether your application is actually healthy; it only knows whether the container processes are running. A container can be running but completely broken (returning errors, stuck in a loop, out of memory). In this lab, you will add health probes that let Kubernetes make smarter decisions, set resource limits so one container cannot starve the node, practice rolling updates and rollbacks on the nginx reverse proxy, intentionally break things to learn how to diagnose and recover from failures, and correct a data durability gap from the previous lab by adding persistent storage to MariaDB.
 
 <LabSubmissionNote />
 ## Before You Start
@@ -25,6 +25,10 @@ You need:
 - SSH access to your EC2 instance
 
 If you ended your AWS Academy session, restart it. The EC2 instance and cluster will still be there. If you deleted the resources from Lab 7, re-apply all the manifests from that lab before starting.
+
+<Aside type="caution">
+If you stopped and restarted your EC2 instance between sessions, k3s restarted all Pods on boot. Because Lab 7 used ephemeral (in-container) storage for MariaDB, any WordPress data you entered (posts, settings, the admin account) is gone. The first tutorial section below adds a PersistentVolumeClaim to fix this. After completing it, you will need to run through the WordPress setup wizard once more; after that, your data will survive pod restarts and EC2 stops.
+</Aside>
 
 ## Key Concepts
 
@@ -36,30 +40,167 @@ If you ended your AWS Academy session, restart it. The EC2 instance and cluster 
 
 **Resource Limits**: The maximum CPU and memory a container can use. If a container exceeds its memory limit, it is killed with an Out of Memory (OOM) error.
 
+**PersistentVolumeClaim (PVC)**: A request for storage from a workload. Kubernetes binds the claim to a PersistentVolume (PV), a piece of storage provisioned on the cluster, and mounts it into the container. Unlike the container's ephemeral writable layer, data in a PVC survives pod deletion and node restarts. k3s ships with a `local-path` StorageClass that automatically provisions PVs backed by directories on the node's local filesystem.
+
 ## Questions
 
 Watch for the answers to these questions as you follow the tutorial.
 
-1. How many revisions does `kubectl rollout history deployment/nginx` show after the rolling update? What image tag was used in the most recent revision? *(4 points)*
-2. During the rolling update, did you observe both old and new Pods running at the same time? How does Kubernetes ensure zero downtime during a rollout? *(5 points)*
-3. When you deployed the nonexistent image (`nginx:doesnotexist`), what error status did the Pod show? Write down the exact error message from the Events section of `kubectl describe pod`. *(5 points)*
-4. When you set the memory limit to 1Mi, what status did the Pod show? What was the exit code, and what does it mean? (Hint: 128 + signal number.) *(5 points)*
-5. After your final rollback, what image tag are the healthy Pods running? How many Pods show `1/1 Ready`? *(3 points)*
-6. Get your TA's initials showing all Pods in a Running/Ready state after recovery from the OOMKill drill. *(3 points)*
+1. Run `kubectl get pvc`. What is the STATUS and STORAGECLASS of `mariadb-pvc`? After deleting the MariaDB Pod and letting Kubernetes replace it, did your WordPress data survive? What does this demonstrate about PersistentVolumeClaims compared to the ephemeral storage used in Lab 7? *(3 points)*
+2. How many revisions does `kubectl rollout history deployment/nginx` show after the rolling update? What image tag was used in the most recent revision? *(3 points)*
+3. During the rolling update, did you observe both old and new Pods running at the same time? How does Kubernetes ensure zero downtime during a rollout? *(5 points)*
+4. When you deployed the nonexistent image (`nginx:doesnotexist`), what error status did the Pod show? Write down the exact error message from the Events section of `kubectl describe pod`. *(4 points)*
+5. When you set the memory limit to 1Mi, what failure signal did you observe? Depending on container runtime timing, you may see either Pod status `OOMKilled`/`CrashLoopBackOff` with exit code `137`, or `FailedCreatePodSandBox` Events that include `container init was OOM-killed`. Explain what either result means. *(5 points)*
+6. After your final rollback, what image tag are the healthy Pods running? How many Pods show `1/1 Ready`? *(2 points)*
+7. Get your TA's initials showing all Pods in a Running/Ready state after recovery from the OOMKill drill. *(3 points)*
 
 ## Tutorial
 
+### Adding Persistent Storage for MariaDB
+
+In Lab 7, MariaDB stored all its data inside the container's own writable layer. That layer is ephemeral: it is discarded whenever the Pod is deleted, crashes, or the node restarts. Stopping and restarting the EC2 instance causes k3s to terminate and relaunch all Pods, wiping the database each time.
+
+Kubernetes separates storage from compute using two objects:
+
+- **PersistentVolume (PV)**: A piece of storage provisioned on the cluster: a directory on the node's filesystem, an EBS volume, an NFS share, and so on. A PV exists independently of any Pod.
+- **PersistentVolumeClaim (PVC)**: A request for storage from a workload. Kubernetes binds a PVC to a matching PV and mounts it into the container. Data in a PVC survives pod deletion and node restarts.
+
+k3s ships with a `local-path` StorageClass that automatically provisions PVs backed by directories on the node's local disk. This is not suitable for multi-node clusters (data is tied to one specific node), but it is exactly right for a single-node learning environment.
+
+<Steps>
+
+1. **Write the PVC manifest**
+
+   SSH into your EC2 instance and navigate to your lab directory then write the PVC manifest:
+
+   ```bash
+   cd ~/k8s-lab
+   vim mariadb-pvc.yaml
+   ```
+
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata:
+     name: mariadb-pvc
+   spec:
+     accessModes:
+       - ReadWriteOnce
+     storageClassName: local-path
+     resources:
+       requests:
+         storage: 1Gi
+   ```
+
+   `ReadWriteOnce` means only one node can mount this volume at a time, which is correct for a single-replica database. `local-path` tells k3s to provision a directory on the node's disk automatically.
+
+2. **Apply the PVC**
+
+   ```bash
+   kubectl apply -f mariadb-pvc.yaml
+   kubectl get pvc
+   ```
+
+   The STATUS column will show `Pending` initially. The `local-path` provisioner uses late binding: the PV is not created until a Pod actually claims the PVC. It will become `Bound` once the updated Deployment starts.
+
+3. **Update the MariaDB Deployment to use the PVC**
+
+   Edit `mariadb-deployment.yaml` and add a `volumeMounts` entry to the container and a `volumes` entry to the Pod spec:
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: mariadb
+     labels:
+       app: mariadb
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: mariadb
+     template:
+       metadata:
+         labels:
+           app: mariadb
+       spec:
+         containers:
+           - name: mariadb
+             image: mariadb:11
+             env:
+               - name: MYSQL_ROOT_PASSWORD
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: db-root-password
+               - name: MYSQL_DATABASE
+                 value: wordpress
+               - name: MYSQL_USER
+                 value: wordpress
+               - name: MYSQL_PASSWORD
+                 valueFrom:
+                   secretKeyRef:
+                     name: db-secret
+                     key: db-password
+             ports:
+               - containerPort: 3306
+             volumeMounts:
+               - name: mariadb-data
+                 mountPath: /var/lib/mysql
+         volumes:
+           - name: mariadb-data
+             persistentVolumeClaim:
+               claimName: mariadb-pvc
+   ```
+
+   MariaDB stores all its data in `/var/lib/mysql`. Mounting the PVC there means all writes go to the EC2 instance's disk rather than the container's ephemeral layer.
+
+4. **Apply the updated Deployment**
+
+   ```bash
+   kubectl apply -f mariadb-deployment.yaml
+   kubectl rollout status deployment/mariadb
+   ```
+
+   `kubectl rollout status` works for any Deployment, including a single-replica one like MariaDB. Here it means "wait until the new MariaDB Pod is available." This is not the same behavior we observed in the previous lab with 2 wordpress replicas, where old and new Pods overlap to keep traffic flowing during the update.
+
+   <Aside type="note">
+   Because the PVC starts empty, MariaDB initializes a fresh database. Any WordPress data from Lab 7 is gone. After this step, open `http://<your-ec2-public-ip>` and run through the WordPress setup wizard again to create the site and admin account. This is the last time you will need to do this: from here on, your data persists across pod restarts and EC2 instance stops.
+   </Aside>
+
+5. **Verify the PVC is bound**
+
+   ```bash
+   kubectl get pvc
+   ```
+
+   STATUS should now show `Bound`. Record the STATUS and STORAGECLASS values for your lab questions.
+
+6. **Verify data persists across pod restarts**
+
+   Log in to the WordPress admin and set a distinctive site title (e.g., "Gerald's Persistent Restaurant"). Then delete the MariaDB Pod:
+
+   ```bash
+   kubectl delete pod -l app=mariadb
+   ```
+
+   Watch Kubernetes replace it:
+
+   ```bash
+   kubectl get pods -w
+   ```
+
+   Once the new Pod is Running, reload WordPress in your browser. Your site title should still be there. The replacement Pod mounted the same PVC, which holds the data on the EC2 disk.
+
+</Steps>
+
 ### Adding Probes and Resource Controls
+
+At this point your stack is running, but Kubernetes still needs explicit rules for traffic safety and resource fairness. The two probes serve different purposes: **liveness** answers "is the nginx process itself alive?" and triggers a restart if it is not, while **readiness** answers "can this nginx Pod successfully serve a real request right now?" and temporarily removes only that Pod from `nginx-service` endpoints when it cannot. Resource settings solve a different problem: **requests** reserve minimum CPU/memory so the scheduler can place Pods reliably, and **limits** cap maximum usage so one container cannot starve the node. Together, probes and resource controls improve availability during failures, updates, and load spikes.
 
 <Steps>
 
 1. **Update the nginx ConfigMap to add a health endpoint**
-
-   SSH into your EC2 instance and navigate to your lab directory:
-
-   ```bash
-   cd ~/k8s-lab
-   ```
 
    Edit `nginx-configmap.yaml` to add a `/health` location that nginx handles directly (not proxied to WordPress). This lets the liveness probe check whether nginx itself is alive, independently of whether WordPress is reachable:
 
@@ -81,9 +222,10 @@ Watch for the answers to these questions as you follow the tutorial.
 
            location / {
                proxy_pass http://wordpress-service;
-               proxy_set_header Host $host;
+               proxy_set_header Host $http_host;
                proxy_set_header X-Real-IP $remote_addr;
                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+               proxy_set_header X-Forwarded-Proto $scheme;
            }
        }
    ```
@@ -149,8 +291,10 @@ Watch for the answers to these questions as you follow the tutorial.
    ```
 
    Let's walk through the new sections:
+   - **`replicas: 2`**: We intentionally run two nginx Pods in this lab so you can observe high-availability behavior during updates and failures. With one replica, a failed readiness check or restart can briefly remove all proxy capacity. With two replicas, one Pod can be removed from traffic while the other keeps serving requests, making rolling updates and probe behavior easier to see.
    - **`livenessProbe`**: Every 10 seconds (after a 5-second initial delay), Kubernetes sends an HTTP GET to `/health` on port 80. nginx handles this location directly (returning 200 without touching WordPress), so the probe checks whether the nginx process itself is alive, not whether the upstream is reachable. If it fails 3 times in a row, Kubernetes restarts the container.
-   - **`readinessProbe`**: Every 5 seconds (after a 3-second delay), Kubernetes checks `/`, a request that nginx proxies to WordPress. If WordPress is unreachable and nginx returns 502, the readiness probe fails and the Pod is removed from Service endpoints (stops receiving traffic) but is not restarted. This is the correct separation: liveness tracks "is nginx running?" and readiness tracks "can nginx currently serve requests?".
+   - **`readinessProbe`**: Every 5 seconds (after a 3-second delay), Kubernetes checks `/`, a request that nginx proxies to WordPress. If WordPress is unreachable and nginx returns 502, the readiness probe fails and that specific **nginx Pod** is removed from **`nginx-service` endpoints** (stops receiving traffic). It does **not** remove or restart WordPress Pods. Readiness failure alone does not restart nginx; the Pod is added back automatically when readiness checks succeed again.
+   - **When does a Pod restart?**: A restart happens when the container process exits (for example, OOM kill), when the **liveness** probe fails repeatedly, or when the Deployment is rolled out/updated. A readiness failure by itself only changes traffic routing.
    - **`resources.requests`**: The Pod needs at least 64 Megabytes (Mi) of memory and 50 millicores (50m = 5% of one CPU core).
    - **`resources.limits`**: The Pod cannot use more than 128Mi of memory or 100 millicores. If it exceeds the memory limit, the kernel's OOM killer terminates it.
 
@@ -301,7 +445,12 @@ This drill simulates a deployment that references an image that does not exist, 
 
 ### Failure Drill 2: OOM Kill
 
-This drill demonstrates what happens when a container exceeds its memory limit. The kernel's Out of Memory (OOM) killer terminates the process, and Kubernetes reports it as `OOMKilled`.
+This drill demonstrates what happens when a container exceeds its memory limit. The kernel's Out of Memory (OOM) killer terminates the process. With an extremely low limit like `1Mi`, you may see one of two valid outcomes depending on runtime timing:
+
+- The container starts, gets killed, and the Pod shows `OOMKilled` and then `CrashLoopBackOff`.
+- The container cannot initialize at all, and Events show `FailedCreatePodSandBox` with `container init was OOM-killed` while the Pod remains `Pending`/`ContainerCreating`.
+
+Both outcomes represent the same root cause: the memory limit is too low.
 
 <Steps>
 
@@ -325,33 +474,33 @@ This drill demonstrates what happens when a container exceeds its memory limit. 
    kubectl apply -f nginx-deployment.yaml
    ```
 
-3. **Observe the OOM kills**
+3. **Observe the failure pattern**
 
    ```bash
    kubectl get pods -w
    ```
 
-   You will see Pods entering `OOMKilled` status, then `CrashLoopBackOff` as Kubernetes repeatedly tries to start them and they keep exceeding the memory limit. Press Ctrl+C after you observe the pattern.
+    With `1Mi`, you may see either `OOMKilled`/`CrashLoopBackOff` in Pod status, or the Pod may stay `ContainerCreating`/`Pending` while sandbox creation fails. In either case, Kubernetes keeps retrying because the memory limit is too low. Press Ctrl+C after you observe the pattern.
 
-4. **Diagnose the failure**
+4. **Diagnose the failure (authoritative step)**
 
    ```bash
    kubectl describe pod <oomkilled-pod-name>
    ```
 
-   Look for the **Last State** section, which shows:
-   - Reason: `OOMKilled`
-   - Exit Code: `137` (128 + signal 9, which is SIGKILL from the OOM killer)
+    Look for one of these:
+    - **Last State**: Reason `OOMKilled`, Exit Code `137` (128 + signal 9, SIGKILL from the OOM killer)
+    - **Events**: `FailedCreatePodSandBox` with `container init was OOM-killed (memory limit too low?)`
 
    Record this output for your lab questions.
 
-5. **Check the logs**
+5. **Check logs when available**
 
    ```bash
    kubectl logs <oomkilled-pod-name> --previous
    ```
 
-   The `--previous` flag shows logs from the last terminated container instance. There may be no logs if the process was killed before it could write any.
+    The `--previous` flag shows logs from the last terminated container instance. If the failure happened during container init (sandbox creation), this command may return little or no output because the main process never started.
 
 6. **Fix the limits and recover**
 
@@ -397,11 +546,13 @@ If you have completed both labs and are permanently done, tear everything down:
 
 ```bash
 kubectl delete \
+  -f wordpress-ingress.yaml \
   -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \
   -f wordpress-deployment.yaml -f wordpress-service.yaml \
-  -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml
+  -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml \
+  -f mariadb-pvc.yaml
 ```
 
 ---
 
-You have now added operational controls to your Kubernetes deployment: liveness probes that detect when nginx itself is stuck, readiness probes that remove nginx from rotation when WordPress is unreachable, resource limits that prevent runaway containers, and you have practiced the full failure-recovery loop: introduce a fault, diagnose it with `describe` and `logs`, and recover with a rollback or configuration fix. In the next lab, you will add observability: monitoring dashboards, alerts, and incident detection across the full WordPress stack.
+You have now added operational controls to your Kubernetes deployment: persistent storage that keeps the MariaDB database alive across pod restarts and EC2 stops, liveness probes that detect when nginx itself is stuck, readiness probes that remove nginx from rotation when WordPress is unreachable, resource limits that prevent runaway containers, and you have practiced the full failure-recovery loop: introduce a fault, diagnose it with `describe` and `logs`, and recover with a rollback or configuration fix. In the next lab, you will add observability: monitoring dashboards, alerts, and incident detection across the full WordPress stack.
