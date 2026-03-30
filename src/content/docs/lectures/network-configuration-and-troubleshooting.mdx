@@ -427,6 +427,63 @@ Modern firewalls combine multiple inspection techniques:
 | **DMZ (Demilitarized Zone)** | A network segment isolated from the internal network by a firewall, used to host internet-facing services (web servers, mail relays) that should not have direct access to internal systems |
 | **Traffic shaping** | Rate limiting and prioritization of traffic; can alleviate the impact of denial-of-service attacks and ensure critical services get bandwidth |
 
+## Reverse Proxies and Load Balancers
+
+A **reverse proxy** is a server that sits in front of one or more backend servers and forwards client requests to them. From the client's perspective it is communicating with the reverse proxy directly; the backend servers are invisible. This contrasts with a **forward proxy**, which sits in front of clients and forwards their requests outward (commonly used for caching or content filtering in corporate networks).
+
+### Why Use a Reverse Proxy?
+
+Reverse proxies provide several operational benefits:
+
+- **TLS termination**: The proxy handles HTTPS, accepting encrypted connections from clients and forwarding plain HTTP to backends. Certificates are configured in one place rather than on every backend server.
+- **Single entry point**: All traffic enters through one host, making it straightforward to apply security policies, access logging, and rate limiting uniformly.
+- **Path-based routing**: The proxy can forward requests to different backends based on the URL path: requests to `/api/` go to the API service; requests to `/static/` go to a file server.
+- **Hiding internal topology**: Clients never see backend server addresses or ports, reducing the attack surface.
+
+### Load Balancers
+
+A **load balancer** is a reverse proxy that distributes incoming requests across multiple backend instances. When a single server cannot handle traffic volume, you run multiple identical instances and let the load balancer spread the load.
+
+Common distribution algorithms:
+
+| Algorithm | How it works | When to use it |
+|-----------|-------------|----------------|
+| Round-robin | Requests cycle across backends in sequence | General purpose; assumes requests are roughly equal in cost |
+| Least connections | Each request goes to the backend with the fewest active connections | Long-lived or variable-cost requests (file uploads, streaming) |
+| IP hash | The client's IP determines which backend handles the request | Session-sticky applications that store state locally on the server |
+
+### Layer 4 vs. Layer 7 Load Balancing
+
+Load balancers operate at different OSI layers, and the distinction affects what routing decisions they can make:
+
+- **Layer 4 (Transport)**: Routes based on IP address and TCP/UDP port. The load balancer forwards the raw TCP stream without inspecting HTTP content, giving lower latency but fewer routing options.
+- **Layer 7 (Application)**: Parses HTTP headers, URL paths, and cookies. Can route traffic to different backends based on hostname or path, inject headers, rewrite URLs, and terminate TLS. More powerful but slightly more overhead.
+
+In AWS, the **Network Load Balancer (NLB)** operates at Layer 4 and the **Application Load Balancer (ALB)** operates at Layer 7. Most web applications use an ALB.
+
+### Nginx as a Reverse Proxy
+
+Nginx is one of the most widely deployed reverse proxies and load balancers. You will configure it in this role when you deploy your application to a Kubernetes cluster in a later lab. A minimal configuration that proxies requests to two backend servers looks like this:
+
+```nginx
+upstream app_servers {
+    server 10.0.1.10:3000;
+    server 10.0.1.11:3000;
+}
+
+server {
+    listen 80;
+
+    location / {
+        proxy_pass         http://app_servers;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+    }
+}
+```
+
+The `upstream` block defines a pool of backends. `proxy_pass` forwards all requests to that pool in round-robin order by default. The `proxy_set_header` directives ensure the backend sees the original client IP and hostname rather than the proxy's own values, which matters for access logging and IP-based rate limiting on the backend.
+
 ## Network Storage
 
 Network storage allows multiple servers and clients to access shared data over a network rather than through locally attached drives.

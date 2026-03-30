@@ -287,6 +287,51 @@ Not every alert deserves a page at 3 AM. A common severity scheme uses three lev
 
 Prometheus hands fired alerts to **Alertmanager**, which handles deduplication, grouping, silencing, and routing. Routing rules direct alerts to different channels based on severity and labels: critical alerts go to PagerDuty or a phone call; warnings go to a Slack channel and a ticket system; info alerts are logged but not sent anywhere.
 
+A concrete Alertmanager configuration showing all three channels:
+
+```yaml
+route:
+  group_by: ['alertname', 'cluster']
+  receiver: 'default-slack'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'pagerduty-critical'
+    - match:
+        severity: warning
+      receiver: 'warning-email'
+
+receivers:
+  - name: 'default-slack'
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/services/...'
+        channel: '#alerts-info'
+
+  - name: 'pagerduty-critical'
+    pagerduty_configs:
+      - routing_key: '<integration-key>'
+
+  - name: 'warning-email'
+    email_configs:
+      - to: 'oncall@greenfield.example'
+        from: 'alertmanager@greenfield.example'
+        smarthost: 'smtp.greenfield.example:587'
+        auth_username: 'alertmanager@greenfield.example'
+        auth_password: '{{ env "SMTP_PASSWORD" }}'
+        require_tls: true
+```
+
+Email is a practical default for warnings: it requires no third-party service, creates a paper trail, and most organizations already have an SMTP relay or a transactional email provider. Teams using AWS commonly point `smarthost` at **Amazon SES** (Simple Email Service) on port 587 and authenticate with an IAM user's SMTP credentials, avoiding the need to run an SMTP server at all.
+
+For simpler use cases such as cron jobs, maintenance scripts, or one-off notifications, the `mail` command (provided by `mailutils` or `mailx`) can send an email directly from the shell:
+
+```bash
+echo "Disk usage on $(hostname) exceeded 90% at $(date)" \
+  | mail -s "Disk Alert" oncall@greenfield.example
+```
+
+For this to work, the system needs a **mail transfer agent (MTA)** such as Postfix configured to relay outbound mail through an SMTP server. In practice, most teams use Alertmanager for production monitoring alerts and reserve `mail` for simple administrative notifications from automated scripts.
+
 ### On-call rotation concepts
 
 Alerting only works if someone is responsible for responding. On-call rotations distribute that responsibility across a team, typically in weekly shifts. A few principles keep on-call sustainable:

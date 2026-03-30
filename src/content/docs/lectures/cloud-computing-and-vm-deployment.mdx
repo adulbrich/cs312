@@ -181,6 +181,23 @@ Their database security group would allow inbound traffic only on port 5432 (Pos
 Security groups are stateful, operate at the instance level, and only support allow rules (all traffic is denied by default). NACLs are stateless, operate at the subnet level, and support both allow and deny rules. In practice, security groups handle most access control needs; NACLs are useful when you need explicit deny rules or subnet-wide policies.
 </Aside>
 
+### How AWS Networking Maps to the OSI Model
+
+The components above correspond directly to the OSI layers covered in the networking fundamentals lecture:
+
+| AWS Component | OSI Layer | Role |
+|---------------|-----------|------|
+| VPC | Layer 3 (Network) | Defines the IP address space (your virtual routing domain) |
+| Subnet | Layer 3 (Network) | A routable address block scoped to one availability zone |
+| Internet Gateway | Layer 3 (Network) | The default route out of the VPC to the public internet |
+| NAT Gateway | Layer 3–4 (Network / Transport) | Translates private source IPs for outbound-only internet access |
+| Security Group | Layer 3–4 (Network / Transport) | Stateful per-instance firewall; rules match on IP, protocol, and port |
+| Network ACL | Layer 3–4 (Network / Transport) | Stateless per-subnet ACL; both inbound and outbound rules required |
+| Network Load Balancer (NLB) | Layer 4 (Transport) | Distributes TCP/UDP connections without inspecting HTTP content |
+| Application Load Balancer (ALB) | Layer 7 (Application) | Routes HTTP/HTTPS requests based on host headers, paths, and cookies |
+
+Thinking in layers helps when troubleshooting. If a security group rule looks correct but traffic is still blocked, check the NACL; both operate at the same layer but at different scopes (instance vs. subnet). If packets are reaching the instance but the application returns errors, the problem is at Layer 7, above where security groups and NACLs operate.
+
 ## Storage: EBS and S3
 
 Greenfield's closet server used a single physical disk for everything. In AWS, storage is decoupled from compute, giving you flexibility to choose the right storage type for each workload.

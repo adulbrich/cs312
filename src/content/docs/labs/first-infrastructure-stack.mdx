@@ -404,6 +404,105 @@ The stack you are about to define provisions two EC2 instances and two security 
    <Aside type="note">
    You do not need to apply this change. The `plan` output is sufficient for the lab question. If you do apply it, remember that a destroy/recreate will give you a new public IP.
    </Aside>
+
+3. **Provision a dedicated VPC and network stack**
+
+   The lab currently uses AWS's default VPC (every account gets one automatically), which is convenient for experimentation. In production you always provision your own VPC so you control the address space, subnet layout, and routing policy.
+
+   Remove the `data "aws_vpc" "default"` block from `main.tf` and replace it with these five resources:
+
+   ```hcl
+   resource "aws_vpc" "cs312" {
+     cidr_block           = "10.0.0.0/16"
+     enable_dns_hostnames = true
+
+     tags = {
+       Name = "cs312-vpc"
+     }
+   }
+
+   resource "aws_subnet" "cs312_public" {
+     vpc_id                  = aws_vpc.cs312.id
+     cidr_block              = "10.0.1.0/24"
+     availability_zone       = "us-east-1a"
+     map_public_ip_on_launch = true
+
+     tags = {
+       Name = "cs312-public-subnet"
+     }
+   }
+
+   resource "aws_internet_gateway" "cs312_igw" {
+     vpc_id = aws_vpc.cs312.id
+
+     tags = {
+       Name = "cs312-igw"
+     }
+   }
+
+   resource "aws_route_table" "cs312_public_rt" {
+     vpc_id = aws_vpc.cs312.id
+
+     route {
+       cidr_block = "0.0.0.0/0"
+       gateway_id = aws_internet_gateway.cs312_igw.id
+     }
+
+     tags = {
+       Name = "cs312-public-rt"
+     }
+   }
+
+   resource "aws_route_table_association" "cs312_public_rta" {
+     subnet_id      = aws_subnet.cs312_public.id
+     route_table_id = aws_route_table.cs312_public_rt.id
+   }
+   ```
+
+   What each resource does:
+   - `aws_vpc` creates a logically isolated network with a `/16` CIDR block (65,536 addresses).
+   - `aws_subnet` carves out a `/24` public subnet in `us-east-1a`. `map_public_ip_on_launch` means instances launched here automatically receive a public IP.
+   - `aws_internet_gateway` attaches an IGW to the VPC so instances can communicate with the internet.
+   - `aws_route_table` defines a routing policy that sends all outbound traffic (`0.0.0.0/0`) through the IGW.
+   - `aws_route_table_association` applies that routing policy to the public subnet.
+
+   Next, update the `vpc_id` in both security groups to reference the new VPC:
+
+   ```hcl
+   # In aws_security_group.control and aws_security_group.managed, replace:
+   vpc_id = data.aws_vpc.default.id
+   # with:
+   vpc_id = aws_vpc.cs312.id
+   ```
+
+   Then add `subnet_id` to both instance resources so Terraform places them in the new subnet:
+
+   ```hcl
+   # Add this argument to aws_instance.control and aws_instance.managed:
+   subnet_id = aws_subnet.cs312_public.id
+   ```
+
+   Finally, add a VPC output to `outputs.tf`:
+
+   ```hcl
+   output "vpc_id" {
+     description = "ID of the provisioned VPC"
+     value       = aws_vpc.cs312.id
+   }
+   ```
+
+   Run the plan:
+
+   ```bash
+   terraform plan -var="key_name=cs312-key"
+   ```
+
+   You will see a large diff: the instances and security groups attached to the default VPC must be destroyed and recreated in the new one. This is expected: network interfaces are attached at instance launch time and cannot be moved between VPCs in place.
+
+   <Aside type="note">
+   You do not need to apply this change for the lab submission. The `plan` output illustrates how infrastructure changes cascade through dependent resources: modifying a VPC forces recreation of everything that references it.
+   </Aside>
+
 </Steps>
 
 ### Understanding State
