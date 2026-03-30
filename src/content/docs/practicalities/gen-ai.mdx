@@ -1,0 +1,207 @@
+---
+title: Using GenAI Tools
+description: What generative AI is, what it isn't, and how to use it responsibly in CS 312.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Generative AI (GenAI) tools are now a normal part of technical work. You will encounter them in code editors, terminals, and documentation search. Used well, they can help you understand unfamiliar tools and move past roadblocks faster. Used poorly, they can produce configurations you cannot explain, credentials you forgot to redact, and a submission you cannot defend.
+
+This page explains what GenAI is, what it is not, what it is good and bad at, and how to use it in line with CS 312's policy.
+
+## The Policy
+
+The policy in this course is simple:
+
+- **Use is permitted.** Asking an LLM questions is fine, the same way you would use a search engine or Stack Overflow.
+- **Disclosure is required.** For every assignment, briefly note what tool(s) you used and how. A short sentence at the end of your PDF is enough. If you did not use AI, a brief note to that effect is also expected.
+- **You must be able to explain everything you submit.** If a TA asks you to walk through your Terraform configuration, your Ansible playbook, or any command in your runbook, you are expected to explain what it does and why it is there. If you cannot, it is not ready to submit.
+
+A complete disclosure looks like this:
+
+> *"Used Claude to research Terraform provider options and to troubleshoot an Ansible connection error; wrote all configurations myself. Used GitHub Copilot for shell script completion."*
+
+A "no AI used" note looks like this:
+
+> *"No AI tools used."*
+
+<Aside type="caution">
+AI use that is not disclosed is an academic integrity violation, regardless of how the AI was used.
+</Aside>
+
+## What GenAI Is
+
+In plain terms, GenAI is a tool that generates text based on patterns learned from a large body of examples. When the examples include documentation, Stack Overflow threads, GitHub repositories, and configuration files, the tool becomes useful for technical work.
+
+You give it a prompt (a question, an error message, a goal, a snippet). It predicts a plausible and useful response (an explanation, an example, a rewrite).
+
+Most chat-based GenAI tools are large language models (LLMs). They are trained to produce text that sounds helpful and correct, not to run your infrastructure in their head.
+
+## What GenAI Is Not
+
+GenAI does not understand your system the way a human operator does.
+
+- It does not know if what it tells you is true. It produces text that sounds right.
+- It does not check your configuration against your specific AWS environment, your key pair names, or your actual VPC.
+- It can produce confident, plausible-looking configurations that silently do the wrong thing: wrong AMI IDs, mismatched resource names, outdated API syntax.
+- It does not know that your AWS Academy session has expired, that your Terraform state is out of sync, or that your security group already exists.
+
+Some modern tools can run code, browse documentation, or inspect files you share with them. When they do, they can catch some of these problems. But tool outputs can be based on the wrong version of a provider, an outdated CLI, or a different region than yours. **Always reproduce results yourself.**
+
+<Aside type="note">
+GenAI is very good at producing a "reasonable-sounding guess." Your job is to verify that guess against what actually happens in your environment.
+</Aside>
+
+## Strengths and Weaknesses
+
+### Strengths
+
+- **Explaining errors**: turning a cryptic Terraform plan diff, Ansible task failure, or `kubectl describe` error into a plain-English diagnosis.
+- **Explaining unfamiliar syntax**: decoding HCL, YAML anchors, Jinja2 templates, or shell constructs you have not seen before.
+- **Idea generation**: brainstorming what resource a task needs, what IAM permissions might be missing, or what could cause a 502 from nginx.
+- **Drafting runbooks and documentation**: generating a starting structure you then fill in with specifics from your actual system.
+- **Researching options**: "what is the difference between a ClusterIP and a NodePort service?" is a great LLM question.
+
+### Weaknesses
+
+- **Hallucinations**: inventing Terraform resource arguments, AWS CLI flags, or Kubernetes fields that do not exist or have changed.
+- **Stale information**: AWS, Terraform providers, and Kubernetes APIs change. An LLM's training data has a cutoff.
+- **Context blindness**: it does not know your key pair name, your bucket name, your IAM role, or your VPC ID. Configurations that look correct but reference wrong values will fail silently or at apply time.
+- **Overconfidence**: sounding certain even when wrong.
+- **Credential exposure**: if you paste your `~/.aws/credentials`, a `.env` file, or a Terraform state file, you have shared live secrets.
+
+## How To Use GenAI
+
+Use GenAI in ways that keep you in control of your system.
+
+<Aside type="caution">
+If you have a working configuration but cannot explain what each block does, you do not yet understand your own infrastructure. Slow down before submitting.
+</Aside>
+
+### Understanding Concepts
+
+Ask for explanations of concepts, not complete solutions.
+
+```text title="Concept explanation prompt"
+Explain the difference between a Terraform data source and a resource.
+Why would I use a data source to reference an existing VPC instead of creating a new one?
+Give me a minimal example of each.
+```
+
+```text title="Tool explanation prompt"
+I am learning Ansible. What is an idempotent task?
+Why does it matter for configuration management?
+Show me a concrete example of a task that is idempotent and one that is not.
+```
+
+### Debugging Help
+
+GenAI is most useful when you give it precise context:
+
+- the **exact error message** (not a paraphrase),
+- the **relevant snippet** of your manifest, playbook, or shell command,
+- what you **expected** to happen and what **actually** happened.
+
+```text title="Terraform error prompt"
+I am running Terraform with the AWS provider ~> 5.0 in us-east-1.
+
+Error:
+[paste the error]
+
+Relevant configuration:
+[paste 10-30 lines]
+
+Explain what is causing this error.
+Suggest 2-3 possible fixes.
+```
+
+```text title="Ansible failure prompt"
+Running an Ansible playbook against an EC2 Ubuntu 24.04 instance.
+
+Task that failed:
+[paste the task YAML]
+
+Error output:
+[paste the error]
+
+What is the most likely cause? What should I check first?
+```
+
+### Researching Options
+
+LLMs are useful for surveying options before you make a decision, as long as you verify the details against official documentation.
+
+```text title="Options research prompt"
+What are the tradeoffs between storing Terraform state locally vs. in an S3 backend?
+When would each be appropriate?
+```
+
+```text title="AWS service research prompt"
+What is the difference between an EC2 instance profile and an IAM user with access keys
+for granting permissions to an EC2 instance?
+What are the security implications of each?
+```
+
+### Drafting Documentation
+
+GenAI can generate a useful first draft of runbooks, architecture summaries, or postmortem templates. You must fill in the specifics: actual resource names, real IP addresses, the actual steps that worked in your environment.
+
+```text title="Runbook draft prompt"
+Draft a runbook section for rolling back a failed Kubernetes deployment using kubectl.
+Include: when to use this procedure, the exact commands, and how to verify the rollback succeeded.
+I will fill in the specific deployment names and image tags for my environment.
+```
+
+## Prompts to Illustrate Strengths vs. Weaknesses
+
+Try these to calibrate your trust:
+
+1. **Good use (explanation):** "Explain what `proxy_set_header X-Forwarded-For` does in an nginx reverse proxy configuration and why it matters."
+2. **Good use (debugging):** "I get `Error: No valid credential sources found` when running Terraform. What are the most common causes?"
+3. **Risky use (full solution vending):** "Write me a complete Terraform configuration for the CS 312 lab." You will get something that looks right but references resource names, AMI IDs, and key pairs that do not match your environment.
+4. **Hallucination test:** "What is the `aws_ec2_instance_connect_endpoint` Terraform resource's `preserve_client_ip` argument?" Check whether the argument actually exists in the provider docs.
+
+## Privacy and Safety
+
+In sysadmin work, the stakes for accidental credential exposure are higher than in a typical programming class.
+
+- **Never paste AWS credentials** (`aws_access_key_id`, `aws_secret_access_key`, `aws_session_token`) into any GenAI tool.
+- **Never paste Terraform state files** (`terraform.tfstate`). They contain resource IDs, private IPs, and potentially secrets.
+- **Never paste `.env` files** or any file containing passwords or API keys.
+- When sharing a configuration for debugging, **replace real values** with placeholders: `ami-XXXXXXXX`, `your-key-name`, `your-bucket-name`.
+
+Most tools log inputs for quality and safety monitoring. Treat anything you paste as potentially visible outside this course.
+
+### Local Models
+
+You can run open-weight models locally on your own computer using tools like [Ollama](https://ollama.com/). This avoids cloud privacy concerns but requires hardware and setup effort. Locally run models are generally less capable than frontier models for technical tasks.
+
+## Academic Integrity
+
+The key principles:
+
+- **You are responsible** for everything you submit. An AI generating your Terraform configuration does not transfer responsibility; if it is broken or insecure, that is your submission.
+- **Disclosure is not optional.** Undisclosed use is a violation regardless of how the AI was used.
+- **You must be able to explain it.** A TA or instructor may ask you to walk through any part of a submitted lab or assignment. If you cannot explain what a resource block does, why a task runs with `become: yes`, or what a Kubernetes probe is checking, you are not ready to submit.
+- **Verify before you use.** An LLM-generated configuration that you copy without testing or understanding is a liability. Run `terraform plan`, run the playbook, check the pod status.
+
+<Aside type="caution" title="The rule">
+If you cannot explain what every part of your submission does and why it is correct, it is not ready to turn in.
+</Aside>
+
+## Before You Submit: Checklist
+
+1. Can I explain every resource, task, or configuration block and what it does?
+2. Did I actually run this and verify it works in my environment?
+3. Have I replaced or removed any real credentials, passwords, or tokens?
+4. Does the configuration match the assignment requirements (right region, right ports, right instance type)?
+5. Did I verify any AWS API details, resource arguments, or CLI flags against official documentation?
+6. Have I included a disclosure note about AI use (or non-use) in my PDF?
+
+If the answer to any of these is "no," fix that before submitting.
+
+## Further Reading
+
+1. Shen, Judy Hanwen, and Alex Tamkin. 2026. "How AI Impacts Skill Formation." arXiv:2601.20245. Preprint, arXiv, January 28. https://doi.org/10.48550/arXiv.2601.20245.
+2. Prather, James, Brent N Reeves, Juho Leinonen, et al. 2024. "The Widening Gap: The Benefits and Harms of Generative AI for Novice Programmers." Proceedings of the 2024 ACM Conference on International Computing Education Research - Volume 1, ICER '24, vol. 1 (August): 469-86. https://doi.org/10.1145/3632620.3671116.
+3. <a href="https://www.youtube.com/watch?v=l6ZcFa8pybE" target="_blank" rel="noopener noreferrer">Is AI Hiding Its Full Power? With Geoffrey Hinton (YouTube)</a>
