@@ -21,10 +21,10 @@ Gerald's investor visited last week and asked, "How do you know your systems are
 ## Before You Start
 
 You need:
-- The k3s cluster from Labs 7-8 with the nginx Deployment and Service still running
+- The k3s cluster from Labs 7–8 with all workloads still running: nginx (reverse proxy), WordPress, and MariaDB
 - SSH access to your EC2 instance
 
-If you no longer have the Lab 7-8 setup, re-apply the manifests from those labs before starting.
+If you ended your AWS Academy session, restart it. The EC2 instance and cluster will still be there. If you deleted the resources from Labs 7–8, re-apply all manifests from those labs before starting.
 
 ## Key Concepts
 
@@ -176,10 +176,10 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
    In the query editor, enter this PromQL query:
 
    ```promql
-   kube_pod_container_status_restarts_total{namespace="default", container="nginx"}
+   kube_pod_container_status_restarts_total{namespace="default"}
    ```
 
-   This metric tracks the cumulative number of restarts for each container. Set the panel title to "Nginx Pod Restarts." Choose a visualization type of **Stat** or **Time series**.
+   This metric tracks the cumulative number of restarts for every container in the default namespace (nginx, wordpress, and mariadb). Set the panel title to "Pod Restarts (default namespace)." Choose a visualization type of **Time series** so you can see restarts over time per container.
 
    Click **Apply** to save the panel.
 
@@ -198,10 +198,10 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
    Add a third panel:
 
    ```promql
-   kube_pod_status_ready{namespace="default", condition="true", pod=~"nginx.*"}
+   kube_pod_status_ready{namespace="default", condition="true"}
    ```
 
-   This returns 1 for Pods that are ready and 0 for those that are not. Title it "Nginx Pods Ready." Use a **Stat** visualization.
+   This returns 1 for Pods that are ready and 0 for those that are not, across all workloads in the default namespace (nginx, wordpress, mariadb). Title it "Pods Ready (default namespace)." Use a **Stat** visualization. When all pods are healthy you will see one series per Pod, each showing 1.
 
 5. **Save the dashboard**
 
@@ -346,19 +346,19 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
 ### Clean Up
 
-When you are done with the lab, you can uninstall the monitoring stack:
+When you are done with all three labs (Labs 7–9), uninstall the monitoring stack and remove all workloads:
 
 ```bash
 helm uninstall monitoring -n monitoring
 kubectl delete namespace monitoring
+kubectl delete \
+  -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \
+  -f wordpress-deployment.yaml -f wordpress-service.yaml \
+  -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml
 ```
 
-If you are also done with the nginx deployment:
-
-```bash
-kubectl delete -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml
-```
+If you just need to pause, end your AWS Academy Learner Lab session instead. Everything persists on the EC2 instance.
 
 ---
 
-You have now deployed a complete monitoring stack, built dashboards that answer "is my service healthy?", defined alerts with runbooks, and experienced the full incident loop: a failure occurs, metrics detect it, an alert fires, and you investigate with logs. These are the same observability practices used in production systems at every scale.
+You have now deployed a complete monitoring stack, built dashboards that answer "is my WordPress stack healthy?", defined alerts with runbooks, and experienced the full incident loop: a failure occurs, metrics detect it, an alert fires, and you investigate with logs. These are the same observability practices used in production systems at every scale.

@@ -15,16 +15,16 @@ import LabSubmissionNote from '/src/components/LabSubmissionNote.astro';
 
 The lunch rush crashed the website at all three locations simultaneously. Gerald called it "a digital fire." He wants "those health check things" and a plan for when things break. You asked who would be on call. Gerald said, "You're on call." You asked when. He said, "Always."
 
-Your nginx deployment works, but Kubernetes does not yet know whether your application is actually healthy; it only knows whether the container process is running. A container can be running but completely broken (returning errors, stuck in a loop, out of memory). In this lab, you will add health probes that let Kubernetes make smarter decisions, set resource limits so one container cannot starve the node, practice rolling updates and rollbacks, and intentionally break things to learn how to diagnose and recover from failures.
+Your WordPress stack (nginx → WordPress → MariaDB) is running, but Kubernetes does not yet know whether your application is actually healthy; it only knows whether the container processes are running. A container can be running but completely broken (returning errors, stuck in a loop, out of memory). In this lab, you will add health probes that let Kubernetes make smarter decisions, set resource limits so one container cannot starve the node, practice rolling updates and rollbacks on the nginx reverse proxy, and intentionally break things to learn how to diagnose and recover from failures.
 
 <LabSubmissionNote />
 ## Before You Start
 
 You need:
-- The k3s cluster from Lab 7 with the nginx Deployment and Service still running
+- The k3s cluster from Lab 7 with all manifests still applied (nginx, WordPress, MariaDB, and their Services)
 - SSH access to your EC2 instance
 
-If you no longer have the Lab 7 setup, re-apply the manifests from that lab before starting.
+If you ended your AWS Academy session, restart it. The EC2 instance and cluster will still be there. If you deleted the resources from Lab 7, re-apply all the manifests from that lab before starting.
 
 ## Key Concepts
 
@@ -53,7 +53,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
 <Steps>
 
-1. **Update the Deployment manifest**
+1. **Update the nginx ConfigMap to add a health endpoint**
 
    SSH into your EC2 instance and navigate to your lab directory:
 
@@ -61,7 +61,42 @@ Watch for the answers to these questions as you follow the tutorial.
    cd ~/k8s-lab
    ```
 
-   Edit `nginx-deployment.yaml` to add probes and resource constraints:
+   Edit `nginx-configmap.yaml` to add a `/health` location that nginx handles directly (not proxied to WordPress). This lets the liveness probe check whether nginx itself is alive, independently of whether WordPress is reachable:
+
+   ```yaml
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: nginx-config
+   data:
+     default.conf: |
+       server {
+           listen 80;
+
+           location /health {
+               access_log off;
+               return 200 "ok\n";
+               add_header Content-Type text/plain;
+           }
+
+           location / {
+               proxy_pass http://wordpress-service;
+               proxy_set_header Host $host;
+               proxy_set_header X-Real-IP $remote_addr;
+               proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           }
+       }
+   ```
+
+   Apply the updated ConfigMap:
+
+   ```bash
+   kubectl apply -f nginx-configmap.yaml
+   ```
+
+2. **Update the nginx Deployment to add probes and resource constraints**
+
+   Edit `nginx-deployment.yaml`:
 
    ```yaml
    apiVersion: apps/v1
@@ -87,7 +122,7 @@ Watch for the answers to these questions as you follow the tutorial.
                - containerPort: 80
              livenessProbe:
                httpGet:
-                 path: /
+                 path: /health
                  port: 80
                initialDelaySeconds: 5
                periodSeconds: 10
@@ -105,33 +140,33 @@ Watch for the answers to these questions as you follow the tutorial.
                  memory: "128Mi"
                  cpu: "100m"
              volumeMounts:
-               - name: html-volume
-                 mountPath: /usr/share/nginx/html
+               - name: nginx-config-volume
+                 mountPath: /etc/nginx/conf.d
          volumes:
-           - name: html-volume
+           - name: nginx-config-volume
              configMap:
-               name: nginx-html
+               name: nginx-config
    ```
 
    Let's walk through the new sections:
-   - **`livenessProbe`**: Every 10 seconds (after a 5-second initial delay), Kubernetes sends an HTTP GET to `/` on port 80. If it fails 3 times in a row, Kubernetes restarts the container.
-   - **`readinessProbe`**: Every 5 seconds (after a 3-second delay), Kubernetes checks if the container is ready for traffic. During rolling updates, new Pods must pass their readiness probe before old Pods are terminated.
+   - **`livenessProbe`**: Every 10 seconds (after a 5-second initial delay), Kubernetes sends an HTTP GET to `/health` on port 80. nginx handles this location directly (returning 200 without touching WordPress), so the probe checks whether the nginx process itself is alive, not whether the upstream is reachable. If it fails 3 times in a row, Kubernetes restarts the container.
+   - **`readinessProbe`**: Every 5 seconds (after a 3-second delay), Kubernetes checks `/`, a request that nginx proxies to WordPress. If WordPress is unreachable and nginx returns 502, the readiness probe fails and the Pod is removed from Service endpoints (stops receiving traffic) but is not restarted. This is the correct separation: liveness tracks "is nginx running?" and readiness tracks "can nginx currently serve requests?".
    - **`resources.requests`**: The Pod needs at least 64 Megabytes (Mi) of memory and 50 millicores (50m = 5% of one CPU core).
    - **`resources.limits`**: The Pod cannot use more than 128Mi of memory or 100 millicores. If it exceeds the memory limit, the kernel's OOM killer terminates it.
 
-2. **Apply the updated Deployment**
+3. **Apply the updated Deployment**
 
    ```bash
    kubectl apply -f nginx-deployment.yaml
    ```
 
-3. **Verify Pods are Running and Ready**
+4. **Verify Pods are Running and Ready**
 
    ```bash
    kubectl get pods
    ```
 
-   The READY column should show `1/1` for both Pods, meaning the readiness probe is passing.
+   The READY column should show `1/1` for both nginx Pods, meaning the readiness probe (which proxies through to WordPress) is passing.
 
 </Steps>
 
@@ -354,12 +389,19 @@ This drill demonstrates what happens when a container exceeds its memory limit. 
 
 ### Clean Up
 
-If you plan to continue with Lab 9 (Observability), leave k3s and the nginx deployment running. Otherwise:
+This cluster is used in Lab 9 (Observability). **Do not delete these resources yet.**
+
+To pause your work, end your AWS Academy Learner Lab session. Your EC2 instance, k3s, and all running workloads persist between sessions.
+
+If you have completed both labs and are permanently done, tear everything down:
 
 ```bash
-kubectl delete -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml
+kubectl delete \
+  -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \
+  -f wordpress-deployment.yaml -f wordpress-service.yaml \
+  -f mariadb-deployment.yaml -f mariadb-service.yaml -f db-secret.yaml
 ```
 
 ---
 
-You have now added operational controls to your Kubernetes deployment: probes that tell Kubernetes whether your application is healthy, resource limits that prevent runaway containers, and you have practiced the full failure-recovery loop: introduce a fault, diagnose it with `describe` and `logs`, and recover with a rollback or configuration fix. In the next lab, you will add observability: monitoring dashboards, alerts, and incident detection.
+You have now added operational controls to your Kubernetes deployment: liveness probes that detect when nginx itself is stuck, readiness probes that remove nginx from rotation when WordPress is unreachable, resource limits that prevent runaway containers, and you have practiced the full failure-recovery loop: introduce a fault, diagnose it with `describe` and `logs`, and recover with a rollback or configuration fix. In the next lab, you will add observability: monitoring dashboards, alerts, and incident detection across the full WordPress stack.
