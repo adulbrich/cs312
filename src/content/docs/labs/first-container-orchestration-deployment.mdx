@@ -42,7 +42,7 @@ Watch for the answers to these questions as you follow the tutorial.
 5. After deleting one WordPress Pod, how many seconds did it take for Kubernetes to create a replacement? What does this demonstrate about Deployments? *(2 points)*
 6. How does nginx's `proxy_pass` directive reference WordPress: by IP address or by DNS name? Why does this matter when Pods restart and get new IP addresses? *(2 points)*
 7. When you first encountered the `?reauth=1` redirect loop, what command showed that no `WORDPRESS_AUTH_KEY` environment variables were set in the Pod? What is the root cause of the loop with two replicas? *(3 points)*
-8. After applying the updated Secret and Deployment, what did `kubectl rollout status deployment/wordpress` report? How does a rolling update keep the site available during the update? *(3 points)*
+8. After applying the updated Secret and Deployment, what did `kubectl rollout status deployment/wordpress` report, and what does that confirm about the update? *(3 points)*
 9. Get your TA's initials showing the WordPress admin dashboard (past the login screen) accessible via nginx in a browser. *(5 points)*
 
 ## Tutorial
@@ -647,7 +647,7 @@ The fix is to generate a consistent set of auth keys once, store them in the Sec
    kubectl rollout status deployment/wordpress
    ```
 
-   Kubernetes performs a **rolling update**: it starts a new Pod with the updated environment variables, waits for it to become ready, then terminates an old Pod, and repeats. At no point are all running Pods shut down simultaneously, so the site stays available throughout. Record what `kubectl rollout status` reports for your lab questions.
+   This triggers a Deployment update and waits until WordPress is healthy again. Record what `kubectl rollout status` reports for your lab questions. You will explore rollout mechanics (pause, resume, revisions, and rollback strategies) in detail in the next lab.
 
 5. **Verify the fix**
 

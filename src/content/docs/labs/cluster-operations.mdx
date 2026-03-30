@@ -47,11 +47,11 @@ If you stopped and restarted your EC2 instance between sessions, k3s restarted a
 Watch for the answers to these questions as you follow the tutorial.
 
 1. Run `kubectl get pvc`. What is the STATUS and STORAGECLASS of `mariadb-pvc`? After deleting the MariaDB Pod and letting Kubernetes replace it, did your WordPress data survive? What does this demonstrate about PersistentVolumeClaims compared to the ephemeral storage used in Lab 7? *(3 points)*
-2. How many revisions does `kubectl rollout history deployment/nginx` show after the rolling update? What image tag was used in the most recent revision? *(3 points)*
-3. During the rolling update, did you observe both old and new Pods running at the same time? How does Kubernetes ensure zero downtime during a rollout? *(5 points)*
+2. How many revisions does `kubectl rollout history deployment/nginx` show after the rolling update? What image tag was used in the most recent revision, and what `CHANGE-CAUSE` text did you record for that revision? *(3 points)*
+3. During the rolling update, what changed after you ran `kubectl rollout pause deployment/nginx` and then `kubectl rollout resume deployment/nginx`? Did you observe both old and new Pods running at the same time, and how does that support zero downtime? *(5 points)*
 4. When you deployed the nonexistent image (`nginx:doesnotexist`), what error status did the Pod show? Write down the exact error message from the Events section of `kubectl describe pod`. *(4 points)*
 5. When you set the memory limit to 1Mi, what failure signal did you observe? Depending on container runtime timing, you may see either Pod status `OOMKilled`/`CrashLoopBackOff` with exit code `137`, or `FailedCreatePodSandBox` Events that include `container init was OOM-killed`. Explain what either result means. *(5 points)*
-6. After your final rollback, what image tag are the healthy Pods running? How many Pods show `1/1 Ready`? *(2 points)*
+6. After rolling back to a specific revision (`kubectl rollout undo --to-revision=<n>`), what image tag are the healthy Pods running? How many Pods show `1/1 Ready`? *(2 points)*
 7. Get your TA's initials showing all Pods in a Running/Ready state after recovery from the OOMKill drill. *(3 points)*
 
 ## Tutorial
@@ -248,7 +248,13 @@ At this point your stack is running, but Kubernetes still needs explicit rules f
      labels:
        app: nginx
    spec:
-     replicas: 2
+     replicas: 4
+     minReadySeconds: 15
+     strategy:
+       type: RollingUpdate
+       rollingUpdate:
+         maxUnavailable: 1
+         maxSurge: 1
      selector:
        matchLabels:
          app: nginx
@@ -291,7 +297,9 @@ At this point your stack is running, but Kubernetes still needs explicit rules f
    ```
 
    Let's walk through the new sections:
-   - **`replicas: 2`**: We intentionally run two nginx Pods in this lab so you can observe high-availability behavior during updates and failures. With one replica, a failed readiness check or restart can briefly remove all proxy capacity. With two replicas, one Pod can be removed from traffic while the other keeps serving requests, making rolling updates and probe behavior easier to see.
+   - **`replicas: 4`**: We intentionally run four nginx Pods in this lab so rollouts are easier to observe. With more replicas, old and new Pods overlap longer during updates, so pause/resume behavior is visible instead of finishing too quickly.
+   - **`minReadySeconds: 15`**: A new Pod must stay Ready for 15 seconds before Kubernetes marks it Available. This slows the rollout enough for you to inspect intermediate states.
+   - **`strategy.rollingUpdate`**: `maxUnavailable: 1` and `maxSurge: 1` create a controlled rollout. Kubernetes can bring up one extra Pod while taking at most one old Pod out of service at a time.
    - **`livenessProbe`**: Every 10 seconds (after a 5-second initial delay), Kubernetes sends an HTTP GET to `/health` on port 80. nginx handles this location directly (returning 200 without touching WordPress), so the probe checks whether the nginx process itself is alive, not whether the upstream is reachable. If it fails 3 times in a row, Kubernetes restarts the container.
    - **`readinessProbe`**: Every 5 seconds (after a 3-second delay), Kubernetes checks `/`, a request that nginx proxies to WordPress. If WordPress is unreachable and nginx returns 502, the readiness probe fails and that specific **nginx Pod** is removed from **`nginx-service` endpoints** (stops receiving traffic). It does **not** remove or restart WordPress Pods. Readiness failure alone does not restart nginx; the Pod is added back automatically when readiness checks succeed again.
    - **When does a Pod restart?**: A restart happens when the container process exits (for example, OOM kill), when the **liveness** probe fails repeatedly, or when the Deployment is rolled out/updated. A readiness failure by itself only changes traffic routing.
@@ -310,13 +318,13 @@ At this point your stack is running, but Kubernetes still needs explicit rules f
    kubectl get pods
    ```
 
-   The READY column should show `1/1` for both nginx Pods, meaning the readiness probe (which proxies through to WordPress) is passing.
+   The READY column should show `1/1` for all four nginx Pods, meaning the readiness probe (which proxies through to WordPress) is passing.
 
 </Steps>
 
 ### Performing a Rolling Update
 
-A rolling update replaces Pods gradually; it creates new Pods with the updated image before terminating old ones, ensuring your service never goes fully offline.
+A rolling update replaces Pods gradually; it creates new Pods with the updated image before terminating old ones, ensuring your service never goes fully offline. In this section, you will go beyond a basic image swap and practice real operator controls: pause first, stage a change safely, annotate change-cause, then resume and observe.
 
 <Steps>
 
@@ -328,27 +336,51 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
    You should see at least one revision.
 
-2. **Update the image to a newer version**
+2. **Pause the Deployment before making changes**
 
-   You can update the image directly from the command line:
+   ```bash
+    kubectl rollout pause deployment/nginx
+   ```
+
+   Pausing lets you stage configuration/image changes without immediately starting a rollout.
+
+3. **Update the image while paused**
+
+   Update directly from the command line:
 
    ```bash
    kubectl set image deployment/nginx nginx=nginx:1.27-alpine
    ```
 
-   This changes the nginx container to use the Alpine-based variant (a smaller image). Kubernetes immediately starts a rolling update.
+   This changes the nginx container to use the Alpine-based variant (a smaller image), but no new Pods are created yet because the Deployment is paused.
 
-3. **Watch the rollout**
-
-   In one terminal, watch the Pods:
+4. **Add a change-cause annotation (common operator practice)**
 
    ```bash
+   kubectl annotate deployment nginx kubernetes.io/change-cause="Upgrade  nginx image to 1.27-alpine" --overwrite
+   ```
+ 
+   This makes rollout history easier to interpret later.
+
+5. **Verify the Deployment is paused**
+
+   ```bash
+   kubectl get deployment nginx -o jsonpath='{.spec.paused}{"\n"}'
+   kubectl get pods
+   ```
+ 
+   The first command should print `true`. You should still see only old-image Pods running.
+
+6. **Resume and watch the rollout begin**
+
+   ```bash
+   kubectl rollout resume deployment/nginx
    kubectl get pods -w
    ```
+ 
+   You will see new Pods being created (with the new image) and old Pods being terminated. Because this lab uses 4 replicas with `minReadySeconds`, you have enough time to capture a moment where both old and new Pods are present. Press Ctrl+C to stop watching.
 
-   You will see new Pods being created (with the new image) and old Pods being terminated. At some point, both old and new Pods will be running simultaneously; capture a `kubectl get pods` snapshot at this moment for your lab questions. Press Ctrl+C to stop watching.
-
-4. **Check the rollout status**
+7. **Wait for rollout completion**
 
    ```bash
    kubectl rollout status deployment/nginx
@@ -356,7 +388,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
    This command blocks until the rollout is complete and reports success or failure.
 
-5. **Verify the new image**
+8. **Verify the new image**
 
    ```bash
    kubectl describe deployment nginx | grep Image
@@ -364,13 +396,13 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
    It should show `nginx:1.27-alpine`.
 
-6. **Check the revision history**
+9. **Check the revision history**
 
    ```bash
    kubectl rollout history deployment/nginx
    ```
 
-   You should now see multiple revisions. Record this output.
+   You should now see multiple revisions and your custom change-cause text. Record this output.
 
 </Steps>
 
@@ -394,6 +426,24 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
    The image should be back to `nginx:1.27`.
 
+3. **Roll back to a specific revision**
+
+   First inspect revision numbers:
+ 
+   ```bash
+   kubectl rollout history deployment/nginx
+   ```
+ 
+   Then roll back explicitly to a chosen revision number from the history  output:
+ 
+   ```bash
+   kubectl rollout undo deployment/nginx --to-revision=<revision-number>
+   kubectl rollout status deployment/nginx
+   kubectl describe deployment nginx | grep Image
+   ```
+ 
+   Record the image tag and ready Pod count for your lab questions.
+ 
 </Steps>
 
 ### Failure Drill 1: Bad Image
