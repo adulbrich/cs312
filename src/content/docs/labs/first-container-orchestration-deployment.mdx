@@ -56,7 +56,6 @@ Watch for the answers to these questions as you follow the tutorial.
    In the AWS Console, launch a **SUSE Linux Enterprise Server 16** instance (available in the Quick Start AMIs). Use **t3.small** (2 vCPU, 2 GiB RAM); k3s runs on t3.micro but performs better with a bit more memory. Create a Security Group that allows:
    - SSH (port 22) from Anywhere
    - HTTP (port 80) from Anywhere
-   - Custom TCP (ports 30000-32767) from Anywhere (this is the NodePort range Kubernetes uses)
 
    Connect via SSH. SLES uses `ec2-user` as the default username:
 
@@ -347,15 +346,46 @@ WordPress connects to MariaDB using the Service DNS name `mariadb-service`, whic
 
 ### Deploying nginx as a Reverse Proxy
 
-nginx will be the only publicly-accessible entry point. It forwards requests from Traefik (k3s's built-in ingress controller, running on port 80) to `wordpress-service`. The proxy configuration lives in a ConfigMap, so you can update routing rules without rebuilding the nginx image.
+Traefik is k3s's built-in **ingress controller** and is the component actually listening on public port 80. Strictly speaking, you could route Traefik directly to `wordpress-service` and skip nginx entirely. We are keeping nginx in front of WordPress on purpose because it gives you an explicit reverse-proxy layer to configure yourself: you can see `proxy_pass`, forwarded headers, and service-to-service DNS in action, and in Lab 8 you will use that same nginx layer to practice probes, resource controls, and rollouts without changing the WordPress application container. The proxy configuration lives in a ConfigMap, so you can update routing rules without rebuilding the nginx image.
 
-The WordPress image used in this lab (`wordpress:6.5.5-php8.3-apache`) runs **Apache** internally as the PHP application server. nginx's role here is purely as a **reverse proxy**: it terminates the incoming connection, forwards the request to WordPress over the cluster network, and returns the response. The request flow is:
+The WordPress image used in this lab (`wordpress:6.5.5-php8.3-apache`) runs **Apache** internally as the PHP application server. nginx's role here is purely as a **reverse proxy**: it accepts the request from Traefik, forwards it to WordPress over the cluster network, and returns the response. The request flow is:
 
+```mermaid
+flowchart LR
+  browser[Browser]
+
+  subgraph edge[Cluster Edge]
+    traefik[Traefik Ingress\npublic HTTP on port 80]
+  end
+
+  subgraph proxy[Reverse Proxy Layer]
+    nginxSvc[nginx-service\nClusterIP Service]
+    nginxPod[nginx Pod\nproxy_pass + forwarded headers]
+    nginxSvc --> nginxPod
+  end
+
+  subgraph app[Application Layer]
+    wpSvc[wordpress-service\nClusterIP Service]
+    wpPod1[WordPress Pod A\nApache + PHP]
+    wpPod2[WordPress Pod B\nApache + PHP]
+    wpSvc --> wpPod1
+    wpSvc --> wpPod2
+  end
+
+  subgraph data[Data Layer]
+    mariadbSvc[mariadb-service\nClusterIP Service]
+    mariadbPod[MariaDB Pod]
+    mariadbSvc --> mariadbPod
+  end
+
+  browser -->|HTTP request| traefik
+  traefik -->|Ingress routes /| nginxSvc
+  nginxPod -->|proxy_pass to service DNS| wpSvc
+  wpPod1 -->|SQL on 3306| mariadbSvc
+  wpPod2 -->|SQL on 3306| mariadbSvc
 ```
-Browser → port 80 → Traefik (Ingress) → nginx-service → nginx Pod → wordpress-service → WordPress Pod (Apache + PHP) → mariadb-service → MariaDB Pod
-```
 
-This separation is common in production: nginx handles load balancing across multiple upstream servers and connection management, while the application server focuses on running application code. Traefik handles the public port 80 entry point via an Ingress resource.
+This separation is common in production: the ingress controller handles cluster entry, the reverse proxy handles application-facing HTTP behavior, and the application server focuses on running application code.
 
 <Steps>
 
