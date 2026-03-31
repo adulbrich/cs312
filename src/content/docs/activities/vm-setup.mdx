@@ -10,9 +10,6 @@ import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 This activity puts the concepts from the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture into practice across four parts. By the end you will have a running Debian VM, have executed the snapshot safety-net workflow, observed how networking modes affect connectivity, and researched how the major hypervisors compare.
 
-<Aside type="tip" title="Before you start">
-Keep the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture open as a reference.
-</Aside>
 
 ## What You Will Need
 
@@ -49,7 +46,7 @@ A hypervisor is the software layer that creates and manages virtual machines on 
 
 ### Download a Guest OS ISO
 
-An ISO file is a disk image — a single file that contains the exact contents of a bootable installation disc. The hypervisor can present this file to the VM as if it were a physical DVD drive, so the VM boots the installer without any physical media. We will use the **Debian 12 (Bookworm)** server netinstall ISO. Debian installs quickly, runs with a low memory footprint, and is available for both ARM and x86-64.
+An ISO file is a disk image: a single file that contains the exact contents of a bootable installation disc. The hypervisor can present this file to the VM as if it were a physical DVD drive, so the VM boots the installer without any physical media. We will use the **Debian 12 (Bookworm)** server netinstall ISO. Debian installs quickly, runs with a low memory footprint, and is available for both ARM and x86-64.
 
 <Tabs>
 <TabItem label="Apple Silicon Mac (ARM)">
@@ -70,7 +67,7 @@ On Apple Silicon, running the ARM Debian ISO is **virtualization** (same CPU arc
 
 ### Create the Virtual Machine
 
-Before starting the installer, we define the VM's virtual hardware: how many vCPUs, how much RAM, and how large a virtual disk. These choices shape the VM's behavior for the rest of the activity. The goal is to start conservative — not generous — because it is easy to increase resources later and because over-allocating on a laptop starves your host OS.
+Before starting the installer, we define the VM's virtual hardware: how many vCPUs, how much RAM, and how large a virtual disk. These choices shape the VM's behavior for the rest of the activity. The goal is to start conservative (not generous) because it is easy to increase resources later and because over-allocating on a laptop starves your host OS.
 
 <Tabs>
 <TabItem label="UTM (macOS)">
@@ -117,7 +114,7 @@ Starting the VM boots the Debian installer from the ISO, exactly as if you had i
 1. Start the VM. The Debian boot menu appears in the VM window. Select **Install** to use the text-mode installer.
 
    <Aside type="note" title="GUI vs. text installer">
-   The installer also offers a **Graphical install** option, which adds a mouse-driven interface over the same steps. Either works for this activity. In production, servers rarely have a monitor attached at all and are configured entirely over SSH after first boot — we are deliberately installing without a desktop to mirror that reality.
+   The installer also offers a **Graphical install** option, which adds a mouse-driven interface over the same steps. Either works for this activity. In production, servers rarely have a monitor attached at all and are configured entirely over SSH after first boot; we are deliberately installing without a desktop to mirror that reality.
    </Aside>
 
 2. Follow the installer prompts:
@@ -138,7 +135,7 @@ Starting the VM boots the Debian installer from the ISO, exactly as if you had i
 
 ### Using the VM's Terminal
 
-After reboot, the VM window shows a plain text login prompt — no desktop, no mouse cursor. This is the **virtual console**: the equivalent of a physical keyboard and monitor directly connected to a server. Type your username and press Enter, then enter your password (it will not echo to the screen; this is normal).
+After reboot, the VM window shows a plain text login prompt: no desktop, no mouse cursor. This is the **virtual console**: the equivalent of a physical keyboard and monitor directly connected to a server. Type your username and press Enter, then enter your password (it will not echo to the screen; this is normal).
 
 Everything in the sections below is typed into this console. The VM's terminal behaves exactly like any Linux terminal: commands you type run inside the VM, not on your laptop. Your host OS is completely unaffected by anything you do here. This isolation is the whole point of a VM.
 
@@ -156,7 +153,7 @@ The hypervisor can expose virtual hardware to the guest in two ways: fully emula
 lsblk -d -o NAME,TYPE,TRAN
 ```
 
-`lsblk` lists block devices — the kernel's view of storage hardware. The `-d` flag shows disks only (no partitions), and `-o NAME,TYPE,TRAN` selects the columns: device name, type (disk/partition/loop), and transport protocol. On a VM with virtio storage you will see a device named `vda` rather than `sda`. The prefix matters: `vda` comes from the `virtio-blk` driver; `sda` would indicate a fully-emulated SCSI/SATA disk.
+`lsblk` lists block devices, which are the kernel's view of storage hardware. The `-d` flag shows disks only (no partitions), and `-o NAME,TYPE,TRAN` selects the columns: device name, type (disk/partition/loop), and transport protocol. On a VM with virtio storage you will see a device named `vda` rather than `sda`. The prefix matters: `vda` comes from the `virtio-blk` driver; `sda` would indicate a fully-emulated SCSI/SATA disk.
 
 **Install the QEMU guest agent and ethtool:**
 
@@ -166,7 +163,7 @@ sudo apt install qemu-guest-agent ethtool
 sudo systemctl enable --now qemu-guest-agent
 ```
 
-`apt update` refreshes the package index from Debian's servers. Without this step, `apt install` would use a stale index and might not find the latest versions. The `qemu-guest-agent` is a small daemon that runs inside the guest and lets the hypervisor communicate with it — used for graceful shutdown, freezing the filesystem before snapshots, and reporting metrics. `ethtool` is a utility for querying network interface driver information.
+`apt update` refreshes the package index from Debian's servers. Without this step, `apt install` would use a stale index and might not find the latest versions. The `qemu-guest-agent` is a small daemon that runs inside the guest and lets the hypervisor communicate with it (graceful shutdown, freezing the filesystem before snapshots, and reporting metrics). `ethtool` is a utility for querying network interface driver information.
 
 **Check the network driver:**
 
@@ -175,7 +172,7 @@ sudo systemctl enable --now qemu-guest-agent
 ip link show
 ```
 
-`ip link show` lists every network interface on the machine. You will see at least two: `lo` (the loopback interface, used for traffic that stays within the machine) and your main network interface (named something like `enp0s3`, `eth0`, or `ens3` — the exact name depends on the hypervisor and the kernel's device detection order).
+`ip link show` lists every network interface on the machine. You will see at least two: `lo` (the loopback interface, used for traffic that stays within the machine) and your main network interface (named something like `enp0s3`, `eth0`, or `ens3`; the exact name depends on the hypervisor and the kernel's device detection order).
 
 ```bash
 # Substitute your non-loopback interface name from the output above
@@ -205,7 +202,7 @@ top -b -n 3 | grep "Cpu(s)" | tail -1
 free -h
 ```
 
-`free -h` shows memory usage in human-readable units. The key column is **available**: this is what the kernel estimates is realistically free for new processes, including memory currently used for disk cache that would be released if needed. "Available" is almost always lower than "total" because the kernel eagerly uses free RAM for caching. This is normal and healthy behavior — unused RAM is wasted RAM.
+`free -h` shows memory usage in human-readable units. The key column is **available**: this is what the kernel estimates is realistically free for new processes, including memory currently used for disk cache that would be released if needed. "Available" is almost always lower than "total" because the kernel eagerly uses free RAM for caching. This is normal and healthy behavior: unused RAM is wasted RAM.
 
 ```bash
 # Disk: used space on root filesystem
@@ -263,7 +260,7 @@ Both should show normal output: SSH active and running, root filesystem with fre
 </Tabs>
 
 <Aside type="note" title="How snapshots work">
-When you take a snapshot, the hypervisor marks the current disk image read-only and creates a new delta file to receive all subsequent writes. Reads still come from the original image for blocks that have not changed; new or changed blocks go to the delta. This is why snapshots are nearly instant — the full disk is not copied.
+When you take a snapshot, the hypervisor marks the current disk image read-only and creates a new delta file to receive all subsequent writes. Reads still come from the original image for blocks that have not changed; new or changed blocks go to the delta. This is why snapshots are nearly instant: the full disk is not copied.
 </Aside>
 
 ### Make a Destructive Change
@@ -384,7 +381,7 @@ Your VM currently uses NAT. In NAT mode, the hypervisor acts like a router: the 
 
    This will time out. The VM can initiate connections outward, but nothing outside the hypervisor's virtual network can initiate a connection to the VM. The hypervisor has no port-forwarding rule telling it where to send incoming packets addressed to the VM.
 
-3. Confirm the VM still has outbound internet access — run this **inside the VM**:
+3. Confirm the VM still has outbound internet access; run this **inside the VM**:
 
    ```bash
    ping -c 3 debian.org
@@ -434,7 +431,7 @@ Host-only creates a private virtual network that exists only between the host an
    ip addr show
    ```
 
-   The address will be on a different subnet than NAT — typically `192.168.x.x` for host-only.
+   The address will be on a different subnet than NAT, typically `192.168.x.x` for host-only.
 
 4. From your **laptop**, ping the VM:
 
