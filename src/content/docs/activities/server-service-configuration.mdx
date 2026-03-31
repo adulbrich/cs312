@@ -15,8 +15,6 @@ You can use your Arch VM from the previous activity or a fresh Debian or Ubuntu 
 
 ## Part 1: Create Service Accounts
 
-**Lecture concept:** This section exercises the *User and Group Management* concepts from the lecture, specifically service accounts vs. login accounts and the principle of least privilege.
-
 A service account owns the process running your application. It has no login shell (so attackers who exploit the service cannot use it to log in interactively) and typically no home directory. Creating it with `useradd -r` marks it as a system account (UID below 1000).
 
 ### Create an Application Service Account
@@ -104,8 +102,6 @@ The `su - deploy` command spawns a login shell as the deploy user. The `-` flag 
 
 ## Part 2: Install Packages
 
-**Lecture concept:** This section exercises the *Package Management* section from the lecture. Updating the package index before installing ensures you get the latest available version from your configured repositories.
-
 <Tabs>
 <TabItem label="Arch">
 <Steps>
@@ -169,8 +165,6 @@ The package placed its web root, configuration, and binary in standard FHS locat
 </Aside>
 
 ## Part 3: Write a Custom Systemd Unit
-
-**Lecture concept:** This section exercises the *Systemd Services* section from the lecture: unit files, dependency ordering, restart policy, and logging.
 
 ### Create the Application Script
 
@@ -253,8 +247,6 @@ We will write a shell script that simulates a long-running service. This exercis
 
 ## Part 4: Monitor Logs
 
-**Lecture concept:** This section exercises the `journalctl` log inspection tools from the *Systemd Services* section of the lecture.
-
 <Steps>
 1. Follow the live log stream:
 
@@ -304,8 +296,6 @@ We will write a shell script that simulates a long-running service. This exercis
 </Steps>
 
 ## Part 5: Disk Usage Monitoring
-
-**Lecture concept:** This section exercises the *Filesystem Layout and Disk Management* section from the lecture.
 
 <Steps>
 1. Check overall disk usage across all mounted filesystems:

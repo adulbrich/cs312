@@ -26,8 +26,6 @@ Keep the [Virtualization and Virtual Machines](/lectures/virtualization-basics/)
 
 ### Install a Hypervisor
 
-**Lecture concept:** Hypervisor Types: you are choosing a Type-2 (hosted) hypervisor appropriate for a laptop lab environment.
-
 <Tabs>
 <TabItem label="macOS (UTM)">
 <Steps>
@@ -69,8 +67,6 @@ Look for a filename like `debian-12.x.x-amd64-netinst.iso`.
 </Aside>
 
 ### Create the Virtual Machine
-
-**Lecture concept:** Virtual Hardware and Resource Allocation: start conservative, not generous.
 
 <Tabs>
 <TabItem label="UTM (macOS)">
@@ -130,8 +126,6 @@ Choosing "SSH server only, no desktop" is exactly what the Linux server planning
 
 ### Verify Paravirtualized Drivers
 
-**Lecture concept:** Paravirtualized Drivers: guest drivers that replace slow fully-emulated hardware with high-performance cooperative interfaces.
-
 Log in to the VM and check what storage driver is active:
 
 ```bash
@@ -164,8 +158,6 @@ The storage device appears as `vda` instead of `sda`. What hardware is `virtio-b
 
 ### Collect Baseline Metrics
 
-**Lecture concept:** Performance and Measurement: record a healthy baseline before making any changes.
-
 ```bash
 # CPU: idle percentage over a short sample
 top -b -n 3 | grep "Cpu(s)" | tail -1
@@ -189,8 +181,6 @@ The `free -h` output shows less than 1 GB available, even though you allocated 1
 ---
 
 ## Part 2: The Snapshot Safety-Net Workflow
-
-**Lecture concept:** Snapshots and Clones.
 
 The lecture describes snapshots as short-lived rollback tools for risky changes. This part runs that workflow end-to-end.
 
@@ -320,8 +310,6 @@ When you reverted the snapshot, what happened to the delta writes that accumulat
 
 ## Part 3: Networking Modes
 
-**Lecture concept:** Networking Modes.
-
 ### Observe NAT Behavior
 
 Your VM currently uses NAT.
@@ -427,8 +415,6 @@ Host-only gave you host-to-guest connectivity but broke internet access. What is
 ---
 
 ## Part 4: Hypervisor Comparison
-
-**Lecture concept:** Hypervisor Types (and Why the Distinction Blurs).
 
 Using official documentation or product pages, fill in the comparison table below. The first row is partially completed as an example.
 

@@ -76,8 +76,6 @@ You are currently running from a RAM-based live environment called **archiso**. 
 
 ## Partition the Disk
 
-**Lecture concept:** This section exercises the *Filesystem Layout and Disk Management* concepts from the lecture. You will create the partition scheme that the lecture describes in the context of `/boot/efi`, swap, and the root filesystem.
-
 We will create three partitions using GPT: an EFI System Partition, a swap partition, and a root partition.
 
 <Steps>
@@ -134,8 +132,6 @@ swapon /dev/sda2
 ```
 
 ### Mount the Filesystems
-
-**Lecture concept:** This mirrors the lecture's discussion of mount points and `/etc/fstab`. You are manually doing what the "Mount Points" section describes.
 
 ```bash
 # Mount the root partition
@@ -219,8 +215,6 @@ pwd
 
 ## Install the Bootloader
 
-**Lecture concept:** This section directly exercises the *Boot Process* section from the lecture. You are installing GRUB2 (the bootloader the lecture describes) and configuring it to chainload from UEFI firmware.
-
 <Steps>
 1. Install GRUB and supporting EFI tools:
 
@@ -250,8 +244,6 @@ pwd
 </Aside>
 
 ## Configure sudo and Create a User
-
-**Lecture concept:** This section exercises the *User and Group Management* section from the lecture. You will use `useradd`, configure the `wheel` group via `visudo`, and see the same `-m`, `-G`, and `-s` flags the lecture demonstrates.
 
 <Steps>
 1. Install sudo:
@@ -316,8 +308,6 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 </Aside>
 
 ## Configure Networking
-
-**Lecture concept:** This section exercises the *Network Configuration Basics* section from the lecture. Where the lecture uses Netplan (Ubuntu's tool), Arch uses systemd-networkd directly. The underlying concepts are the same: identify the interface, configure an address source (DHCP or static), enable the service.
 
 <Steps>
 1. Set a hostname (the lecture covers this with `hostnamectl`):

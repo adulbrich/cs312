@@ -28,8 +28,6 @@ AWS resources cost money. The two `t3.small` Windows instances used in this acti
 
 ## Set Up the Network (VPC)
 
-**Lecture concept:** The lecture emphasizes that Active Directory depends on network connectivity between the domain controller and all clients. This step creates the network that makes that possible.
-
 Before deploying any servers, you need a Virtual Private Cloud (VPC) with subnets in two Availability Zones. This mirrors a real deployment where domain controllers and clients may sit in different data center zones for resilience.
 
 <Steps>
@@ -64,8 +62,6 @@ Before deploying any servers, you need a Virtual Private Cloud (VPC) with subnet
 </Aside>
 
 ## Deploy the Domain Controller
-
-**Lecture concept:** This exercises the *Promoting a Domain Controller* section from the lecture. You will install the AD DS role, run the promotion wizard, and see the server reboot into its new role.
 
 <Steps>
 1. Navigate to the **EC2 Dashboard**. Click **Launch Instance**.
@@ -135,8 +131,6 @@ The first login after promotion takes several minutes as Active Directory finish
 
 ## Deploy a Client Machine
 
-**Lecture concept:** This exercises the concept of *domain-joined machines* from the lecture. The client will authenticate against the domain controller rather than using local accounts.
-
 <Steps>
 1. Return to the **EC2 Dashboard** and launch a second instance:
    - **Name:** `WindowsClient`
@@ -160,8 +154,6 @@ You might wonder why we use Windows Server as a "client" instead of Windows 10 o
 </Aside>
 
 ## Point the Client's DNS to the Domain Controller
-
-**Lecture concept:** The lecture's *DNS Dependency* section and its caution box explain why this step is critical. Active Directory relies entirely on DNS to locate domain controllers. If the client uses a public DNS server (like 8.8.8.8), it cannot resolve `cs312lab.local` and domain join will fail.
 
 On the **WindowsClient** machine:
 
@@ -211,8 +203,6 @@ On the **WindowsClient** machine:
 
 ## Create an Organizational Unit, User, and Group
 
-**Lecture concept:** This exercises the *AD Building Blocks: Users, Groups, and Organizational Units* section from the lecture. You will create the kind of OU structure and group-based access model the lecture recommends.
-
 On the **DomainController**:
 
 <Steps>
@@ -246,8 +236,6 @@ On the **DomainController**:
 </Steps>
 
 ## Create and Apply a Group Policy Object
-
-**Lecture concept:** This exercises the *Group Policy Objects* section from the lecture. You will create a GPO, configure both computer and user settings, link it to an OU, and verify that LSDOU processing applies it correctly.
 
 <Steps>
 1. Back in **Group Policy Management**, right-click the **Lab Computers** OU and select **Create a GPO in this domain, and Link it here**. Name it `Lab Policy`.
