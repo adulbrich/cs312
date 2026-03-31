@@ -280,12 +280,10 @@ When configuring storage, follow these guidelines:
 You populate a second M.2 slot and your previously x16 GPU now reports x8. The manual shows that slot steals CPU lanes from the primary GPU slot. Moving the second NVMe to a chipset-attached slot restores full GPU bandwidth with negligible impact to the secondary drive's latency, an optimal trade for graphics workloads.
 </Aside>
 
-<Aside type="caution">
-A steadily climbing SMART metric (e.g. reallocated sectors, media errors) is a meaningful warning: take a fresh backup and plan for replacement rather than waiting for outright failure. A single isolated value is less alarming, but a trend demands action.
-</Aside>
+<Aside type="caution" title="Act on SMART trends, not single values">
+A steadily climbing metric (reallocated sectors, media errors) is a meaningful warning: take a fresh backup and plan for replacement. A single isolated value may be noise, but a trend demands action.
 
-<Aside type="tip" icon="star" title="Example: SMART Trend Response">
-You notice an SSD's SMART "media errors" count jump from 0 to 8 within a week while reallocated sectors remain 0. You immediately capture a fresh backup and schedule a warranty RMA instead of waiting; subsequent extended tests reveal intermittent read failures. Early action avoided data reconstruction stress later.
+**Example:** An SSD's "media errors" count jumps from 0 to 8 within a week while reallocated sectors stay at 0. You capture a fresh backup and schedule a warranty RMA rather than waiting. Subsequent extended tests reveal intermittent read failures — early action avoided a full data reconstruction.
 </Aside>
 
 ## Graphics and Parallel Accelerators
@@ -421,7 +419,7 @@ You build on an mATX board and get no video. The board's "DRAM" LED is lit. Remo
 Misplaced standoffs can short traces on the underside of the motherboard; install standoffs only where the board has mounting holes.
 </Aside>
 
-## Further reading
+## Further Reading
 
 - <a href="https://www.youtube.com/watch?v=fpnE6UAfbtU" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #6: Registers and RAM (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=FZGugFqdr60" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #7: The CPU (YouTube)</a>

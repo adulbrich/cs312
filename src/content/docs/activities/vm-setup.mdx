@@ -1,16 +1,17 @@
 ---
-title: "Set Up Your First Virtual Machine"
-description: "Install a hypervisor, create a VM with appropriate virtual hardware, boot a Linux guest, and collect baseline metrics."
+title: "Virtual Machine Fundamentals"
+description: "Install a hypervisor, configure a Linux guest, practice the snapshot safety-net workflow, explore networking modes, and compare hypervisors."
 sidebar:
   order: 1
 ---
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts the concepts from the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture into practice. You will install a hypervisor on your laptop, create a virtual machine with deliberate resource choices, boot a Linux guest, and verify that paravirtualized drivers are active. By the end, you will have a running VM that the next activity will build on.
+This activity puts the concepts from the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture into practice across four parts. By the end you will have a running Debian VM, have executed the snapshot safety-net workflow, observed how networking modes affect connectivity, and researched how the major hypervisors compare.
 
 <Aside type="tip">
-Read the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture before starting. Each section below notes which lecture concept it exercises.
+Keep the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture open as a reference. Each section below notes which lecture concept it exercises.
 </Aside>
 
 ## What You Will Need
@@ -19,7 +20,11 @@ Read the [Virtualization and Virtual Machines](/lectures/virtualization-basics/)
 - Administrator access to your laptop
 - An internet connection
 
-## Install a Hypervisor
+---
+
+## Part 1: Set Up the Virtual Machine
+
+### Install a Hypervisor
 
 **Lecture concept:** Hypervisor Types: you are choosing a Type-2 (hosted) hypervisor appropriate for a laptop lab environment.
 
@@ -42,7 +47,7 @@ Read the [Virtualization and Virtual Machines](/lectures/virtualization-basics/)
 </TabItem>
 </Tabs>
 
-## Download a Guest OS ISO
+### Download a Guest OS ISO
 
 We will use the **Debian 12 (Bookworm)** server netinstall ISO. Debian installs quickly, runs with a low memory footprint, and is available for both ARM and x86-64.
 
@@ -63,7 +68,7 @@ Look for a filename like `debian-12.x.x-amd64-netinst.iso`.
 **Lecture connection: virtualization vs. emulation:** On Apple Silicon, running the ARM Debian ISO is **virtualization** (same architecture, near-native speed via Apple's Hypervisor framework). Running the x86-64 ISO on the same machine would be **emulation** (instruction translation, much slower). Always match the ISO architecture to your host CPU when you want performance.
 </Aside>
 
-## Create the Virtual Machine
+### Create the Virtual Machine
 
 **Lecture concept:** Virtual Hardware and Resource Allocation: start conservative, not generous.
 
@@ -96,11 +101,11 @@ Look for a filename like `debian-12.x.x-amd64-netinst.iso`.
 </TabItem>
 </Tabs>
 
-<Aside type="tip">
-A Debian server install with no GUI uses about 700 MB of RAM at idle. Starting at 1 GB provides enough headroom to observe memory behavior without over-provisioning. Two vCPUs mirrors what you would typically allocate to a small server VM. Starting small and measuring is the principle, not guessing big.
-</Aside>
+<ActivityQuestion>
+You configured 2 vCPUs and 1 GB of RAM. Why start this small rather than giving the VM half your laptop's resources? What risk does the lecture describe if you overcommit CPU or memory on the host?
+</ActivityQuestion>
 
-## Install Debian
+### Install Debian
 
 <Steps>
 1. Start the VM and boot from the ISO. Select **Install** (text mode) from the boot menu.
@@ -120,10 +125,10 @@ A Debian server install with no GUI uses about 700 MB of RAM at idle. Starting a
 </Steps>
 
 <Aside type="note">
-**Lecture connection:** Choosing "SSH server only, no desktop" is exactly what the Linux server planning lecture describes as a server edition: no graphical desktop, lower memory footprint, smaller attack surface.
+Choosing "SSH server only, no desktop" is exactly what the Linux server planning lecture describes as a server installation: no graphical desktop, lower memory footprint, smaller attack surface.
 </Aside>
 
-## Verify Paravirtualized Drivers
+### Verify Paravirtualized Drivers
 
 **Lecture concept:** Paravirtualized Drivers: guest drivers that replace slow fully-emulated hardware with high-performance cooperative interfaces.
 
@@ -143,18 +148,21 @@ sudo apt install qemu-guest-agent ethtool
 sudo systemctl enable --now qemu-guest-agent
 ```
 
-Check the network driver (the interface name varies; use the non-loopback interface from `ip link show`):
+Check the network driver (find your interface name first, then inspect its driver):
 
 ```bash
-# Find your interface name first
 ip link show
 
-# Then check its driver (substitute your interface name, e.g. enp0s3 or eth0)
+# Substitute your non-loopback interface name (e.g. enp0s3, eth0)
 ethtool -i enp0s3 | grep driver
 # Expected output: driver: virtio_net
 ```
 
-## Collect Baseline Metrics
+<ActivityQuestion>
+The storage device appears as `vda` instead of `sda`. What hardware is `virtio-blk` replacing, and why is it faster than the fully-emulated alternative? What would you need to do to confirm the network driver is also using virtio?
+</ActivityQuestion>
+
+### Collect Baseline Metrics
 
 **Lecture concept:** Performance and Measurement: record a healthy baseline before making any changes.
 
@@ -174,13 +182,276 @@ uptime
 
 Record these values. The habit of noting "normal" before changes is what lets you recognize "abnormal" when something goes wrong.
 
-## Reflection Questions
+<ActivityQuestion>
+The `free -h` output shows less than 1 GB available, even though you allocated 1 GB to the VM. Where did the rest go? Is this a problem, and how would you tell if the VM were actually memory-constrained?
+</ActivityQuestion>
 
-1. **Virtualization vs. emulation:** If you are on Apple Silicon and used the ARM ISO, why is it faster than using the x86-64 ISO? What would happen if you chose **Emulate** instead of **Virtualize** in UTM?
-2. **Paravirtual drivers:** The storage device appeared as `vda` instead of `sda`. What hardware does the `virtio-blk` driver replace, and why is it faster than the emulated alternative?
-3. **Resource sizing:** You allocated 1 GB of RAM. The `free -h` output shows less than 1 GB "available." Where did the rest go, and is that a problem?
-4. **Hypervisor type:** VirtualBox and UTM are Type-2 hypervisors. What does that mean in terms of how they run on your laptop? What would be different about a Type-1 hypervisor like Proxmox VE?
+---
+
+## Part 2: The Snapshot Safety-Net Workflow
+
+**Lecture concept:** Snapshots and Clones.
+
+The lecture describes snapshots as short-lived rollback tools for risky changes. This part runs that workflow end-to-end.
+
+### Confirm a Healthy Baseline
+
+Log in to the VM and verify the SSH service and disk state are clean:
+
+```bash
+sudo systemctl status ssh
+df -h /
+```
+
+Both should show normal output: SSH active, root filesystem with free space.
+
+### Take a Pre-Change Snapshot
+
+<Tabs>
+<TabItem label="UTM">
+<Steps>
+1. Right-click the VM in the UTM sidebar.
+2. Select **Snapshot > New Snapshot**.
+3. Name it `pre-change-1` and confirm.
+</Steps>
+</TabItem>
+<TabItem label="VirtualBox">
+<Steps>
+1. With the VM selected, open **Machine > Take Snapshot**.
+2. Name it `pre-change-1` and click **OK**.
+</Steps>
+</TabItem>
+</Tabs>
+
+<Aside type="note">
+A snapshot marks the current disk image read-only and starts writing only changed blocks to a new delta file. The full disk is not copied, which is why snapshots are fast, but both the delta and the base image live on the same physical disk.
+</Aside>
+
+### Make a Destructive Change
+
+Simulate a misconfiguration by corrupting the SSH service config:
+
+```bash
+sudo sh -c 'echo "Port INVALID_VALUE" >> /etc/ssh/sshd_config'
+sudo systemctl reload ssh
+```
+
+Verify the damage:
+
+```bash
+sudo systemctl status ssh
+sudo sshd -T 2>&1 | head -5
+```
+
+The status should show a failure or reload error.
+
+### Attempt an In-Place Fix (and Give Up)
+
+```bash
+tail -10 /etc/ssh/sshd_config
+```
+
+You can see the `Port INVALID_VALUE` line. In a real incident, the bad config might not be obvious. This is the decision point: spend more time debugging, or revert to the known-good snapshot.
+
+### Revert the Snapshot
+
+Shut down the VM:
+
+```bash
+sudo shutdown -h now
+```
+
+Revert to `pre-change-1`:
+
+<Tabs>
+<TabItem label="UTM">
+<Steps>
+1. Right-click the VM and select **Snapshot > Restore Snapshot**.
+2. Select `pre-change-1` and confirm.
+</Steps>
+</TabItem>
+<TabItem label="VirtualBox">
+<Steps>
+1. Open the **Snapshots** panel for the VM.
+2. Right-click `pre-change-1` and choose **Restore**.
+3. Uncheck **Create snapshot of current state** and click **Restore**.
+</Steps>
+</TabItem>
+</Tabs>
+
+Start the VM and verify recovery:
+
+```bash
+sudo systemctl status ssh
+sudo sshd -T 2>&1 | head -3
+tail -5 /etc/ssh/sshd_config
+```
+
+All three should be clean: SSH active, no config error, no `INVALID_VALUE` line.
+
+<Aside type="caution">
+Snapshots are not backups. The snapshot and the base disk share the same storage pool. If the host machine's disk fails, both are lost. Backups must reside on separate storage.
+</Aside>
+
+### Delete the Snapshot
+
+Once recovery is confirmed, delete `pre-change-1`:
+
+<Tabs>
+<TabItem label="UTM">
+<Steps>
+1. Right-click the VM and select **Snapshot > Delete Snapshot**.
+2. Select `pre-change-1` and confirm.
+</Steps>
+</TabItem>
+<TabItem label="VirtualBox">
+<Steps>
+1. Open the **Snapshots** panel.
+2. Right-click `pre-change-1` and choose **Delete Snapshot**.
+</Steps>
+</TabItem>
+</Tabs>
+
+<ActivityQuestion>
+When you reverted the snapshot, what happened to the delta writes that accumulated between taking the snapshot and reverting? Why does the lecture recommend deleting snapshots once a change is confirmed stable, rather than keeping them indefinitely?
+</ActivityQuestion>
+
+---
+
+## Part 3: Networking Modes
+
+**Lecture concept:** Networking Modes.
+
+### Observe NAT Behavior
+
+Your VM currently uses NAT.
+
+<Steps>
+1. Check the VM's IP address:
+
+   ```bash
+   ip addr show
+   ```
+
+   Note the address (typically `10.0.2.15` on VirtualBox; varies on UTM).
+
+2. From your **laptop's** terminal (not the VM), try to reach the VM:
+
+   ```bash
+   ping -c 3 <vm-ip-address>
+   ```
+
+   This will time out on most NAT configurations. The VM can reach outward; nothing can reach in without port forwarding.
+
+3. Confirm the VM still has internet access — run this **inside the VM**:
+
+   ```bash
+   ping -c 3 debian.org
+   ```
+</Steps>
+
+<ActivityQuestion>
+The ping from your laptop to the VM times out even though the VM can reach the internet. Explain why, using the lecture's description of how NAT works. What would you need to configure to SSH into the VM from your laptop while it is in NAT mode?
+</ActivityQuestion>
+
+### Switch to Host-Only Networking
+
+<Steps>
+1. Power off the VM:
+
+   ```bash
+   sudo shutdown -h now
+   ```
+
+2. Change the network adapter:
+
+   <Tabs>
+   <TabItem label="UTM">
+   <Steps>
+   1. Open **VM Settings > Network**.
+   2. Change the mode from **Shared Network** to **Host Only**.
+   3. Save and start the VM.
+   </Steps>
+   </TabItem>
+   <TabItem label="VirtualBox">
+   <Steps>
+   1. Open **Settings > Network > Adapter 1**.
+   2. Change **Attached to** from **NAT** to **Host-only Adapter**.
+   3. Select `vboxnet0` from the adapter list, then click **OK**.
+   4. Start the VM.
+   </Steps>
+   </TabItem>
+   </Tabs>
+
+3. Check the new IP address inside the VM:
+
+   ```bash
+   ip addr show
+   ```
+
+4. Test reachability from your **laptop**:
+
+   ```bash
+   ping -c 3 <new-vm-ip>
+   ```
+
+   This should succeed.
+
+5. Test internet access from **inside the VM**:
+
+   ```bash
+   ping -c 3 debian.org
+   ```
+
+   This will fail: host-only means the host and guest can communicate, but the guest is isolated from the broader network.
+</Steps>
+
+### Summary Table
+
+Fill in the table from your observations:
+
+| Mode | Guest can reach internet? | Host can reach guest? | Other LAN machines can reach guest? |
+|------|--------------------------|----------------------|--------------------------------------|
+| NAT | | | |
+| Host-only | | | |
+| Bridged | (predict; do not test) | | |
+
+<Aside type="note">
+Switch your adapter back to NAT before the next part. Host-only mode breaks internet access, which you will need for package installation.
+</Aside>
+
+<ActivityQuestion>
+Host-only gave you host-to-guest connectivity but broke internet access. What is present in NAT mode that host-only lacks? If you were setting up multiple VMs that needed to talk to each other but not to the internet, which mode would you use?
+</ActivityQuestion>
+
+---
+
+## Part 4: Hypervisor Comparison
+
+**Lecture concept:** Hypervisor Types (and Why the Distinction Blurs).
+
+Using official documentation or product pages, fill in the comparison table below. The first row is partially completed as an example.
+
+| Hypervisor | Type | Primary use case | License | One notable limitation |
+|---|---|---|---|---|
+| VirtualBox | Type-2 | Desktop lab, cross-platform | Free (GPL) | |
+| UTM | | | | |
+| KVM (with libvirt) | | | | |
+| Proxmox VE | | | | |
+| VMware ESXi | | | | |
+
+Useful starting points: [virtualbox.org](https://www.virtualbox.org), [mac.getutm.app](https://mac.getutm.app), [linux-kvm.org](https://linux-kvm.org), [proxmox.com](https://www.proxmox.com), [broadcom.com/products/software/vmware](https://www.broadcom.com/products/software/vmware).
+
+<ActivityQuestion>
+You used VirtualBox or UTM for this activity — both Type-2 hypervisors. What concrete advantage would Proxmox VE (Type-1) offer if you were running a server with four VMs that needed to stay up overnight?
+</ActivityQuestion>
+
+<ActivityQuestion>
+After Broadcom acquired VMware, the free ESXi tier was discontinued and then partially reinstated. Why does a licensing change like this accelerate adoption of open-source alternatives like Proxmox VE or KVM? What risk does this illustrate for infrastructure built on proprietary platforms?
+</ActivityQuestion>
+
+---
 
 ## What's Next
 
-Keep this VM running: the next activity ([VM Snapshots and Networking](/activities/vm-snapshots-networking/)) builds directly on it.
+With a working VM, hands-on experience with snapshots and networking, and a map of the hypervisor landscape, you are ready to put Linux itself through its paces. The [Arch Linux Install](/activities/arch-linux-install/) activity takes the concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture and makes you perform every step manually (partitioning, bootloader installation, user creation, and networking) that an OS installer would otherwise hide.

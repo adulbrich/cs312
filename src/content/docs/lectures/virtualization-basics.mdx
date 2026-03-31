@@ -35,6 +35,18 @@ If you run Ubuntu inside VirtualBox on your Mac: the MacBook is the *host*, Virt
 ## Why Virtualize
 Virtualization matters because it converts hardware from a static asset into a dynamic pool you can programmatically slice, pause, clone, and move. Operational teams use VMs to isolate failures; if one guest kernel panics it rarely affects neighbors. Developers spin up ephemeral environments to test changes that require kernel modules or different distributions. Disaster recovery strategies replicate VM images to a second site so services can resume quickly after hardware loss. Economically, virtualization raises utilization: instead of ten servers each 10% busy, one larger host might run ten guests at 60-70% aggregate usage with headroom. Strategically, skills you build here transfer directly to cloud usage, because cloud "instances" are VMs exposed via APIs. Note that virtualization is not free performance-wise; there is real overhead, though it is often modest with hardware assistance.
 
+<LinkCard
+  title="Windows Users"
+  href="/practicalities/windows-users/"
+  description="Running Windows on your personal machine? See how to set up WSL and a Linux environment for this course."
+/>
+
+<LinkCard
+  title="Ventoy"
+  href="https://www.ventoy.net/"
+  description="An open-source tool for creating bootable USB drives that can hold multiple ISOs at once. Useful for testing hypervisor installers, Linux distributions, and rescue environments from a single USB stick."
+/>
+
 ## Architecture: Host, Hypervisor, Guests
 At runtime the hypervisor multiplexes physical CPUs and memory pages among guests while mediating privileged operations. On x86 and ARM, hardware virtualization extensions (Intel VT-x, AMD-V, ARM Virtualization Extensions) let guest code run near native speed in a CPU mode that traps only sensitive instructions. Device access is either fully emulated (the hypervisor simulates a network card), paravirtualized (a cooperative high-performance interface like virtio-net), or directly assigned (PCI passthrough of a physical GPU). The balance of emulation vs paravirtualization drives performance and compatibility. Modern stacks (KVM + QEMU, Hyper-V, ESXi, Xen) combine these techniques automatically; your job is usually to select enhanced drivers inside the guest.
 
@@ -216,12 +228,6 @@ Live migration copies a running VM's memory to a target host while it continues 
 
 A *process virtual machine* (also called a language runtime or application VM) is conceptually different from the system hypervisors discussed above. It is a software layer that runs a single application written in an intermediate language, making that application portable across host operating systems. The **Java Virtual Machine (JVM)** is the canonical example: Java source compiles to JVM bytecode, and the JVM executable itself is ported to run on countless operating systems, enabling Java programs to run unchanged wherever the JVM does. Python, Ruby, and the .NET CLR follow the same principle. Process VMs are not used for isolation of full operating systems, so they do not appear in typical sysadmin workflows, but understanding the distinction prevents confusion when documentation uses "VM" in a Java or containerization context.
 
-<LinkCard
-  title="Windows Users"
-  href="/practicalities/windows-users/"
-  description="Running Windows on your personal machine? See how to set up WSL and a Linux environment for this course."
-/>
-
 ## Hypervisor Ecosystem and Market State
 
 ### Proxmox Virtual Environment (VE)
@@ -240,12 +246,6 @@ The major public cloud platforms each rely on enterprise-grade hypervisors under
 ### VMware Licensing Shift
 After Broadcom's acquisition of VMware, the free ESXi program was discontinued then partially reinstated (version 8.0 Update 3e, 2025) with ongoing community debate about scope and support. This has accelerated adoption of open alternatives like Proxmox VE, oVirt, and OpenStack-based stacks.
 
-<LinkCard
-  title="Ventoy"
-  href="https://www.ventoy.net/"
-  description="An open-source tool for creating bootable USB drives that can hold multiple ISOs at once. Useful for testing hypervisor installers, Linux distributions, and rescue environments from a single USB stick."
-/>
-
 ## Virtualization Ecosystem
 
 Industry consolidation and licensing changes keep reshaping choices. After Broadcom's acquisition of VMware, the free ESXi program was briefly discontinued then reinstated in 2025 (version 8.0 Update 3e) with community debate over support scope. This has accelerated interest in open platforms like KVM (ubiquitous via Proxmox VE, oVirt, OpenStack) and lightweight homelab stacks. Proxmox VE continues traction for its integrated UI, ZFS support, and LXC containers alongside KVM VMs. Public clouds still predominantly use customized KVM derivatives ([AWS Nitro](https://aws.amazon.com/ec2/nitro/), GCP KVM, Azure Hyper-V variants) to expose instance types. Apple's virtualization framework and tools like UTM simplify ARM-based macOS/Linux guest experimentation on Apple Silicon. The practical takeaway: be tool-curious, but master the transferable primitives: CPU scheduling, memory pressure, block and network I/O paths, image lifecycle. Licensing shifts; fundamentals persist. Skills locked to a single vendor's UI flows do not transfer well; the primitives (CPU scheduling, memory pressure, I/O paths, image lifecycle) are what persist across platform shifts.
@@ -259,4 +259,12 @@ An organization runs a Proxmox cluster (VM layer) hosting three Ubuntu VMs formi
 
 Containers will be covered in a later lecture.
 
+## Further reading
 
+- <a href="https://www.linux-kvm.org/page/Documents" target="_blank" rel="noopener noreferrer">KVM Documentation (linux-kvm.org)</a>
+- <a href="https://www.qemu.org/docs/master/" target="_blank" rel="noopener noreferrer">QEMU User Documentation</a>
+- <a href="https://docs.getutm.app/" target="_blank" rel="noopener noreferrer">UTM Documentation (macOS/iOS)</a>
+- <a href="https://www.virtualbox.org/manual/" target="_blank" rel="noopener noreferrer">VirtualBox User Manual</a>
+- <a href="https://pve.proxmox.com/wiki/Main_Page" target="_blank" rel="noopener noreferrer">Proxmox VE Wiki</a>
+- <a href="https://wiki.libvirt.org/index.html" target="_blank" rel="noopener noreferrer">libvirt Documentation (the API layer beneath KVM)</a>
+- <a href="https://wiki.archlinux.org/title/QEMU" target="_blank" rel="noopener noreferrer">QEMU — Arch Linux Wiki (practical setup guide)</a>
