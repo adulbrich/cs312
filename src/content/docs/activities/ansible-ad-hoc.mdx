@@ -1,0 +1,98 @@
+---
+title: "Ansible Ad-Hoc Commands"
+description: "Run a series of Ansible ad-hoc commands against an EC2 instance to gather facts, manage files, and verify idempotency without writing a playbook."
+sidebar:
+  order: 11
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Ad-hoc commands are Ansible's equivalent of a one-liner: they let you run a single module against one or more hosts without writing a playbook. Practicing them builds muscle memory with Ansible's module syntax before you write your first playbook in Lab 6.
+
+**Prerequisite:** An EC2 instance you can SSH into, with your key pair available. Ansible installed on your laptop or the control node from Lab 5.
+
+## Setup
+
+Create a minimal inventory file:
+
+```ini
+[managed]
+<your-ec2-public-ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/Downloads/cs312-key.pem
+```
+
+Save it as `~/cs312-activity/inventory.ini`. Test connectivity:
+
+```bash
+ansible -i ~/cs312-activity/inventory.ini managed -m ping
+```
+
+You should see `"ping": "pong"`.
+
+## Ad-Hoc Tasks
+
+Run each of the following commands. Take a screenshot of each command and its output.
+
+<Steps>
+
+1. **Gather system facts:**
+   ```bash
+   ansible -i inventory.ini managed -m setup -a "filter=ansible_distribution*"
+   ```
+   Note the OS name and version.
+
+2. **Check disk space:**
+   ```bash
+   ansible -i inventory.ini managed -m command -a "df -h /"
+   ```
+
+3. **Create a file with your name:**
+   ```bash
+   ansible -i inventory.ini managed -m copy \
+     -a "content='Activity completed by: YOUR_NAME\n' dest=/tmp/cs312-activity.txt"
+   ```
+   Replace `YOUR_NAME` with your actual name.
+
+4. **Verify the file exists:**
+   ```bash
+   ansible -i inventory.ini managed -m command -a "cat /tmp/cs312-activity.txt"
+   ```
+
+5. **Run the file creation command again** (identical to step 3). Observe the output. Is it `changed` or `ok`? This demonstrates idempotency.
+
+6. **Install a package:**
+   ```bash
+   ansible -i inventory.ini managed -m apt -a "name=tree state=present update_cache=yes" --become
+   ```
+   Then verify:
+   ```bash
+   ansible -i inventory.ini managed -m command -a "tree --version"
+   ```
+
+7. **Remove the package:**
+   ```bash
+   ansible -i inventory.ini managed -m apt -a "name=tree state=absent" --become
+   ```
+   Run the install command from step 6 again. What does the status show?
+
+</Steps>
+
+## Questions
+
+1. What is the difference between the `command` module and the `shell` module in Ansible? When would you use each?
+2. In step 5, why did the second run of the `copy` task show `ok` instead of `changed`? What property of Ansible does this demonstrate?
+3. The `--become` flag in step 6 is required for `apt`. What does it do, and why is it needed for package management?
+4. Why is Ansible described as "agentless"? What does it actually use to connect to managed nodes?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- Screenshots of each of the seven steps with your terminal prompt visible
+- The screenshot of step 4 showing your name in the file contents
+- Answers to the four questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="tip">
+If a command fails with `UNREACHABLE`, check that your EC2 instance is running, your security group allows SSH from your IP, and the path to your key file is correct.
+</Aside>

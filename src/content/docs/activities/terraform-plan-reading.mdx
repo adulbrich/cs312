@@ -1,0 +1,141 @@
+---
+title: "Reading a Terraform Plan"
+description: "Initialize a provided Terraform configuration, run terraform plan, and answer questions about what it would create without applying it."
+sidebar:
+  order: 10
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+`terraform plan` is the most important command in Terraform's workflow — it is your chance to verify what will happen before anything is created or destroyed. This activity builds the habit of reading plans carefully.
+
+**Prerequisite:** Terraform installed on your laptop (see Lab 5) and AWS credentials configured for your Academy account.
+
+## The Configuration
+
+Create a directory `~/tf-activity` and write the following three files:
+
+**`main.tf`**
+```hcl
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+data "aws_vpc" "default" {
+  default = true
+}
+
+resource "aws_security_group" "web" {
+  name        = "activity-web-sg"
+  description = "Activity security group"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_instance" "web" {
+  ami           = var.ami_id
+  instance_type = var.instance_type
+
+  vpc_security_group_ids = [aws_security_group.web.id]
+
+  tags = {
+    Name  = "activity-web"
+    Owner = var.owner_name
+  }
+}
+```
+
+**`variables.tf`**
+```hcl
+variable "ami_id" {
+  description = "Ubuntu 24.04 AMI in us-east-1"
+  type        = string
+  default     = "ami-0a0e5d9c7acc336f1"
+}
+
+variable "instance_type" {
+  type    = string
+  default = "t3.micro"
+}
+
+variable "owner_name" {
+  description = "Your name, to appear in the instance tag"
+  type        = string
+}
+```
+
+**`outputs.tf`**
+```hcl
+output "instance_id" {
+  value = aws_instance.web.id
+}
+
+output "security_group_id" {
+  value = aws_security_group.web.id
+}
+```
+
+## Steps
+
+<Steps>
+
+1. **Initialize:**
+   ```bash
+   cd ~/tf-activity
+   terraform init
+   ```
+
+2. **Run the plan, setting your name as the owner:**
+   ```bash
+   terraform plan -var="owner_name=YOUR_NAME"
+   ```
+   Replace `YOUR_NAME` with your actual name. This will appear in the plan output and in the EC2 tag if applied.
+
+3. **Take a screenshot** of the plan output showing the full list of resources and the `+` symbols.
+
+</Steps>
+
+<Aside type="caution">
+Do not run `terraform apply`. This activity ends at `plan`.
+</Aside>
+
+## Questions
+
+Answer based on the plan output you see:
+
+1. How many resources does the plan say it will create? List each resource type.
+2. What is the value of the `Owner` tag that would be applied to the instance?
+3. The security group allows port 80 from `0.0.0.0/0`. What does that mean, and is SSH (port 22) accessible?
+4. Change `instance_type` default to `t3.small` in `variables.tf`. Run `plan` again. Does the change show as "update in-place" or "destroy and recreate"? Why?
+5. The `data "aws_vpc" "default"` block does not create anything. What does it do, and how is it used by `aws_security_group.web`?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- A screenshot of `terraform plan` output showing the resources listed, with your name visible in the `Owner` tag value
+- Answers to the five questions
+
+Your **full name and student ID** must appear in the PDF header.

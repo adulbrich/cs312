@@ -1,0 +1,97 @@
+---
+title: "Postmortem Writing"
+description: "Write a blameless postmortem for a provided fictional incident, including a 5 Whys root cause analysis and SMART action items."
+sidebar:
+  order: 16
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A postmortem turns a failure into organizational learning. Writing one well is harder than it looks — the goal is not to explain what broke, but to understand why the system allowed it to break and what will prevent it from happening again. This activity gives you a realistic incident and asks you to write the full document.
+
+## The Incident
+
+> **Summary:** On a Tuesday afternoon, the Pinnacle Provisions website went offline for 47 minutes due to a failed database migration that corrupted the `wp_options` table. Approximately 200 customers were unable to place orders. One customer called to complain that the website showed a PHP error page with visible database credentials.
+
+**What you know:**
+- A developer ran `wp db migrate` on the production database instead of staging.
+- The migration script was written for a different WordPress version and modified the `wp_options` table in a way that broke the site.
+- There was no pre-migration backup because "it was just a small change."
+- The PHP error page was caused by `WP_DEBUG` being set to `true` and `WP_DEBUG_DISPLAY` not being explicitly set to `false`.
+- Recovery required restoring the `wp_options` table from a week-old backup, losing 7 days of configuration changes.
+- The on-call engineer was not notified by alerting — a customer email triggered the response.
+- The incident lasted from 14:15 to 15:02.
+
+## The Template
+
+Write a postmortem using all of the following sections. Each section must be substantive — one or two sentences is not enough.
+
+---
+
+**Postmortem**
+
+**Author:** [Your full name]
+
+**Date:** [Today's date]
+
+**Incident date:** Tuesday, time 14:15–15:02
+
+---
+
+### Summary
+One paragraph. What happened, what was the impact, and how was it resolved?
+
+### Impact
+Who was affected, and in what way? Quantify where possible (duration, number of users, revenue estimate if relevant).
+
+### Timeline
+At minimum eight entries. Include: first sign of trouble, key investigation steps, recovery action, and all-clear. Use the format: `14:15 — Description of event`.
+
+### Contributing Factors
+List at least four. These are not root causes — they are conditions that made the incident worse or more likely. Example: "No automated alert existed for the home page returning a non-200 status."
+
+### Root Cause Analysis: 5 Whys
+
+Apply the 5 Whys technique starting from: "The production database was corrupted by a migration script."
+
+| Why # | Question | Answer |
+|---|---|---|
+| 1 | Why was the production database corrupted? | |
+| 2 | Why was...? | |
+| 3 | Why was...? | |
+| 4 | Why was...? | |
+| 5 | Why was...? | |
+
+What is the root cause (the answer to Why #5)?
+
+### Action Items
+
+List at least four action items. Each must be SMART: Specific, Measurable, Achievable, Relevant, Time-bound.
+
+| Action | Owner | Due date |
+|---|---|---|
+| | | |
+| | | |
+| | | |
+| | | |
+
+---
+
+## Questions
+
+1. The database credentials were visible in the error page. This is a separate finding from the migration failure. Write one action item specifically addressing this.
+2. The blameless postmortem principle says you should not name individuals in a way that assigns blame. Review your timeline and contributing factors: did you write anything that could read as blaming a specific person? If so, rewrite it.
+3. The recovery used a week-old backup, losing 7 days of configuration. What RPO (Recovery Point Objective) does this imply the team was operating with, and what RPO would you recommend instead?
+
+## Deliverable
+
+Submit a PDF to Canvas with:
+- The completed postmortem document, with your name as the Author
+- Answers to the three questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="note">
+A good postmortem is not a blame document and not a technical writeup. It is a learning document addressed to the entire organization. Write it as if a new hire who was not on call that day will read it to understand what happened and why.
+</Aside>

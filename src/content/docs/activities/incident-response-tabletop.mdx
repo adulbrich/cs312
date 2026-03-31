@@ -1,0 +1,88 @@
+---
+title: "Incident Response Tabletop"
+description: "Work through a realistic incident scenario by filling in an incident report template, assigning roles, and drafting a status communication."
+sidebar:
+  order: 14
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A tabletop exercise walks through an incident on paper before one happens in production. The goal is to test your process, not your infrastructure. This activity gives you a scenario and asks you to respond using the framework from lecture.
+
+## The Scenario
+
+**Pinnacle Provisions** — the three-location restaurant chain from the course narrative — has a website outage.
+
+> **14:03:** A customer reports the website is returning a blank page. The support email starts receiving similar reports.
+>
+> **14:07:** You SSH into the web server. The WordPress container is running, but `docker compose logs wordpress` shows repeated `Error establishing a database connection` messages.
+>
+> **14:09:** You check the database container: `docker compose ps` shows it is in a restart loop. `docker compose logs db` shows: `[ERROR] InnoDB: Page [page id: space=0, page number=7] log sequence number 12345678 is in the future!`
+>
+> **14:11:** You realize: a junior engineer ran `docker compose down -v` earlier today to "free up space." All database volumes were deleted.
+>
+> **14:13:** You locate an S3 backup from this morning at 06:00. Restore time is estimated at 20 minutes.
+>
+> **14:33:** Restore completes. Service is back. Approximately 8 hours of new orders are lost.
+
+## Your Task
+
+Fill in the following incident report template based on the scenario above. Where the scenario does not provide information, make a reasonable assumption and note that you did so.
+
+---
+
+**Incident Report**
+
+| Field | Your answer |
+|---|---|
+| Your name | |
+| Incident title (one line) | |
+| Severity level (SEV-1 through SEV-4) | |
+| Affected service(s) | |
+| Start time | |
+| End time / resolution time | |
+| Total duration | |
+
+**Timeline** (fill in at least 5 entries with timestamps and what happened):
+
+| Time | Event |
+|---|---|
+| 14:03 | |
+| | |
+| | |
+| | |
+| | |
+
+**Immediate mitigation steps taken** (what actions were taken to restore service?):
+
+**Root cause** (what was the actual underlying cause, not just what failed?):
+
+**Contributing factors** (list at least two things that made the incident worse or harder to detect):
+
+**Impact** (who was affected and how?):
+
+**Draft a customer-facing status update** (2–4 sentences, as if posting to a status page. Do not mention internal details like container names or S3.):
+
+**Draft an internal post-incident message to the team** (3–5 sentences, factual and blameless):
+
+---
+
+## Questions
+
+1. What severity level (SEV-1 through SEV-4) did you assign? Justify your choice.
+2. The incident was caused by a human running the wrong command. The blameless postmortem culture says "don't blame the person." What should the organization change to prevent this class of incident?
+3. There were 8 hours of lost orders because the most recent backup was 8 hours old. What would you change about the backup strategy, and what term describes the maximum acceptable data loss?
+4. Who would you assign as Incident Commander for this incident if you were one of two engineers on call?
+
+## Deliverable
+
+Submit a PDF to Canvas with:
+- The completed incident report template with your name in the first row
+- Answers to the four questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="note">
+There is no single correct answer for most of these fields. Grading is based on whether your responses are internally consistent, use the correct framework vocabulary, and reflect reasonable operational judgment.
+</Aside>

@@ -1,0 +1,78 @@
+---
+title: "AWS Console Tour"
+description: "Navigate the AWS console to answer specific questions about EC2 pricing, VPC topology, IAM, and the shared responsibility model."
+sidebar:
+  order: 6
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The AWS Console exposes an enormous amount of information. This activity trains you to find specific things quickly — a skill that matters when something is broken at 2 AM.
+
+**Prerequisite:** Access to your AWS Academy Learner Lab. Start the lab session before beginning.
+
+## Tasks
+
+Work through the following items in order. For each one, take a screenshot showing the relevant page and your AWS account number (visible in the top-right corner of the console).
+
+### 1. EC2 Instance Types
+
+Navigate to **EC2 > Instance Types** (or use the pricing calculator at aws.amazon.com/ec2/pricing). Find the following and fill in the table:
+
+| Instance Type | vCPUs | Memory (GiB) | On-Demand price/hr (Linux, us-east-1) |
+|---|---|---|---|
+| t3.micro | | | |
+| t3.medium | | | |
+| m5.large | | | |
+| c5.xlarge | | | |
+
+Which instance type gives the best memory-per-dollar ratio among these four?
+
+### 2. Default VPC
+
+Navigate to **VPC > Your VPCs**. Find the default VPC and record:
+- The IPv4 CIDR block
+- How many subnets it has (navigate to **Subnets** and filter by VPC ID)
+- Which availability zones those subnets are in
+
+### 3. Security Groups
+
+Navigate to **EC2 > Security Groups**. Find the default security group and record:
+- What inbound rules it has by default
+- What outbound rules it has by default
+- Is the default inbound configuration safe for a public-facing server? Why or why not?
+
+### 4. IAM
+
+Navigate to **IAM > Roles**. Find the `LabRole` or `LabInstanceProfile` role (the role that AWS Academy grants to EC2 instances). Record:
+- The role ARN
+- One policy attached to it
+
+### 5. S3 Bucket Creation (do not create one — just read the options)
+
+Navigate to **S3 > Create bucket** (but do not complete creation). Find the following settings and note what the default is for each:
+- Block all public access: on or off by default?
+- Versioning: enabled or disabled by default?
+- Server-side encryption: what algorithm is the default?
+
+Then click Cancel.
+
+## Questions
+
+1. Your EC2 instance's default VPC subnet is in `us-east-1a`. A second subnet is in `us-east-1b`. Why would you deploy resources in both?
+2. What is the shared responsibility model? Give one concrete example of what AWS is responsible for and one example of what you are responsible for.
+3. Looking at the IAM role you found in Task 4: why is an instance profile safer than storing AWS credentials in a `.env` file on the instance?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- Screenshots for each of the five tasks, with your AWS account number visible in each
+- The filled tables and recorded values
+- Answers to the three questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="note">
+AWS Academy Learner Lab accounts have restricted IAM permissions. Some console pages may show errors or be grayed out. Record what you see and note the restriction.
+</Aside>

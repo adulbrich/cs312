@@ -1,0 +1,125 @@
+---
+title: "Your First GitHub Actions Workflow"
+description: "Create a GitHub repository, write a workflow that runs on push, and capture a successful pipeline run with your name in the output."
+sidebar:
+  order: 12
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+CI/CD pipelines run automatically in response to git events. The fastest way to understand them is to build one. This activity has you write a minimal workflow from scratch, push to trigger it, and read the output.
+
+**Prerequisite:** A GitHub account. No AWS access required for this activity.
+
+## Steps
+
+<Steps>
+
+1. **Create a new public GitHub repository** named `cs312-cicd-activity`. Initialize it with a README.
+
+2. **Clone it locally:**
+   ```bash
+   git clone https://github.com/YOUR_GITHUB_USERNAME/cs312-cicd-activity.git
+   cd cs312-cicd-activity
+   ```
+
+3. **Create the workflow directory:**
+   ```bash
+   mkdir -p .github/workflows
+   ```
+
+4. **Write the workflow file** at `.github/workflows/activity.yml`:
+
+   ```yaml
+   name: CS 312 Activity
+
+   on:
+     push:
+       branches: [main]
+     workflow_dispatch:
+
+   jobs:
+     identify:
+       runs-on: ubuntu-latest
+       steps:
+         - name: Check out code
+           uses: actions/checkout@v4
+
+         - name: Print student info
+           run: |
+             echo "Student: YOUR_NAME"
+             echo "GitHub user: ${{ github.actor }}"
+             echo "Triggered by: ${{ github.event_name }}"
+             echo "Repository: ${{ github.repository }}"
+
+         - name: System info
+           run: |
+             uname -a
+             echo "Runner OS: ${{ runner.os }}"
+
+         - name: List repo files
+           run: ls -la
+
+     lint:
+       runs-on: ubuntu-latest
+       needs: identify
+       steps:
+         - name: Check out code
+           uses: actions/checkout@v4
+
+         - name: Check for trailing whitespace
+           run: |
+             if grep -rn " $" --include="*.yml" --include="*.md" .; then
+               echo "Trailing whitespace found"
+               exit 1
+             else
+               echo "No trailing whitespace found"
+             fi
+   ```
+
+   Replace `YOUR_NAME` with your actual name.
+
+5. **Commit and push:**
+   ```bash
+   git add .
+   git commit -m "Add CI activity workflow"
+   git push origin main
+   ```
+
+6. **Watch the workflow run:** navigate to your repository on GitHub, click the **Actions** tab, and open the running workflow. Wait for it to complete.
+
+7. **Take a screenshot** of the completed workflow run showing:
+   - The green checkmark indicating success
+   - The "Print student info" step expanded, showing your name and GitHub username in the output
+
+</Steps>
+
+## Extend the Workflow
+
+Add a third job called `report` that:
+- Runs after both `identify` and `lint` complete (use `needs: [identify, lint]`)
+- Prints: `"Pipeline complete for: YOUR_NAME"`
+
+Commit and push. Take a screenshot of the updated workflow graph showing all three jobs and their dependency relationship.
+
+## Questions
+
+1. What is the difference between `on: push` and `on: workflow_dispatch` as triggers?
+2. What does `needs: identify` in the `lint` job do? What would happen if you removed it?
+3. The `lint` job would fail if it found trailing whitespace. This is an example of a CI gate. Name two other things you would commonly gate on in a production CI pipeline for a web application.
+4. GitHub Actions runners are ephemeral. What does that mean, and why does it matter for storing state between pipeline runs?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- Screenshot of the initial workflow run with your name visible in the "Print student info" step
+- Screenshot of the updated workflow showing all three jobs and their dependency graph
+- The URL of your GitHub repository
+- Answers to the four questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="tip">
+If your workflow fails, click the failing step to expand the logs. GitHub Actions logs are detailed enough that most failures are diagnosable directly from the error message.
+</Aside>

@@ -1,0 +1,105 @@
+---
+title: "Runbook Writing"
+description: "Write an operator-grade runbook for a service you have deployed this term, covering verification, restart, rollback, and three failure scenarios."
+sidebar:
+  order: 19
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A runbook is the document an on-call engineer reaches for at 2 AM when a service is down and they are not the person who built it. If the runbook is missing, ambiguous, or wrong, the outage lasts longer. This activity asks you to write one for real.
+
+## Choose Your Service
+
+Pick any service you have deployed this term:
+- Your WordPress stack (Docker Compose or Kubernetes)
+- Your Minecraft server (any assignment iteration)
+- Your Terraform + Ansible provisioned EC2 setup
+- Your k3s cluster with nginx + WordPress
+
+The service must currently exist (or be recreatable within a few minutes) so that you can verify your own runbook is accurate.
+
+## The Runbook Template
+
+Write a runbook following this structure. Every section must contain commands you have actually run and verified. Do not write steps you think might work.
+
+---
+
+**Runbook: [Service Name]**
+
+**Author:** [Your full name]
+
+**Date:** [Today's date]
+
+**Service URL / endpoint:** [public IP or URL]
+
+---
+
+### Service Description
+Two to three sentences: what does this service do, how is it deployed, and what depends on it?
+
+### Prerequisites
+What does an operator need before using this runbook? (SSH key location, AWS credentials, which directory to `cd` into, etc.)
+
+### Health Check: Is the Service Running?
+
+Provide the exact commands to verify:
+1. The process or container is running
+2. The service is responding to requests (e.g., `curl`, `nmap`, or a health endpoint)
+3. The expected output when everything is healthy
+
+### How to Restart the Service
+
+Step-by-step commands to perform a clean restart. Include any ordering requirements (e.g., "restart the database before the application").
+
+### How to Roll Back to the Previous Version
+
+Step-by-step commands to revert to the last known-good version. Include how to identify what the previous version was.
+
+### Failure Scenarios
+
+For each of the three scenarios below, provide:
+- How to detect this failure (what does it look like in logs, metrics, or health checks?)
+- The most likely cause
+- The exact recovery steps
+
+**Scenario 1: The service process has crashed and is not restarting automatically.**
+
+**Scenario 2: The service is running but returning errors (e.g., 500 Internal Server Error or "Error establishing a database connection").**
+
+**Scenario 3: The EC2 instance rebooted unexpectedly and the service did not come back.**
+
+### Cost Controls
+
+What should an operator do to minimize AWS cost when this service is not needed? (e.g., stop the instance, run `terraform destroy`, etc.)
+
+---
+
+## Verify Your Own Runbook
+
+After writing the runbook, test it:
+1. Stop your service using a method other than the one in your runbook.
+2. Follow your own restart procedure and confirm the service comes back.
+3. Note any step that was incorrect or missing.
+
+Take a screenshot showing the service responding after you followed your restart procedure.
+
+## Questions
+
+1. What is the difference between a runbook and a playbook in operational documentation?
+2. Your runbook includes the SSH key path as `~/Downloads/cs312-key.pem`. Why might this cause the runbook to fail for a different operator?
+3. After testing, did you find any gaps or inaccuracies in your runbook? What did you correct?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- The completed runbook with your name as Author
+- The screenshot of the service responding after you followed your own restart steps
+- Answers to the three questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="caution">
+A runbook that has never been tested is a liability, not an asset. An untested runbook may give false confidence and slow down recovery when it fails mid-incident. Always test your runbooks.
+</Aside>

@@ -1,0 +1,88 @@
+---
+title: "Log Analysis"
+description: "Use journalctl, grep, and standard log tools to answer operational questions from a real Linux server's logs."
+sidebar:
+  order: 13
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Answering operational questions from logs is one of the most common sysadmin tasks. This activity gives you a set of specific questions to answer using only log commands — no guessing.
+
+**Prerequisite:** SSH access to your EC2 instance from a prior lab. If the instance is stopped, start it first.
+
+## Tasks
+
+For each task below, run the command, take a screenshot of the output, and write a one-sentence answer to the question.
+
+<Steps>
+
+1. **When was the system last booted?**
+   ```bash
+   who -b
+   journalctl --list-boots | head -5
+   ```
+   How many boots appear in the log history?
+
+2. **What services failed on the most recent boot?**
+   ```bash
+   journalctl -b -p err..emerg
+   ```
+   List any failed units. If none, note that.
+
+3. **Find recent SSH login attempts**
+   ```bash
+   journalctl -u ssh --since "1 hour ago" | tail -30
+   grep "Failed password\|Accepted\|Invalid user" /var/log/auth.log | tail -20
+   ```
+   How many failed login attempts appear? What usernames were tried?
+
+4. **Check your web server or Docker logs (if running)**
+
+   If you have nginx or Apache running:
+   ```bash
+   sudo tail -50 /var/log/nginx/access.log
+   sudo tail -20 /var/log/nginx/error.log
+   ```
+   If you have Docker running a WordPress stack:
+   ```bash
+   docker compose logs --tail=30 wordpress
+   ```
+   What HTTP status codes appear most frequently?
+
+5. **Find disk-related messages**
+   ```bash
+   journalctl -k | grep -i -E "error|fail|disk|i/o" | tail -20
+   ```
+   Are there any disk errors? Note the output.
+
+6. **Stamp the log with your name**
+   ```bash
+   logger "CS312 log activity completed by: YOUR_NAME"
+   journalctl --since "1 minute ago" | grep "YOUR_NAME"
+   ```
+   Replace `YOUR_NAME` with your actual name. Take a screenshot showing your message appearing in the journal.
+
+</Steps>
+
+## Questions
+
+1. What is the difference between `journalctl -b` and `journalctl --since "24 hours ago"`? When would you use each?
+2. What does `journalctl -p err..emerg` filter for? Name the severity levels it includes.
+3. You see hundreds of failed SSH login attempts for usernames like `admin`, `root`, and `test`. Is your server compromised? What should you check first?
+4. Why would you prefer `journalctl` over reading `/var/log/syslog` directly for most troubleshooting tasks?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- Screenshots of each task's output with your terminal prompt (username and hostname) visible
+- The screenshot of task 6 showing your name in the journal output
+- One-sentence answers to each task's question
+- Answers to the four questions above
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="note">
+Some log commands require `sudo`. If `auth.log` does not exist, your system may use a different path (`/var/log/secure` on RHEL-based systems) or journal-only logging. Adapt the command accordingly and note what you changed.
+</Aside>

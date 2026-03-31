@@ -1,0 +1,100 @@
+---
+title: "Server Security Audit"
+description: "Run a structured security audit on a Linux EC2 instance using SSH config review, port scanning, auth log analysis, and firewall inspection."
+sidebar:
+  order: 7
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+A security audit is not a one-time event — it is a repeatable checklist you run whenever a new server is provisioned or after a configuration change. This activity walks you through a minimal audit on your own EC2 instance.
+
+**Prerequisite:** An EC2 instance you can SSH into (your instance from Lab 1b or Lab 2 works fine).
+
+## The Audit
+
+Run the following checks and record the output of each. For every item, note whether the finding is acceptable or whether it would need to be fixed in a production environment.
+
+<Steps>
+
+1. **Who can currently log in?**
+
+   ```bash
+   cat /etc/passwd | grep -v nologin | grep -v false
+   last -n 10
+   lastb -n 10 2>/dev/null || sudo lastb -n 10
+   ```
+
+   Record: how many human users exist, and how many failed login attempts appear?
+
+2. **What services are listening on the network?**
+
+   ```bash
+   ss -tlnp
+   ```
+
+   For each listening service, note the port and whether it should be publicly reachable.
+
+3. **Check the SSH configuration**
+
+   ```bash
+   sudo grep -E "PermitRootLogin|PasswordAuthentication|AllowUsers|PubkeyAuthentication" /etc/ssh/sshd_config
+   ```
+
+   Record the value of each setting. Is root login permitted? Is password authentication on?
+
+4. **Review sudo access**
+
+   ```bash
+   sudo cat /etc/sudoers | grep -v "^#" | grep -v "^$"
+   sudo ls /etc/sudoers.d/
+   ```
+
+   Record: who has sudo access, and is `NOPASSWD` granted anywhere?
+
+5. **Check firewall rules**
+
+   ```bash
+   sudo ufw status verbose 2>/dev/null || sudo iptables -L -n --line-numbers
+   ```
+
+   Record: what is allowed inbound? Is anything broader than it needs to be?
+
+6. **Check for unattended upgrades**
+
+   ```bash
+   dpkg -l unattended-upgrades 2>/dev/null && cat /etc/apt/apt.conf.d/20auto-upgrades 2>/dev/null
+   ```
+
+   Record: are automatic security updates enabled?
+
+7. **Stamp your audit with your name**
+
+   ```bash
+   echo "Audit completed by: YOUR_NAME on $(date)" | sudo tee /var/log/cs312-audit.log
+   cat /var/log/cs312-audit.log
+   ```
+
+   Take a screenshot of this final command and its output.
+
+</Steps>
+
+## Questions
+
+1. What is the single highest-risk finding from your audit? What would you change first?
+2. Is `PasswordAuthentication yes` in SSH a problem on this instance? Why or why not?
+3. What is defense in depth, and how do security groups and `ufw` together illustrate it?
+
+## Deliverable
+
+Submit a PDF to Canvas with:
+- Screenshots of each audit step's output, with your terminal prompt (which shows your username and hostname) visible
+- The screenshot of the final stamped log entry with your name
+- Answers to the three questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="caution">
+Run this audit only on instances you own. Never run security tools against systems you do not have explicit permission to test.
+</Aside>

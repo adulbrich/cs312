@@ -1,0 +1,112 @@
+---
+title: "Docker Image Exploration"
+description: "Pull images, inspect layers, run containers, and write a minimal Dockerfile on your local machine."
+sidebar:
+  order: 5
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This activity builds familiarity with Docker's core mechanics before the lab introduces Docker Compose. You need Docker installed on your laptop (see the [Windows Users](/practicalities/windows-users/) page if you are on Windows).
+
+## Steps
+
+<Steps>
+
+1. **Verify Docker is running**
+
+   ```bash
+   docker version
+   docker run --rm hello-world
+   ```
+
+2. **Pull and compare two official images**
+
+   ```bash
+   docker pull nginx:alpine
+   docker pull nginx:latest
+   docker images nginx
+   ```
+
+   Note the size difference between the two tags. Record both sizes.
+
+3. **Inspect image layers**
+
+   ```bash
+   docker history nginx:alpine
+   ```
+
+   Count the number of layers. Find the layer with the largest size and note what command created it.
+
+4. **Run a container and explore it**
+
+   ```bash
+   docker run -d --name my-nginx -p 8080:80 nginx:alpine
+   docker exec -it my-nginx sh
+   ```
+
+   Inside the container, run:
+
+   ```sh
+   whoami
+   cat /etc/os-release
+   ls /usr/share/nginx/html
+   exit
+   ```
+
+5. **Write a custom identifier into the container**
+
+   From your host machine (not inside the container), run:
+
+   ```bash
+   docker exec my-nginx sh -c 'echo "Built by: YOUR_NAME" > /usr/share/nginx/html/index.html'
+   curl http://localhost:8080
+   ```
+
+   Replace `YOUR_NAME` with your actual name. The curl output should show your name.
+
+6. **Write a minimal Dockerfile**
+
+   Create a new directory and write a `Dockerfile` that:
+   - Uses `nginx:alpine` as the base
+   - Adds a comment at the top: `# Author: Your Name`
+   - Copies a custom `index.html` (which you also create) into `/usr/share/nginx/html/`
+
+   Build and run it:
+
+   ```bash
+   docker build -t my-custom-nginx .
+   docker run -d --name custom -p 8081:80 my-custom-nginx
+   curl http://localhost:8081
+   ```
+
+7. **Clean up**
+
+   ```bash
+   docker stop my-nginx custom
+   docker rm my-nginx custom
+   ```
+
+</Steps>
+
+## Questions to Answer
+
+1. What is the size difference between `nginx:latest` and `nginx:alpine`? Why does it matter?
+2. How many layers does `nginx:alpine` have, and what created the largest layer?
+3. What user does nginx run as inside the alpine container?
+4. What is one security or operational advantage of writing a Dockerfile instead of modifying a running container?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- A screenshot of `curl http://localhost:8080` showing your name in the response body
+- A screenshot of `curl http://localhost:8081` showing your custom index page
+- Your `Dockerfile` (copy-pasted into the PDF, with your name in the comment)
+- Answers to the four questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="note">
+If you are on Windows, run these commands in WSL2 or Git Bash. The `curl` commands can be replaced by opening `http://localhost:8080` in a browser and taking a screenshot.
+</Aside>

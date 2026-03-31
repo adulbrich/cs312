@@ -1,0 +1,108 @@
+---
+title: "Prometheus and Node Exporter Exploration"
+description: "Install node_exporter on an EC2 instance, scrape the metrics endpoint, run PromQL queries, and interpret what you find."
+sidebar:
+  order: 15
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+Prometheus collects metrics by scraping HTTP endpoints. Node Exporter is a single binary that exposes operating system metrics in Prometheus format. Together, they give you a complete picture of a server's health in under five minutes of setup.
+
+**Prerequisite:** An EC2 instance you can SSH into. No prior Prometheus installation needed.
+
+## Part 1: Install and Run Node Exporter
+
+<Steps>
+
+1. **SSH into your EC2 instance** and run:
+
+   ```bash
+   cd /tmp
+   wget https://github.com/prometheus/node_exporter/releases/download/v1.8.2/node_exporter-1.8.2.linux-amd64.tar.gz
+   tar xzf node_exporter-1.8.2.linux-amd64.tar.gz
+   sudo mv node_exporter-1.8.2.linux-amd64/node_exporter /usr/local/bin/
+   ```
+
+2. **Start it in the background:**
+   ```bash
+   node_exporter &
+   ```
+
+3. **Verify it is running:**
+   ```bash
+   curl -s http://localhost:9100/metrics | head -20
+   ```
+
+   You should see lines starting with `#` (comments/type info) and metric lines.
+
+</Steps>
+
+## Part 2: Explore the Metrics Endpoint
+
+Run the following queries and record what each returns. All commands run on the EC2 instance itself via `curl`.
+
+<Steps>
+
+1. **Total memory:**
+   ```bash
+   curl -s http://localhost:9100/metrics | grep "^node_memory_MemTotal_bytes"
+   ```
+   Convert the value from bytes to GiB.
+
+2. **Available memory:**
+   ```bash
+   curl -s http://localhost:9100/metrics | grep "^node_memory_MemAvailable_bytes"
+   ```
+   Calculate memory usage percentage: `(Total - Available) / Total * 100`.
+
+3. **CPU idle time:**
+   ```bash
+   curl -s http://localhost:9100/metrics | grep 'node_cpu_seconds_total{cpu="0",mode="idle"}'
+   ```
+   This is a counter. Explain what the value represents.
+
+4. **Filesystem usage:**
+   ```bash
+   curl -s http://localhost:9100/metrics | grep 'node_filesystem_avail_bytes{mountpoint="/"}'
+   curl -s http://localhost:9100/metrics | grep 'node_filesystem_size_bytes{mountpoint="/"}'
+   ```
+   Calculate the percentage of disk used on `/`.
+
+5. **Uptime:**
+   ```bash
+   curl -s http://localhost:9100/metrics | grep "^node_boot_time_seconds"
+   ```
+   The value is a Unix timestamp. Calculate how many seconds ago the system booted using: `date +%s` minus the boot time value.
+
+6. **Stamp your activity:**
+   ```bash
+   echo "# Activity completed by: YOUR_NAME" > /tmp/activity_metrics.txt
+   echo "node_cs312_activity_completed 1" >> /tmp/activity_metrics.txt
+   cat /tmp/activity_metrics.txt
+   ```
+   Replace `YOUR_NAME` with your actual name. Take a screenshot of this file.
+
+</Steps>
+
+## Questions
+
+1. Node Exporter exposes `node_cpu_seconds_total` as a counter. Why does Prometheus use the `rate()` function when you want to graph CPU usage over time, rather than just plotting the counter directly?
+2. What is the difference between `MemTotal` and `MemAvailable` on Linux? Is `MemAvailable` the same as free memory?
+3. If you wanted to alert when disk usage on `/` exceeds 85%, write the PromQL expression you would use (assuming `node_filesystem_avail_bytes` and `node_filesystem_size_bytes` are being scraped).
+4. Why is Prometheus described as using a "pull model" instead of a "push model"? What is one tradeoff of the pull model?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- Screenshots of each curl command's output with your terminal prompt visible
+- The screenshot of the stamped activity file with your name
+- Calculated values for memory usage %, disk usage %, and uptime in seconds
+- Answers to the four questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="tip">
+Kill node_exporter when you are done to free the port: `pkill node_exporter`. If you want it to start automatically on reboot, create a systemd service for it.
+</Aside>

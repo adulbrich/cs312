@@ -6,6 +6,7 @@ This repository contains the source code for the CS312 website.
 
 Watch https://www.youtube.com/watch?v=Cpy20DnIDTI
 
+- [ ] The "Further Reading" sections of lectures should be "Resources" and include not just reading but videos, podcasts, etc.
 - [ ] Do we cover emails at all? (i.e., mail in lab with builtin cron + email server, or just talk about it in lectures? see previous scheduling lab) - we could add emails to the last lab when there is an alert - we cover email alerts in observability a little bit
 - [ ] Add the DNS exercise back from 2024 (the website from julia evans)
 - [ ] GitOps?
