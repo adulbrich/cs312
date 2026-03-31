@@ -6,9 +6,7 @@ This repository contains the source code for the CS312 website.
 
 Watch https://www.youtube.com/watch?v=Cpy20DnIDTI
 
-- [ ] Do we cover emails at all? (i.e., mail in lab with builtin cron + email server, or just talk about it in lectures? see previous scheduling lab) - we could add emails to the last lab when there is an alert
-- [ ] in the networking lectures, do we cover proxies and load balancers? We have nginx as a reverse proxy in the labs, but do we talk about it in lectures? We could add a section on proxies and load balancers to the networking lectures, and then add a studio where students set up an nginx reverse proxy in front of their WordPress deployment.
-- [ ] in the networking lecture, discuss the various network layers that AWS uses (gateway, VPC, subnets, security groups, etc.) and how they relate to the OSI model and how students can provision them
+- [ ] Do we cover emails at all? (i.e., mail in lab with builtin cron + email server, or just talk about it in lectures? see previous scheduling lab) - we could add emails to the last lab when there is an alert - we cover email alerts in observability a little bit
 - [ ] Add the DNS exercise back from 2024 (the website from julia evans)
 - [ ] GitOps?
 - [ ] cron anywhere? -> should be an in-class activity

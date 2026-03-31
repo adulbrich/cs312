@@ -45,6 +45,12 @@ The CPU you choose locks in the socket and often the memory generation; for exam
 Older motherboard designs (circa 2007 and earlier) split the chipset into two chips: the **Northbridge**, which handled high-speed components (RAM, PCIe x16 for the GPU), and the **Southbridge**, which handled slower peripherals (SATA, USB, audio, PCI). Communication between them was a bottleneck. AMD integrated the memory controller directly into the CPU in **2003** with its K8 (Athlon 64) architecture; Intel followed in **2008** with Nehalem. Today, the CPU handles RAM and the primary PCIe lanes directly. What remains of the traditional chipset is now a single **Platform Controller Hub**, called **PCH** by Intel and **FCH** (Fusion Controller Hub) by AMD, which manages secondary PCIe lanes, SATA, USB, and audio. This integration reduces latency and is why modern motherboards look much simpler than their predecessors.
 </Aside>
 
+<Aside type="note" title="System-on-Chip (SoC): When Everything Shares One Package">
+The integration trend taken to its logical conclusion produces a **System-on-Chip (SoC)**: a single package containing the CPU, GPU, memory controller, and often an AI accelerator, with memory mounted directly alongside. Apple's M-series (M1 through M4) are the most visible example: an M4 Pro combines CPU cores, GPU cores, a Neural Engine, and the RAM on one module, which is why the spec sheet lists "24 GB unified memory" rather than slots. AMD's **APUs** (Accelerated Processing Units, such as the Ryzen AI 300 series) and Intel's **Meteor Lake** and **Lunar Lake** chips follow the same direction, integrating capable GPU and NPU tiles alongside the CPU cores.
+
+The efficiency advantage is real: because the CPU and GPU share the same physical memory, data does not need to be copied between separate memory pools before the GPU can operate on it. The trade-off is that memory is soldered at manufacture and cannot be upgraded after purchase.
+</Aside>
+
 - Read the board's CPU support list and memory Qualified Vendor List (QVL) before buying.
 - Favor chipsets that expose the lanes and ports you will actually use.
 - Confirm rear I/O you need (USB-C, 2.5/10GbE, Wi-Fi) and internal headers for your case.
@@ -153,6 +159,10 @@ import DDR5LImage from './hardware-components/ddr5l.png';
 <FigureWithCaption src={DDR5LImage} caption="A Laptop DDR5 Memory Stick" imageHeight="h-32"/>
 
 Capacity planning follows workload: 16-32 GB for general use, 32-64 GB for heavy creative or virtualization tasks, and more for specialized servers.
+
+**Error-Correcting Code (ECC)** memory adds extra bits to detect and correct single-bit errors caused by cosmic rays or electrical noise. Consumer motherboards typically do not support ECC; workstation-class and server platforms generally do. If you are speccing a machine that will run unattended for long periods or store data that must not be silently corrupted, confirm whether your CPU and motherboard support ECC before purchasing. The server and data center lecture covers ECC in more depth, including Registered DIMMs (RDIMMs) used in high-density server configurations.
+
+**Unified Memory Architecture (UMA)** is found in SoC-based systems such as Apple M-series and AMD APUs, where the CPU and GPU share a single physical memory pool rather than having separate pools. Because there is no separate VRAM, data does not need to be copied between memory pools before the GPU can process it, which reduces latency and improves efficiency for graphics and AI tasks. The trade-off is that GPU workloads consume memory that would otherwise be available to the CPU, and since memory is soldered, total capacity is fixed at purchase.
 
 - Install in the slots the manual marks for 2-DIMM operation to enable dual channel.
 - Prefer matched kits (2×16 GB) over mixing brands or speeds.
@@ -398,19 +408,19 @@ Building a computer is a process where careful planning and methodical steps pay
 <Steps>
 1. **Breadboard Test (Outside the Case)**
 
-    Install the CPU, one stick of memory, and (if needed) the GPU on the motherboard outside the case. Connect the power supply and monitor. Power on to check for a successful POST (Power-On Self-Test) and display output. This step ensures your core parts work before you commit to full assembly.
+      Install the CPU, one stick of memory, and (if needed) the GPU on the motherboard outside the case. Connect the power supply and monitor. Power on to check for a successful POST (Power-On Self-Test) and display output. This step ensures your core parts work before you commit to full assembly.
 
 2. **Install in the Case**
 
-    Mount the motherboard on the correct standoffs, install the I/O shield if needed, and route the main power cables (24-pin ATX, 8-pin EPS for CPU). Connect front-panel connectors (power switch, reset, LEDs) as shown in the manual. Install storage drives and any additional cards.
+      Mount the motherboard on the correct standoffs, install the I/O shield if needed, and route the main power cables (24-pin ATX, 8-pin EPS for CPU). Connect front-panel connectors (power switch, reset, LEDs) as shown in the manual. Install storage drives and any additional cards.
 
 3. **Cable Management and Final Checks**
 
-    Tidy up cables to ensure good airflow and no loose connectors. Double-check that all power cables are fully seated and that no standoffs are misplaced under the board (which could cause a short).
+      Tidy up cables to ensure good airflow and no loose connectors. Double-check that all power cables are fully seated and that no standoffs are misplaced under the board (which could cause a short).
 
 4. **First Boot and UEFI Setup**
 
-    Power on the system. Enter UEFI/BIOS to confirm that the CPU, memory, and drives are detected. Check idle temperatures. Only after a clean POST should you enable memory profiles (XMP/EXPO), set the boot order, and adjust fan curves. If there is no display or no POST, simplify the build, reseat memory and GPU, and consult the board's diagnostic LEDs or beep codes.
+      Power on the system. Enter UEFI/BIOS to confirm that the CPU, memory, and drives are detected. Check idle temperatures. Only after a clean POST should you enable memory profiles (XMP/EXPO), set the boot order, and adjust fan curves. If there is no display or no POST, simplify the build, reseat memory and GPU, and consult the board's diagnostic LEDs or beep codes.
 
 </Steps>
 
