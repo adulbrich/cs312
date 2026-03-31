@@ -5,14 +5,14 @@ sidebar:
   order: 2
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside, Steps, LinkCard, CardGrid } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 {/* TODO: demonstrate everything using UTM on macOS or similar, use Starlight's Tabs to show how to do things in different Hypervisors and hosts, choose a guest OS that works on ARM and x86 */}
 
 {/* TODO: group some headings into subheadings */}
 
-Suppose you need to test a risky kernel upgrade before touching your production server. Or you need three environments (Ubuntu, AlmaLinux, and Debian) to verify your deployment scripts work across distributions. Or you want to give each developer on your team an isolated sandbox so that a misconfiguration in one environment cannot affect another. Buying separate physical hardware for every scenario is slow and expensive; rebuilding from scratch after every mistake wastes hours. Virtualization solves all three problems by letting you run multiple isolated operating systems on the same physical machine simultaneously, and roll back any of them to a clean state in seconds.
+Suppose you need to test a risky kernel upgrade before touching your production server. Or you need three environments (Ubuntu with `apt`, AlmaLinux with `dnf`, and Arch Linux with `pacman`) to verify your deployment scripts work across distributions with genuinely different package managers and release models. Or you want to give each developer on your team an isolated sandbox so that a misconfiguration in one environment cannot affect another. Buying separate physical hardware for every scenario is slow and expensive; rebuilding from scratch after every mistake wastes hours. Virtualization solves all three problems by letting you run multiple isolated operating systems on the same physical machine simultaneously, and roll back any of them to a clean state in seconds.
 
 Virtualization inserts a thin control layer called a hypervisor between software and hardware. Instead of dedicating a whole server to one workload, you carve the machine into slices of CPU time, memory, storage, and network interfaces that each guest believes are "its" hardware. This multiplies flexibility: you can prototype quickly, recover from mistakes by rolling back snapshots, and drive hardware utilization closer to what you paid for.
 
@@ -115,20 +115,57 @@ The idea of running multiple operating systems on a single machine dates to 1972
 When defining a VM you declare a bundle of virtual hardware: number of vCPUs, memory size, virtual disks, network adapters, firmware (BIOS vs UEFI), and ancillary devices (TPM, GPU). The goal is sufficiency with observability, not speculative overprovisioning. Start small, watch utilization inside (guest metrics) and outside (host hypervisor statistics), then resize. Capacity planning is iterative: predict → measure → adjust. Every resource has its own tuning levers and overcommit risks, so we explore them separately below.
 
 ### CPU Scheduling
-Hypervisors schedule vCPUs onto physical cores using time slices. Modern workloads exhibit bursts; idle guests relinquish their quantum early. Moderate overcommit (e.g. allocating total vCPUs ≈ 2-4× physical cores) often works for mixed utilization sets. Performance drops when too many runnable vCPUs contend simultaneously, raising run queue lengths and latency. NUMA (Non-Uniform Memory Access) topology enters for large hosts; pinning a VM's vCPUs and memory to a NUMA node can reduce cross-node latency for databases. Measure with tools: `top`, `htop`, `vmstat`, `sar`, or hypervisor dashboards (`esxtop`, `virsh domstats`). Assigning vCPUs generously does not improve performance for lightly threaded applications and raises scheduling overhead; moderate overcommit (2–4× physical cores across all guests) is usually more effective than matching vCPUs to physical cores.
+
+A vCPU is not a dedicated physical core reserved exclusively for a guest. It is a schedulable thread that the hypervisor multiplexes onto whatever physical cores are free at the moment. The hypervisor runs vCPUs in time slices: if a guest is idle, it surrenders its slice early and another guest's vCPU runs instead. This is why you can assign more total vCPUs across all guests than you have physical cores, a practice called **overcommit**, and it usually works fine because most guests are not all compute-bound at the same moment.
+
+Assigning more vCPUs does not automatically make a guest faster. A single-threaded program can only use one vCPU at a time no matter how many you configure; adding more just raises scheduling overhead. Two vCPUs is a good starting point for a lab VM running typical server workloads. Increase only when a guest's CPU usage is consistently high and the workload actually parallelizes.
+
+Overcommit becomes a problem when many guests are simultaneously maxing out their vCPUs: they queue up waiting for physical cores, and everything slows down. You can monitor CPU load inside a guest with `top` or `htop`. If idle percentage stays near zero under normal conditions, the guest is genuinely CPU-bound and may need more vCPUs, or the host may simply be overloaded.
 
 ### Memory Management
-Memory is harder to overcommit safely because swapping (paging to disk) is orders of magnitude slower than RAM. Hypervisors employ techniques: page sharing (identical memory pages deduplicated), ballooning (a driver inside the guest releases pages back to the host under pressure), and memory compression. Start with the minimum the OS + baseline services need, then grow if the guest's "used + cache" nears its allocation and performance degrades. Monitor host swap usage; if the host is swapping, all guests suffer. Some platforms support memory hot-add for online scaling.
+
+Memory is harder to overcommit safely than CPU because the fallback (**swapping**, where the OS moves memory pages to disk when it runs out of RAM) is orders of magnitude slower than actual RAM. An operation that takes nanoseconds in RAM can take milliseconds from disk. You will experience this as severe, sustained system slowness that can make a VM feel completely unresponsive.
+
+Hypervisors use several techniques to make memory overcommit safer before resorting to swapping:
+
+- **Page sharing**: If multiple VMs have loaded identical memory pages (for example, the same Linux kernel image), the hypervisor can detect the duplicates and store one shared copy, reclaiming the redundant pages. Guests are unaware this is happening.
+- **Ballooning**: A special driver installed inside the guest (often part of the guest tools package, such as `qemu-guest-agent`) that the hypervisor can "inflate." When the host is under memory pressure, it inflates the balloon driver, which asks the guest OS to allocate and hold memory effectively returning those pages to the host's control before the situation becomes critical.
+- **Memory compression**: Rarely-used pages are compressed and kept in a small in-RAM cache rather than written immediately to disk.
+
+For practical sizing: start a VM with the minimum memory its OS and baseline services need, then watch `free -h` inside the guest. If the "available" column stays near zero and the VM feels slow, increase the allocation. The critical warning sign is the host itself swapping; at that point every single guest on the host suffers simultaneously.
 
 <Aside type="caution">
-If the host machine is swapping, every guest suffers. Sustained swap activity is the clearest sign of memory overcommit.
+If the host machine is swapping, every guest suffers. Sustained swap activity is the clearest sign that the host as a whole is over-provisioned on memory.
 </Aside>
 
 ### Storage and Disk Images
-Virtual disks are files (qcow2, vmdk, vdi) or block devices (LVM volumes, ZFS zvols). Thin-provisioned (sparse) images allocate physical blocks on demand, conserving space but risking fragmentation and overcommit (host runs out of space unexpectedly). Thick (preallocated) images reserve space upfront, improving predictability for I/O intensive apps. Formats like qcow2 add features (snapshots, compression, encryption) at some performance cost relative to raw. Place performance-sensitive workloads on faster storage (NVMe, RAID10, ZFS with appropriate cache devices) and separate VM images from host OS partitions to simplify growth and monitoring. Align backup strategy: snapshots are not backups until copied off the storage pool. Monitor thin-provisioned disk growth to avoid unexpected host filesystem exhaustion.
+
+A virtual disk is a file on the host's filesystem that stores all of the blocks of the guest's disk. The guest operating system cannot tell the difference between this file and a real physical drive. When a VM writes a file, those bytes land in the disk image file on the host. Several image formats are in common use:
+
+- **qcow2** (QEMU Copy-On-Write 2): QEMU's native format. Supports thin provisioning, snapshots, compression, and encryption. It has a small I/O overhead compared to raw, but its feature set makes it the right default for most lab and desktop hypervisor use.
+- **vmdk**: VMware's format. Supported by many tools beyond VMware, including VirtualBox.
+- **vdi**: VirtualBox's native format.
+- **raw**: A flat, byte-for-byte image. The fastest format for I/O because there is no format overhead, but it has no built-in snapshot support.
+
+**Thin-provisioned** (sparse) images allocate host disk space only as the guest actually writes data. A 50 GB thin disk might consume only 8 GB on the host if the guest has written 8 GB so far. This conserves host storage, but introduces a risk: if all thin-provisioned VMs on the host grow simultaneously, the host filesystem can run out of space, which typically crashes all running VMs at once. **Thick (preallocated)** images reserve all space upfront, eliminating that surprise at the cost of higher immediate disk usage.
+
+For a laptop lab environment, thin-provisioned qcow2 or vdi is the right choice. The performance difference is not noticeable for typical workloads, and the space savings are useful when you have multiple VMs.
+
+<Aside type="note">
+You may encounter references to LVM (Logical Volume Manager) and ZFS as storage backends for virtual disks. These are advanced storage technologies that provide additional features like efficient snapshots at the storage layer, checksumming, and pooled storage management. They are common in server and production environments. You will encounter them in later lectures when storage is covered in depth; for now, treat them as future topics.
+</Aside>
+
+One critical point: **snapshots live on the same storage as the base image**. If the host's disk fails, both the snapshot and the base disk are gone. A snapshot on the same drive is a rollback tool, not a backup. A backup must exist on separate storage: a different disk, a different machine, or a cloud object store.
 
 ### Networking Modes
-Hypervisors expose virtual NICs that connect guests to virtual switches or host networking stacks. NAT mode lets guests reach the Internet via host address translation, simple and safe for laptops. Bridged mode attaches the guest directly to the physical LAN, giving it a peer IP (needed for inbound services) (note: some Wi-Fi access points block unknown MAC addresses, which can make guests on bridged Wi-Fi appear offline). Host-only creates an isolated network for inter-guest communication without external exposure. Some platforms add internal networks, macvtap (direct attach), or SR-IOV (single root I/O virtualization) for near-native NIC performance. Choose the simplest mode that satisfies reachability and security requirements; document port mappings when using NAT.
+
+When you create a VM, you assign it one or more virtual network adapters. The hypervisor offers several modes that control how the guest connects to the outside world:
+
+- **NAT (Network Address Translation)**: The guest shares the host's network connection via address translation, similar to how your home router lets multiple devices share one public IP address. The guest can initiate connections outward (browse the web, run `apt update`, etc.), but machines outside your laptop cannot initiate connections to the guest unless you configure explicit port-forwarding rules. This is the safest and simplest mode for a lab VM.
+- **Bridged**: The guest is connected directly to the same physical network as the host. It gets its own IP address from that network and is reachable from other machines on the same LAN. Use this when you need to SSH into the VM from another machine, or when you want the VM to behave like a real server on the network. Note: some Wi-Fi access points block traffic from unknown MAC addresses, which can prevent a bridged guest on Wi-Fi from receiving an IP.
+- **Host-only**: Creates an isolated virtual network between the host and its guests, with no path to the internet. Useful for multi-VM lab setups where you want the VMs to communicate with each other and with your laptop, but not reach the outside world.
+
+For the activities in this course, NAT is sufficient unless a specific exercise requires inbound access. Start with NAT and switch only when you have a concrete reason to do otherwise.
 
 ## Operations and Advanced Features
 
@@ -142,10 +179,15 @@ Snapshots and backups are not the same thing. If the underlying storage pool fai
 </Aside>
 
 <Aside type="tip" icon="star" title="Example: Safe Package Upgrade">
-1. Take snapshot `pre-nginx-1.26`.
-2. Upgrade Nginx and reload service.
-3. Run smoke tests (`curl`, log checks).
-4. If errors: revert snapshot; else: delete snapshot within 24h to collapse layers.
+Imagine you are running a web server (Nginx) on a VM and need to upgrade it to a new version. You are not certain the upgrade will be clean. Here is the snapshot safety-net workflow:
+
+1. **Take snapshot `pre-nginx-upgrade`** before touching anything. This freezes the current working state.
+2. **Upgrade the package** (`sudo apt upgrade nginx`) and reload the service (`sudo systemctl reload nginx`).
+3. **Verify**: `curl http://localhost` should return an HTTP response; check `sudo journalctl -u nginx` for errors.
+4. **If something broke**: revert to the snapshot in your hypervisor's UI. You are back to the known-good state in seconds, with zero manual cleanup.
+5. **If everything works**: delete the snapshot. Keeping snapshots long-term is not free: they accumulate delta layers that the hypervisor must traverse on every disk read, gradually degrading performance.
+
+The same pattern applies to database schema migrations, kernel upgrades, or any configuration change you are not confident about. Snapshot first, make the change, verify, then commit (delete snapshot) or roll back.
 </Aside>
 
 ### VM Lifecycle and Automation
@@ -174,13 +216,11 @@ Live migration copies a running VM's memory to a target host while it continues 
 
 A *process virtual machine* (also called a language runtime or application VM) is conceptually different from the system hypervisors discussed above. It is a software layer that runs a single application written in an intermediate language, making that application portable across host operating systems. The **Java Virtual Machine (JVM)** is the canonical example: Java source compiles to JVM bytecode, and the JVM executable itself is ported to run on countless operating systems, enabling Java programs to run unchanged wherever the JVM does. Python, Ruby, and the .NET CLR follow the same principle. Process VMs are not used for isolation of full operating systems, so they do not appear in typical sysadmin workflows, but understanding the distinction prevents confusion when documentation uses "VM" in a Java or containerization context.
 
-## Running Linux on Windows: WSL
-
-Microsoft introduced WSL 1 (Windows Subsystem for Linux) in 2016, followed by WSL 2 in 2019. WSL 2 uses a real Linux kernel and full virtualization, giving you access to Linux tools and utilities with minimal performance overhead and tight VS Code integration. It is useful for development workflows where you want Linux command-line tools without managing a separate VM.
-
-<Aside type="caution" title="WSL Is Not a Server Platform">
-WSL is recommended by Microsoft for development use only. Configuration options are limited, systemd support is partial, and networking behavior differs from a standalone Linux VM. If you need a Linux server for production or lab work, use a dedicated VM or a cloud instance.
-</Aside>
+<LinkCard
+  title="Windows Users"
+  href="/practicalities/windows-users/"
+  description="Running Windows on your personal machine? See how to set up WSL and a Linux environment for this course."
+/>
 
 ## Hypervisor Ecosystem and Market State
 
@@ -200,8 +240,11 @@ The major public cloud platforms each rely on enterprise-grade hypervisors under
 ### VMware Licensing Shift
 After Broadcom's acquisition of VMware, the free ESXi program was discontinued then partially reinstated (version 8.0 Update 3e, 2025) with ongoing community debate about scope and support. This has accelerated adoption of open alternatives like Proxmox VE, oVirt, and OpenStack-based stacks.
 
-### Bootable USB: Ventoy
-[Ventoy](https://www.ventoy.net/) is an open-source tool for creating bootable USB drives. Instead of reformatting the drive for each ISO, you copy ISO/WIM/IMG/VHD(x)/EFI files to the drive and Ventoy presents a boot menu. This is convenient for testing multiple hypervisor installers, Linux distributions, and rescue environments from a single USB stick.
+<LinkCard
+  title="Ventoy"
+  href="https://www.ventoy.net/"
+  description="An open-source tool for creating bootable USB drives that can hold multiple ISOs at once. Useful for testing hypervisor installers, Linux distributions, and rescue environments from a single USB stick."
+/>
 
 ## Virtualization Ecosystem
 
@@ -216,19 +259,4 @@ An organization runs a Proxmox cluster (VM layer) hosting three Ubuntu VMs formi
 
 Containers will be covered in a later lecture.
 
-## Hands-On: Creating Your First VM
-{/* TODO: get rid of that section and merge instead the VM creation in the flow of the lecture */}
-Creating a first VM solidifies the abstractions. Choose a lightweight Linux distribution (e.g. Debian, Ubuntu Server, AlmaLinux). Start with 2 vCPUs, 2-4 GB RAM, a 20-40 GB thin disk (expect it to grow), and a single NAT or bridged NIC depending on whether you need inbound access. Name a snapshot "pre-install" before first boot. Boot from the ISO, perform the OS install, then update packages and install a paravirtual driver package if needed (often already present). Collect baseline metrics: CPU idle %, memory used vs cache, disk latency during a simple `apt update`. Finally, document the build steps (even in a short README) so you can script them later with cloud-init or Ansible.
-
-<Aside type="caution">
-Before rebooting after installation, eject the installer ISO from the virtual optical drive; otherwise the VM boots back into the setup wizard. Also install the QEMU guest agent (`qemu-guest-agent`) for graceful shutdown and host-side metrics.
-</Aside>
-
-<Aside type="tip" icon="star" title="Example: Post-Install Checklist">
-1. Remove ISO from virtual CD drive.
-2. Install paravirtual tools (e.g. `qemu-guest-agent`).
-3. Set up SSH key authentication; disable password login.
-4. Take snapshot `baseline-patched` after updates.
-5. Record VM spec + purpose in inventory file.
-</Aside>
 
