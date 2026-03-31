@@ -8,7 +8,7 @@ sidebar:
 import { Aside, Steps } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
-A Linux server is just Linux — the same kernel, the same commands, the same file hierarchy — but configured deliberately: right-sized for its workload, secured for network exposure, and arranged so that services start reliably and can be debugged when they do not. This lecture walks through the decisions and tools that matter from the moment you choose a distribution to the moment a service is running and monitored. Every section builds on the last; by the end, you will have the vocabulary and the commands to set up and maintain a Linux server from scratch.
+A Linux server is just Linux, with the same kernel, the same commands, and the same file hierarchy, but configured deliberately: right-sized for its workload, secured for network exposure, and arranged so that services start reliably and can be debugged when they do not. This lecture walks through the decisions and tools that matter from the moment you choose a distribution to the moment a service is running and monitored. Every section builds on the last; by the end, you will have the vocabulary and the commands to set up and maintain a Linux server from scratch.
 
 ## Where Does a Linux Server Run?
 
@@ -228,7 +228,7 @@ Always verify your `fstab` entry with `sudo mount -a` before rebooting. A malfor
 
 Monitoring disk usage is an ongoing responsibility. A full `/var` partition (common when logs grow unchecked) can cause services to crash or refuse to start. Set up log rotation and keep an eye on `df -h` output regularly.
 
-With storage laid out and mount points established, the next question is who — and what processes — should be allowed to access it.
+With storage laid out and mount points established, the next question is who (and what processes) should be allowed to access it.
 
 ## User and Group Management
 
@@ -238,7 +238,7 @@ A freshly installed Ubuntu server has a root account and the admin user you crea
 
 Linux enforces access control through ownership: every file, directory, process, and socket belongs to a user and a group. The kernel checks these identities for every operation. On a server, this matters in two ways.
 
-First, **service accounts** are unprivileged system users that own the processes running your services. When Nginx starts, it runs as the `www-data` user, not as root. If an attacker exploits a vulnerability in Nginx, they land in a shell as `www-data` — a user with very limited capabilities — rather than as root. System accounts like `www-data` have UIDs below 1000 (reserved by most distributions for system use), have no login shell (set to `/sbin/nologin` or `/bin/false`), and often have no home directory. Creating them with `useradd -r` (system account flag) signals this intent.
+First, **service accounts** are unprivileged system users that own the processes running your services. When Nginx starts, it runs as the `www-data` user, not as root. If an attacker exploits a vulnerability in Nginx, they land in a shell as `www-data`, a user with very limited capabilities, rather than as root. System accounts like `www-data` have UIDs below 1000 (reserved by most distributions for system use), have no login shell (set to `/sbin/nologin` or `/bin/false`), and often have no home directory. Creating them with `useradd -r` (system account flag) signals this intent.
 
 Second, **groups** manage shared access. If both your application process and your Nginx process need to read the same set of files, you add both service accounts to a common group and set group read permissions on those files. This avoids giving more permissions than necessary to either account.
 
@@ -320,7 +320,7 @@ Generate a key pair on your local machine (not the server):
 ssh-keygen -t ed25519 -C "deploy key for web-prod-01"
 ```
 
-This creates two files: `~/.ssh/id_ed25519` (private — keep this secret and never share it) and `~/.ssh/id_ed25519.pub` (public — safe to distribute).
+This creates two files: `~/.ssh/id_ed25519` (private; keep this secret and never share it) and `~/.ssh/id_ed25519.pub` (public; safe to distribute).
 
 Copy the public key to the server:
 
@@ -375,7 +375,7 @@ You will see at least two interfaces: `lo` (the loopback interface, always 127.0
 
 ### Configuring a Static IP with Netplan
 
-Ubuntu uses Netplan for network configuration. Netplan reads YAML files from `/etc/netplan/` and applies them to the underlying network manager (usually `systemd-networkd` on servers). Servers should have predictable, static IP addresses — services and monitoring systems that need to reach them cannot rely on DHCP assigning a different address after a reboot. Here is a configuration that assigns a static IP:
+Ubuntu uses Netplan for network configuration. Netplan reads YAML files from `/etc/netplan/` and applies them to the underlying network manager (usually `systemd-networkd` on servers). Servers should have predictable, static IP addresses: services and monitoring systems that need to reach them cannot rely on DHCP assigning a different address after a reboot. Here is a configuration that assigns a static IP:
 
 ```yaml
 # /etc/netplan/01-static.yaml
@@ -590,7 +590,7 @@ The `After=` directive controls ordering (what starts first), while `Requires=` 
 For most of Linux's first two decades, PID 1 was SysV init: a collection of shell scripts that started services one at a time in a fixed sequence. It was simple but slow; each service had to finish before the next could start, and dependency ordering was fragile and largely manual. In 2006 Apple released launchd for macOS, which parallelized service startup. Lennart Poettering proposed systemd for Linux in 2010, drawing on launchd's ideas. systemd parallelized startup using socket activation, managed logging through a unified journal, and eventually absorbed login sessions, device management, and dozens of other system functions that had previously required separate daemons. The adoption provoked significant debate. Critics argued it violated Unix's "do one thing well" philosophy and that its centralized scope made debugging harder. Despite the controversy, every major Linux distribution had made systemd its default by 2015.
 </HistoricalNote>
 
-The concepts in this lecture form a complete foundation: you now have the vocabulary and commands to go from a blank machine to a running, maintained Linux server. Distribution selection determines your package ecosystem and support lifecycle. Filesystem and disk choices shape reliability and growth capacity. User and group management enforces least privilege across services and operators. Network configuration gives the server a predictable identity on the network. Package management keeps software current and secure. And systemd ties it together, starting services in the right order, restarting them on failure, and capturing their output in a queryable journal. The next lectures build on this foundation with automation tools — Ansible and Terraform — that apply this configuration at scale.
+The concepts in this lecture form a complete foundation: you now have the vocabulary and commands to go from a blank machine to a running, maintained Linux server. Distribution selection determines your package ecosystem and support lifecycle. Filesystem and disk choices shape reliability and growth capacity. User and group management enforces least privilege across services and operators. Network configuration gives the server a predictable identity on the network. Package management keeps software current and secure. And systemd ties it together, starting services in the right order, restarting them on failure, and capturing their output in a queryable journal. The next lectures build on this foundation with automation tools (Ansible and Terraform) that apply this configuration at scale.
 
 ## Further reading
 

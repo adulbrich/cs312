@@ -7,7 +7,7 @@ sidebar:
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 
-The [Arch Linux install activity](/activities/arch-linux-install/) put every layer of a Linux system in your hands during installation. This activity focuses on what comes next: configuring a running system to host services reliably. You will apply concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture that the install activity did not cover in depth — service accounts, package management, writing systemd unit files, and log and disk monitoring.
+The [Arch Linux install activity](/activities/arch-linux-install/) put every layer of a Linux system in your hands during installation. This activity focuses on what comes next: configuring a running system to host services reliably. You will apply concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture that the install activity did not cover in depth: service accounts, package management, writing systemd unit files, and log and disk monitoring.
 
 <Aside type="tip">
 You can use your Arch VM from the previous activity or a fresh Debian or Ubuntu Server VM. You need a regular user with sudo access and a working internet connection from the VM.
@@ -15,7 +15,7 @@ You can use your Arch VM from the previous activity or a fresh Debian or Ubuntu 
 
 ## Part 1: Create Service Accounts
 
-**Lecture concept:** This section exercises the *User and Group Management* concepts from the lecture — specifically service accounts vs. login accounts and the principle of least privilege.
+**Lecture concept:** This section exercises the *User and Group Management* concepts from the lecture, specifically service accounts vs. login accounts and the principle of least privilege.
 
 A service account owns the process running your application. It has no login shell (so attackers who exploit the service cannot use it to log in interactively) and typically no home directory. Creating it with `useradd -r` marks it as a system account (UID below 1000).
 
@@ -123,7 +123,7 @@ The `su - deploy` command spawns a login shell as the deploy user. The `-` flag 
    sudo systemctl status nginx
    ```
 
-   Nginx is installed but not yet running — you will control it through systemd in the next part.
+   Nginx is installed but not yet running; you will control it through systemd in the next part.
 </Steps>
 </TabItem>
 <TabItem label="Debian / Ubuntu">
@@ -142,7 +142,7 @@ The `su - deploy` command spawns a login shell as the deploy user. The `-` flag 
    sudo systemctl status nginx
    ```
 
-   Nginx is installed but not yet running — you will control it through systemd in the next part.
+   Nginx is installed but not yet running; you will control it through systemd in the next part.
 </Steps>
 </TabItem>
 </Tabs>
@@ -170,7 +170,7 @@ The package placed its web root, configuration, and binary in standard FHS locat
 
 ## Part 3: Write a Custom Systemd Unit
 
-**Lecture concept:** This section exercises the *Systemd Services* section from the lecture — unit files, dependency ordering, restart policy, and logging.
+**Lecture concept:** This section exercises the *Systemd Services* section from the lecture: unit files, dependency ordering, restart policy, and logging.
 
 ### Create the Application Script
 
@@ -248,7 +248,7 @@ We will write a shell script that simulates a long-running service. This exercis
 </Steps>
 
 <Aside type="note">
-`After=network.target` tells systemd to order this service after network initialization. It does not mean the service will fail if the network is unavailable — for a hard dependency, you would use `Requires=`. The lecture explains this distinction.
+`After=network.target` tells systemd to order this service after network initialization. It does not mean the service will fail if the network is unavailable; for a hard dependency, you would use `Requires=`. The lecture explains this distinction.
 </Aside>
 
 ## Part 4: Monitor Logs
@@ -300,7 +300,7 @@ We will write a shell script that simulates a long-running service. This exercis
    sudo journalctl -u webapp.service -n 15
    ```
 
-   Look for a line showing `Started` — that is the automatic restart recorded by the journal.
+   Look for a line showing `Started`: that is the automatic restart recorded by the journal.
 </Steps>
 
 ## Part 5: Disk Usage Monitoring

@@ -51,7 +51,7 @@ Take a snapshot named `pre-change-1`.
 </Tabs>
 
 <Aside type="note">
-A snapshot marks the current disk image read-only and starts writing only changed blocks to a new delta file. The full disk is not copied, which is why snapshots are fast — but it also means they share the same storage pool as the base image.
+A snapshot marks the current disk image read-only and starts writing only changed blocks to a new delta file. The full disk is not copied, which is why snapshots are fast, but it also means they share the same storage pool as the base image.
 </Aside>
 
 ### Step C: Make a Destructive Change
@@ -74,7 +74,7 @@ The status should show a failure or reload error. The sshd config check should s
 
 ### Step D: Attempt an In-Place Fix (and Give Up)
 
-Try to find and fix the bad line — but act as if you cannot locate it quickly:
+Try to find and fix the bad line, but act as if you cannot locate it quickly:
 
 ```bash
 tail -10 /etc/ssh/sshd_config
@@ -116,7 +116,7 @@ sudo sshd -T 2>&1 | head -3
 tail -5 /etc/ssh/sshd_config
 ```
 
-All three should be clean — SSH active, no config error, no `INVALID_VALUE` line.
+All three should be clean: SSH active, no config error, no `INVALID_VALUE` line.
 
 <Aside type="caution">
 Snapshots are not backups. The snapshot and the base disk share the same storage pool. If the host machine's disk fails, both are lost. Backups must reside on separate storage.
@@ -170,7 +170,7 @@ Your VM currently uses NAT.
 
    This will time out on most NAT configurations. The VM can reach outward; nothing can reach in without port forwarding.
 
-3. Test that the VM can still reach the internet — run this **inside the VM**:
+3. Test that the VM can still reach the internet; run this **inside the VM**:
 
    ```bash
    ping -c 3 debian.org
@@ -237,7 +237,7 @@ Fill in the table from your observations:
 |------|-------------------|---------------|--------------------------|
 | NAT | | | |
 | Host-only | | | |
-| Bridged | (predict — do not test) | | |
+| Bridged | (predict; do not test) | | |
 
 <Aside type="note">
 Switch your adapter back to NAT before the next activity. Host-only mode breaks internet access, which you will need for package installation.
@@ -252,4 +252,4 @@ Switch your adapter back to NAT before the next activity. Host-only mode breaks 
 
 ## What's Next
 
-With a working VM and an understanding of snapshots and networking, you are ready to put Linux itself through its paces. The [Arch Linux Install](/activities/arch-linux-install/) activity takes the concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture and makes you perform every step manually — partitioning, bootloader installation, user creation, and networking — that an Ubuntu installer would otherwise hide.
+With a working VM and an understanding of snapshots and networking, you are ready to put Linux itself through its paces. The [Arch Linux Install](/activities/arch-linux-install/) activity takes the concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture and makes you perform every step manually (partitioning, bootloader installation, user creation, and networking) that an Ubuntu installer would otherwise hide.

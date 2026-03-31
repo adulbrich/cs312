@@ -1,7 +1,161 @@
 ---
-title: "Scripting and Automation"
-description: TBD
+title: "Shell Scripting: Bootstrap and Automation"
+description: "Write a setup script that installs a package manager and your tools, then write a second script that automatically organizes photos from your phone into dated directories."
+sidebar:
+  order: 8
 draft: true
 ---
 
-TBD!
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+A good script solves a real problem you already have. This activity asks you to write two scripts you will actually use: one that rebuilds your development environment from scratch, and one that organizes the camera roll you have been meaning to sort for months.
+
+You may use any scripting language you are comfortable with: Bash, Zsh, PowerShell, or Python. The concepts (variables, conditionals, loops, file operations) transfer across all of them.
+
+## Part 1: Environment Bootstrap Script
+
+Write a script that sets up your personal development environment on a fresh machine. The goal is that running one script should leave you with a fully configured machine.
+
+### Requirements
+
+The script must:
+
+1. Start with a comment block at the top containing:
+   - Your full name
+   - A one-line description of what the script does
+   - The target OS (macOS, Windows, or Linux)
+
+2. Install a package manager if it is not already present:
+   - macOS: [Homebrew](https://brew.sh/) (`brew`)
+   - Windows: [Chocolatey](https://chocolatey.org/) (`choco`) or [winget](https://learn.microsoft.com/en-us/windows/package-manager/winget/)
+   - Debian/Ubuntu: `apt` is already present; use it directly
+
+3. Install at least five tools or applications using that package manager. Choose tools you actually use (editors, languages, CLI utilities, browsers, etc.).
+
+4. Check whether each tool is already installed before trying to install it. Print a message either way: `Already installed: git` or `Installing: git`.
+
+5. Exit with a non-zero code and print a clear error message if a critical installation fails.
+
+6. At the end, print a summary of what was installed and what was skipped.
+
+### Example Structure (Bash)
+
+```bash
+#!/usr/bin/env bash
+# Author: Your Full Name
+# Description: Bootstrap script for macOS development environment
+# Target: macOS 14+
+
+set -euo pipefail
+
+INSTALLED=()
+SKIPPED=()
+
+install_if_missing() {
+    local tool="$1"
+    local install_cmd="$2"
+    if command -v "$tool" &>/dev/null; then
+        echo "Already installed: $tool"
+        SKIPPED+=("$tool")
+    else
+        echo "Installing: $tool"
+        eval "$install_cmd"
+        INSTALLED+=("$tool")
+    fi
+}
+
+# Install Homebrew if missing
+if ! command -v brew &>/dev/null; then
+    echo "Installing Homebrew..."
+    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+fi
+
+install_if_missing "git" "brew install git"
+install_if_missing "gh" "brew install gh"
+# Add your tools here...
+
+echo ""
+echo "=== Summary ==="
+echo "Installed: ${INSTALLED[*]:-none}"
+echo "Skipped:   ${SKIPPED[*]:-none}"
+```
+
+### Deliverable for Part 1
+
+Run your script on your own machine (or a VM). Take a screenshot showing:
+- The script running with at least one "Already installed" and at least one "Installing" message, or the full summary if everything was already installed.
+- The terminal prompt must be visible and include your username.
+
+## Part 2: Photo Organization Script
+
+Write a script that takes a directory of photos (such as a camera roll export) and sorts them into subdirectories by date.
+
+### Requirements
+
+The script must:
+
+1. Accept a source directory (where the unsorted photos are) and a destination directory (where the organized folders will go) as arguments. Print a usage message if either is missing.
+
+2. Create destination subdirectories in `YYYY/MM` format (e.g., `2024/07/`) based on each photo's date.
+
+3. Determine the photo date using one of these methods (in order of preference):
+   - EXIF `DateTimeOriginal` field (requires `exiftool` on macOS/Linux or `PIL`/`Pillow` in Python)
+   - The file's last-modified timestamp as a fallback
+
+4. Copy (do not move) each photo into the appropriate subdirectory. Never overwrite an existing file: if a filename already exists at the destination, rename the incoming file by appending `_1`, `_2`, etc.
+
+5. Print a one-line log entry for each file processed:
+   ```
+   2024-07-14 | ~/Pictures/camera-roll/IMG_4821.jpg -> ~/Pictures/organized/2024/07/IMG_4821.jpg
+   ```
+
+6. At the end, print a summary: how many files were processed, how many subdirectories were created.
+
+### Testing Your Script
+
+If you do not have a camera roll handy, generate test photos:
+
+```bash
+mkdir -p ~/test-photos
+# Create files with different modification times
+touch -t 202407141200 ~/test-photos/IMG_001.jpg
+touch -t 202308221430 ~/test-photos/IMG_002.jpg
+touch -t 202501031000 ~/test-photos/IMG_003.jpg
+echo "your name" > ~/test-photos/IMG_001.jpg
+```
+
+Run your script against the test directory and verify the output structure looks like:
+
+```
+organized/
+  2024/07/IMG_001.jpg
+  2023/08/IMG_002.jpg
+  2025/01/IMG_003.jpg
+```
+
+### Deliverable for Part 2
+
+Take a screenshot showing:
+- The script output (log lines and summary)
+- The resulting directory tree (use `find organized/ -type f` or `tree organized/`)
+
+## Questions
+
+1. Your bootstrap script checks whether a tool is already installed before installing it. What property of a well-written automation script does this demonstrate? What would happen on a second run if you did not do this check?
+2. In Part 2, why is it safer to copy files instead of moving them when sorting a camera roll? In what situation would moving be the correct choice?
+3. Your photo script falls back to the file modification timestamp if EXIF data is missing. What is one scenario where this fallback would produce the wrong date?
+
+## Deliverable
+
+Submit a PDF to Canvas containing:
+- Your full bootstrap script (your name must appear in the comment block at the top)
+- Your full photo organization script
+- The screenshot from Part 1 showing the script running
+- The screenshot from Part 2 showing organized output
+- Answers to the three questions
+
+Your **full name and student ID** must appear in the PDF header.
+
+<Aside type="tip">
+Start with the happy path: get the script working for the normal case before adding error handling and edge cases. A script that handles 90% of cases reliably is more useful than one that handles every edge case but never gets finished.
+</Aside>

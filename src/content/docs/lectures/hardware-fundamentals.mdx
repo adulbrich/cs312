@@ -51,6 +51,8 @@ The integration trend taken to its logical conclusion produces a **System-on-Chi
 The efficiency advantage is real: because the CPU and GPU share the same physical memory, data does not need to be copied between separate memory pools before the GPU can operate on it. The trade-off is that memory is soldered at manufacture and cannot be upgraded after purchase.
 </Aside>
 
+When selecting a platform, verify these before purchasing:
+
 - Read the board's CPU support list and memory Qualified Vendor List (QVL) before buying.
 - Favor chipsets that expose the lanes and ports you will actually use.
 - Confirm rear I/O you need (USB-C, 2.5/10GbE, Wi-Fi) and internal headers for your case.
@@ -99,6 +101,8 @@ import ATXSFXPSUImage from './hardware-components/atx-sfx-psu.png';
 <FigureWithCaption src={ATXSFXPSUImage} caption="ATX, SFX-L, and SFX PSUs" imageHeight="h-32"/>
 
 Front panel connectors (power/reset switches, LEDs, USB headers, audio) must be matched to the board's pin layout; miswiring can cause mysterious no-boot or instant shutdown behavior. Treat clearances (CPU cooler height, radiator thickness, GPU slot width) as first-class constraints you verify from spec sheets; don't assume "standard" parts fit.
+
+Before finalizing your case and form factor, verify these physical constraints:
 
 - Map required PCIe cards (GPU, NIC (Network Interface Card), HBA (Host Bus Adapter, used to connect storage fabrics like SAS or Fibre Channel)) before choosing a compact form factor.
 - Confirm maximum GPU length and cooler height vs. your chosen components.
@@ -158,6 +162,8 @@ Capacity planning follows workload: 16-32 GB for general use, 32-64 GB for heavy
 
 **Unified Memory Architecture (UMA)** is found in SoC-based systems such as Apple M-series and AMD APUs, where the CPU and GPU share a single physical memory pool rather than having separate pools. Because there is no separate VRAM, data does not need to be copied between memory pools before the GPU can process it, which reduces latency and improves efficiency for graphics and AI tasks. The trade-off is that GPU workloads consume memory that would otherwise be available to the CPU, and since memory is soldered, total capacity is fixed at purchase.
 
+A few configuration guidelines to follow for reliable performance:
+
 - Install in the slots the manual marks for 2-DIMM operation to enable dual channel.
 - Prefer matched kits (2×16 GB) over mixing brands or speeds.
 - Enable XMP/EXPO only after a clean, stable POST at default settings.
@@ -169,7 +175,7 @@ Memory testing is important because even new kits can have subtle errors that ca
 </Aside>
 
 <Aside type="caution">
-Seating a DIMM incompletely — one unlatched side — can cause a no-POST condition that is easy to mistake for a component failure. Always press firmly until both retention clips snap closed.
+Seating a DIMM incompletely (one unlatched side) can cause a no-POST condition that is easy to mistake for a component failure. Always press firmly until both retention clips snap closed.
 </Aside>
 
 ## Interfaces and Connectors
@@ -232,6 +238,8 @@ The table below compares the peak theoretical speeds of common interfaces. Real-
 | LTE | 4 Gb/s (download) |
 | DRAM | 400 Gb/s |
 
+When selecting or configuring interfaces, keep these in mind:
+
 - Read motherboard fine print for which M.2 keys (B, M, B+M) and protocols each slot supports.
 - Treat USB marketing names (3.2 Gen 1/Gen 2/2x2) as bandwidth indicators, not just connector shape.
 - Prefer DisplayPort (or USB-C Alt Mode) for high refresh, high resolution displays.
@@ -260,6 +268,8 @@ Physical form factor governs slot count and layout (ATX vs. mATX vs. ITX) and in
 
 Plan early so cable routing, thermals, and lane allocation reinforce rather than conflict.
 
+When configuring storage, follow these guidelines:
+
 - Use an NVMe drive for OS, apps, and I/O-intensive workloads, and optional SATA/HDD for bulk media or backups.
 - Enable TRIM (modern OSes do this by default) to sustain SSD write performance.
 - Monitor key SMART attributes (reallocated sector count, media errors) and act on trends, not isolated single values.
@@ -271,7 +281,7 @@ You populate a second M.2 slot and your previously x16 GPU now reports x8. The m
 </Aside>
 
 <Aside type="caution">
-A steadily climbing SMART metric (e.g. reallocated sectors, media errors) is a meaningful warning — take a fresh backup and plan for replacement rather than waiting for outright failure. A single isolated value is less alarming, but a trend demands action.
+A steadily climbing SMART metric (e.g. reallocated sectors, media errors) is a meaningful warning: take a fresh backup and plan for replacement rather than waiting for outright failure. A single isolated value is less alarming, but a trend demands action.
 </Aside>
 
 <Aside type="tip" icon="star" title="Example: SMART Trend Response">
@@ -290,8 +300,10 @@ import RTX5080Image from './hardware-components/rtx5080.png';
 
 **Integrated** graphics share system memory and are power-efficient, while **discrete** GPUs offer higher performance at greater power and thermal cost. Emerging **accelerators** (TPUs, NPUs) specialize further, trading flexibility for efficiency on specific operations like matrix multiply or inference.
 
+When selecting and installing a GPU or accelerator:
+
 - Match GPU capability to resolution/refresh or compute workload; excess capacity wastes power.
-- Ensure PSU has sufficient dedicated PCIe power connectors and headroom.
+- Ensure the PSU has sufficient dedicated PCIe power connectors and headroom.
 - Consider case airflow (exhaust vs. axial cooler designs) to prevent hotspot recirculation.
 
 <Aside type="tip" icon="star" title="Example: PCIe Lane Negotiation Impact">
@@ -315,6 +327,8 @@ import RM1000EImage from './hardware-components/rm1000e.png';
 **Cooling** keeps components within safe temperature limits; tower air coolers and AIO (All-In-One) liquid coolers must fit the case and memory height, and case fans should create a front/side-to-rear/top airflow path. PCIe 5.0 and Gen5 NVMe SSDs can run hot; ensure adequate airflow or heatsinks for these devices. When possible, choose fans and coolers that are easy to clean and replace, supporting longer hardware lifespans. Mount AIO radiator tubes at the bottom of a front intake to avoid trapping air in the pump head; also verify cooler height against the tallest RAM sticks before purchase.
 
 **Firmware** is the low-level software that runs before your operating system. Modern systems use [**UEFI (Unified Extensible Firmware Interface)**](https://en.wikipedia.org/wiki/UEFI), which replaces the older [BIOS](https://en.wikipedia.org/wiki/BIOS). UEFI provides a graphical setup menu, lets you configure fan curves, memory profiles (XMP/EXPO), [Secure Boot](https://en.wikipedia.org/wiki/UEFI#Secure_Boot), and [Trusted Platform Module (TPM)](https://en.wikipedia.org/wiki/Trusted_Platform_Module) settings, and gives diagnostic LEDs and beep codes at first boot. With good power, clean airflow, and sensible firmware settings, you get a system that is fast, quiet, and reliable.
+
+For reliable, efficient operation:
 
 - Use separate PCIe power cables for high-draw GPUs instead of daisy-chaining splitters.
 - Start with conservative fan curves, then tune for noise vs. temperature after stress testing.
