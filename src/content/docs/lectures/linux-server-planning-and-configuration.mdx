@@ -93,6 +93,8 @@ If your server hangs during boot, GRUB lets you interrupt the process and edit k
 
 ## Linux Filesystems
 
+Before partitioning a disk or mounting a root filesystem, you need to choose what type of filesystem to use. The choice has lasting consequences for performance, reliability, and available features.
+
 Choosing the right filesystem for your workload matters more on Linux than on most other operating systems, because the options differ significantly in features and performance characteristics.
 
 **ext4** is the default filesystem for most Debian/Ubuntu installations and the workhorse of the Linux world. It is stable, well-understood, and works well for general-purpose servers. It supports large files and volumes and includes journaling to recover gracefully from crashes.
@@ -226,6 +228,8 @@ Always verify your `fstab` entry with `sudo mount -a` before rebooting. A malfor
 
 Monitoring disk usage is an ongoing responsibility. A full `/var` partition (common when logs grow unchecked) can cause services to crash or refuse to start. Set up log rotation and keep an eye on `df -h` output regularly.
 
+With storage laid out and mount points established, the next question is who — and what processes — should be allowed to access it.
+
 ## User and Group Management
 
 A freshly installed Ubuntu server has a root account and the admin user you created during installation. Before deploying any application, you need to think about who (and what) needs access to this machine.
@@ -307,6 +311,8 @@ Never edit `/etc/sudoers` with a regular text editor. The `visudo` command valid
 ### SSH Key Authentication
 
 Password authentication over SSH is convenient but weak. SSH key authentication uses asymmetric cryptography: you generate a key pair (public + private), place the public key on the server, and your client proves identity using the private key without ever transmitting it over the network.
+
+Note: the commands in this section require a working network connection to the server. Network configuration is covered in the next section; if you are setting up a new server, complete the network setup before putting these steps into practice.
 
 Generate a key pair on your local machine (not the server):
 
@@ -584,7 +590,13 @@ The `After=` directive controls ordering (what starts first), while `Requires=` 
 For most of Linux's first two decades, PID 1 was SysV init: a collection of shell scripts that started services one at a time in a fixed sequence. It was simple but slow; each service had to finish before the next could start, and dependency ordering was fragile and largely manual. In 2006 Apple released launchd for macOS, which parallelized service startup. Lennart Poettering proposed systemd for Linux in 2010, drawing on launchd's ideas. systemd parallelized startup using socket activation, managed logging through a unified journal, and eventually absorbed login sessions, device management, and dozens of other system functions that had previously required separate daemons. The adoption provoked significant debate. Critics argued it violated Unix's "do one thing well" philosophy and that its centralized scope made debugging harder. Despite the controversy, every major Linux distribution had made systemd its default by 2015.
 </HistoricalNote>
 
+The concepts in this lecture form a complete foundation: you now have the vocabulary and commands to go from a blank machine to a running, maintained Linux server. Distribution selection determines your package ecosystem and support lifecycle. Filesystem and disk choices shape reliability and growth capacity. User and group management enforces least privilege across services and operators. Network configuration gives the server a predictable identity on the network. Package management keeps software current and secure. And systemd ties it together, starting services in the right order, restarting them on failure, and capturing their output in a queryable journal. The next lectures build on this foundation with automation tools — Ansible and Terraform — that apply this configuration at scale.
+
 ## Further reading
 
 - <a href="https://www.youtube.com/watch?v=26QPDBe-NB8" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #18: Operating Systems (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=KN8YgJnShPM" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #20: Files and File Systems (YouTube)</a>
+- <a href="https://ubuntu.com/server/docs" target="_blank" rel="noopener noreferrer">Ubuntu Server Guide (Official Documentation)</a>
+- <a href="https://netplan.readthedocs.io/en/stable/" target="_blank" rel="noopener noreferrer">Netplan Reference Documentation</a>
+- <a href="https://www.freedesktop.org/software/systemd/man/systemd.service.html" target="_blank" rel="noopener noreferrer">systemd.service man page (freedesktop.org)</a>
+- <a href="https://wiki.archlinux.org/title/Users_and_groups" target="_blank" rel="noopener noreferrer">Users and Groups — Arch Linux Wiki</a>
