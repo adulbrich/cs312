@@ -274,8 +274,6 @@ You populate a second M.2 slot and your previously x16 GPU now reports x8. The m
 A steadily climbing SMART metric (e.g. reallocated sectors, media errors) is a meaningful warning — take a fresh backup and plan for replacement rather than waiting for outright failure. A single isolated value is less alarming, but a trend demands action.
 </Aside>
 
-Also check the board manual for lane-sharing rules before adding a second NVMe drive, as an additional M.2 slot can silently disable SATA ports or reduce PCIe bandwidth to the GPU.
-
 <Aside type="tip" icon="star" title="Example: SMART Trend Response">
 You notice an SSD's SMART "media errors" count jump from 0 to 8 within a week while reallocated sectors remain 0. You immediately capture a fresh backup and schedule a warranty RMA instead of waiting; subsequent extended tests reveal intermittent read failures. Early action avoided data reconstruction stress later.
 </Aside>
@@ -314,7 +312,7 @@ import RM1000EImage from './hardware-components/rm1000e.png';
 
 <FigureWithCaption src={RM1000EImage} caption="Modular PSU" imageHeight="h-64"/>
 
-**Cooling** keeps components within safe temperature limits; tower air coolers and AIO (All-In-One) liquid coolers must fit the case and memory height, and case fans should create a front/side-to-rear/top airflow path. PCIe 5.0 and Gen5 NVMe SSDs can run hot; ensure adequate airflow or heatsinks for these devices. When possible, choose fans and coolers that are easy to clean and replace, supporting longer hardware lifespans.
+**Cooling** keeps components within safe temperature limits; tower air coolers and AIO (All-In-One) liquid coolers must fit the case and memory height, and case fans should create a front/side-to-rear/top airflow path. PCIe 5.0 and Gen5 NVMe SSDs can run hot; ensure adequate airflow or heatsinks for these devices. When possible, choose fans and coolers that are easy to clean and replace, supporting longer hardware lifespans. Mount AIO radiator tubes at the bottom of a front intake to avoid trapping air in the pump head; also verify cooler height against the tallest RAM sticks before purchase.
 
 **Firmware** is the low-level software that runs before your operating system. Modern systems use [**UEFI (Unified Extensible Firmware Interface)**](https://en.wikipedia.org/wiki/UEFI), which replaces the older [BIOS](https://en.wikipedia.org/wiki/BIOS). UEFI provides a graphical setup menu, lets you configure fan curves, memory profiles (XMP/EXPO), [Secure Boot](https://en.wikipedia.org/wiki/UEFI#Secure_Boot), and [Trusted Platform Module (TPM)](https://en.wikipedia.org/wiki/Trusted_Platform_Module) settings, and gives diagnostic LEDs and beep codes at first boot. With good power, clean airflow, and sensible firmware settings, you get a system that is fast, quiet, and reliable.
 
