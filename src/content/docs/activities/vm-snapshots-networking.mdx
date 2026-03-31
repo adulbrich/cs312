@@ -10,7 +10,7 @@ import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 This activity builds on the VM you created in [Set Up Your First Virtual Machine](/activities/vm-setup/). You will practice two operational skills covered in the [Virtualization lecture](/lectures/virtualization-basics/): the snapshot safety-net workflow and the differences between networking modes.
 
 <Aside type="tip">
-The `debian-lab` VM from the previous activity. It should be running or in a saved/powered-off state with the QEMU guest agent installed.
+You will need the `debian-lab` VM from the previous activity. It should be running or in a saved/powered-off state with the QEMU guest agent installed.
 </Aside>
 
 ## Part 1: The Snapshot Safety-Net Workflow
@@ -151,68 +151,83 @@ Delete snapshots once they are no longer needed. Long snapshot chains add read o
 
 ### Observe NAT Behavior
 
-Your VM currently uses NAT. Check its IP:
+Your VM currently uses NAT.
 
-```bash
-ip addr show
-```
+<Steps>
+1. Check the VM's IP address:
 
-Note the address (typically `10.0.2.15` on VirtualBox, varies on UTM). From your laptop's terminal (not the VM), try to reach the VM:
+   ```bash
+   ip addr show
+   ```
 
-```bash
-ping -c 3 <vm-ip-address>
-```
+   Note the address (typically `10.0.2.15` on VirtualBox, varies on UTM).
 
-This will time out on most NAT configurations. The VM can reach outward; nothing can reach in without port forwarding.
+2. From your **laptop's** terminal (not the VM), try to reach the VM:
 
-Test that the VM can still reach the internet:
+   ```bash
+   ping -c 3 <vm-ip-address>
+   ```
 
-```bash
-# Run inside the VM
-ping -c 3 debian.org
-```
+   This will time out on most NAT configurations. The VM can reach outward; nothing can reach in without port forwarding.
+
+3. Test that the VM can still reach the internet — run this **inside the VM**:
+
+   ```bash
+   ping -c 3 debian.org
+   ```
+</Steps>
 
 ### Switch to Host-Only Networking
 
-Power off the VM. Change the network adapter:
-
-<Tabs>
-<TabItem label="UTM">
 <Steps>
-1. Open **VM Settings > Network**.
-2. Change the mode from **Shared Network** to **Host Only**.
-3. Save and start the VM.
+1. Power off the VM:
+
+   ```bash
+   sudo shutdown -h now
+   ```
+
+2. Change the network adapter:
+
+   <Tabs>
+   <TabItem label="UTM">
+   <Steps>
+   1. Open **VM Settings > Network**.
+   2. Change the mode from **Shared Network** to **Host Only**.
+   3. Save and start the VM.
+   </Steps>
+   </TabItem>
+   <TabItem label="VirtualBox">
+   <Steps>
+   1. Open **Settings > Network > Adapter 1**.
+   2. Change **Attached to** from **NAT** to **Host-only Adapter**.
+   3. Select `vboxnet0` from the adapter list, then click **OK**.
+   4. Start the VM.
+   </Steps>
+   </TabItem>
+   </Tabs>
+
+3. Check the new IP address inside the VM:
+
+   ```bash
+   ip addr show
+   ```
+
+4. Test reachability from your **laptop**:
+
+   ```bash
+   ping -c 3 <new-vm-ip>
+   ```
+
+   This should succeed.
+
+5. Test internet access from **inside the VM**:
+
+   ```bash
+   ping -c 3 debian.org
+   ```
+
+   This will fail. Host-only means the host and guest can communicate, but the guest is isolated from the broader network.
 </Steps>
-</TabItem>
-<TabItem label="VirtualBox">
-<Steps>
-1. Open **Settings > Network > Adapter 1**.
-2. Change **Attached to** from **NAT** to **Host-only Adapter**.
-3. Select `vboxnet0` from the adapter list, then click **OK**.
-4. Start the VM.
-</Steps>
-</TabItem>
-</Tabs>
-
-Check the new IP:
-
-```bash
-ip addr show
-```
-
-Test from your laptop:
-
-```bash
-ping -c 3 <new-vm-ip>
-```
-
-This should succeed. Test internet access from inside the VM:
-
-```bash
-ping -c 3 debian.org
-```
-
-This will fail. Host-only means the host and guest can communicate, but the guest is isolated from the broader network.
 
 ### Summary Table
 
