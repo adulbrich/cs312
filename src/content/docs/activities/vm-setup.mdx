@@ -10,7 +10,7 @@ import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 This activity puts the concepts from the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture into practice across four parts. By the end you will have a running Debian VM, have executed the snapshot safety-net workflow, observed how networking modes affect connectivity, and researched how the major hypervisors compare.
 
-<Aside type="tip">
+<Aside type="tip" title="Before you start">
 Keep the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture open as a reference.
 </Aside>
 
@@ -22,7 +22,7 @@ Keep the [Virtualization and Virtual Machines](/lectures/virtualization-basics/)
 
 ---
 
-## Part 1: Set Up the Virtual Machine
+## Set Up the Virtual Machine
 
 ### Install a Hypervisor
 
@@ -101,7 +101,7 @@ Before starting the installer, we define the VM's virtual hardware: how many vCP
 </TabItem>
 </Tabs>
 
-<Aside type="tip">
+<Aside type="tip" title="Why these resource sizes">
 A Debian server install with no GUI uses about 700 MB of RAM at idle. Starting at 1 GB provides enough headroom to observe memory behavior without over-provisioning. Two vCPUs mirrors what you would typically allocate to a small server VM.
 </Aside>
 
@@ -116,7 +116,7 @@ Starting the VM boots the Debian installer from the ISO, exactly as if you had i
 <Steps>
 1. Start the VM. The Debian boot menu appears in the VM window. Select **Install** to use the text-mode installer.
 
-   <Aside type="note">
+   <Aside type="note" title="GUI vs. text installer">
    The installer also offers a **Graphical install** option, which adds a mouse-driven interface over the same steps. Either works for this activity. In production, servers rarely have a monitor attached at all and are configured entirely over SSH after first boot — we are deliberately installing without a desktop to mirror that reality.
    </Aside>
 
@@ -142,7 +142,7 @@ After reboot, the VM window shows a plain text login prompt — no desktop, no m
 
 Everything in the sections below is typed into this console. The VM's terminal behaves exactly like any Linux terminal: commands you type run inside the VM, not on your laptop. Your host OS is completely unaffected by anything you do here. This isolation is the whole point of a VM.
 
-<Aside type="tip">
+<Aside type="tip" title="Releasing the cursor">
 If you accidentally click outside the VM window and your mouse or keyboard stops responding to the VM, look for a way to "capture" input back. In VirtualBox, click inside the VM window. In UTM, the window title shows a key combination (often Right-Ctrl or Right-Option) to release the cursor if it gets captured.
 </Aside>
 
@@ -229,7 +229,7 @@ The `free -h` output shows less than 1 GB available, even though you allocated 1
 
 ---
 
-## Part 2: The Snapshot Safety-Net Workflow
+## The Snapshot Safety-Net Workflow
 
 Before making any risky change to a running system, a snapshot gives you a guaranteed rollback path. Rather than spending time carefully reversing each change if something goes wrong, you revert the entire disk to the pre-change state in seconds. This part runs that workflow end-to-end so the steps are instinctive before you need them in a real scenario.
 
@@ -262,7 +262,7 @@ Both should show normal output: SSH active and running, root filesystem with fre
 </TabItem>
 </Tabs>
 
-<Aside type="note">
+<Aside type="note" title="How snapshots work">
 When you take a snapshot, the hypervisor marks the current disk image read-only and creates a new delta file to receive all subsequent writes. Reads still come from the original image for blocks that have not changed; new or changed blocks go to the delta. This is why snapshots are nearly instant — the full disk is not copied.
 </Aside>
 
@@ -328,7 +328,7 @@ tail -5 /etc/ssh/sshd_config
 
 All three should be clean: SSH active, no config error, no `INVALID_VALUE` line.
 
-<Aside type="caution">
+<Aside type="caution" title="Snapshots are not backups">
 Snapshots are not backups. The snapshot and the base disk share the same storage pool on the host. If the host machine's disk fails, both are lost simultaneously. Backups must reside on entirely separate storage.
 </Aside>
 
@@ -359,7 +359,7 @@ When you reverted the snapshot, what happened to the delta writes that accumulat
 
 ---
 
-## Part 3: Networking Modes
+## Networking Modes
 
 The networking mode you assign to a VM determines what it can reach and what can reach it. This matters immediately: if you configure a VM to host a service, the networking mode decides whether other machines on your network can connect. This part lets you observe the practical difference between NAT and host-only directly.
 
