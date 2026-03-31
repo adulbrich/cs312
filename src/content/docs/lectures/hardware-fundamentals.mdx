@@ -64,11 +64,9 @@ The memory QVL is a list published by the motherboard (MB) manufacturer that sho
 Suppose you want fast single- and multi-threaded performance, a quiet system at idle, one graphics card, and two NVMe drives. Start by picking a recent AMD Ryzen 7 (AM5 socket) or Intel Core i7 (LGA1700 socket). For an AM5 build, a B650 motherboard (MB) gives you PCIe Gen 4 NVMe support and plenty of USB ports without the extra cost of X670. Check that the MB has two M.2 slots, both wired for x4 PCIe lanes, and read the manual to see if using both disables any SATA ports you need. Make sure your case supports ATX if you want more expansion slots, or choose micro-ATX (mATX) for a smaller footprint. Always confirm the MB's CPU support list and memory QVL before buying to avoid compatibility surprises.
 </Aside>
 
-**Common Pitfalls**
-
-- Buying a CPU that the board supports only after a BIOS update you cannot perform without an older CPU.
-- Assuming every M.2 slot is the same; many are electrically x2 or share lanes with SATA ports.
-- Ignoring case clearance; tall VRM heatsinks can clash with large coolers in small cases.
+<Aside type="caution">
+Some CPUs require a BIOS update that can only be applied with an older, already-supported CPU. Check the board's CPU support list and confirm whether a BIOS flash is needed before purchasing.
+</Aside>
 
 ## Cases, Form Factors, and Physical Constraints
 
@@ -112,11 +110,7 @@ Many business desktops, especially those from large OEMs like Dell, HP, and Leno
 You plan a quiet Mini-ITX build with a 240 mm AIO, a 3-slot GPU, and two NVMe drives. The chosen case supports a 240 mm radiator only if you use an SFX PSU. Switching from ATX to SFX frees space for front-mounted fans, improving intake pressure and lowering GPU temps by ~5-7 °C under gaming load. Had you kept an ATX PSU, the radiator would have been restricted to slim fans, raising noise. This illustrates how enclosure, PSU form factor, and cooling choices interlock.
 </Aside>
 
-**Common Pitfalls**
-
-- Forgetting to remove a pre-installed case standoff that does not align with the board.
-- Assuming any "120 mm radiator support" implies room for push/pull or thick radiators.
-- Buying a large triple-slot GPU that blocks necessary airflow or the only remaining PCIe slot.
+Verify radiator and GPU clearances against spec sheets; a triple-slot GPU can block adjacent PCIe slots, and "120 mm radiator support" does not always mean room for thick radiators or push/pull configurations.
 
 ## Memory (RAM): Capacity, Channels, and ECC (Error-Correcting Code)
 
@@ -174,11 +168,9 @@ If you plan to run a Linux virtual machine while browsing and editing, 32 GB (2�
 Memory testing is important because even new kits can have subtle errors that cause crashes or data loss. Tools like [MemTest86](https://www.memtest86.com/) (bootable USB) or Windows Memory Diagnostic can check for errors by writing and reading patterns in every part of your RAM. A successful test means zero errors after at least one full pass. If you see any errors, reseat the DIMMs, check BIOS settings, or try running at a lower speed before assuming the kit is bad.
 </Aside>
 
-**Common Pitfalls**
-
-- Mixing DIMMs of different speeds/timings and expecting the kit to run at the higher spec.
-- Forcing aggressive overclocks before confirming a stable baseline.
-- Seating a DIMM incompletely; one unlatched side can cause a no-POST condition.
+<Aside type="caution">
+Seating a DIMM incompletely — one unlatched side — can cause a no-POST condition that is easy to mistake for a component failure. Always press firmly until both retention clips snap closed.
+</Aside>
 
 ## Interfaces and Connectors
 
@@ -248,11 +240,7 @@ The table below compares the peak theoretical speeds of common interfaces. Real-
 You buy a USB-C external NVMe enclosure rated for 20 Gb/s (USB 3.2 Gen 2x2) but plug it into a motherboard front-panel USB-C wired only for 5 Gb/s (Gen 1). CrystalDiskMark reports ~450 MB/s and you suspect the drive is slow. Checking the manual reveals the header's limitation; moving to a rear Gen 2x2 port raises sequential reads to ~2,000 MB/s, matching expectations.
 </Aside>
 
-**Common Pitfalls**
-
-- Equating M.2 with NVMe automatically; some slots are SATA-only.
-- Buying a "USB-C" device and discovering the host port is power-only or low-speed.
-- Assuming any PCIe slot length (x16 physical) guarantees full x16 electrical lanes.
+Verify electrical lane counts and protocol support before purchasing: an M.2 slot may be SATA-only, a USB-C port may be power-only or limited to low speeds, and an x16-length PCIe slot does not guarantee x16 electrical bandwidth.
 
 ## Storage and Expansion Planning
 
@@ -282,15 +270,11 @@ Plan early so cable routing, thermals, and lane allocation reinforce rather than
 You populate a second M.2 slot and your previously x16 GPU now reports x8. The manual shows that slot steals CPU lanes from the primary GPU slot. Moving the second NVMe to a chipset-attached slot restores full GPU bandwidth with negligible impact to the secondary drive's latency, an optimal trade for graphics workloads.
 </Aside>
 
-**Common Pitfalls**
+<Aside type="caution">
+A steadily climbing SMART metric (e.g. reallocated sectors, media errors) is a meaningful warning — take a fresh backup and plan for replacement rather than waiting for outright failure. A single isolated value is less alarming, but a trend demands action.
+</Aside>
 
-- Mounting an M.2 drive without moving the standoff to the correct length.
-- Assuming front-panel USB-C exists because the case has the hole; the motherboard must also have the internal header.
-- Forgetting that a triple-slot GPU can block a second PCIe slot in mATX/ITX cases.
-- Assuming a single SMART warning means immediate catastrophic failure, or ignoring a steadily climbing count.
-- Believing secure file deletion is achieved by a quick format; remnants persist without full drive erase.
-- Ignoring lane sharing footnotes leading to disabled SATA ports after NVMe install.
-- Mounting HDDs loosely so vibration propagates and accelerates mechanical wear.
+Also check the board manual for lane-sharing rules before adding a second NVMe drive, as an additional M.2 slot can silently disable SATA ports or reduce PCIe bandwidth to the GPU.
 
 <Aside type="tip" icon="star" title="Example: SMART Trend Response">
 You notice an SSD's SMART "media errors" count jump from 0 to 8 within a week while reallocated sectors remain 0. You immediately capture a fresh backup and schedule a warranty RMA instead of waiting; subsequent extended tests reveal intermittent read failures. Early action avoided data reconstruction stress later.
@@ -316,11 +300,7 @@ import RTX5080Image from './hardware-components/rtx5080.png';
 A GPU installed in a secondary mechanical x16 slot wired electrically for x4 (due to lane sharing with M.2 devices) shows reduced performance in bandwidth-heavy compute tasks (~10% drop). Moving it to the primary CPU-attached x16 slot restores full throughput, highlighting the need to confirm electrical lane counts, not just slot size.
 </Aside>
 
-**Common Pitfalls**
-
-- Assuming any x16-length slot provides x16 bandwidth.
-- Undersizing the PSU when adding a second accelerator or high-TDP GPU.
-- Blocking GPU intake with vertical cable runs or front drive cages.
+Ensure the PSU has sufficient headroom before adding a second accelerator, and keep cable runs and drive cages clear of the GPU intake to prevent thermal throttling.
 
 ## Power, Cooling, and Firmware
 
@@ -354,12 +334,9 @@ import D80PlusImage from './hardware-components/80PLUS.png';
 
 </Aside>
 
-**Common Pitfalls**
-
-- Forgetting the 8-pin (or 8+4-pin) EPS CPU power cable; the system will not POST.
-- Mounting an AIO radiator with tubes entering at the top of a front mount, which can trap air in the pump; prefer tubes at the bottom for front mounts.
-- Overlooking cooler and RAM height interactions; tall DIMMs can collide with some air coolers.
-- Choosing a PSU without ATX 3.1 support for a PCIe 5.0 GPU, leading to instability under load.
+<Aside type="caution">
+Forgetting to connect the 8-pin (or 8+4-pin) EPS CPU power cable is a common cause of no-POST that is easy to overlook; the 24-pin ATX connector alone is not enough.
+</Aside>
 
 ## Enterprise and Business-Grade Hardware
 
@@ -428,24 +405,9 @@ Building a computer is a process where careful planning and methodical steps pay
 You build on an mATX board and get no video. The board's "DRAM" LED is lit. Remove the GPU, move a single DIMM to the A2 slot, and clear CMOS. The system now POSTs to UEFI. You update to a stable BIOS revision listed as improving memory compatibility, then reinstall the second DIMM and the GPU. The system boots; you run a short memory test before enabling EXPO.
 </Aside>
 
-**Common Pitfalls**
-
-- Misplaced standoffs causing a short under the board.
-- Reversing front-panel connectors or missing the power-switch header entirely.
-- Tight cable bends that slowly work connectors loose during transport.
-
-## Quick Recap
-
-- Match platform trio (CPU socket, chipset feature set, memory generation) early; verify BIOS support and lane sharing.
-- The ATX standard (descended from the IBM PC/AT) defines physical dimensions, power voltages (+12 V, +5 V, +3.3 V, −12 V, +5 VSB), and connectors; modern CPUs integrate the memory controller and PCIe lanes that used to live in the Northbridge.
-- Right-size and validate memory (dual channel, stability first, then XMP/EXPO; consider ECC for reliability-critical systems).
-- Plan storage and expansion holistically: NVMe (preferably Gen4/Gen5) for active workloads, monitored redundancy plus separate backups for resilience.
-- Distinguish protocol vs. connector to avoid hidden bandwidth bottlenecks and lane-sharing surprises; USB and PCIe generation matter as much as physical shape.
-- Treat physical constraints (case, PSU form factor, cooler/GPU clearance) and airflow as core design inputs; provide power/cooling headroom.
-- Check GPU-CPU balance when selecting parts for performance workloads.
-- For enterprise and business hardware, evaluate remote management (vPro/AMD PRO), extended warranties, and vendor diagnostics as part of total cost of ownership.
-- Use systematic diagnostics (MemTest86, S.M.A.R.T., OS logs, vendor tools) before replacing hardware.
-- Prefer modular, repairable, and upgradable components to support sustainability and reduce e-waste.
+<Aside type="caution">
+Misplaced standoffs can short traces on the underside of the motherboard; install standoffs only where the board has mounting holes.
+</Aside>
 
 ## Further reading
 

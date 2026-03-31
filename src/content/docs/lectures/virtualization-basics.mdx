@@ -32,16 +32,8 @@ A **virtual CPU** (vCPU) is a schedulable execution context presented to a guest
 If you run Ubuntu inside VirtualBox on your Mac: the MacBook is the *host*, VirtualBox is the *hypervisor* (Type-2), the Ubuntu installation is the *guest* VM, its two configured *vCPUs* are threads that VirtualBox schedules onto your physical cores, and the `.vdi` file in your VirtualBox folder is the VM's primary *disk image*.
 </Aside>
 
-**Common Pitfalls**
-- Treating "VM" and "container" as synonyms (they isolate at different layers).
-- Ignoring the difference between a snapshot (rollback) and a backup (separately stored copy).
-
 ## Why Virtualize
-Virtualization matters because it converts hardware from a static asset into a dynamic pool you can programmatically slice, pause, clone, and move. Operational teams use VMs to isolate failures; if one guest kernel panics it rarely affects neighbors. Developers spin up ephemeral environments to test changes that require kernel modules or different distributions. Disaster recovery strategies replicate VM images to a second site so services can resume quickly after hardware loss. Economically, virtualization raises utilization: instead of ten servers each 10% busy, one larger host might run ten guests at 60-70% aggregate usage with headroom. Strategically, skills you build here transfer directly to cloud usage, because cloud "instances" are VMs exposed via APIs.
-
-**Common Pitfalls**
-- Assuming virtualization is "free" performance-wise; there is overhead (though often modest with hardware assistance).
-- Oversizing every VM "just in case," which starves the host and causes paging.
+Virtualization matters because it converts hardware from a static asset into a dynamic pool you can programmatically slice, pause, clone, and move. Operational teams use VMs to isolate failures; if one guest kernel panics it rarely affects neighbors. Developers spin up ephemeral environments to test changes that require kernel modules or different distributions. Disaster recovery strategies replicate VM images to a second site so services can resume quickly after hardware loss. Economically, virtualization raises utilization: instead of ten servers each 10% busy, one larger host might run ten guests at 60-70% aggregate usage with headroom. Strategically, skills you build here transfer directly to cloud usage, because cloud "instances" are VMs exposed via APIs. Note that virtualization is not free performance-wise; there is real overhead, though it is often modest with hardware assistance.
 
 ## Architecture: Host, Hypervisor, Guests
 At runtime the hypervisor multiplexes physical CPUs and memory pages among guests while mediating privileged operations. On x86 and ARM, hardware virtualization extensions (Intel VT-x, AMD-V, ARM Virtualization Extensions) let guest code run near native speed in a CPU mode that traps only sensitive instructions. Device access is either fully emulated (the hypervisor simulates a network card), paravirtualized (a cooperative high-performance interface like virtio-net), or directly assigned (PCI passthrough of a physical GPU). The balance of emulation vs paravirtualization drives performance and compatibility. Modern stacks (KVM + QEMU, Hyper-V, ESXi, Xen) combine these techniques automatically; your job is usually to select enhanced drivers inside the guest.
@@ -69,9 +61,9 @@ flowchart LR
 
 The diagram shows two guests whose system calls ultimately depend on hypervisor-mediated access to storage and network hardware; isolation boundaries sit between guests at the hypervisor layer.
 
-**Common Pitfalls**
-- Forgetting to install paravirtual drivers (e.g. virtio) and accepting slow emulated hardware.
-- Assuming a diagram's simplicity means direct hardware access; most devices are shared.
+<Aside type="tip">
+Install paravirtualized guest tools (e.g. `qemu-guest-agent`, virtio drivers) inside every VM. The performance difference over fully-emulated devices is measurable.
+</Aside>
 
 <Aside type="note" title="Hardware Virtualization vs Hardware Emulation">
 Hardware **virtualization** uses CPU features (like Intel VT-x, AMD-V, or ARM Virtualization Extensions) to let guest operating systems run instructions almost directly on the host CPU, with the hypervisor only stepping in for privileged operations. This delivers *near-native performance*.  
@@ -118,40 +110,25 @@ Historically we labeled hypervisors as Type-1 (bare-metal: Proxmox VE / KVM, VMw
 The idea of running multiple operating systems on a single machine dates to 1972, when IBM shipped the VM/370 mainframe OS. VM/370 let customers run multiple isolated copies of their existing software, critical when time on the machine cost thousands of dollars per hour. The concept then largely disappeared as the PC era pushed toward single-user machines. VMware reinvented it for commodity x86 hardware in 1998. Founded by Diane Greene and Mendel Rosenblum (a Stanford professor), VMware shipped a hypervisor at a time when Intel and AMD CPUs had no hardware virtualization support; it had to binary-translate privileged instructions in software. The product was initially dismissed as a curiosity; server consolidation proved the business case, and VMware became one of the most profitable software companies in enterprise IT history before Broadcom's 2023 acquisition fundamentally changed its licensing model.
 </HistoricalNote>
 
-**Common Pitfalls**
-- Treating Type-2 as "not real" virtualization (they still use hardware assist and can be performant).
-- Overindexing on taxonomy instead of management capabilities (e.g. clustering, APIs).
 
 ## Virtual Hardware and Resource Allocation
 When defining a VM you declare a bundle of virtual hardware: number of vCPUs, memory size, virtual disks, network adapters, firmware (BIOS vs UEFI), and ancillary devices (TPM, GPU). The goal is sufficiency with observability, not speculative overprovisioning. Start small, watch utilization inside (guest metrics) and outside (host hypervisor statistics), then resize. Capacity planning is iterative: predict → measure → adjust. Every resource has its own tuning levers and overcommit risks, so we explore them separately below.
 
 ### CPU Scheduling
-Hypervisors schedule vCPUs onto physical cores using time slices. Modern workloads exhibit bursts; idle guests relinquish their quantum early. Moderate overcommit (e.g. allocating total vCPUs ≈ 2-4× physical cores) often works for mixed utilization sets. Performance drops when too many runnable vCPUs contend simultaneously, raising run queue lengths and latency. NUMA (Non-Uniform Memory Access) topology enters for large hosts; pinning a VM's vCPUs and memory to a NUMA node can reduce cross-node latency for databases. Measure with tools: `top`, `htop`, `vmstat`, `sar`, or hypervisor dashboards (`esxtop`, `virsh domstats`).
-
-**Common Pitfalls**
-- Matching vCPU count to physical core count "for fairness," leading to idle waste.
-- Assigning many vCPUs to a lightly threaded app, increasing scheduling overhead.
+Hypervisors schedule vCPUs onto physical cores using time slices. Modern workloads exhibit bursts; idle guests relinquish their quantum early. Moderate overcommit (e.g. allocating total vCPUs ≈ 2-4× physical cores) often works for mixed utilization sets. Performance drops when too many runnable vCPUs contend simultaneously, raising run queue lengths and latency. NUMA (Non-Uniform Memory Access) topology enters for large hosts; pinning a VM's vCPUs and memory to a NUMA node can reduce cross-node latency for databases. Measure with tools: `top`, `htop`, `vmstat`, `sar`, or hypervisor dashboards (`esxtop`, `virsh domstats`). Assigning vCPUs generously does not improve performance for lightly threaded applications and raises scheduling overhead; moderate overcommit (2–4× physical cores across all guests) is usually more effective than matching vCPUs to physical cores.
 
 ### Memory Management
 Memory is harder to overcommit safely because swapping (paging to disk) is orders of magnitude slower than RAM. Hypervisors employ techniques: page sharing (identical memory pages deduplicated), ballooning (a driver inside the guest releases pages back to the host under pressure), and memory compression. Start with the minimum the OS + baseline services need, then grow if the guest's "used + cache" nears its allocation and performance degrades. Monitor host swap usage; if the host is swapping, all guests suffer. Some platforms support memory hot-add for online scaling.
 
-**Common Pitfalls**
-- Ignoring sustained host swap activity (a siren of overload).
-- Confusing guest "free" memory (which may be used as cache) with waste.
+<Aside type="caution">
+If the host machine is swapping, every guest suffers. Sustained swap activity is the clearest sign of memory overcommit.
+</Aside>
 
 ### Storage and Disk Images
-Virtual disks are files (qcow2, vmdk, vdi) or block devices (LVM volumes, ZFS zvols). Thin-provisioned (sparse) images allocate physical blocks on demand, conserving space but risking fragmentation and overcommit (host runs out of space unexpectedly). Thick (preallocated) images reserve space upfront, improving predictability for I/O intensive apps. Formats like qcow2 add features (snapshots, compression, encryption) at some performance cost relative to raw. Place performance-sensitive workloads on faster storage (NVMe, RAID10, ZFS with appropriate cache devices) and separate VM images from host OS partitions to simplify growth and monitoring. Align backup strategy: snapshots are not backups until copied off the storage pool.
-
-**Common Pitfalls**
-- Stacking long snapshot chains (each adds lookup overhead and risk).
-- Letting thin provisioning silently fill the host filesystem.
+Virtual disks are files (qcow2, vmdk, vdi) or block devices (LVM volumes, ZFS zvols). Thin-provisioned (sparse) images allocate physical blocks on demand, conserving space but risking fragmentation and overcommit (host runs out of space unexpectedly). Thick (preallocated) images reserve space upfront, improving predictability for I/O intensive apps. Formats like qcow2 add features (snapshots, compression, encryption) at some performance cost relative to raw. Place performance-sensitive workloads on faster storage (NVMe, RAID10, ZFS with appropriate cache devices) and separate VM images from host OS partitions to simplify growth and monitoring. Align backup strategy: snapshots are not backups until copied off the storage pool. Monitor thin-provisioned disk growth to avoid unexpected host filesystem exhaustion, and consolidate snapshot chains once a change proves stable.
 
 ### Networking Modes
-Hypervisors expose virtual NICs that connect guests to virtual switches or host networking stacks. NAT mode lets guests reach the Internet via host address translation, simple and safe for laptops. Bridged mode attaches the guest directly to the physical LAN, giving it a peer IP (needed for inbound services). Host-only creates an isolated network for inter-guest communication without external exposure. Some platforms add internal networks, macvtap (direct attach), or SR-IOV (single root I/O virtualization) for near-native NIC performance. Choose the simplest mode that satisfies reachability and security requirements; document port mappings when using NAT.
-
-**Common Pitfalls**
-- Choosing bridged mode on a Wi-Fi that blocks unknown MACs (guest appears "offline").
-- Forgetting firewall adjustments when a service moves from host to guest network identity.
+Hypervisors expose virtual NICs that connect guests to virtual switches or host networking stacks. NAT mode lets guests reach the Internet via host address translation, simple and safe for laptops. Bridged mode attaches the guest directly to the physical LAN, giving it a peer IP (needed for inbound services) (note: some Wi-Fi access points block unknown MAC addresses, which can make guests on bridged Wi-Fi appear offline). Host-only creates an isolated network for inter-guest communication without external exposure. Some platforms add internal networks, macvtap (direct attach), or SR-IOV (single root I/O virtualization) for near-native NIC performance. Choose the simplest mode that satisfies reachability and security requirements; document port mappings when using NAT.
 
 ## Operations and Advanced Features
 
@@ -167,39 +144,31 @@ Snapshots capture a point-in-time state: the base disk becomes read-only and new
 4. If errors: revert snapshot; else: delete snapshot within 24h to collapse layers.
 </Aside>
 
-**Common Pitfalls**
-- Using snapshots as "backups" and losing data when the datastore fails.
-- Keeping dozens of forgotten snapshots, inflating storage usage.
+<Aside type="caution">
+Snapshots and backups are not the same thing. If the underlying storage pool fails, both the snapshot and the base disk are gone. A backup must exist on separate storage.
+</Aside>
 
 ### VM Lifecycle and Automation
 Manually clicking through wizards does not scale. Templates (golden images) and cloud-init (or ignition on Fedora CoreOS) let you parameterize hostnames, users, SSH keys, and packages at first boot. API tooling (e.g. `virsh`, `govc` for vSphere, Proxmox API, Terraform providers) enables scripted provisioning and teardown. Combine Infrastructure as Code (IaC) (Terraform) with configuration management (Ansible) to converge VM state repeatably. Version control the template build steps (Packer) so you can rebuild on security patch day rather than nurse snowflake images.
 
-**Common Pitfalls**
-- Hand-editing templates and losing reproducibility.
-- Baking secrets (passwords, keys) into images instead of injecting at deploy time.
+<Aside type="caution">
+Never bake secrets (passwords, API keys, SSH private keys) into VM images. Inject them at deploy time via cloud-init, environment variables, or a secrets manager.
+</Aside>
 
 Infrastructure as Code and Configuration Management will be covered in later lectures.
 
 ### Performance and Measurement
 Treat performance empirically. Baseline: record CPU ready time (wait to be scheduled), memory balloon size, disk latency (ms), and network throughput for a healthy VM. Use synthetic load (e.g. `fio` for disk, `iperf3` for network, stress tools) in a lab to understand ceilings. Investigate slowdowns by checking host contention first; a guest perceiving slowness may just be starved for CPU cycles. Align storage format to workload: databases benefit from low latency (often raw or preallocated volumes); log servers tolerate sparse images. Track growth of thin-provisioned disks to forecast expansion needs. Automate periodic reports.
 
-**Common Pitfalls**
-- Blaming the guest OS for latency when host is CPU saturated.
-- Ignoring disk write amplification on copy-on-write formats for heavy random I/O.
-
 ### Security and Isolation
 VMs isolate kernel faults and many user-space compromises, but side-channel attacks (e.g. speculative execution vulnerabilities) can pierce isolation if unpatched. Harden hosts: minimal install, timely microcode and hypervisor updates, restricted management interfaces (firewall + MFA, multi-factor authentication), signed images, and principle of least privilege for orchestration credentials. Leverage virtualization for defense in depth: separate roles (database vs web) into distinct VMs to limit lateral movement. Use virtual TPM (Trusted Platform Module, a hardware-backed secure key store) and secure boot features where supported to attest guest integrity. Encrypt disk images at rest (e.g. LUKS, Linux Unified Key Setup, the standard Linux full-disk encryption layer, inside guest or at storage layer) when threat models include physical access or multi-tenant storage.
 
-**Common Pitfalls**
-- Believing a VM boundary replaces network segmentation or logging.
-- Skipping firmware updates that include virtualization security mitigations.
+<Aside type="caution">
+A VM boundary does not replace network segmentation, logging, or firewall rules. Keep hypervisor firmware and microcode current — many virtualization security advisories require firmware patches, not just software updates.
+</Aside>
 
 ### Live Migration and High Availability
 Live migration copies a running VM's memory to a target host while it continues executing; iterative pre-copy phases reduce the final pause to milliseconds-seconds. This enables non-disruptive hardware maintenance, load balancing, and evacuation prior to predicted failures. High availability (HA) layers monitor hosts; if one dies they restart (not migrate) affected VMs elsewhere using shared storage. Design constraints: shared or replicated storage accessible from both hosts, compatible CPU families (or CPU masking), and sufficient destination capacity. Measure acceptable downtime budgets to decide between pure restart vs seamless migration.
-
-**Common Pitfalls**
-- Migrating latency-sensitive real-time apps without testing pause tolerance.
-- Forgetting to align CPU feature sets, causing migration failures.
 
 ## Process Virtual Machines
 
@@ -236,11 +205,7 @@ After Broadcom's acquisition of VMware, the free ESXi program was discontinued t
 
 ## Virtualization Ecosystem
 
-Industry consolidation and licensing changes keep reshaping choices. After Broadcom's acquisition of VMware, the free ESXi program was briefly discontinued then reinstated in 2025 (version 8.0 Update 3e) with community debate over support scope. This has accelerated interest in open platforms like KVM (ubiquitous via Proxmox VE, oVirt, OpenStack) and lightweight homelab stacks. Proxmox VE continues traction for its integrated UI, ZFS support, and LXC containers alongside KVM VMs. Public clouds still predominantly use customized KVM derivatives ([AWS Nitro](https://aws.amazon.com/ec2/nitro/), GCP KVM, Azure Hyper-V variants) to expose instance types. Apple's virtualization framework and tools like UTM simplify ARM-based macOS/Linux guest experimentation on Apple Silicon. The practical takeaway: be tool-curious, but master the transferable primitives: CPU scheduling, memory pressure, block and network I/O paths, image lifecycle. Licensing shifts; fundamentals persist.
-
-**Common Pitfalls**
-- Locking skills to one vendor feature set (e.g. only vCenter flows) and struggling to translate.
-- Ignoring license terms on backup APIs or feature availability in free tiers.
+Industry consolidation and licensing changes keep reshaping choices. After Broadcom's acquisition of VMware, the free ESXi program was briefly discontinued then reinstated in 2025 (version 8.0 Update 3e) with community debate over support scope. This has accelerated interest in open platforms like KVM (ubiquitous via Proxmox VE, oVirt, OpenStack) and lightweight homelab stacks. Proxmox VE continues traction for its integrated UI, ZFS support, and LXC containers alongside KVM VMs. Public clouds still predominantly use customized KVM derivatives ([AWS Nitro](https://aws.amazon.com/ec2/nitro/), GCP KVM, Azure Hyper-V variants) to expose instance types. Apple's virtualization framework and tools like UTM simplify ARM-based macOS/Linux guest experimentation on Apple Silicon. The practical takeaway: be tool-curious, but master the transferable primitives: CPU scheduling, memory pressure, block and network I/O paths, image lifecycle. Licensing shifts; fundamentals persist. Skills locked to a single vendor's UI flows do not transfer well; the primitives (CPU scheduling, memory pressure, I/O paths, image lifecycle) are what persist across platform shifts.
 
 ## Virtualization vs Containers vs Serverless
 Containers (e.g. Docker, Kubernetes pods) package processes with user-space dependencies while sharing the host kernel; this yields faster startup, denser packing, and less memory overhead. VMs virtualize hardware and encapsulate full OS kernels, but are heavier, with stronger isolation and kernel diversity. Serverless (Functions-as-a-Service) adds a managed layer that schedules short-lived function invocations onto multi-tenant micro-VMs or containers you do not manage directly. Choice hinges on operational boundaries: need a custom kernel module or different Linux distribution? Use a VM. Need to horizontally scale stateless web handlers rapidly? Consider containers or serverless. Often you layer them: a VM cluster provides consistent host baselines; containers orchestrate application components on top.
@@ -248,10 +213,6 @@ Containers (e.g. Docker, Kubernetes pods) package processes with user-space depe
 <Aside type="tip" icon="star" title="Example: Layering">
 An organization runs a Proxmox cluster (VM layer) hosting three Ubuntu VMs forming a Kubernetes control plane. Application microservices run as containers inside that cluster. Stateful database workloads remain on dedicated VMs with tuned storage rather than inside containers for clearer performance isolation.
 </Aside>
-
-**Common Pitfalls**
-- Forcing all workloads into containers, including those needing kernel tuning or device passthrough.
-- Spinning up a VM per microservice and suffering orchestration sprawl.
 
 Containers will be covered in a later lecture.
 
@@ -267,21 +228,7 @@ Creating a first VM solidifies the abstractions. Choose a lightweight Linux dist
 5. Record VM spec + purpose in inventory file.
 </Aside>
 
-**Common Pitfalls**
-- Forgetting to detach the installer ISO and rebooting into setup again.
-- Skipping guest agent install (losing graceful shutdown + metrics features).
+<Aside type="caution">
+Before rebooting after installation, eject the installer ISO from the virtual optical drive — otherwise the VM boots back into the setup wizard. Also install the QEMU guest agent (`qemu-guest-agent`) for graceful shutdown and host-side metrics.
+</Aside>
 
-## Quick Recap
-- Virtualization abstracts hardware so multiple isolated OS instances share a host while believing they own hardware.
-- Hypervisors schedule vCPUs, manage memory, virtualize or paravirtualize devices, and expose snapshots, cloning, and migration.
-- Right-sizing (start small + measure) beats speculative overprovisioning for CPU, RAM, disk, and network.
-- Snapshots are short-term rollback tools; backups are independent, durable copies; do not conflate them.
-- Containers and serverless complement, not replace, VMs; choose based on isolation, kernel needs, and operational scope.
-- Ecosystem tools shift, but core principles (resource arbitration, isolation, observability) remain steady.
-- Common pitfalls to watch for:
-    - Treating snapshots as backups (risking total loss on datastore failure)
-    - Oversizing resources early, masking real utilization signals
-    - Ignoring host swap: silent performance killer
-    - Letting thin disks fill an underlying filesystem without alerts
-    - Neglecting to patch hypervisors for virtualization security advisories
-    - Vendor lock-in of operational muscle memory
