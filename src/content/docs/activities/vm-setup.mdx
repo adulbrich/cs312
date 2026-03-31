@@ -127,7 +127,7 @@ A Debian server install with no GUI uses about 700 MB of RAM at idle. Starting a
 
 **Lecture concept:** Paravirtualized Drivers — guest drivers that replace slow fully-emulated hardware with high-performance cooperative interfaces.
 
-Log in to the VM (as root or with `su -`) and check what storage driver is active:
+Log in to the VM and check what storage driver is active:
 
 ```bash
 lsblk -d -o NAME,TYPE,TRAN
@@ -135,24 +135,23 @@ lsblk -d -o NAME,TYPE,TRAN
 
 On a VM with virtio storage you will see a `vda` device rather than `sda` (emulated SATA). The `vda` prefix confirms `virtio-blk` is in use.
 
-Install the QEMU guest agent if it is missing:
+Install the QEMU guest agent and ethtool:
 
 ```bash
-apt install qemu-guest-agent
-systemctl enable --now qemu-guest-agent
+sudo apt update
+sudo apt install qemu-guest-agent ethtool
+sudo systemctl enable --now qemu-guest-agent
 ```
 
-Check the network driver:
+Check the network driver (the interface name varies — use the non-loopback interface from `ip link show`):
 
 ```bash
-ethtool -i eth0 2>/dev/null | grep driver
+# Find your interface name first
+ip link show
+
+# Then check its driver (substitute your interface name, e.g. enp0s3 or eth0)
+ethtool -i enp0s3 | grep driver
 # Expected output: driver: virtio_net
-```
-
-If `ethtool` is not installed:
-
-```bash
-apt install ethtool
 ```
 
 ## Collect Baseline Metrics
