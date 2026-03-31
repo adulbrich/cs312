@@ -1,0 +1,315 @@
+---
+title: "Server and Data Center Architecture"
+description: "Enterprise server platforms, custom silicon, server specialization by workload, high-speed networking, advanced storage, and data center infrastructure design."
+sidebar:
+  order: 18
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import StorageLayers from './hardware-components/StorageLayers.astro';
+
+By this point in the course you have deployed servers, written automation, containerized services, and debugged incidents. You have been treating hardware mostly as an abstraction: instances launch, disks mount, networks connect. But as you take on more responsibility, operational questions with hardware-level answers start appearing: Why is this database query slow even though CPU utilization looks fine? Should the new log server use NVMe or SAS? Why does one node in the cluster randomly miss health checks? A deeper model of what is happening inside the machine lets you answer those questions instead of guessing.
+
+This lecture moves past the component-identification level of the Hardware Fundamentals lecture and focuses on what changes when hardware is operated at scale: server CPU platforms, the growing competition from custom silicon, enterprise memory configurations, storage reliability and integrity, server specialization by workload, high-speed networking, and data center infrastructure. By the end you should be able to read a server spec sheet critically, distinguish a storage node from a compute node, and reason about the infrastructure layers that underpin a production deployment.
+
+## Server CPU Platforms
+
+Consumer CPUs (Ryzen, Core i-series) are optimized for single-socket operation, low idle power, and burst performance. **Server CPUs** are a different product line designed for continuous multi-threaded load, multi-socket configurations, very large memory capacities, and long product lifecycles. The two dominant server CPU families are **AMD EPYC** (SP5 socket) and **Intel Xeon** (LGA4677 socket). Both support ECC RDIMMs and LRDIMMs, many more memory channels than consumer platforms (up to 12 channels on high-end EPYC), and PCIe lane counts that consumer chipsets cannot match.
+
+<div class="**:mx-auto">
+  ![](./hardware-components/chipset.jpg)
+</div>
+<p class="text-center italic text-sm m-0 p-0">Modern <a href="https://en.wikipedia.org/wiki/Intel_X99" target="_blank" rel="noopener noreferrer">Intel X99</a> from Wikipedia</p>
+
+Multi-socket servers introduce **Non-Uniform Memory Access (NUMA)**. In a two-socket system, each CPU has local memory banks it can access at full speed, and remote memory banks on the other socket that it must reach over an inter-socket interconnect (AMD Infinity Fabric or Intel UPI). The latency difference between local and remote memory is typically 2-3x. Applications that are not NUMA-aware may run significantly slower if the OS schedules threads across sockets or allocates memory on the remote node. Linux tools `numactl` and `numastat` expose NUMA topology and allow you to pin processes and memory allocation to a specific node.
+
+<Aside type="tip" icon="star" title="Example: Reading a Server Spec Sheet">
+An AMD EPYC 9354P spec sheet lists 32 cores, 128 PCIe 5.0 lanes, and 12 memory channels supporting up to 3 TB of DDR5 ECC RDIMM. The "P" suffix means single-socket. A dual-socket board using two 9354 (no P) CPUs doubles core count, memory bandwidth, and PCIe lanes, but the OS now sees two NUMA nodes. Any workload that allocates large buffers should be tested with `numactl --interleave=all` to confirm whether cross-socket memory access is causing latency.
+</Aside>
+
+**Common Pitfalls**
+- Assuming a consumer CPU can be dropped into a server board: sockets are incompatible.
+- Ignoring NUMA topology; performance drops significantly in dual-socket nodes when threads and memory are split across sockets.
+- Purchasing server CPUs that require a minimum BIOS version not yet shipping on available boards.
+
+## Beyond x86: Custom Silicon and the New Server Landscape
+
+For most of computing history, "server CPU" meant Intel Xeon or (later) AMD EPYC. That assumption no longer holds. Hyperscalers and major vendors now design and manufacture their own chips, driven by workload specialization, cost control, and the strategic value of silicon independence. As a sysadmin, you will operate hardware built on many of these platforms.
+
+### ARM-Based Server CPUs
+
+The original dominance of x86 in the server market came from software compatibility and manufacturing scale, not architectural superiority. ARM's 64-bit server ISA (AArch64) delivers competitive performance per watt and has attracted both hyperscaler investment and independent CPU vendors.
+
+**Amazon Graviton** is AWS's in-house ARM server CPU, now in its fourth generation. Graviton4 (2024) uses 96 Neoverse V2 cores, supports up to 3 TB of DDR5 ECC memory, and is available across a wide range of EC2 instance types. AWS consistently reports 40-60% better price-performance for Graviton vs. comparable x86 instances for workloads compiled or containerized for ARM. Because you build your containers once and target an architecture, porting to Graviton is often as simple as a recompile.
+
+**Ampere Altra / Altra Max** is a third-party ARM server CPU aimed at cloud-native workloads. Altra Max scales to 128 cores per socket, with high memory bandwidth and a focus on consistent, predictable performance. It powers some Oracle Cloud and Microsoft Azure instances.
+
+**Microsoft Cobalt 100** is Microsoft's ARM Neoverse N2-based processor for Azure virtual machine infrastructure, announced in 2023. Like Graviton, it is purpose-built for cloud-native Linux workloads.
+
+**Google Axion** is Google's ARM Neoverse V2-based CPU for GCP compute instances, analogous to Amazon Graviton.
+
+### Custom AI Accelerators and Hybrid CPU/Accelerator Packages
+
+**NVIDIA** is no longer just a GPU company. The **Grace CPU** (an ARM Neoverse V2 design) can be combined with an H100 or H200 GPU on a single module called the **Grace Hopper Superchip**. The CPU and GPU share a 900 GB/s NVLink-C2C interconnect rather than the 64-128 GB/s of a typical PCIe 5.0 link, and they use a common coherent memory space. This eliminates the copy overhead that limits traditional CPU+GPU systems and is designed specifically for large-model AI inference and scientific computing. The **Blackwell** generation (GB200) extends this to clusters of NVLink-connected superchips.
+
+**Google TPU (Tensor Processing Unit)**: matrix multiply ASICs designed specifically for training and serving neural networks. TPU v4 pods contain 4,096 chips interconnected by a custom 3D torus network. TPU v5e and v5p extend to higher precision and larger topologies. TPUs are not general-purpose; they run a narrower programming model (XLA/JAX) optimized for Google's own frameworks.
+
+**Amazon Trainium and Inferentia** are AWS's own AI chips, competing with NVIDIA for ML training (Trainium2) and inference (Inferentia2) workloads, exposed as `trn1` and `inf2` EC2 instance families. They run models through the Neuron SDK, which compiles PyTorch and TensorFlow graphs for the custom architecture.
+
+**Microsoft Maia 100** is Microsoft's AI accelerator for Azure, targeting large-language model training and inference for Azure OpenAI Service. Like TPUs and Trainium, it is designed for specific workloads, not general compute.
+
+### What This Means for Sysadmins
+
+The practical takeaway is that the server CPU market is no longer a duopoly. When you provision cloud infrastructure, you should evaluate whether ARM instances (Graviton, Cobalt, Axion) or specialized accelerators offer better cost-performance for your specific workload. On-premises, AMD EPYC and Intel Xeon remain the defaults, but ARM-based options from Ampere are beginning to appear in managed products like Arm-native NAS appliances and edge servers.
+
+<Aside type="note" title="Checking Architecture in Linux">
+`uname -m` reports `x86_64` on Intel/AMD and `aarch64` on ARM servers. Container images must match the host architecture unless emulation (QEMU) is used, which carries a significant performance penalty. Always build and push multi-arch images (`docker buildx`) for workloads that may run on both.
+</Aside>
+
+## Memory Architectures: ECC and Registered DIMMs
+
+Memory is the workspace of your computer, and its reliability and speed are crucial for both performance and data integrity. Modern systems use several types of memory modules, each with trade-offs.
+
+**Error-Correcting Code (ECC)** memory adds extra bits to detect and correct single-bit errors, protecting against silent data corruption from cosmic rays or electrical noise.
+
+**Registered** (buffered) DIMMs (RDIMM/LRDIMM) use a register to stabilize signals, allowing servers to support more memory modules at higher capacities. **Unbuffered** DIMMs (UDIMM) connect directly to the memory controller, offering lower latency but less scalability. Most platforms support either UDIMM or RDIMM, not both, and mixing them will prevent the system from starting.
+
+ECC and RDIMM are especially important in servers, virtualization hosts, and scientific computing, where data integrity and large memory footprints matter. In contrast, consumer desktops and laptops often prioritize lower latency and cost, using UDIMM and non-ECC memory.
+
+<Aside type="tip" icon="star" title="Example: Choosing Memory for a Homelab Server">
+If you're building a virtualization server for home or research, ECC RDIMM allows you to run many virtual machines with confidence that memory errors won't silently corrupt your data. Attempting to mix UDIMM and RDIMM, however, will prevent the system from booting.
+</Aside>
+
+**Common Pitfalls**
+
+- Buying ECC UDIMMs for a board that only supports non-ECC UDIMM; the extra bits are ignored and you paid for nothing.
+- Attempting to mix RDIMM with UDIMM: system will not POST.
+- Populating all DIMM slots on a consumer board and expecting the same bandwidth as a server platform; consumer CPUs typically have 2 memory channels regardless of DIMM count.
+
+## Enterprise Storage: Media, Interfaces, and Data Integrity
+
+The [Hardware Fundamentals](/lectures/hardware-fundamentals/) lecture covers the basics of HDD and SSD technology: spinning platters, NAND flash, wear leveling, TRIM, and SMART monitoring. At the server and data center scale, the focus shifts to interface selection, density, hot-swap support, and the data integrity mechanisms that protect against silent corruption.
+
+### SATA, SAS, and NVMe: Choosing the Right Interface
+
+| Interface | Bandwidth | Duplex | Hot-Swap | Use Case |
+|---|---|---|---|---|
+| **SATA III** | ~600 MB/s | Half | Backplane-dependent | Budget servers, bulk storage |
+| **SAS-3 (12G)** | ~1,200 MB/s | Full | Yes (SAS expanders) | High-density enterprise storage |
+| **SAS-4 (22.5G)** | ~2,250 MB/s | Full | Yes | Tier-1 storage arrays |
+| **NVMe (PCIe 4.0 x4)** | ~7,000 MB/s | Full | Via U.2/U.3 backplane | Low-latency databases, AI |
+| **NVMe-oF** | Limited by network | Full | N/A | Disaggregated storage over fabric |
+
+**Full-duplex** means SAS can read and write simultaneously on the same link, unlike SATA which is half-duplex. This matters in high-throughput server workloads where concurrent reads and writes are common. **SAS expanders** allow a single HBA to address up to 256 drives, making SAS the traditional choice for high-density storage enclosures.
+
+**NVMe over Fabrics (NVMe-oF)** extends the NVMe protocol across a network, making remote SSDs appear as locally attached block devices with near-local latency. NVMe-oF transports include RDMA (RoCE, iWARP, InfiniBand), Fibre Channel, and TCP. Storage disaggregation using NVMe-oF is increasingly common in hyperscale and cloud deployments.
+
+**Hot-swapping** (replacing a drive without powering down the system) is supported on SAS and enterprise SATA backplanes and is essential in production environments. Consumer SATA typically does not guarantee safe hot-swap.
+
+### Direct-Attached, Network-Attached, and Storage Area Networks
+
+- **Direct-Attached Storage (DAS)**: storage connected directly to a single host (internal drives, external USB/eSATA enclosures). Fastest access; no network overhead; accessible only to the attached host.
+- **Network-Attached Storage (NAS)**: a device (or system) that presents storage over a network as a file server (SMB, NFS). Multiple clients can access the same data; simpler to manage than a SAN; slightly higher latency than DAS.
+- **Storage Area Network (SAN)**: a dedicated high-speed network (Fibre Channel, iSCSI, or NVMe-oF) connecting hosts to block-level storage. Appears to each host as a locally attached disk; used in enterprise environments for virtualization, databases, and high-availability clustering.
+
+### Data Integrity: RAID, ZFS, and Btrfs
+
+Traditional **Redundant Array of Independent Disks (RAID)** combines multiple drives for redundancy or performance, but does not provide end-to-end data integrity; silent errors can go undetected, especially during rebuilds. Modern filesystems like **ZFS** and **Btrfs** use copy-on-write and checksumming to detect and correct errors, offer built-in redundancy, and support features like snapshots and scrubbing for ongoing health checks.
+
+**RAID levels** serve different goals:
+- **RAID 0** (striping): data is split across drives for speed, with no redundancy; any drive failure loses all data.
+- **RAID 1** (mirroring): identical data on two or more drives; full redundancy but capacity equals the smallest drive.
+- **RAID 5** (striping with parity): data and a single parity block are distributed across three or more drives; survives one drive failure.
+- **RAID 6**: like RAID 5 but with two parity blocks; survives two simultaneous drive failures.
+- **RAID 10** (1+0): mirrored pairs that are then striped; good performance and redundancy but requires at least four drives and wastes half capacity.
+
+**How parity works (RAID 5/6)**: parity is computed using XOR across the data blocks on each stripe. If drive B fails, its content can be reconstructed as XOR(block A, block C, parity). RAID with a single parity disk tolerates one failure; double parity (RAID 6) tolerates two.
+
+| | Software RAID | Hardware RAID |
+|---|---|---|
+| **Where it runs** | OS kernel (e.g., Linux `mdadm`) | Dedicated RAID controller card |
+| **CPU usage** | Uses host CPU for parity/rebuild | Offloaded to controller |
+| **Cost** | Free (included in OS) | More expensive |
+| **Flexibility** | Easy to move arrays between systems | Vendor lock-in; controller failure can trap data |
+| **Best for** | NAS, small/medium workloads | Performance- and reliability-critical environments |
+
+Software RAID is often the better choice for home labs and small deployments using ZFS or Btrfs, which provide their own RAID-like implementations (RAID-Z, mirrors) with the added benefit of checksumming. Hardware RAID is common in enterprise servers where consistent write performance and boot-from-array support matter.
+
+{/* TODO: add RAID illustrations, maybe ZFS/Btrfs as well */}
+
+| **Feature**                | **RAID (Traditional)** | **ZFS/Btrfs**                |
+|----------------------------|-----------------------|------------------------------|
+| **Redundancy**             | Yes (RAID 1/5/6/10)   | Yes (mirrors, RAID-Z, etc.)  |
+| **Performance**            | Yes (RAID 0/10)       | Yes (varies by config)       |
+| **Checksumming**           | No                    | Yes (detects/corrects errors)|
+| **Silent Data Corruption** | Possible              | Detected and self-healed       |
+| **Snapshots**              | No                    | Yes                          |
+| **Online Expansion**       | Limited               | Yes (with caveats)           |
+| **Ease of Management**     | Moderate              | Moderate (learning curve)    |
+| **Backup Replacement**     | No                    | No                           |
+
+Operational best practices include maintaining separate, versioned, offline or offsite backups: redundancy is not a substitute for backup. Schedule regular scrubs (ZFS/Btrfs) to catch errors early, label drive bays for easy replacement, and monitor SMART data for signs of impending failure.
+
+<Aside type="tip" icon="star" title="Example: RAID vs. Backup Misunderstanding">
+If a RAID1 array loses a disk and, during the rebuild, a directory is deleted, the deletion is instantly mirrored; only an external backup can restore it. Redundancy is not backup.
+</Aside>
+
+**Common Pitfalls**
+
+- Treating RAID as protection against accidental deletion or ransomware.
+- Expanding arrays without documenting original disk order.
+- Skipping scrubs, allowing silent corruption to accumulate.
+- Assuming a quick format is a secure erase.
+
+## Server Specialization by Workload
+
+"Server" is a generic term. In production environments, different classes of server hardware are optimized for different workloads. Understanding these categories helps you match hardware to requirements and interpret vendor product lines.
+
+### Compute Servers and Virtualization Hosts
+
+Standard 1U and 2U rackmount servers with dual-socket CPUs, a large amount of RAM, and a small number of NVMe boot and scratch drives are the workhorses of most data centers. As **virtualization hosts** (hypervisor nodes running VMware ESXi, Proxmox, or KVM), they are maximized for RAM capacity (to host many VMs) and CPU core count (to share cores across VMs without contention). A typical dense virtualization node might have 2 × AMD EPYC 9354P (64 cores total), 768 GB of DDR5 ECC RDIMM, and 4 NVMe drives for VM images.
+
+**Blade servers** pack compute nodes (blades) into a shared chassis that provides common power, cooling, and networking backplane. Each blade is a thin compute module; the chassis aggregates network uplinks, reducing per-node cable count. The trade-off is vendor lock-in (blades from one vendor rarely fit another's chassis) and limited per-blade expansion.
+
+### Storage Servers and JBOD/JBOF Enclosures
+
+A **storage server** prioritizes drive count over CPU and RAM. A 4U storage server may hold 60-90 3.5" drives on a SAS/SATA expander backplane, with a modest dual-socket CPU and a pair of 10/25 GbE or Fibre Channel NICs. Storage servers run operating systems like TrueNAS (ZFS-based), Ceph, or Windows Server with Storage Spaces Direct.
+
+A **JBOD (Just a Bunch of Disks)** is a disk enclosure with no embedded compute: it presents drives directly to an attached server over SAS or NVMe, leaving RAID and filesystem logic entirely to the host. A **JBOF (Just a Bunch of Flash)** is the NVMe equivalent, housing dozens of NVMe SSDs in a disaggregated enclosure connected to servers over NVMe-oF.
+
+These form the storage backend of Ceph clusters, large-scale object stores, and distributed databases.
+
+### AI/GPU Servers
+
+AI training and inference workloads require **high-density GPU configurations** and the interconnects to match. A purpose-built AI server such as the **NVIDIA DGX H100** hosts 8 × H100 SXM GPUs, connected to each other via **NVLink** (900 GB/s bidirectional per GPU pair) and to the host CPU over **PCIe 5.0**. The chassis provides 10 kW of power capacity and liquid cooling.
+
+At smaller scale, a 4U server with 8 × PCIe-attached GPUs (such as an H100 PCIe variant) is a common unit of GPU capacity in on-premises clusters. The critical difference from a standard server is power (each H100 draws up to 700 W) and cooling (dual-rotor fans or liquid cooling direct to the GPU cold plate).
+
+**Inference servers** are configured differently from training servers: lower-tier GPUs (NVIDIA L4, L40S) or purpose-built accelerators (AWS Inferentia, Google TPU v5e) offer better cost per query for serving trained models, because inference workloads are latency-bound and benefit from higher parallelism across smaller accelerators rather than fewer high-memory training GPUs.
+
+<div class="**:mx-auto">
+  ![](./hardware-components/server-chipset.png)
+</div>
+<p class="text-center italic text-sm m-0 p-0">2U HPC/AI Server <a href="https://www.gigabyte.com/Enterprise/GPU-Server/G293-S41-AAP1" target="_blank" rel="noopener noreferrer">G293-S41-AAP1</a> from GIGABYTE</p>
+
+### Edge Servers
+
+An **edge server** runs close to users or sensors: in a remote office, a retail location, a telecom central office, or an industrial site. The requirements diverge sharply from data center servers: small form factor (often Mini-ITX or short-depth 1U), wide operating temperature range, vibration tolerance, no moving storage parts, and often a fanless design. Edge servers typically run a subset of data center workloads: local inference, data aggregation before upload, or OT/IoT integration.
+
+## High-Speed Networking and Data Center Fabrics
+
+As compute density increases and storage disaggregates over the network, the network fabric itself becomes a critical hardware layer. The networking requirements of a data center are fundamentally different from a campus LAN.
+
+### Ethernet Speed Tiers
+
+Consumer and small office equipment operates at 1 GbE. Servers and storage have moved well beyond this:
+
+| Speed | Common Use |
+|---|---|
+| **10 GbE** | Basic server uplinks, storage replication, legacy data centers |
+| **25 GbE** | Standard modern server NIC (replaces 10 GbE in new deployments) |
+| **40 GbE** | Older aggregation and storage; largely replaced by 100 GbE |
+| **100 GbE** | Top-of-rack switch uplinks, storage servers, GPU cluster nodes |
+| **400 GbE** | Spine switches, hyperscale core, AI cluster interconnects |
+| **800 GbE / 1.6 TbE** | Emerging standards for next-generation AI clusters |
+
+A standard modern server ships with a **dual-port 25 GbE NIC** for primary data traffic, and a separate 1 GbE or 10 GbE port dedicated to the BMC (Baseboard Management Controller) out-of-band management network.
+
+### RDMA, RoCE, and InfiniBand
+
+Standard Ethernet networking requires the CPU to copy data between application memory and network buffers, consuming CPU cycles and adding latency. **Remote Direct Memory Access (RDMA)** allows a NIC to write data directly into the remote host's memory without involving the remote CPU, reducing latency to microseconds and CPU overhead to near zero.
+
+- **InfiniBand (IB)**: the original RDMA fabric, still dominant in HPC clusters. HDR InfiniBand runs at 200 Gbps per port; NDR at 400 Gbps. InfiniBand requires dedicated switches and HCAs (Host Channel Adapters) but offers the lowest possible latency.
+- **RoCE (RDMA over Converged Ethernet)**: runs the same RDMA protocol (IB transport) over standard Ethernet hardware. RoCEv2 is now widely deployed in AI clusters (NVIDIA uses RoCE to interconnect NIC-attached GPU nodes in its SuperPOD reference design). Requires PFC (Priority Flow Control) and ECN (Explicit Congestion Notification) for lossless behavior.
+- **iWARP**: RDMA over TCP/IP. Lower performance than RoCE but works on any Ethernet network without lossless configuration.
+
+### SmartNICs and DPUs
+
+A **SmartNIC** is a NIC with an embedded ARM CPU and programmable packet processing logic. A **DPU (Data Processing Unit)** extends this further into a complete system-on-chip capable of running a general-purpose OS alongside its network processing. NVIDIA BlueField-3 and Intel IPU (Infrastructure Processing Unit) are the main examples.
+
+DPUs offload infrastructure functions from the host CPU: overlay networking (VXLAN, GENEVE), storage encryption, firewall rules, hypervisor vSwitch, and telemetry. In cloud environments, placing the hypervisor network stack on a DPU frees the entire host CPU budget for tenant workloads. AWS Nitro Cards are a well-known production example of this architecture.
+
+### Spine-Leaf Topology and Oversubscription
+
+Traditional three-tier data center networks (core, distribution, access) are replaced by **spine-leaf** (also called fat-tree or Clos) topologies in modern data centers. Every leaf switch connects to every spine switch; no two leaf switches connect directly. This ensures any leaf-to-leaf path is always exactly two hops, providing predictable and uniform latency across the fabric.
+
+**Oversubscription ratio** is the ratio of total downlink bandwidth (to servers) to total uplink bandwidth (to spine). A 4:1 ratio means four servers sharing a single server's worth of uplink capacity. For most workloads this is acceptable; AI training clusters that do heavy gradient synchronization may require 1:1 (non-blocking) fabric to avoid communication bottlenecks during distributed training.
+
+<Aside type="tip" icon="star" title="Example: AI Cluster Network Design">
+A distributed training job running on 64 GPUs does an all-reduce (gradient synchronization) after each batch. If the network is oversubscribed 4:1, the all-reduce step stalls waiting for bandwidth, turning 64 GPUs into 16 effective GPUs from a throughput perspective. Non-blocking 100 GbE RoCE fabric eliminates this bottleneck. This is why AI cluster networking is often the most expensive line item after the GPUs themselves.
+</Aside>
+
+## Server and Data Center Design: Availability, Efficiency, and Scale
+
+As you move from single workstations to servers and data centers, priorities shift toward availability, manageability, density, and predictable power and cooling. Server hardware adds features like ECC RDIMM/LRDIMM, multi-socket support, hot-swap backplanes, redundant power supplies and fans, and a Baseboard Management Controller (BMC) for out-of-band control (such as remote power cycling and KVM access). Storage is often attached via SAS/SATA expanders, Host Bus Adapters (HBAs, ideally in IT mode for ZFS/Btrfs), or high-density NVMe backplanes.
+
+A complete data center deployment involves more than just servers. The full hardware stack includes:
+
+- **Racks** (typically 42U standard enclosures)
+- **Cabling** (structured copper and fiber runs, cable management arms)
+- **Cooling and ventilation** (CRAC units, Computer Room Air Conditioners that recirculate and cool data center air, hot/cold aisle containment, liquid cooling)
+- **Power**: branch circuits, PDUs (power distribution units), and **Uninterruptible Power Supplies (UPS)** to bridge brief outages and give systems time for a clean shutdown during extended ones
+- **Network infrastructure** (top-of-rack switches, spine/leaf fabric, out-of-band management network)
+- **Servers** themselves (compute, storage, and GPU nodes)
+
+Server form factors include rackmount (1U/2U/4U), blade (ultra-dense, shared power/network), and tower (quiet, serviceable for edge or small office). Modern data centers use racks measured in U (1U ≈ 1.75"), enforce hot/cold aisle airflow, and plan power using an 80% derating rule for continuous load. Storage may be pooled and disaggregated over high-speed fabrics, and remote management is standard.
+
+<div class="**:mx-auto **:h-64 **:w-auto **:object-contain">
+  ![](./hardware-components/server-top.png)
+</div>
+<div class="**:mx-auto **:h-auto **:w-96 **:object-contain">
+  ![](./hardware-components/server-front.png)
+</div>
+<div class="**:mx-auto **:h-auto **:w-96 **:object-contain">
+  ![](./hardware-components/server-back.png)
+</div>
+<p class="text-center italic text-sm m-0 p-0">2U HPC/AI Server <a href="https://www.gigabyte.com/Enterprise/GPU-Server/G293-S41-AAP1" target="_blank" rel="noopener noreferrer">G293-S41-AAP1</a> from GIGABYTE</p>
+
+Key concepts include N+1 redundancy (extra power/fan units for resilience), hot-swap components to minimize downtime, Non-Uniform Memory Access (NUMA) for memory locality, and strict airflow management. Always verify component compatibility, size power for growth, and document rack layouts for future expansion.
+
+<div class="**:mx-auto">
+  ![](./hardware-components/server-racks.png)
+</div>
+<p class="text-center italic text-sm m-0 p-0">Server Racks Organisation to Maximize Airflow</p>
+
+<Aside type="tip" icon="star" title="Example: Lab Rack Power Budget">
+On a 208 V 30 A circuit (≈6.2 kVA), using the 80% continuous guideline gives ~5 kW usable. If a 2U storage server draws 350 W and each compute node 400 W, you can fit (5,000 − 350)/400 ≈ 11 nodes in theory, but should deploy 8-9 to allow for growth and power spikes.
+</Aside>
+
+**Common Pitfalls**
+
+- Mixing UDIMM with RDIMM: no POST.
+- Deploying side-to-side airflow gear without proper ducting: overheats.
+- Ignoring NUMA pinning: performance drops in dual-socket nodes.
+- Underestimating power density: tripping circuits during simultaneous spin-up.
+
+## Quick Recap
+
+- Server CPUs (AMD EPYC, Intel Xeon) support multi-socket operation, many memory channels, and ECC RDIMM; consumer CPUs do not.
+- NUMA introduces latency asymmetry in multi-socket systems; pin workloads to a socket with `numactl` to avoid cross-socket memory penalties.
+- The server CPU market is no longer a duopoly: Amazon Graviton, Google Axion, and Ampere Altra (all ARM) offer competitive price-performance for cloud-native Linux workloads.
+- NVIDIA Grace Hopper and Blackwell superchips combine ARM CPUs and H100/H200 GPUs with a 900 GB/s NVLink interconnect, eliminating the PCIe bottleneck for AI workloads.
+- Google TPUs, Amazon Trainium/Inferentia, and Microsoft Maia are ASICs designed for ML; they run specific frameworks (XLA, Neuron SDK) and are not general-purpose.
+- ECC detects and corrects single-bit memory errors; RDIMM adds a register to stabilize signals at high DIMM counts; mixing RDIMM and UDIMM prevents POST.
+- SAS is full-duplex and supports expanders for high-density backplanes; NVMe is fastest but most cost-effective at lower drive counts; SATA is low-cost bulk storage.
+- NVMe-oF extends NVMe over a network fabric (RDMA or TCP), enabling storage disaggregation.
+- RAID provides redundancy (or speed) but is not a backup; ZFS and Btrfs add checksumming and self-healing that traditional RAID lacks.
+- Compute servers maximize CPU/RAM for virtualization; storage servers maximize drive count; AI servers maximize GPU density and NVLink/NVMe-oF bandwidth; edge servers prioritize small form factor and no moving parts.
+- Modern server NICs operate at 25/100/400 GbE; RDMA (InfiniBand or RoCEv2) reduces CPU overhead and latency for storage and AI cluster traffic.
+- SmartNICs and DPUs (NVIDIA BlueField, Intel IPU) offload network, storage, and security functions from the host CPU; AWS Nitro is a production example.
+- Spine-leaf topology provides uniform two-hop latency across a data center fabric; oversubscription ratio determines how much bandwidth servers share.
+- Data center deployments require racks, structured cabling, cooling (hot/cold aisle), UPS, PDUs, network fabric, and servers; plan all layers together.
+- The 80% derating rule: size power infrastructure for 80% continuous load to leave headroom for spikes.
+
+## Further reading
+
+- <a href="https://www.youtube.com/watch?v=TQCr9RV7twk" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #19: Memory and Storage (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=KN8YgJnShPM" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #20: Files and File Systems (YouTube)</a>
+- <a href="https://en.wikipedia.org/wiki/Computer_data_storage" target="_blank" rel="noopener noreferrer">Computer data storage (Wikipedia)</a>
+- <a href="https://aws.amazon.com/ec2/graviton/" target="_blank" rel="noopener noreferrer">Amazon EC2 Graviton Processors (AWS)</a>
+- <a href="https://cloud.google.com/tpu/docs/intro-to-tpu" target="_blank" rel="noopener noreferrer">Introduction to Cloud TPU (Google)</a>
+- <a href="https://developer.nvidia.com/grace-hopper-superchip" target="_blank" rel="noopener noreferrer">NVIDIA Grace Hopper Superchip</a>
+- <a href="https://www.elastic.co/guide/en/cloud-enterprise/current/ece-hardware-prereq.html" target="_blank" rel="noopener noreferrer">Elastic Cloud Enterprise hardware prerequisites</a>
+- <a href="https://www.racksolutions.com/news/blog/rack-unit-converter-how-to-convert-rack-u-height/" target="_blank" rel="noopener noreferrer">Rack Unit Converter (RackSolutions)</a>
+- <a href="https://www.redhat.com/sysadmin/troubleshooting-slow-servers" target="_blank" rel="noopener noreferrer">Troubleshooting slow servers: CPU, RAM, and Disk I/O (Red Hat Enable Sysadmin)</a>
+- <a href="https://www.youtube.com/watch?v=wFCc3ts74pQ" target="_blank" rel="noopener noreferrer">A Day in the Life of the Data Centre: Racking Servers (YouTube)</a>
