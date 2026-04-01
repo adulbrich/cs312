@@ -16,7 +16,7 @@ A server randomly reboots under load: is it the PSU, faulty RAM, or a thermal is
 Modern computers are built from a small set of well-defined parts that must match one another in socket, speed, and power budget. In this lecture you will learn how the motherboard, CPU, memory, storage, graphics card, power supply, and cooling fit together and what "compatibility" really means in practice. We will favor plain language first, then introduce the necessary terms (socket, chipset, PCIe lanes, TDP) with short glosses. By the end you should be able to read a spec sheet, choose parts that make sense for a given goal (a quiet student workstation, a home lab server, a cost-optimized cloud instance), and assemble a system that boots on the first try. Building on this foundation, later lectures on networking and operating systems assume you can reliably bring bare metal to life.
 
 <Aside type="note" title="2025 Hardware Trends and Future-Proofing">
-As of 2025, the job market expects familiarity with the latest standards: DDR5 memory, PCI Express (PCIe) 5.0 for graphics and storage, Gen5 NVMe SSDs, and ATX 3.1 power supplies (PSUs) that support new power delivery and efficiency requirements. When planning a build, look for these features to ensure your system is ready for current and near-future workloads. Always leave budget for a quality PSU and cooling; these are critical for reliability and upgradability. Sustainability is also a growing concern: favor modular, repairable designs and consider e-waste when replacing parts.
+As of 2025, the job market expects familiarity with the latest standards: DDR5 memory, PCI Express (PCIe) 5.0 for graphics and storage, Gen5 NVMe SSDs, and newer ATX 3.x power supplies (PSUs) that better handle modern GPU power excursions. When planning a build, look for these features when they match your workload and budget; they improve current performance and can extend upgrade life. Always leave budget for a quality PSU and cooling; these are critical for reliability and upgradability. Sustainability is also a growing concern: favor modular, repairable designs and consider e-waste when replacing parts.
 </Aside>
 
 ## The Motherboard-CPU Platform
@@ -27,9 +27,9 @@ import MBRAMCPUImage from '/src/content/docs/lectures/hardware-components/mother
 
 <FigureWithCaption src={MBRAMCPUImage} alt="Motherboard Overview (GIGABYTE B850M DS3H Motherboard)" imageHeight="h-96"/>
 
-[**ATX**](https://en.wikipedia.org/wiki/ATX) is the most common motherboard size (form factor) for desktops, measuring about 12 x 9.6 inches. It matters because it determines how many slots and ports you get, and what cases will fit. Smaller sizes like microATX (mATX) and Mini-ITX offer fewer slots but fit in smaller cases. In 2025, most new boards support PCIe 5.0 for GPUs and at least one NVMe slot, with some offering Gen5 NVMe for ultra-fast storage. ATX 3.1 PSUs are now standard for new builds, providing better efficiency and support for high-wattage GPUs.
+[**ATX**](https://en.wikipedia.org/wiki/ATX) is the most common motherboard size (form factor) for desktops, measuring about 12 x 9.6 inches. It matters because it determines how many slots and ports you get, and what cases will fit. Smaller sizes like microATX (mATX) and Mini-ITX offer fewer slots but fit in smaller cases. In 2025, many new boards support PCIe 5.0 for GPUs and at least one NVMe slot, with higher-end models more likely to offer a Gen5 NVMe slot for ultra-fast storage. ATX 3.x PSUs are increasingly recommended for high-wattage GPUs because they are designed for the large transient power spikes modern cards can demand.
 
-For storage, motherboards provide connectors like [**SATA**](https://en.wikipedia.org/wiki/SATA) (Serial ATA), a cable-based interface for hard drives and older SSDs, and [**M.2**](https://en.wikipedia.org/wiki/M.2) slots for modern, stick-shaped drives. Some M.2 slots support [**NVMe**](https://en.wikipedia.org/wiki/NVM_Express) (Non-Volatile Memory Express), a protocol that lets SSDs talk directly to the CPU over [**PCI Express (PCIe)**](https://en.wikipedia.org/wiki/PCI_Express) lanes for much higher speeds than SATA. In 2025, PCIe 5.0 and Gen5 NVMe SSDs are becoming mainstream, offering up to 14 GB/s sequential reads, ideal for demanding workloads but requiring careful attention to cooling and lane allocation. PCIe is the main expansion bus for add-in cards like graphics cards (graphics processing units, or GPUs) and high-speed storage.
+For storage, motherboards provide connectors like [**SATA**](https://en.wikipedia.org/wiki/SATA) (Serial ATA), a cable-based interface for hard drives and older SSDs, and [**M.2**](https://en.wikipedia.org/wiki/M.2) slots for modern, stick-shaped drives. Some M.2 slots support [**NVMe**](https://en.wikipedia.org/wiki/NVM_Express) (Non-Volatile Memory Express), a protocol that lets SSDs talk directly to the CPU over [**PCI Express (PCIe)**](https://en.wikipedia.org/wiki/PCI_Express) lanes for much higher speeds than SATA. In 2025, PCIe 5.0 and Gen5 NVMe SSDs are increasingly common in higher-end consumer systems, offering up to about 14 GB/s sequential reads on PCIe 5.0 x4 drives, but they also require careful attention to cooling and lane allocation. PCIe is the main expansion bus for add-in cards like graphics cards (graphics processing units, or GPUs) and high-speed storage.
 
 import MBPCIESATAImage from './hardware-components/motherboard-pcie-sata.png';
 
@@ -81,7 +81,7 @@ import CaseImage from './hardware-components/case.png';
 
 **ATX** is not just a motherboard size: it is a **standard** that enforces the placement and dimensions of mounting holes, rear I/O shield cutouts, expansion slot alignment, and power connectors. This ensures that any ATX-compliant motherboard will fit in any ATX-compliant case, and that power supplies, expansion cards, and other components will line up correctly. ATX also defines the standard 24-pin power connector, rear I/O layout, and slot spacing, making it possible to mix and match parts from different vendors with confidence.
 
-The name **AT** comes from IBM's second-generation PC, the IBM PC/AT, where AT stands for "Advanced Technology." **ATX** (Advanced Technology eXtended) is the modern, extended successor to the AT standard. In addition to physical dimensions and mounting, ATX standardizes the DC voltages a PSU must supply: **+12 V** (GPU and drives), **+5 V** (motherboard logic, some drives), **+3.3 V** (RAM and some expansion slots), **−12 V** (backward compatibility for some legacy serial and analog devices), and **+5 VSB** (Stand-By, so components like the real-time clock remain active when the system is powered off). The main board connector is 24-pin; an additional 4- or 8-pin EPS connector delivers a stable +12 V feed directly to the CPU.
+The name **AT** comes from IBM's second-generation PC, the IBM PC/AT, where AT stands for "Advanced Technology." **ATX** (Advanced Technology eXtended) is the modern, extended successor to the AT standard. In addition to physical dimensions and mounting, ATX standardizes the PSU rails presented to the board: **+12 V**, **+5 V**, **+3.3 V**, **−12 V** (mainly for legacy support), and **+5 VSB** (standby power, so components like the real-time clock remain active when the system is powered off). Modern motherboards then use onboard voltage regulators to derive the lower voltages actually used by the CPU, DRAM, chipset, and other components. The main board connector is 24-pin; an additional 4- or 8-pin EPS connector delivers a stable +12 V feed directly to the CPU power circuitry.
 
 <HistoricalNote title="Why ATX Replaced AT (1995)">
 The ATX specification was published by Intel in 1995 to replace the aging AT form factor inherited from IBM's PC/AT (1984). AT-era motherboards had two fundamental problems: the power supply delivered voltage to the board even when the machine appeared to be "off" (making software-controlled shutdown impossible), and the CPU socket sat directly in front of the expansion slots (blocking airflow and making cooler installation awkward). ATX moved the CPU to the upper-left corner away from the slots, introduced a standby voltage rail so the OS could trigger a software shutdown, and standardized the rear I/O cutout so that cases and motherboards from different vendors were mechanically interchangeable. Nearly every desktop PC and server motherboard manufactured in the 30 years since has been ATX-compatible.
@@ -158,7 +158,7 @@ import DDR5LImage from './hardware-components/ddr5l.png';
 
 Capacity planning follows workload: 16-32 GB for general use, 32-64 GB for heavy creative or virtualization tasks, and more for specialized servers.
 
-**Error-Correcting Code (ECC)** memory adds extra bits to detect and correct single-bit errors caused by cosmic rays or electrical noise. Consumer motherboards typically do not support ECC; workstation-class and server platforms generally do. If you are speccing a machine that will run unattended for long periods or store data that must not be silently corrupted, confirm whether your CPU and motherboard support ECC before purchasing. The server and data center lecture covers ECC in more depth, including Registered DIMMs (RDIMMs) used in high-density server configurations.
+**Error-Correcting Code (ECC)** memory adds extra bits to detect and correct single-bit errors caused by cosmic rays or electrical noise. Most mainstream consumer desktops do not support ECC, though some AMD consumer platforms can use **unbuffered ECC** (also called **ECC UDIMM**, a standard desktop-style ECC module that connects directly to the memory controller without an extra register chip) if the CPU, motherboard, and firmware all support it. Workstation-class and server platforms are much more likely to support ECC officially, and servers often add support for **Registered DIMMs (RDIMMs)**, which place a register buffer between the memory controller and the DRAM chips so the system can drive more modules and larger capacities reliably. If you are speccing a machine that will run unattended for long periods or store data that must not be silently corrupted, confirm ECC support in the CPU and motherboard documentation before purchasing. The server and data center lecture covers ECC in more depth.
 
 **Unified Memory Architecture (UMA)** is found in SoC-based systems such as Apple M-series and AMD APUs, where the CPU and GPU share a single physical memory pool rather than having separate pools. Because there is no separate VRAM, data does not need to be copied between memory pools before the GPU can process it, which reduces latency and improves efficiency for graphics and AI tasks. The trade-off is that GPU workloads consume memory that would otherwise be available to the CPU, and since memory is soldered, total capacity is fixed at purchase.
 
@@ -171,7 +171,7 @@ A few configuration guidelines to follow for reliable performance:
 <Aside type="tip" icon="star" title="Example: Memory Kit and Testing">
 If you plan to run a Linux virtual machine while browsing and editing, 32 GB (2×16 GB) of DDR5-6000 is a good balance on AM5. Populate the A2/B2 slots as indicated in the manual for dual channel. First boot at "Auto," then enable EXPO and verify stability with a 10-15 minute memory test before moving on.
 
-Memory testing is important because even new kits can have subtle errors that cause crashes or data loss. Tools like [MemTest86](https://www.memtest86.com/) (bootable USB) or Windows Memory Diagnostic can check for errors by writing and reading patterns in every part of your RAM. A successful test means zero errors after at least one full pass. If you see any errors, reseat the DIMMs, check BIOS settings, or try running at a lower speed before assuming the kit is bad.
+Memory testing is important because even new kits can have subtle errors that cause crashes or data loss. Tools like [MemTest86](https://www.memtest86.com/) (bootable USB) or Windows Memory Diagnostic can check for errors by writing and reading patterns in every part of your RAM. A quick confidence check is one clean pass with zero errors, but for a machine you plan to rely on, run multiple passes or a longer overnight test. If you see any errors, reseat the DIMMs, check BIOS settings, or try running at a lower speed before assuming the kit is bad.
 </Aside>
 
 <Aside type="caution">
@@ -213,7 +213,7 @@ Distinguishing these layers helps you predict compatibility: a USB-C shaped port
 | USB 3.x | 5-20 Gb/s (Gen 1 / Gen 2 / Gen 2×2) |
 | USB 4 / Thunderbolt | 20-80 Gb/s |
 
-With USB 3.2 and USB 4, only the USB-C connector is not deprecated for high-speed transfers. Note that USB marketing names (e.g., "USB 3.2 Gen 2×2") describe both speed tier and connector expectations; always verify both when purchasing cables or hubs.
+With USB 3.2 and USB 4, USB-C is the dominant connector for the newest high-speed modes, especially for USB4 and Thunderbolt. USB-A still exists on many systems for USB 3.x devices, but connector shape alone does not tell you the supported speed. Note that USB marketing names (e.g., "USB 3.2 Gen 2×2") describe both speed tier and signaling mode; always verify the actual port, cable, and device capabilities when purchasing cables or hubs.
 
 Legacy interfaces like **RS-232** (serial) and **VGA** (analog video) persist for diagnostics and KVM (Keyboard-Video-Mouse) switches, which let one keyboard and monitor control multiple servers, even if they are no longer performance-relevant. They are another good example of how standards and physical connectors differ. RS-232 can use DE-9 or DB-25 connectors, while VGA uses a DE-15 connector even though early days also used DE-9.
 
@@ -221,22 +221,21 @@ import SerialConnectorsImage from './hardware-components/serial-connectors.png';
 
 <FigureWithCaption src={SerialConnectorsImage} caption="DE-9, DB-25, and DE-15" imageHeight="h-32"/>
 
-The table below compares the peak theoretical speeds of common interfaces. Real-world performance is always lower, and multiple factors (protocol overhead, queue depth, cable quality) affect actual throughput. Use this as a reference for rough comparisons, not absolute guarantees.
+The table below compares representative peak theoretical speeds of common interfaces. The assumptions matter: some rows are per lane, some are per link, and some are for a specific current-generation configuration. Real-world performance is always lower because of encoding overhead, protocol overhead, queue depth, signal quality, and device implementation. Use this as a quick comparison table, not as a substitute for reading the exact spec.
 
-| Interface | Peak bandwidth (latest version) |
-|---|---|
-| SATA | 16 Gb/s |
-| SAS | 22.5 Gb/s |
-| NVMe (PCIe) | 128 Gb/s |
-| PCI Express | 968 Gb/s |
-| NVLink (GPU-GPU) | 1.2 Tb/s |
-| USB 4 / Thunderbolt | 80 Gb/s |
-| HDMI | 48 Gb/s |
-| Ethernet | 400 Gb/s |
-| Wi-Fi | 40 Gb/s |
-| Bluetooth | 50 Mb/s |
-| LTE | 4 Gb/s (download) |
-| DRAM | 400 Gb/s |
+| Interface | Representative peak bandwidth | Assumption |
+|---|---|---|
+| SATA | 6 Gb/s | SATA III link |
+| SAS | 24 Gb/s | SAS-4, per lane |
+| NVMe SSD | 128 Gb/s | PCIe 5.0 x4 SSD link, bidirectional raw aggregate |
+| PCI Express slot | 512 Gb/s | PCIe 5.0 x16 slot, one direction raw |
+| USB4 / Thunderbolt | 80 Gb/s | USB4 v2 / Thunderbolt 5 peak mode |
+| HDMI | 48 Gb/s | HDMI 2.1 FRL |
+| Ethernet | 400 Gb/s | 400GbE link |
+| Wi-Fi | 46 Gb/s | Wi-Fi 7 theoretical maximum, top-end configuration |
+| Bluetooth | 3 Mb/s | Bluetooth Classic EDR class; BLE is lower |
+| Cellular | 1 Gb/s | LTE Advanced Pro class, theoretical peak |
+| DRAM | 384 Gb/s | DDR5-6000 dual-channel desktop memory, theoretical peak |
 
 When selecting or configuring interfaces, keep these in mind:
 
@@ -312,7 +311,7 @@ Ensure the PSU has sufficient headroom before adding a second accelerator, and k
 
 ## Power, Cooling, and Firmware
 
-All the components you have selected only deliver sustained performance when electrical power is stable, heat is removed efficiently, and low-level firmware is configured sensibly. In 2025, **ATX 3.1** power supplies are the new standard, supporting higher transient loads for modern GPUs and improved efficiency. 
+All the components you have selected only deliver sustained performance when electrical power is stable, heat is removed efficiently, and low-level firmware is configured sensibly. In 2025, **ATX 3.x** power supplies are increasingly recommended for new builds with high-end GPUs because they are designed to tolerate larger transient loads cleanly. 
 
 A **power supply unit (PSU)** converts wall AC into regulated DC rails and exposes the 24-pin ATX connector for the board, one or two 8-pin EPS connectors for CPU power, and PCIe leads for GPUs. 
 
@@ -334,7 +333,7 @@ For reliable, efficient operation:
 - Prefer modular, repairable PSUs and coolers to reduce e-waste and support sustainability.
 
 <Aside type="tip" icon="star" title="Example: PSU Sizing, ATX 3.1, and 80PLUS">
-Suppose your CPU peaks near 125 W and your GPU near 350 W (a common value for PCIe 5.0 cards). Add 60 W for the board, drives, and fans to estimate ~535 W under combined load. Adding 40% headroom suggests a PSU around 750 W; choose an ATX 3.1 model rated for PCIe 5.0 transient loads. This keeps fan noise low, leaves upgrade room, and ensures compatibility with new GPUs.
+Suppose your CPU peaks near 125 W and your GPU near 350 W (a common value for recent high-end cards). Add 60 W for the board, drives, and fans to estimate ~535 W under combined load. Adding 40% headroom suggests a PSU around 750 W; for a modern GPU build, an ATX 3.x model is a strong choice because it is designed for large transient loads. This keeps fan noise low, leaves upgrade room, and improves compatibility with newer GPUs.
 
 When choosing a power supply, look for the [**80 PLUS**](https://en.wikipedia.org/wiki/80_Plus) efficiency label. These ratings mean the PSU wastes less power as heat and is more reliable and quieter under load. For most builds, 80 Plus Gold is a sweet spot for efficiency and value. In UEFI, set case fans to ramp with CPU temperature and keep idle near 30-40% duty for quiet operation.
 

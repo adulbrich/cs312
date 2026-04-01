@@ -92,13 +92,13 @@ The [Hardware Fundamentals](/lectures/hardware-fundamentals/) lecture covers the
 
 ### SATA, SAS, and NVMe: Choosing the Right Interface
 
-| Interface | Bandwidth | Duplex | Hot-Swap | Use Case |
-|---|---|---|---|---|
-| **SATA III** | ~600 MB/s | Half | Backplane-dependent | Budget servers, bulk storage |
-| **SAS-3 (12G)** | ~1,200 MB/s | Full | Yes (SAS expanders) | High-density enterprise storage |
-| **SAS-4 (22.5G)** | ~2,250 MB/s | Full | Yes | Tier-1 storage arrays |
-| **NVMe (PCIe 4.0 x4)** | ~7,000 MB/s | Full | Via U.2/U.3 backplane | Low-latency databases, AI |
-| **NVMe-oF** | Limited by network | Full | N/A | Disaggregated storage over fabric |
+| Interface | Representative throughput | Assumption | Duplex | Hot-Swap | Use Case |
+|---|---|---|---|---|---|
+| **SATA III** | ~600 MB/s | One 6 Gb/s SATA link, practical sequential ceiling | Half | Backplane-dependent | Budget servers, bulk storage |
+| **SAS-3 (12G)** | ~1,200 MB/s | One 12 Gb/s SAS lane, practical sequential ceiling | Full | Yes (SAS expanders) | High-density enterprise storage |
+| **SAS-4 (24G)** | ~2,400 MB/s | One 24 Gb/s SAS lane, practical sequential ceiling | Full | Yes | Tier-1 storage arrays |
+| **NVMe (PCIe 4.0 x4)** | ~7,000 MB/s | Single PCIe 4.0 x4 SSD, high-end sequential read | Full | Via U.2/U.3 backplane | Low-latency databases, AI |
+| **NVMe-oF** | Fabric-dependent | Depends on network speed and transport, such as 100 GbE RoCE or TCP | Full | N/A | Disaggregated storage over fabric |
 
 **Full-duplex** means SAS can read and write simultaneously on the same link, unlike SATA which is half-duplex. This matters in high-throughput server workloads where concurrent reads and writes are common. **SAS expanders** allow a single HBA to address up to 256 drives, making SAS the traditional choice for high-density storage enclosures.
 
@@ -241,7 +241,7 @@ A distributed training job running on 64 GPUs does an all-reduce (gradient synch
 
 ## Server and Data Center Design: Availability, Efficiency, and Scale
 
-As you move from single workstations to servers and data centers, priorities shift toward availability, manageability, density, and predictable power and cooling. Server hardware adds features like ECC RDIMM/LRDIMM, multi-socket support, hot-swap backplanes, redundant power supplies and fans, and a Baseboard Management Controller (BMC) for out-of-band control (such as remote power cycling and KVM access). Storage is often attached via SAS/SATA expanders, Host Bus Adapters (HBAs, ideally in IT mode for ZFS/Btrfs), or high-density NVMe backplanes.
+As you move from single workstations to servers and data centers, priorities shift toward availability, manageability, density, and predictable power and cooling. Server hardware adds features like **ECC RDIMM** (ECC memory with a register chip that reduces electrical load so servers can use more DIMMs reliably) and **LRDIMM** (Load-Reduced DIMM, which buffers the memory load even further for very high capacities), multi-socket support, hot-swap backplanes, redundant power supplies and fans, and a Baseboard Management Controller (BMC) for out-of-band control (such as remote power cycling and KVM access). Storage is often attached via SAS/SATA expanders, Host Bus Adapters (HBAs, ideally in IT mode for ZFS/Btrfs), or high-density NVMe backplanes.
 
 A complete data center deployment involves more than just servers. The full hardware stack includes:
 
