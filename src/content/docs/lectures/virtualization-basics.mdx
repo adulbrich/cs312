@@ -8,10 +8,6 @@ sidebar:
 import { Aside, Steps, LinkCard, CardGrid } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
-{/* TODO: demonstrate everything using UTM on macOS or similar, use Starlight's Tabs to show how to do things in different Hypervisors and hosts, choose a guest OS that works on ARM and x86 */}
-
-{/* TODO: group some headings into subheadings */}
-
 Suppose you need to test a risky kernel upgrade before touching your production server. Or you need three environments (Ubuntu with `apt`, AlmaLinux with `dnf`, and Arch Linux with `pacman`) to verify your deployment scripts work across distributions with genuinely different package managers and release models. Or you want to give each developer on your team an isolated sandbox so that a misconfiguration in one environment cannot affect another. Buying separate physical hardware for every scenario is slow and expensive; rebuilding from scratch after every mistake wastes hours. Virtualization solves all three problems by letting you run multiple isolated operating systems on the same physical machine simultaneously, and roll back any of them to a clean state in seconds.
 
 Virtualization inserts a thin control layer called a hypervisor between software and hardware. Instead of dedicating a whole server to one workload, you carve the machine into slices of CPU time, memory, storage, and network interfaces that each guest believes are "its" hardware. This multiplies flexibility: you can prototype quickly, recover from mistakes by rolling back snapshots, and drive hardware utilization closer to what you paid for.
@@ -26,6 +22,8 @@ Before diving deeper we need a shared vocabulary.
 
 A **host** is the physical system providing CPU, memory, storage, and I/O. A **hypervisor** (also called a Virtual Machine Monitor) is the software component that arbitrates those resources among guests. A **guest** (or virtual machine / VM) is an installed operating system plus its virtual hardware configuration running under the hypervisor's control. 
 
+When using a hosted hypervisor such as VirtualBox or UTM, you may also hear **host OS**. That means the normal operating system on the physical machine that the hypervisor application runs inside.
+
 A **virtual CPU** (vCPU) is a schedulable execution context presented to a guest, mapped to one or more physical cores or hardware threads. A **disk image** is a file (or logical block device) that stores a virtual disk's blocks (e.g. qcow2, vmdk, vdi, raw). A **snapshot** captures the state of a VM's storage (and optionally memory) at a point in time so you can revert. **Paravirtualized drivers** are guest drivers explicitly written to cooperate with the hypervisor for efficiency (e.g. virtio). **Live migration** is moving a running VM between hosts with minimal disruption. These terms recur in tooling docs, job postings, and runbooks; knowing them speeds comprehension and lets you ask better questions.
 
 <Aside type="tip" icon="star" title="Example: Relating Terms">
@@ -33,7 +31,7 @@ If you run Ubuntu inside VirtualBox on your Mac: the MacBook is the *host*, Virt
 </Aside>
 
 ## Why Virtualize
-Virtualization matters because it converts hardware from a static asset into a dynamic pool you can programmatically slice, pause, clone, and move. Operational teams use VMs to isolate failures; if one guest kernel panics it rarely affects neighbors. Developers spin up ephemeral environments to test changes that require kernel modules or different distributions. Disaster recovery strategies replicate VM images to a second site so services can resume quickly after hardware loss. Economically, virtualization raises utilization: instead of ten servers each 10% busy, one larger host might run ten guests at 60-70% aggregate usage with headroom. Strategically, skills you build here transfer directly to cloud usage, because cloud "instances" are VMs exposed via APIs. Note that virtualization is not free performance-wise; there is real overhead, though it is often modest with hardware assistance.
+Virtualization matters because it converts hardware from a static asset into a dynamic pool you can programmatically slice, pause, clone, and move. Operational teams use VMs to isolate failures; if one guest kernel panics it rarely affects neighbors. Developers spin up ephemeral environments to test changes that require kernel modules or different distributions. Disaster recovery strategies replicate VM images to a second site so services can resume quickly after hardware loss. Economically, virtualization raises utilization: instead of ten servers each 10% busy, one larger host might run ten guests at 60-70% aggregate usage with headroom. Strategically, skills you build here transfer directly to cloud usage, because many cloud "instances" are VMs exposed via APIs, even though clouds also offer other compute models such as bare metal and serverless platforms. Note that virtualization is not free performance-wise; there is real overhead, though it is often modest with hardware assistance.
 
 <LinkCard
   title="Windows Users"
@@ -71,7 +69,7 @@ flowchart LR
   HV-->NIC
 ```
 
-The diagram shows two guests whose system calls ultimately depend on hypervisor-mediated access to storage and network hardware; isolation boundaries sit between guests at the hypervisor layer.
+The diagram shows two guests running their own applications and kernels, while privileged hardware access is mediated by the hypervisor. The important boundary is that Guest A does not touch Guest B's memory or devices directly; both must go through the hypervisor layer.
 
 <Aside type="tip">
 Install paravirtualized device drivers (for example virtio storage and network drivers) inside every VM. Also install your platform's guest agent for lifecycle integration and observability. The performance difference over fully-emulated devices is measurable.
@@ -82,7 +80,7 @@ Hardware **virtualization** uses CPU features (like Intel VT-x, AMD-V, or ARM Vi
 
 Hardware **emulation** means the hypervisor/software simulates an entire hardware platform, translating every instruction and device interaction. This allows running software for one architecture on a different one, but is *much slower*. 
 
-Some examples of emulation include running Windows for x86 on an Apple Silicon Mac using UTM or QEMU in full emulation mode, or running a Nintendo DS emulator on an iPhone. The first scenario will be very slow, while the second will be less so, because the iPhone's powerful chips and optimized emulators easily handle the DS's modest hardware requirements, leveraging efficient APIs like Metal for smooth performance.
+For example, running an ARM Linux guest on Apple Silicon uses virtualization and can be close to native speed. Running an x86 guest on the same machine requires emulation, which is much slower because instructions must be translated between architectures.
 </Aside>
 
 ## Virtualization Modes
@@ -111,12 +109,14 @@ Paravirtualized drivers complement hardware-assisted virtualization. All operati
 
 Installing these drivers inside the guest instead of accepting the default fully-emulated devices can dramatically improve throughput and reduce CPU overhead. Some components (such as the interrupt controller or BIOS resources) cannot be fully covered by drivers and still require partial emulation.
 
+Although virtio-blk and virtio-scsi both provide paravirtualized storage, they integrate differently into the guest kernel. **virtio-blk** exposes a direct block device, so the kernel names it `vda`, `vdb`, and so on. **virtio-scsi** attaches through the kernel's SCSI subsystem, which uses SCSI naming conventions: `sda`, `sdb`, and so on -- the same names you would see with a fully-emulated SATA disk. The names alone therefore do not tell you whether the underlying driver is paravirtualized. To confirm which controller is present, inspect the PCI device list with `lspci`: a paravirtualized controller will appear as a Virtio device, while an emulated one will appear as an Intel AHCI, PIIX, or similar entry.
+
 <Aside type="tip" title="Virtualization Today">
-In practice, modern stacks use a mix of hardware-assisted virtualization, paravirtualized drivers, and a small amount of paravirtualized code in guest kernels. Pure full emulation of every device is rare. The hypervisor negotiates the best available approach for each component automatically, so you rarely need to choose manually; but installing the vendor's guest tools or virtio drivers makes a measurable difference.
+In practice, modern stacks use a mix of hardware-assisted virtualization, paravirtualized drivers, and a small amount of paravirtualized code in guest kernels. Pure full emulation of every device is rare. Much of this is selected for you by the platform, so you rarely choose every mechanism manually; but installing the vendor's guest tools or virtio drivers still makes a measurable difference.
 </Aside>
 
 ## Hypervisor Types (and Why the Distinction Blurs)
-Historically we labeled hypervisors as Type-1 (bare-metal: Proxmox VE / KVM, VMware ESXi, Microsoft Hyper-V, Xen) and Type-2 (hosted: VirtualBox, VMware Workstation, UTM, Parallels). Type-1 runs directly on hardware and includes only what it needs to schedule guests; Type-2 runs within a general OS as an application. In practice the lines blur: KVM is a Linux kernel module, so is Linux plus KVM a host OS with a Type-2 VMM, or a Type-1 platform? The distinction is still useful when choosing tooling: bare-metal hypervisors offer centralized, headless management and consistent performance; hosted hypervisors offer convenience, UI, and better desktop hardware integration (sound, USB, clipboard) for learning labs. Focus less on purity and more on operational fit, licensing model, and ecosystem support.
+Historically we labeled hypervisors as Type-1 (bare-metal: Proxmox VE, VMware ESXi, Xen, and Hyper-V-based server platforms) and Type-2 (hosted: VirtualBox, VMware Workstation, UTM, Parallels). Type-1 runs directly on hardware and includes only what it needs to schedule guests; Type-2 runs within a general OS as an application. In practice the lines blur: KVM is a Linux kernel module, so a Linux host running KVM is often treated operationally like a Type-1 platform even though the architecture is not as cleanly separated as the textbook definition suggests. The distinction is still useful when choosing tooling: bare-metal hypervisors offer centralized, headless management and consistent performance; hosted hypervisors offer convenience, UI, and better desktop hardware integration (sound, USB, clipboard) for learning labs. Focus less on purity and more on operational fit, licensing model, and ecosystem support.
 
 <HistoricalNote title="From IBM Mainframes to VMware on x86 (1972-1998)">
 The idea of running multiple operating systems on a single machine dates to 1972, when IBM shipped the VM/370 mainframe OS. VM/370 let customers run multiple isolated copies of their existing software, critical when time on the machine cost thousands of dollars per hour. The concept then largely disappeared as the PC era pushed toward single-user machines. VMware reinvented it for commodity x86 hardware in 1998. Founded by Diane Greene and Mendel Rosenblum (a Stanford professor), VMware shipped a hypervisor at a time when Intel and AMD CPUs had no hardware virtualization support; it had to binary-translate privileged instructions in software. The product was initially dismissed as a curiosity; server consolidation proved the business case, and VMware became one of the most profitable software companies in enterprise IT history before Broadcom's 2023 acquisition fundamentally changed its licensing model.
@@ -148,13 +148,15 @@ Page-sharing deduplication is platform-dependent and is not always enabled, espe
 
 For practical sizing: start a VM with the minimum memory its OS and baseline services need, then watch `free -h` inside the guest. If the "available" column stays near zero and the VM feels slow, increase the allocation. The critical warning sign is the host itself swapping; at that point every single guest on the host suffers simultaneously.
 
+**Reading `free -h` correctly:** Linux deliberately uses spare RAM as a disk cache -- pages read from disk recently are kept in memory so repeat reads are fast. This is normal and healthy behavior; unused RAM is wasted RAM. As a result, `free -h` will always show far less "free" memory than you allocated. The column to watch is **available**, which estimates how much memory could realistically be reclaimed for new processes (including cache that would be released on demand). Only act if "available" approaches zero under normal workloads. To detect actual memory pressure, run `vmstat 1` and watch the `si` (swap in) and `so` (swap out) columns: non-zero values mean the guest is actively swapping and needs more RAM.
+
 <Aside type="caution">
 If the host machine is swapping, every guest suffers. Sustained swap activity is the clearest sign that the host as a whole is over-provisioned on memory.
 </Aside>
 
 ### Storage and Disk Images
 
-A virtual disk is a file on the host's filesystem that stores all of the blocks of the guest's disk. The guest operating system cannot tell the difference between this file and a real physical drive. When a VM writes a file, those bytes land in the disk image file on the host. Several image formats are in common use:
+A virtual disk is often a file on the host's filesystem that stores all of the blocks of the guest's disk, though in production it may instead be backed by a logical block device or networked storage volume. The guest operating system cannot usually tell the difference between this virtual disk and a real physical drive. When a VM writes a file, those bytes ultimately land in whatever storage backend the hypervisor has assigned to that virtual disk. Several image formats are in common use:
 
 - **qcow2** (QEMU Copy-On-Write 2): QEMU's native format. Supports thin provisioning, snapshots, compression, and encryption. It has a small I/O overhead compared to raw, but its feature set makes it the right default for most lab and desktop hypervisor use.
 - **vmdk**: VMware's format. Supported by many tools beyond VMware, including VirtualBox.
@@ -169,7 +171,7 @@ For a laptop lab environment, thin-provisioned qcow2 or vdi is the right choice.
 You may encounter references to LVM (Logical Volume Manager) and ZFS as storage backends for virtual disks. These are advanced storage technologies that provide additional features like efficient snapshots at the storage layer, checksumming, and pooled storage management. They are common in server and production environments. You will encounter them in later lectures when storage is covered in depth; for now, treat them as future topics.
 </Aside>
 
-One critical point: **snapshots live on the same storage as the base image**. If the host's disk fails, both the snapshot and the base disk are gone. A snapshot on the same drive is a rollback tool, not a backup. A backup must exist on separate storage: a different disk, a different machine, or a cloud object store.
+One critical point: in the common desktop and lab case, **snapshots live on the same storage as the base image**. If that host disk fails, both the snapshot and the base disk are gone. A snapshot on the same drive is a rollback tool, not a backup. A backup must exist on separate storage: a different disk, a different machine, or a cloud object store.
 
 ### Networking Modes
 
@@ -179,6 +181,8 @@ When you create a VM, you assign it one or more virtual network adapters. The hy
 - **Bridged**: The guest is connected directly to the same physical network as the host. It gets its own IP address from that network and is reachable from other machines on the same LAN. Use this when you need to SSH into the VM from another machine, or when you want the VM to behave like a real server on the network. Note: some Wi-Fi access points block traffic from unknown MAC addresses, which can prevent a bridged guest on Wi-Fi from receiving an IP.
 - **Host-only**: Creates an isolated virtual network between the host and its guests, with no path to the internet. Useful for multi-VM lab setups where you want the VMs to communicate with each other and with your laptop, but not reach the outside world.
 
+A common pattern for multi-VM labs is to use **host-only** so that VMs can communicate with each other and with the laptop without being reachable from the outside network. For example, a two-VM setup with a database server and a web server that should not be internet-facing would use host-only networking: both VMs get addresses on the same virtual network, the laptop can reach them directly, and there is no default gateway to the internet. If one of those VMs also needs outbound internet access (for package installs, for example), you can attach a second network adapter set to NAT alongside the host-only adapter.
+
 For the activities in this course, NAT is sufficient unless a specific exercise requires inbound access. Start with NAT and switch only when you have a concrete reason to do otherwise.
 
 ## Operations and Advanced Features
@@ -186,10 +190,10 @@ For the activities in this course, NAT is sufficient unless a specific exercise 
 Once a VM is created and resourced, day-to-day management and advanced capabilities become essential for reliability, automation, and scale. This section explores the operational tools and features that make virtualization practical in real environments: taking and managing snapshots, automating VM lifecycles, measuring and tuning performance, enforcing security and isolation, and enabling live migration or high availability. Mastery of these features lets you move beyond basic VM setup to robust, repeatable, and secure infrastructure operations.
 
 ### Snapshots and Clones
-Snapshots capture a point-in-time state: the base disk becomes read-only and new writes go into a delta file; optionally memory and device state are stored so you can resume a paused execution. They are excellent for short-lived safety nets during upgrades, schema migrations, or risky configuration edits. Long chains degrade performance because reads must traverse layers; consolidate once a change proves stable. Clones create an independent copy of a VM (linked clones share base blocks; full clones duplicate). Use snapshots for rollback windows; use image backups and configuration management for long-term recoverability.
+Snapshots capture a point-in-time state: in many implementations, the original disk state is preserved and new writes go into a delta file; optionally memory and device state are stored so you can resume a paused execution. They are excellent for short-lived safety nets during upgrades, schema migrations, or risky configuration edits. Long chains degrade performance because reads may have to traverse multiple layers; consolidate once a change proves stable. Clones create an independent copy of a VM (linked clones share base blocks; full clones duplicate). Use snapshots for rollback windows; use image backups and configuration management for long-term recoverability.
 
 <Aside type="caution">
-Snapshots and backups are not the same thing. If the underlying storage pool fails, both the snapshot and the base disk are gone. A backup must exist on separate storage.
+Snapshots and backups are not the same thing. In the usual single-host lab setup, if the underlying storage fails, both the snapshot and the base disk are gone. A backup must exist on separate storage.
 </Aside>
 
 <Aside type="tip" icon="star" title="Example: Safe Package Upgrade">
@@ -217,14 +221,14 @@ Infrastructure as Code and Configuration Management will be covered in later lec
 Treat performance empirically. Baseline: record CPU ready time (wait to be scheduled), memory balloon size, disk latency (ms), and network throughput for a healthy VM. Use synthetic load (e.g. `fio` for disk, `iperf3` for network, stress tools) in a lab to understand ceilings. Investigate slowdowns by checking host contention first; a guest perceiving slowness may just be starved for CPU cycles. Align storage format to workload: databases benefit from low latency (often raw or preallocated volumes); log servers tolerate sparse images. Track growth of thin-provisioned disks to forecast expansion needs. Automate periodic reports. For write-intensive workloads such as databases, note that copy-on-write formats like qcow2 carry write amplification overhead; raw or preallocated volumes typically serve these workloads better.
 
 ### Security and Isolation
-VMs isolate kernel faults and many user-space compromises, but side-channel attacks (e.g. speculative execution vulnerabilities) can pierce isolation if unpatched. Harden hosts: minimal install, timely microcode and hypervisor updates, restricted management interfaces (firewall + MFA, multi-factor authentication), signed images, and principle of least privilege for orchestration credentials. Leverage virtualization for defense in depth: separate roles (database vs web) into distinct VMs to limit lateral movement. Use virtual TPM (Trusted Platform Module, a hardware-backed secure key store) and secure boot features where supported to attest guest integrity. Encrypt disk images at rest (e.g. LUKS, Linux Unified Key Setup, the standard Linux full-disk encryption layer, inside guest or at storage layer) when threat models include physical access or multi-tenant storage.
+VMs isolate kernel faults and many user-space compromises, but side-channel attacks (e.g. speculative execution vulnerabilities) can pierce isolation if unpatched. Harden hosts: minimal install, timely microcode and hypervisor updates, restricted management interfaces (firewall + MFA, multi-factor authentication), signed images, and principle of least privilege for orchestration credentials. Leverage virtualization for defense in depth: separate roles (database vs web) into distinct VMs to limit lateral movement. Use virtual TPM (Trusted Platform Module, a TPM device presented virtually to the guest and typically protected by VM encryption or host-managed keys) and secure boot features where supported to attest guest integrity. Encrypt disk images at rest (e.g. LUKS, Linux Unified Key Setup, the standard Linux full-disk encryption layer, inside guest or at storage layer) when threat models include physical access or multi-tenant storage.
 
 <Aside type="caution">
 A VM boundary does not replace network segmentation, logging, or firewall rules. Keep hypervisor firmware and microcode current: many virtualization security advisories require firmware patches, not just software updates.
 </Aside>
 
 ### Live Migration and High Availability
-Live migration copies a running VM's memory to a target host while it continues executing; iterative pre-copy phases reduce the final pause to milliseconds-seconds. This enables non-disruptive hardware maintenance, load balancing, and evacuation prior to predicted failures. High availability (HA) layers monitor hosts; if one dies they restart (not migrate) affected VMs elsewhere using shared storage. Design constraints: shared or replicated storage accessible from both hosts, compatible CPU families (or CPU masking), and sufficient destination capacity. Measure acceptable downtime budgets to decide between pure restart vs seamless migration. CPU feature masking (advertising a common CPU feature baseline across hosts) is required when migrating between CPUs of different generations; mismatched feature sets cause migration failures.
+Live migration copies a running VM's memory to a target host while it continues executing; iterative pre-copy phases reduce the final pause to milliseconds-seconds. This enables non-disruptive hardware maintenance, load balancing, and evacuation prior to predicted failures. High availability (HA) layers monitor hosts; if one dies they restart (not migrate) affected VMs elsewhere using shared storage. Common design constraints include shared or replicated storage accessible from both hosts, compatible CPU families (or CPU masking), and sufficient destination capacity, though some platforms also support shared-nothing migration approaches. Measure acceptable downtime budgets to decide between pure restart vs seamless migration. CPU feature masking (advertising a common CPU feature baseline across hosts) is often required when migrating between CPUs of different generations; mismatched feature sets can cause migration failures.
 
 ## Process Virtual Machines
 
@@ -241,7 +245,7 @@ The major public cloud platforms each rely on enterprise-grade hypervisors under
 | Provider | Hypervisor |
 |----------|-----------|
 | Microsoft Azure | Hyper-V-based platform (customized by Azure) |
-| Amazon Web Services | Xen (historical); [AWS Nitro](https://aws.amazon.com/ec2/nitro/) platform (current) |
+| Amazon Web Services | Xen (historical); [Nitro Hypervisor / Nitro System](https://aws.amazon.com/ec2/nitro/) (current) |
 | Google Cloud Platform | KVM-based platform |
 | IBM Cloud | Varies by offering (for example, KVM-based VPC virtual servers and separate VMware offerings) |
 

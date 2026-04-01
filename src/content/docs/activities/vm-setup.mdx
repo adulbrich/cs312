@@ -23,80 +23,40 @@ This activity puts the concepts from the [Virtualization and Virtual Machines](/
 
 ### Install a Hypervisor
 
-A hypervisor is the software layer that creates and manages virtual machines on your laptop. Without it, there is no way to run a second operating system alongside your host OS. We will use a **Type-2 (hosted) hypervisor**, meaning it runs as a regular application on top of your existing operating system. The two most common options for student laptops are UTM (macOS) and VirtualBox (Windows and Linux).
+A hypervisor is the software layer that creates and manages virtual machines on your laptop. Without it, there is no way to run a second operating system alongside your host OS. We will use a **Type-2 (hosted) hypervisor**, meaning it runs as a regular application on top of your existing operating system. We will use **VirtualBox**, which runs on macOS, Windows, and Linux.
 
-<Tabs>
-<TabItem label="macOS (UTM)">
-<Steps>
-1. Download UTM from [mac.getutm.app](https://mac.getutm.app/) or install via Homebrew:
-   ```bash
-   brew install --cask utm
-   ```
-2. Open UTM. You do not need to create a VM yet.
-</Steps>
-</TabItem>
-<TabItem label="Windows / Linux (VirtualBox)">
 <Steps>
 1. Download VirtualBox from [virtualbox.org](https://www.virtualbox.org/wiki/Downloads) and install it.
 2. Also install the **VirtualBox Extension Pack** from the same page (enables USB 3.0 and other features).
 3. Open VirtualBox. You do not need to create a VM yet.
 </Steps>
-</TabItem>
-</Tabs>
+
+<Aside type="note" title="macOS alternative: UTM">
+On macOS you can also use [UTM](https://mac.getutm.app/), which is a frontend for QEMU and supports both ARM and x86-64 guests. VirtualBox works on Apple Silicon as well, so we standardize on it here for consistency across platforms.
+</Aside>
 
 ### Download a Guest OS ISO
 
 An ISO file is a disk image: a single file that contains the exact contents of a bootable installation disc. The hypervisor can present this file to the VM as if it were a physical DVD drive, so the VM boots the installer without any physical media. We will use the **Debian 12 (Bookworm)** server netinstall ISO. Debian installs quickly, runs with a low memory footprint, and is available for both ARM and x86-64.
 
-<Tabs>
-<TabItem label="Apple Silicon Mac (ARM)">
-Download the `arm64` netinstall ISO from [cdimage.debian.org](https://cdimage.debian.org/debian-cd/current/arm64/iso-cd/).
-
-Look for a filename like `debian-12.x.x-arm64-netinst.iso`.
-</TabItem>
-<TabItem label="Intel Mac / Windows / Linux (x86-64)">
 Download the `amd64` netinstall ISO from [cdimage.debian.org](https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/).
 
 Look for a filename like `debian-12.x.x-amd64-netinst.iso`.
-</TabItem>
-</Tabs>
-
-<Aside type="note" title="Architecture matters">
-On Apple Silicon, running the ARM Debian ISO is **virtualization** (same CPU architecture, near-native speed via Apple's Hypervisor framework). Running the x86-64 ISO on the same machine would be **emulation** (every instruction translated in software, much slower). Always match the ISO architecture to your host CPU.
-</Aside>
 
 ### Create the Virtual Machine
 
 Before starting the installer, we define the VM's virtual hardware: how many vCPUs, how much RAM, and how large a virtual disk. These choices shape the VM's behavior for the rest of the activity. The goal is to start conservative (not generous) because it is easy to increase resources later and because over-allocating on a laptop starves your host OS.
 
-<Tabs>
-<TabItem label="UTM (macOS)">
-<Steps>
-1. Click **Create a New Virtual Machine**.
-2. Choose **Virtualize** (not Emulate; you want hardware-accelerated performance with a matching-architecture guest).
-3. Operating System: **Linux**.
-4. Boot ISO: select the Debian ISO you downloaded.
-5. Hardware:
-   - **CPU Cores:** 2
-   - **Memory:** 1024 MB
-6. Storage: **8 GB** (dynamic).
-7. Leave shared directory empty. Name the VM `debian-lab` and save.
-</Steps>
-</TabItem>
-<TabItem label="VirtualBox (Windows / Linux)">
 <Steps>
 1. Click **New**.
 2. Name: `debian-lab`. Type: **Linux**. Version: **Debian (64-bit)**.
-3. Memory: **1024 MB**.
-4. Create a Virtual Hard Disk: VDI format, **Dynamically allocated**, **8 GB**.
-5. Open **Settings** for the new VM:
-   - **System > Processor:** 2 CPUs.
-   - **System > Motherboard:** Enable EFI.
-   - **Storage:** Under the optical drive, select the Debian ISO.
-   - **Network:** Adapter 1 set to **NAT** (the default).
+3. Hardware:
+   - Memory: **1024 MB**
+   - Number of CPUs: **2**
+   - Disk Size: **8 GB**
+   - Use EFI
+4. After the VM is created, open **Settings > Network > Adapter 1 and set **Adapter Type** to **Paravirtualized Network (virtio-net)**. VirtualBox defaults to an emulated Intel NIC; VirtIO gives you a paravirtualized network adapter instead.
 </Steps>
-</TabItem>
-</Tabs>
 
 <Aside type="tip" title="Why these resource sizes">
 A Debian server install with no GUI uses about 700 MB of RAM at idle. Starting at 1 GB provides enough headroom to observe memory behavior without over-provisioning. Two vCPUs mirrors what you would typically allocate to a small server VM.
@@ -119,11 +79,14 @@ Starting the VM boots the Debian installer from the ISO, exactly as if you had i
 
 2. Follow the installer prompts:
    - Language: English
-   - Location: your country
+   - Location: United States
+   - Keyboard: American English (or whatever matches your physical keyboard)
    - Hostname: `debian-lab`
    - Root password: set one you will remember
-   - New user: create a regular account (e.g., `labuser`)
-   - Partitioning: **Guided — use entire disk**, then **All files in one partition**
+   - New user: create a regular account (you can use your ONID username, e.g., `ulbrical`) with a password
+   - Timezone: Pacific (or your local timezone)
+   - Partitioning: **Guided - use entire disk**, then **All files in one partition**
+   - Package manager mirror: United States - debian.osuosl.com
    - Software selection: uncheck everything except **SSH server** and **standard system utilities**
 
    The software selection step is significant. Deselecting the desktop environment means the installed system boots to a text prompt with no graphical interface. This is a deliberate choice that reflects real server practice: a GUI consumes memory, installs more software (more attack surface), and is simply unnecessary on a machine you will manage remotely.
@@ -140,7 +103,7 @@ After reboot, the VM window shows a plain text login prompt: no desktop, no mous
 Everything in the sections below is typed into this console. The VM's terminal behaves exactly like any Linux terminal: commands you type run inside the VM, not on your laptop. Your host OS is completely unaffected by anything you do here. This isolation is the whole point of a VM.
 
 <Aside type="tip" title="Releasing the cursor">
-If you accidentally click outside the VM window and your mouse or keyboard stops responding to the VM, look for a way to "capture" input back. In VirtualBox, click inside the VM window. In UTM, the window title shows a key combination (often Right-Ctrl or Right-Option) to release the cursor if it gets captured.
+If you accidentally click outside the VM window and your mouse or keyboard stops responding to the VM, click inside the VM window to recapture input. The VirtualBox status bar shows the host key combination (default: Right Ctrl) to release the cursor if it gets captured.
 </Aside>
 
 ### Verify Paravirtualized Drivers
@@ -153,37 +116,54 @@ The hypervisor can expose virtual hardware to the guest in two ways: fully emula
 lsblk -d -o NAME,TYPE,TRAN
 ```
 
-`lsblk` lists block devices, which are the kernel's view of storage hardware. The `-d` flag shows disks only (no partitions), and `-o NAME,TYPE,TRAN` selects the columns: device name, type (disk/partition/loop), and transport protocol. On a VM with virtio storage you will see a device named `vda` rather than `sda`. The prefix matters: `vda` comes from the `virtio-blk` driver; `sda` would indicate a fully-emulated SCSI/SATA disk.
+`lsblk` lists block devices, which are the kernel's view of storage hardware. The `-d` flag shows disks only (no partitions), and `-o NAME,TYPE,TRAN` selects the columns: device name, type, and transport protocol.
 
-**Install the QEMU guest agent and ethtool:**
+You will see something like this:
 
-```bash
-sudo apt update
-sudo apt install qemu-guest-agent ethtool
-sudo systemctl enable --now qemu-guest-agent
+```
+NAME TYPE TRAN
+sda  disk
+sr0  rom
 ```
 
-`apt update` refreshes the package index from Debian's servers. Without this step, `apt install` would use a stale index and might not find the latest versions. The `qemu-guest-agent` is a small daemon that runs inside the guest and lets the hypervisor communicate with it (graceful shutdown, freezing the filesystem before snapshots, and reporting metrics). `ethtool` is a utility for querying network interface driver information.
+The disk appears as `sda` because VirtualBox uses a VirtIO SCSI controller, which uses SCSI device naming (`sda`, `sdb`, ...) rather than the virtio-blk naming (`vda`). The TRAN column is empty because lsblk does not report a transport for virtio. To confirm the virtio controller is actually active, check the PCI devices:
+
+```bash
+lspci | grep -i virtio
+```
+
+You should see a line containing `Virtio SCSI` for storage and `Virtio network` for networking.
+
+**Install guest utilities and ethtool:**
+
+<Aside type="note" title="sudo vs. su: Debian vs. Ubuntu">
+Ubuntu pre-installs `sudo` and disables direct root login by default, so you never need `su`. Debian takes the opposite approach: `sudo` is not installed on a fresh system, and root has a real password you set during installation. To run commands as root on Debian, use `su -` (the `-` loads root's full environment, including the correct `PATH`) and then run commands directly without any prefix. If you later want `sudo`-style access, you can install it with `apt install sudo` and add your user to the `sudo` group.
+</Aside>
+
+```bash
+su -
+apt update
+apt install ethtool
+```
+
+`apt update` refreshes the package index from Debian's servers. Without this step, `apt install` would use a stale index and might not find the latest versions. `ethtool` is a utility for querying network interface driver information.
 
 **Check the network driver:**
 
 ```bash
 # Show all network interfaces
 ip link show
-```
-
-`ip link show` lists every network interface on the machine. You will see at least two: `lo` (the loopback interface, used for traffic that stays within the machine) and your main network interface (named something like `enp0s3`, `eth0`, or `ens3`; the exact name depends on the hypervisor and the kernel's device detection order).
-
-```bash
 # Substitute your non-loopback interface name from the output above
 ethtool -i enp0s3 | grep driver
 # Expected output: driver: virtio_net
 ```
 
+`ip link show` lists every network interface on the machine. You will see at least two: `lo` (the loopback interface, used for traffic that stays within the machine) and your main network interface (named something like `enp0s3`, `eth0`, or `ens3`; the exact name depends on the hypervisor and the kernel's device detection order).
+
 `ethtool -i` queries driver information for a network interface. The `driver:` line tells you which kernel module is managing the device. `virtio_net` confirms paravirtualized networking is active; `e1000` or `pcnet32` would indicate a fully-emulated NIC.
 
 <ActivityQuestion>
-The storage device appears as `vda` instead of `sda`. What hardware is `virtio-blk` replacing, and why is it faster than the fully-emulated alternative? What would you expect to see if virtio drivers were not available?
+The storage device appears as `sda` even though the controller is VirtIO SCSI. Why does VirtIO SCSI use SCSI device naming instead of `vda`? What would `lspci` show differently if the VM were using a fully-emulated SATA controller instead?
 </ActivityQuestion>
 
 ### Collect Baseline Metrics
@@ -235,7 +215,7 @@ Before making any risky change to a running system, a snapshot gives you a guara
 Log in to the VM and verify the SSH service and disk state are clean before creating the snapshot. Taking a snapshot of a broken system is not useful.
 
 ```bash
-sudo systemctl status ssh
+systemctl status ssh
 df -h /
 ```
 
@@ -243,21 +223,10 @@ Both should show normal output: SSH active and running, root filesystem with fre
 
 ### Take a Pre-Change Snapshot
 
-<Tabs>
-<TabItem label="UTM">
 <Steps>
-1. Right-click the VM in the UTM sidebar.
-2. Select **Snapshot > New Snapshot**.
-3. Name it `pre-change-1` and confirm.
-</Steps>
-</TabItem>
-<TabItem label="VirtualBox">
-<Steps>
-1. With the VM selected, open **Machine > Take Snapshot**.
+1. With the VM selected, open **Snapshots**, right click on "Current State" and click "Take...".
 2. Name it `pre-change-1` and click **OK**.
 </Steps>
-</TabItem>
-</Tabs>
 
 <Aside type="note" title="How snapshots work">
 When you take a snapshot, the hypervisor marks the current disk image read-only and creates a new delta file to receive all subsequent writes. Reads still come from the original image for blocks that have not changed; new or changed blocks go to the delta. This is why snapshots are nearly instant: the full disk is not copied.
@@ -268,18 +237,20 @@ When you take a snapshot, the hypervisor marks the current disk image read-only 
 We will simulate a common real-world mistake: a typo in a configuration file that breaks a service. In practice this could be a misconfigured firewall rule, a bad nginx config, or an incorrect database connection string. Here we corrupt the SSH service config with an invalid port value.
 
 ```bash
-sudo sh -c 'echo "Port INVALID_VALUE" >> /etc/ssh/sshd_config'
-sudo systemctl reload ssh
+sh -c 'echo "Port INVALID_VALUE" >> /etc/ssh/sshd_config'
+systemctl reload ssh
 ```
 
 Verify the damage:
 
 ```bash
-sudo systemctl status ssh
-sudo sshd -T 2>&1 | head -5
+systemctl status ssh
+sshd -T
 ```
 
-`sshd -T` runs the SSH daemon in test mode, printing the effective configuration and any errors without actually starting a daemon. The `2>&1` redirects error output (stderr) alongside normal output (stdout) so both appear in the terminal. You should see a configuration error referencing the invalid port value.
+`systemctl status ssh` will show the service as still **active (running)** but with the reload marked as failed. This is intentional: sshd is designed to keep the existing process alive when a reload fails, so active SSH sessions are not dropped. The damage is in the config, not yet in the running process.
+
+`sshd -T` runs the SSH daemon in test mode, validating the config without starting a daemon. You should see a single line such as `Badly formatted port number`.
 
 ### Attempt an In-Place Fix (and Give Up)
 
@@ -291,35 +262,21 @@ tail -10 /etc/ssh/sshd_config
 
 ### Revert the Snapshot
 
-Shut down the VM gracefully before reverting, since most hypervisors require the VM to be powered off to restore a snapshot:
-
-```bash
-sudo shutdown -h now
-```
+Shut down the VM gracefully before reverting (e.g., `shutdown now`), since most hypervisors require the VM to be powered off to restore a snapshot.
 
 Revert to `pre-change-1`:
 
-<Tabs>
-<TabItem label="UTM">
-<Steps>
-1. Right-click the VM and select **Snapshot > Restore Snapshot**.
-2. Select `pre-change-1` and confirm.
-</Steps>
-</TabItem>
-<TabItem label="VirtualBox">
 <Steps>
 1. Open the **Snapshots** panel for the VM.
 2. Right-click `pre-change-1` and choose **Restore**.
 3. Uncheck **Create snapshot of current state** and click **Restore**.
 </Steps>
-</TabItem>
-</Tabs>
 
 Start the VM and verify recovery:
 
 ```bash
-sudo systemctl status ssh
-sudo sshd -T 2>&1 | head -3
+systemctl status ssh
+sshd -T
 tail -5 /etc/ssh/sshd_config
 ```
 
@@ -333,20 +290,10 @@ Snapshots are not backups. The snapshot and the base disk share the same storage
 
 Once recovery is confirmed and you are satisfied the system is working, delete the snapshot:
 
-<Tabs>
-<TabItem label="UTM">
-<Steps>
-1. Right-click the VM and select **Snapshot > Delete Snapshot**.
-2. Select `pre-change-1` and confirm.
-</Steps>
-</TabItem>
-<TabItem label="VirtualBox">
 <Steps>
 1. Open the **Snapshots** panel.
 2. Right-click `pre-change-1` and choose **Delete Snapshot**.
 </Steps>
-</TabItem>
-</Tabs>
 
 Deleting a snapshot merges the delta file back into the base image and removes the extra layer. Snapshots are meant to be short-lived: the longer you keep one, the larger the delta grows, and the more layers the hypervisor must traverse on every disk read.
 
@@ -371,7 +318,7 @@ Your VM currently uses NAT. In NAT mode, the hypervisor acts like a router: the 
    ip addr show
    ```
 
-   `ip addr show` lists all network interfaces with their assigned addresses. Look for an `inet` line on your non-loopback interface. The address is typically `10.0.2.15` on VirtualBox and varies on UTM. Note that this is a private address in a virtual subnet managed entirely by the hypervisor.
+   `ip addr show` lists all network interfaces with their assigned addresses. Look for an `inet` line on your non-loopback interface. The address is typically `10.0.2.15` on VirtualBox. Note that this is a private address in a virtual subnet managed entirely by the hypervisor.
 
 2. From your **laptop's** terminal (not inside the VM), try to ping the VM:
 
@@ -402,28 +349,17 @@ Host-only creates a private virtual network that exists only between the host an
 1. Power off the VM:
 
    ```bash
-   sudo shutdown -h now
+   shutdown now
    ```
 
 2. Change the network adapter to host-only:
 
-   <Tabs>
-   <TabItem label="UTM">
    <Steps>
-   1. Open **VM Settings > Network**.
-   2. Change the mode from **Shared Network** to **Host Only**.
-   3. Save and start the VM.
+   1. In the main VirtualBox Manager window, open the **Network** tab (separate from the VM) and click **Create** to add a host-only network if none exists.
+   2. Open your VM **Settings > Network > Adapter 1**.
+   3. Change **Attached to** from **NAT** to **Host-only Network** and select the network you just created.
+   4. Click **OK** and start the VM.
    </Steps>
-   </TabItem>
-   <TabItem label="VirtualBox">
-   <Steps>
-   1. Open **Settings > Network > Adapter 1**.
-   2. Change **Attached to** from **NAT** to **Host-only Adapter**.
-   3. Select `vboxnet0` from the adapter list, then click **OK**.
-   4. Start the VM.
-   </Steps>
-   </TabItem>
-   </Tabs>
 
 3. Check the new IP address inside the VM:
 
@@ -447,15 +383,16 @@ Host-only creates a private virtual network that exists only between the host an
    ping -c 3 debian.org
    ```
 
-   This will fail. The host-only network has no default gateway pointing to the internet; traffic has nowhere to go beyond the host.
+   This will fail. The host-only network has no default gateway pointing to the internet; traffic has nowhere to go beyond the host. You can test the host's IP on the host-only network to confirm the VM can still reach the host:
+
+   ```bash
+   ping -c 3 <host-only-ip-of-host>
+   ```
+
+   That IP address is typically the gateway for the host-only network, and it should respond to pings from the VM.
 </Steps>
 
 <ActivityQuestion>
 Host-only gave you host-to-guest connectivity but broke internet access. What is present in NAT mode that host-only lacks? If you were building a two-VM lab where one VM acts as a database server and the other as a web server, and neither should be reachable from the internet, which mode would you use?
 </ActivityQuestion>
 
----
-
-## What's Next
-
-With a working VM, hands-on experience with snapshots and networking, and a map of the hypervisor landscape, you are ready to put Linux itself through its paces. The [Arch Linux Install](/activities/arch-linux-install/) activity takes the concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture and makes you perform every step manually (partitioning, bootloader installation, user creation, and networking) that an OS installer would otherwise hide.
