@@ -39,9 +39,22 @@ On macOS you can also use [UTM](https://mac.getutm.app/), which is a frontend fo
 
 An ISO file is a disk image: a single file that contains the exact contents of a bootable installation disc. The hypervisor can present this file to the VM as if it were a physical DVD drive, so the VM boots the installer without any physical media. We will use the **Debian 12 (Bookworm)** server netinstall ISO. Debian installs quickly, runs with a low memory footprint, and is available for both ARM and x86-64.
 
+<Tabs>
+<TabItem label="Apple Silicon Mac (ARM)">
+Download the `arm64` netinstall ISO from [cdimage.debian.org](https://cdimage.debian.org/debian-cd/current/arm64/iso-cd/).
+
+Look for a filename like `debian-12.x.x-arm64-netinst.iso`.
+</TabItem>
+<TabItem label="Intel Mac / Windows / Linux (x86-64)">
 Download the `amd64` netinstall ISO from [cdimage.debian.org](https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/).
 
 Look for a filename like `debian-12.x.x-amd64-netinst.iso`.
+</TabItem>
+</Tabs>
+
+<Aside type="note" title="Architecture matters">
+Always match the ISO architecture to your host CPU. VirtualBox on Apple Silicon runs ARM64 guests natively at near-native speed. Running an x86-64 ISO on Apple Silicon would require full instruction emulation, which is much slower.
+</Aside>
 
 ### Create the Virtual Machine
 
@@ -49,7 +62,7 @@ Before starting the installer, we define the VM's virtual hardware: how many vCP
 
 <Steps>
 1. Click **New**.
-2. Name: `debian-lab`. Type: **Linux**. Version: **Debian (64-bit)**.
+2. Name: `debian-lab`. Type: **Linux**. Version: **Debian (64-bit)** on Intel/Windows/Linux, or **Debian (arm64)** on Apple Silicon.
 3. Hardware:
    - Memory: **1024 MB**
    - Number of CPUs: **2**
