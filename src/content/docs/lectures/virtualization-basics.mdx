@@ -74,7 +74,7 @@ flowchart LR
 The diagram shows two guests whose system calls ultimately depend on hypervisor-mediated access to storage and network hardware; isolation boundaries sit between guests at the hypervisor layer.
 
 <Aside type="tip">
-Install paravirtualized guest tools (e.g. `qemu-guest-agent`, virtio drivers) inside every VM. The performance difference over fully-emulated devices is measurable.
+Install paravirtualized device drivers (for example virtio storage and network drivers) inside every VM. Also install your platform's guest agent for lifecycle integration and observability. The performance difference over fully-emulated devices is measurable.
 </Aside>
 
 <Aside type="note" title="Hardware Virtualization vs Hardware Emulation">
@@ -90,9 +90,9 @@ Some examples of emulation include running Windows for x86 on an Apple Silicon M
 Modern hypervisors combine several different techniques. Understanding the vocabulary helps you read documentation and make sense of performance tuning advice.
 
 ### Full Virtualization
-Full virtualization completely emulates the underlying hardware, defining virtual replacements for all basic computing resources (storage drivers, network devices, motherboard hardware, BIOS, etc.). Guest operating systems run unmodified because they believe they are talking to real hardware. The trade-off is performance: every hardware interaction must be intercepted and translated by the hypervisor.
+Full virtualization presents a complete virtual hardware platform to a guest operating system so the guest can run unmodified. The guest behaves as if it is running on real hardware (virtual disk controller, NIC, firmware, and so on), while the hypervisor controls access to the real host resources underneath.
 
-QEMU is a notable tool in this space: it can operate as a full emulator (matching the full virtualization description above), but when paired with a hardware acceleration backend it steps into hardware-assisted territory. [QEMU](https://www.qemu.org/) is a common open-source tool that serves two distinct roles depending on the workload. As a **virtualizer**, it hands CPU execution directly to a hardware acceleration backend (KVM on Linux or Apple's Hypervisor framework on macOS), so guest code runs at near-native speed when the guest and host share the same CPU architecture. As an **emulator**, it translates every instruction between architectures, making it possible to run x86 software on an ARM host (or vice versa) at a significant performance cost.
+In modern systems, full virtualization is usually implemented with hardware assistance, so CPU execution is often near-native when guest and host architectures match. [QEMU](https://www.qemu.org/) is a common open-source tool that serves two distinct roles depending on the workload. As a **virtualizer**, it hands CPU execution directly to a hardware acceleration backend (KVM on Linux or Apple's Hypervisor framework on macOS), so guest code runs at near-native speed when the guest and host share the same CPU architecture. As an **emulator**, it translates instructions between architectures, making it possible to run x86 software on an ARM host (or vice versa) at a significant performance cost.
 
 In practice, the role QEMU plays depends on the host and the guest. On Apple Silicon, running an ARM Linux guest via UTM is near-native virtualization; running an x86 guest is true emulation. QEMU also supports **User Mode Emulation**, which runs individual processes compiled for one architecture on a different-architecture host without booting a full guest OS, useful for testing cross-compiled binaries or cross-architecture programs in CI pipelines.
 
@@ -141,8 +141,10 @@ Memory is harder to overcommit safely than CPU because the fallback (**swapping*
 Hypervisors use several techniques to make memory overcommit safer before resorting to swapping:
 
 - **Page sharing**: If multiple VMs have loaded identical memory pages (for example, the same Linux kernel image), the hypervisor can detect the duplicates and store one shared copy, reclaiming the redundant pages. Guests are unaware this is happening.
-- **Ballooning**: A special driver installed inside the guest (often part of the guest tools package, such as `qemu-guest-agent`) that the hypervisor can "inflate." When the host is under memory pressure, it inflates the balloon driver, which asks the guest OS to allocate and hold memory effectively returning those pages to the host's control before the situation becomes critical.
+- **Ballooning**: A special memory balloon driver inside the guest (for example `virtio-balloon` on KVM) that the hypervisor can "inflate." When the host is under memory pressure, it inflates the balloon, which asks the guest OS to allocate and hold memory, effectively returning those pages to the host's control before the situation becomes critical.
 - **Memory compression**: Rarely-used pages are compressed and kept in a small in-RAM cache rather than written immediately to disk.
+
+Page-sharing deduplication is platform-dependent and is not always enabled, especially in multi-tenant environments where security trade-offs are a concern.
 
 For practical sizing: start a VM with the minimum memory its OS and baseline services need, then watch `free -h` inside the guest. If the "available" column stays near zero and the VM feels slow, increase the allocation. The critical warning sign is the host itself swapping; at that point every single guest on the host suffers simultaneously.
 
@@ -226,7 +228,7 @@ Live migration copies a running VM's memory to a target host while it continues 
 
 ## Process Virtual Machines
 
-A *process virtual machine* (also called a language runtime or application VM) is conceptually different from the system hypervisors discussed above. It is a software layer that runs a single application written in an intermediate language, making that application portable across host operating systems. The **Java Virtual Machine (JVM)** is the canonical example: Java source compiles to JVM bytecode, and the JVM executable itself is ported to run on countless operating systems, enabling Java programs to run unchanged wherever the JVM does. Python, Ruby, and the .NET CLR follow the same principle. Process VMs are not used for isolation of full operating systems, so they do not appear in typical sysadmin workflows, but understanding the distinction prevents confusion when documentation uses "VM" in a Java or containerization context.
+A *process virtual machine* (also called a language runtime or application VM) is conceptually different from the system hypervisors discussed above. It is a software layer that runs a single application written in an intermediate language, making that application portable across host operating systems. The **Java Virtual Machine (JVM)** is the canonical example: Java source compiles to JVM bytecode, and the JVM executable itself is ported to run on countless operating systems, enabling Java programs to run unchanged wherever the JVM does. The **.NET CLR** is a similar runtime model. Process VMs are not used for isolation of full operating systems, so they do not appear in typical sysadmin workflows, but understanding the distinction prevents confusion when documentation uses "VM" in a Java or containerization context.
 
 ## Hypervisor Ecosystem and Market State
 
@@ -238,17 +240,17 @@ The major public cloud platforms each rely on enterprise-grade hypervisors under
 
 | Provider | Hypervisor |
 |----------|-----------|
-| Microsoft Azure | Hyper-V (proprietary) |
-| Amazon Web Services | Xen (historical); [AWS Nitro](https://aws.amazon.com/ec2/nitro/) (current, KVM-based) |
-| Google Cloud Platform | KVM (open source) / ESXi (proprietary) |
-| IBM Cloud | XenServer, VMware, and Hyper-V |
+| Microsoft Azure | Hyper-V-based platform (customized by Azure) |
+| Amazon Web Services | Xen (historical); [AWS Nitro](https://aws.amazon.com/ec2/nitro/) platform (current) |
+| Google Cloud Platform | KVM-based platform |
+| IBM Cloud | Varies by offering (for example, KVM-based VPC virtual servers and separate VMware offerings) |
 
 ### VMware Licensing Shift
-After Broadcom's acquisition of VMware, the free ESXi program was discontinued then partially reinstated (version 8.0 Update 3e, 2025) with ongoing community debate about scope and support. This has accelerated adoption of open alternatives like Proxmox VE, oVirt, and OpenStack-based stacks.
+After Broadcom's acquisition of VMware, the free ESXi program was discontinued then reinstated in 2025 (version 8.0 Update 3e), with ongoing community debate about scope and support. This has accelerated adoption of open alternatives like Proxmox VE, oVirt, and OpenStack-based stacks.
 
 ## Virtualization Ecosystem
 
-Industry consolidation and licensing changes keep reshaping choices. After Broadcom's acquisition of VMware, the free ESXi program was briefly discontinued then reinstated in 2025 (version 8.0 Update 3e) with community debate over support scope. This has accelerated interest in open platforms like KVM (ubiquitous via Proxmox VE, oVirt, OpenStack) and lightweight homelab stacks. Proxmox VE continues traction for its integrated UI, ZFS support, and LXC containers alongside KVM VMs. Public clouds still predominantly use customized KVM derivatives ([AWS Nitro](https://aws.amazon.com/ec2/nitro/), GCP KVM, Azure Hyper-V variants) to expose instance types. Apple's virtualization framework and tools like UTM simplify ARM-based macOS/Linux guest experimentation on Apple Silicon. The practical takeaway: be tool-curious, but master the transferable primitives: CPU scheduling, memory pressure, block and network I/O paths, image lifecycle. Licensing shifts; fundamentals persist. Skills locked to a single vendor's UI flows do not transfer well; the primitives (CPU scheduling, memory pressure, I/O paths, image lifecycle) are what persist across platform shifts.
+Industry consolidation and licensing changes keep reshaping choices. This has accelerated interest in open platforms like KVM (ubiquitous via Proxmox VE, oVirt, OpenStack) and lightweight homelab stacks. Proxmox VE continues traction for its integrated UI, ZFS support, and LXC containers alongside KVM VMs. Public clouds use customized hypervisor stacks (for example AWS Nitro, GCP's KVM-based platform, and Azure's Hyper-V-based platform) to expose instance types. Apple's virtualization framework and tools like UTM simplify ARM-based macOS/Linux guest experimentation on Apple Silicon. The practical takeaway: be tool-curious, but master the transferable primitives: CPU scheduling, memory pressure, block and network I/O paths, and image lifecycle. Licensing shifts; fundamentals persist. Skills locked to a single vendor's UI flows do not transfer well.
 
 ## Virtualization vs Containers vs Serverless
 Containers (e.g. Docker, Kubernetes pods) package processes with user-space dependencies while sharing the host kernel; this yields faster startup, denser packing, and less memory overhead. VMs virtualize hardware and encapsulate full OS kernels, but are heavier, with stronger isolation and kernel diversity. Serverless (Functions-as-a-Service) adds a managed layer that schedules short-lived function invocations onto multi-tenant micro-VMs or containers you do not manage directly. Choice hinges on operational boundaries: need a custom kernel module or different Linux distribution? Use a VM. Need to horizontally scale stateless web handlers rapidly? Consider containers or serverless. Often you layer them: a VM cluster provides consistent host baselines; containers orchestrate application components on top.
