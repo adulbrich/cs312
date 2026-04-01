@@ -8,11 +8,9 @@ sidebar:
 import { Aside, Steps } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
-It is 11:30 PM on a Friday when your phone buzzes. Gerald's restaurant website is down. You SSH into the EC2 instance running your Docker Compose stack — or rather, you try to. The instance is unreachable: a hardware failure on the underlying AWS host terminated the VM. By the time you provision a replacement, pull the images, and bring `docker compose up` back online, 45 minutes have passed. Gerald's customers have been staring at a blank page during the dinner rush.
+Docker Compose runs containers on a single host. That single host is both a performance ceiling and a single point of failure: when the underlying machine goes down — hardware failure, cloud provider interruption, a required reboot — every container stops with it, and nothing brings them back automatically. Scaling up to a larger instance raises the ceiling but leaves you with one point of failure; spreading workloads across multiple machines by hand means managing placement, coordination, and recovery yourself.
 
-Two months later, a local food magazine runs a feature on Gerald's restaurants. Traffic spikes to ten times the usual load. Your single instance buckles: the database is fine, but the WordPress PHP workers are saturated and requests are timing out. You could move to a bigger instance, but there is a ceiling to how large a single VM can get, and scaling up still leaves you with one point of failure.
-
-Both problems share the same root cause: your application is coupled to a single host. The solution is **container orchestration**: a system that runs your containers across a pool of machines, watches them continuously, and takes corrective action automatically when something goes wrong or when conditions change. This lecture explains how that system works, using Kubernetes, the platform that has become the industry standard for running containerized workloads at scale.
+**Container orchestration** solves all three by treating a pool of machines as a single unified compute resource. You declare what should be running; the orchestrator decides where and ensures it stays running. This lecture explains how that system works, using Kubernetes, the platform that has become the industry standard for running containerized workloads at scale.
 
 ## The Limits of Docker Compose
 
@@ -228,7 +226,7 @@ metadata:
   name: restaurant-ingress
 spec:
   rules:
-  - host: geraldsrestaurant.com
+  - host: myapp.example.com
     http:
       paths:
       - path: /

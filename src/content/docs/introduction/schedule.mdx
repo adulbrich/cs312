@@ -82,41 +82,44 @@ Network troubleshooting deepens your ability to debug VPC and connectivity issue
 
 Both lectures directly support this week's lab. Ansible covers idempotent configuration; CI/CD covers the automated build-test-deploy pipeline you will build with GitHub Actions.
 
-## Week 7: Logging and Incident Response
+## Week 7: Container Orchestration and Logging
 
 | | |
 |---|---|
-| **Lecture 13** | [Log Management and Analysis](/lectures/log-management-and-analysis/) |
-| **Lecture 14** | [Incident Response and Disaster Recovery](/lectures/incident-response-fundamentals/) |
+| **Lecture 13** | [Container Orchestration with Kubernetes](/lectures/container-orchestration-with-kubernetes/) |
+| **Lecture 14** | [Log Management and Analysis](/lectures/log-management-and-analysis/) |
 | **Lab 7** | [First Container Orchestration Deployment (k3s)](/labs/first-container-orchestration-deployment/) |
 
-Log analysis and incident response are essential skills for operating container orchestration clusters. You will need both when debugging deployments and running failure drills in the coming weeks.
+Kubernetes introduces the orchestration concepts directly before the k3s lab. Log Management is paired here because you will need log analysis skills immediately when debugging pod deployments — `kubectl logs`, container crash output, and event streams are the first tools you reach for when something fails in a cluster.
 
-## Week 8: Monitoring and Postmortems
+## Week 8: Incident Response and Monitoring
 
 | | |
 |---|---|
-| **Lecture 15** | [Monitoring and Performance Management](/lectures/monitoring-and-performance/) |
-| **Lecture 16** | [Postmortems and Communications](/lectures/postmortems-and-communications/) |
+| **Lecture 15** | [Incident Response and Disaster Recovery](/lectures/incident-response-fundamentals/) |
+| **Lecture 16** | [Monitoring and Performance Management](/lectures/monitoring-and-performance/) |
 | **Lab 8** | [Cluster Operations: Health Probes, Rollouts, and Failure Drills (Kubernetes)](/labs/cluster-operations/) |
 | **Assignment 4** | **Sunday: [Ops 4: Container Orchestration](/assignments/minecraft-4-container-orchestration/)** |
 
-Monitoring covers Prometheus, Grafana, and alerting patterns that directly support the cluster probes and resource limits in this week's lab and next week's observability workshop. Postmortems prepares you for the incident documentation required in Assignment 5.
+Incident Response is moved here because Lab 8's failure drills — bad images, OOM kills, rollbacks — are the exact scenarios the lecture prepares you for. RTO/RPO concepts now have direct hands-on context. Monitoring covers health probes, resource metrics, and alerting patterns that this week's lab configures and that next week's observability workshop builds on.
 
-## Week 9: Observability and Server Breadth
+## Week 9: Postmortems and Server Breadth
 
 | | |
 |---|---|
-| **Lecture 17** | [Windows Server Administration and Active Directory](/lectures/windows-server-and-active-directory/) |
-| **Lecture 18** | [Server and Data Center Architecture](/lectures/server-datacenter-architecture/) |
+| **Lecture 17** | [Postmortems and Communications](/lectures/postmortems-and-communications/) |
+| **Lecture 18** | [Windows Server Administration and Active Directory](/lectures/windows-server-and-active-directory/) |
 | **Lab 9** | [Observability Workshop: Metrics and Dashboards (Prometheus + Grafana)](/labs/observability-workshop/) |
 
-The observability lab builds on the monitoring concepts from Week 8. This week's lectures broaden your perspective: Windows Server shows how the same administration principles apply outside Linux, and Server and Data Center Architecture revisits physical infrastructure with the full-stack understanding you have now built.
+The observability lab builds on the monitoring concepts from Week 8. Postmortems is paired here — one week before Assignment 5's postmortem requirement — so the blameless review framework and communication templates are fresh when you sit down to write. Windows Server broadens your perspective: the same administration principles apply outside Linux.
 
-## Week 10: Wrap-Up
+## Week 10: Architecture and Wrap-Up
 
 | | |
 |---|---|
-| **Lecture 19** | [Documentation, Teamwork, and Course Wrap-Up](/lectures/documentation-teamwork-wrap-up/) |
+| **Lecture 19** | [Server and Data Center Architecture](/lectures/server-datacenter-architecture/) |
+| **Lecture 20** | [Documentation, Teamwork, and Course Wrap-Up](/lectures/documentation-teamwork-wrap-up/) |
 | **Lab 10** | Make-up lab (catch up on incomplete lab work) |
 | **Assignment 5** | **Sunday: [Ops 5: Observability and Incident Response](/assignments/minecraft-5-observability/)** |
+
+Server and Data Center Architecture works as a capstone breadth lecture: you now have the full-stack context — from containers to clusters to cloud — to understand server hardware, storage hierarchies, and physical infrastructure at a meaningful level. The course wrap-up follows.
