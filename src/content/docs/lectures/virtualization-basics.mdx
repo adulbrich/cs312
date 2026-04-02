@@ -183,8 +183,6 @@ When you create a VM, you assign it one or more virtual network adapters. The hy
 
 A common pattern for multi-VM labs is to use **host-only** so that VMs can communicate with each other and with the laptop without being reachable from the outside network. For example, a two-VM setup with a database server and a web server that should not be internet-facing would use host-only networking: both VMs get addresses on the same virtual network, the laptop can reach them directly, and there is no default gateway to the internet. If one of those VMs also needs outbound internet access (for package installs, for example), you can attach a second network adapter set to NAT alongside the host-only adapter.
 
-For the activities in this course, NAT is sufficient unless a specific exercise requires inbound access. Start with NAT and switch only when you have a concrete reason to do otherwise.
-
 ## Operations and Advanced Features
 
 Once a VM is created and resourced, day-to-day management and advanced capabilities become essential for reliability, automation, and scale. This section explores the operational tools and features that make virtualization practical in real environments: taking and managing snapshots, automating VM lifecycles, measuring and tuning performance, enforcing security and isolation, and enabling live migration or high availability. Mastery of these features lets you move beyond basic VM setup to robust, repeatable, and secure infrastructure operations.
