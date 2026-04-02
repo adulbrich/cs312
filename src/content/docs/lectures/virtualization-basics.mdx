@@ -207,7 +207,7 @@ The same pattern applies to database schema migrations, kernel upgrades, or any 
 </Aside>
 
 ### VM Lifecycle and Automation
-Manually clicking through wizards does not scale. Templates (golden images) and cloud-init (or ignition on Fedora CoreOS) let you parameterize hostnames, users, SSH keys, and packages at first boot. API tooling (e.g. `virsh`, `govc` for vSphere, Proxmox API, Terraform providers) enables scripted provisioning and teardown. Combine Infrastructure as Code (IaC) (Terraform) with configuration management (Ansible) to converge VM state repeatably. Version control the template build steps (Packer) so you can rebuild on security patch day rather than nurse snowflake images.
+Manually clicking through wizards does not scale. Templates (golden images) and cloud-init (or ignition on Fedora CoreOS) let you parameterize hostnames, users, SSH keys, and packages at first boot. API tooling (e.g. `virsh`, `govc` for vSphere, Proxmox API, Terraform providers) enables scripted provisioning and teardown. For developer workflows, **Vagrant** provides a lightweight abstraction over hypervisors (VirtualBox, VMware, libvirt): a single `Vagrantfile` describes the base box, network, shared folders, and provisioning steps, so any team member can reproduce the same environment with `vagrant up`. Combine Infrastructure as Code (IaC) (Terraform) with configuration management (Ansible) to converge VM state repeatably at scale. Version control the template build steps (Packer) so you can rebuild on security patch day rather than nurse snowflake images.
 
 <Aside type="caution">
 Never bake secrets (passwords, API keys, SSH private keys) into VM images. Inject them at deploy time via cloud-init, environment variables, or a secrets manager.
