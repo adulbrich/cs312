@@ -5,7 +5,7 @@ sidebar:
   order: 3
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 A Linux server is just Linux, with the same kernel, the same commands, and the same file hierarchy, but configured deliberately: right-sized for its workload, secured for network exposure, and arranged so that services start reliably and can be debugged when they do not. This lecture walks through the decisions and tools that matter from the moment you choose a distribution to the moment a service is running and monitored. Every section builds on the last; by the end, you will have the vocabulary and the commands to set up and maintain a Linux server from scratch.
@@ -14,13 +14,13 @@ A Linux server is just Linux, with the same kernel, the same commands, and the s
 
 Linux servers run on bare metal (a physical machine you can touch), inside a virtual machine (VirtualBox, Proxmox, or a cloud hypervisor), or as a cloud instance (an EC2 instance on AWS, a Droplet on DigitalOcean, etc.). The operating system does not care which of these it is running on; once you have a shell prompt, the commands in this chapter work the same way everywhere. The differences show up at the edges: device names (`sda` on physical SATA, `vda` on virtio in a VM, `nvme0n1` on NVMe or some cloud instance types), how you access the console (a monitor vs. a VNC window vs. SSH), and who manages the firmware and hardware underneath you.
 
-For the purposes of this chapter, we assume you have a fresh Ubuntu 24.04 LTS installation with SSH access. Any of the following will work:
+Any of the following will work:
 
-- **Cloud instance (easiest to start).** Launch a `t3.micro` or `t3.small` EC2 (Elastic Compute Cloud, AWS's virtual machine service) instance with the Ubuntu 24.04 LTS AMI (Amazon Machine Image, a pre-built OS snapshot used to launch instances). You get a running server in under a minute and can tear it down when you are done.
-- **Local VM.** Create a virtual machine in VirtualBox or UTM (macOS) with 2 GB of RAM and 20 GB of disk. Download the Ubuntu Server 24.04 ISO and install from it. This gives you the full installation experience including the boot process, partitioning, and first-boot configuration.
-- **Bare metal.** If you have a spare physical machine, install Ubuntu Server directly. This is the most complete experience (you will see real firmware, real disk detection, real network interfaces), but it requires dedicated hardware.
+- **Cloud instance (easiest to start).** Launch a `t3.micro` or `t3.small` EC2 (Elastic Compute Cloud, AWS's virtual machine service) instance using a Linux LTS AMI (Amazon Machine Image, a pre-built OS snapshot used to launch instances). You get a running server in under a minute and can tear it down when you are done.
+- **Local VM.** Create a virtual machine in VirtualBox or UTM (macOS) with 2 GB of RAM and 20 GB of disk. Download the ISO for your chosen distribution and install from it. This gives you the full installation experience including the boot process, partitioning, and first-boot configuration.
+- **Bare metal.** If you have a spare physical machine, install your chosen Linux distribution directly. This is the most complete experience (you will see real firmware, real disk detection, real network interfaces), but it requires dedicated hardware.
 
-<Aside type="tip">
+<Aside type="tip" title="VM vs. Cloud Instance: Which to Use">
 If you want to practice the installation process itself (partitioning, bootloader, first boot), use a local VM. If you just want to practice configuration and administration, a cloud instance skips the installation and gets you to a shell faster.
 </Aside>
 
@@ -41,7 +41,7 @@ Linux distributions fall into a small number of family trees that share a common
 
 **RHEL and its rebuilds (AlmaLinux, Rocky Linux)** dominate enterprise environments. Red Hat Enterprise Linux uses the `dnf` package manager (formerly `yum`) and follows a ten-year support lifecycle. AlmaLinux and Rocky Linux are community rebuilds that track RHEL releases without the subscription cost. If your organization already runs RHEL-family systems, staying in that ecosystem reduces the number of things your team needs to know.
 
-<Aside type="tip">
+<Aside type="tip" title="Prefer LTS and Stable Releases">
 For servers, always prefer an LTS or Stable release over a rolling or short-lived release. A server that quietly drifts out of security support is a liability you may not notice until it is too late.
 </Aside>
 
@@ -59,19 +59,7 @@ A reasonable starting point for a small web application might be 2 vCPUs (virtua
 
 ### Naming Conventions
 
-Every server needs a hostname. In a small environment, a simple convention like `purpose-environment-number` works well: `web-prod-01`, `db-staging-01`. Avoid cute names ("gandalf", "mordor") in production; they are fun until you have forty servers and cannot remember which one runs the billing database.
-
-Set the hostname during installation or immediately after:
-
-```bash
-sudo hostnamectl set-hostname web-prod-01
-```
-
-Verify it took effect:
-
-```bash
-hostnamectl
-```
+Every server needs a hostname. In a small environment, a simple convention like `purpose-environment-number` works well: `web-prod-01`, `db-staging-01`. Avoid cute names ("gandalf", "mordor") in production; they are fun until you have forty servers and cannot remember which one runs the billing database. Set the hostname during installation or immediately after with `sudo hostnamectl set-hostname <name>`; verify the change took effect by running `hostnamectl` with no arguments.
 
 ## The Boot Process
 
@@ -87,7 +75,7 @@ Understanding how a Linux server starts up helps you diagnose problems when it d
 
 A few special process IDs are worth knowing. PID 0 is the scheduler and memory page daemon, a kernel-internal entity that never appears as a normal user-space process. PID 1 is `systemd` (or `init` on older systems), the first user-space process. PID 2 is typically `kthreadd`, which spawns kernel threads on demand; many of the low-level daemons visible in `ps` output are children of PID 2.
 
-<Aside type="note">
+<Aside type="note" title="Boot Troubleshooting with GRUB">
 If your server hangs during boot, GRUB lets you interrupt the process and edit kernel parameters. Appending `systemd.unit=rescue.target` to the kernel command line boots into single-user rescue mode, which is invaluable for troubleshooting.
 </Aside>
 
@@ -112,7 +100,7 @@ Choosing the right filesystem for your workload matters more on Linux than on mo
 
 ZFS can be resource-intensive (it benefits from ample RAM for its adaptive replacement cache), but its data integrity guarantees make it a compelling choice wherever data loss is unacceptable.
 
-**Btrfs** (B-tree filesystem) was designed as a modern alternative to ext4 and shares several goals with ZFS. It is lighter on resources than ZFS and is the default filesystem in Fedora and openSUSE. Key features include copy-on-write semantics, snapshots, transparent automatic compression, and subvolumes (virtual partitions within a single Btrfs volume that can be mounted independently). Btrfs is generally considered less production-ready than ZFS for mission-critical storage but is excellent for desktop machines and general-purpose servers.
+**Btrfs** (B-tree filesystem) was designed as a modern alternative to ext4 and shares several goals with ZFS. It is lighter on resources than ZFS and is the default filesystem for Fedora Workstation and openSUSE (Fedora Server defaults to XFS instead). Key features include copy-on-write semantics, snapshots, transparent automatic compression, and subvolumes (virtual partitions within a single Btrfs volume that can be mounted independently). Btrfs is generally considered less production-ready than ZFS for mission-critical storage but is a common choice for desktop machines and workstations.
 
 For high-performance computing and distributed storage, Linux supports specialized clustered filesystems such as Lustre, BeeGFS, GPFS, and Ceph, but these are outside the scope of a typical server deployment.
 
@@ -127,8 +115,8 @@ The Filesystem Hierarchy Standard (FHS) defines where things live. The table bel
 | Path              | Purpose                                                                                    |
 |-------------------|--------------------------------------------------------------------------------------------|
 | `/`               | The root of the entire filesystem tree                                                     |
-| `/boot`           | Kernel images (`vmlinuz*`), initial ramdisk (`initramfs`), bootloader files, EFI partition |
-| `/bin`            | Essential binaries available to all users (`cd`, `kill`, `ping`, `mount`, `passwd`)        |
+| `/boot`           | Kernel images (`vmlinuz*`), initial ramdisk (`initramfs`), bootloader files; the EFI System Partition is typically mounted at `/boot/efi` |
+| `/bin`            | Essential binaries available to all users (`cat`, `kill`, `ping`, `mount`, `passwd`)       |
 | `/sbin`           | System binaries for booting, restoring, and repairing (`fdisk`, `fsck`, `useradd`)         |
 | `/usr`            | UNIX Systems Resource: installed programs, libraries, documentation, source code           |
 | `/usr/bin`        | Most general-purpose user binaries (`grep`, `ls`, `curl`, `chmod`)                        |
@@ -175,54 +163,15 @@ Application code typically lives in `/opt/<appname>`, database files are managed
 
 ### Inspecting Disks and Usage
 
-Several commands help you understand your storage situation:
-
-```bash
-# List all block devices (disks and partitions)
-lsblk
-
-# Show filesystem disk usage (human-readable)
-df -h
-
-# Show how much space a directory uses
-du -sh /var/log
-```
-
-A typical `lsblk` output on a cloud instance might look like the following (on a local VM you would see `sda` instead of `vda`, and on NVMe hardware you would see `nvme0n1`):
-
-```
-NAME    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
-vda     252:0    0   40G  0 disk
-├─vda1  252:1    0  512M  0 part /boot/efi
-├─vda2  252:2    0    1G  0 part /boot
-└─vda3  252:3    0 38.5G  0 part /
-```
+Three commands form the core of daily storage inspection. `lsblk` lists all block devices and their partitions in a tree view, showing sizes, device names (which vary by bus type: `sda` for SATA, `vda` for virtio, `nvme0n1` for NVMe), and current mount points. `df -h` reports how much space each mounted filesystem has consumed and how much remains, a quick health check that can be run at any time. `du -sh <path>` drills into a specific directory to measure its total footprint, useful when `/var/log` or a database directory is growing faster than expected.
 
 ### Mount Points
 
-In Linux, every storage device is accessed by mounting it at a directory in the filesystem tree. The `/etc/fstab` file defines which filesystems are mounted automatically at boot:
+In Linux, every storage device is accessed by mounting it at a directory in the filesystem tree. The `/etc/fstab` file defines which filesystems are mounted automatically at boot; examining it with `cat /etc/fstab` reveals the current mount configuration.
 
-```bash
-cat /etc/fstab
-```
+Separating data-intensive directories (like a database's storage path) onto their own volume isolates their growth from the root filesystem and allows independent backup policies. Adding a new disk follows a predictable three-step pattern: format the partition with the appropriate filesystem type (`mkfs.ext4` or `mkfs.xfs`), create the directory that will serve as its mount point, then mount it and record the entry in `/etc/fstab` so it persists across reboots. Use the device's UUID (retrieved with `blkid`) rather than the device-name path like `/dev/vdb1`, since device names can shift when disks are added or removed.
 
-Separating data-intensive directories (like a database's storage path) onto their own volume isolates their growth from the root filesystem and allows independent backup policies. If you add a new disk (for example, a separate volume for database storage), you would partition it, create a filesystem, and mount it:
-
-```bash
-# Create a filesystem on the new partition
-sudo mkfs.ext4 /dev/vdb1
-
-# Create the mount point
-sudo mkdir -p /mnt/pgdata
-
-# Mount it
-sudo mount /dev/vdb1 /mnt/pgdata
-
-# Add to fstab for persistence across reboots
-echo '/dev/vdb1 /mnt/pgdata ext4 defaults 0 2' | sudo tee -a /etc/fstab
-```
-
-<Aside type="caution">
+<Aside type="caution" title="Validate fstab Before Rebooting">
 Always verify your `fstab` entry with `sudo mount -a` before rebooting. A malformed `fstab` can prevent the system from booting, requiring you to fix it from a rescue environment.
 </Aside>
 
@@ -232,7 +181,7 @@ With storage laid out and mount points established, the next question is who (an
 
 ## User and Group Management
 
-A freshly installed Ubuntu server has a root account and the admin user you created during installation. Before deploying any application, you need to think about who (and what) needs access to this machine.
+A freshly installed Linux server has a root account and the admin user you created during installation. Before deploying any application, you need to think about who (and what) needs access to this machine.
 
 ### Why Users and Groups Matter
 
@@ -244,9 +193,17 @@ Second, **groups** manage shared access. If both your application process and yo
 
 The principle behind all of this is **least privilege**: every user and process should have exactly the access it needs and nothing more.
 
+### File Permissions
+
+Linux controls file access through a permission model built into every file and directory. Each object has an **owner** (a single user), an **owning group**, and a set of **permission bits** that specify what the owner, the group, and everyone else can do.
+
+The three permission classes are **owner** (u), **owning group** (g), and **others** (o). Each class gets three bits: **read** (r, value 4), **write** (w, value 2), and **execute** (x, value 1). For a regular file, execute means the file can be run as a program; for a directory, execute means the directory can be entered (listed or traversed). Permissions are commonly written in octal: `755` means the owner can read, write, and execute (4+2+1=7) while the group and others can only read and execute (4+0+1=5). Common values to internalize: `644` for files readable by everyone but writable only by the owner; `600` for owner-only readable files such as private keys; `700` for owner-only directories.
+
+The `chmod` command changes permissions (`chmod 640 /etc/app.conf` grants owner read/write, group read, no access for others). The `chown` command transfers ownership: `chown deploy:www-data /opt/webapp` sets both the owning user and group in one step. A common server pattern is `640` with `deploy:www-data` ownership on application files, giving the deploy user read/write access and the web server read-only access while excluding all other users.
+
 ### Creating Users
 
-The `useradd` command creates a new user account. On Ubuntu, the friendlier `adduser` wrapper is also available, but understanding the lower-level command matters:
+The `useradd` command creates a new user account. On Debian-based distributions, the friendlier `adduser` wrapper is also available, but understanding the lower-level command matters:
 
 ```bash
 # Create a user with a home directory and bash as the default shell
@@ -291,7 +248,7 @@ sudo groupadd appteam
 
 ### Privilege Escalation with sudo
 
-The `sudo` command lets a permitted user run commands as root (or another user) without sharing the root password. On Ubuntu, users in the `sudo` group automatically gain full sudo privileges. For a deploy user, you might grant limited access:
+The `sudo` command lets a permitted user run commands as root (or another user) without sharing the root password. On Debian-family distributions, users in the `sudo` group gain full sudo privileges by default; on RHEL-family distributions, the equivalent group is `wheel`. For a deploy user, you might grant more targeted access:
 
 ```bash
 # Open the sudoers file safely
@@ -304,54 +261,19 @@ Add a line that lets the deploy user restart Nginx without a password prompt:
 deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
 ```
 
-<Aside type="caution">
+<Aside type="caution" title="Always Use `visudo`">
 Never edit `/etc/sudoers` with a regular text editor. The `visudo` command validates syntax before saving, preventing you from locking yourself out of sudo access with a typo.
 </Aside>
 
 ### SSH Key Authentication
 
-Password authentication over SSH is convenient but weak. SSH key authentication uses asymmetric cryptography: you generate a key pair (public + private), place the public key on the server, and your client proves identity using the private key without ever transmitting it over the network.
+Password authentication over SSH is convenient but weak. SSH key authentication uses asymmetric cryptography: a key pair consists of a **private key** that the client keeps secret and a **public key** that is placed on the server. During authentication the client proves it holds the private key through a cryptographic challenge without ever transmitting it over the network.
 
-Note: the commands in this section require a working network connection to the server. Network configuration is covered in the next section; if you are setting up a new server, complete the network setup before putting these steps into practice.
+Key pairs are generated with `ssh-keygen`. Ed25519 is the recommended algorithm: `ssh-keygen -t ed25519` produces `~/.ssh/id_ed25519` (private, never shared) and `~/.ssh/id_ed25519.pub` (public, safe to distribute). The public key is appended to `~/.ssh/authorized_keys` on the server, either with `ssh-copy-id` or by pasting it in manually. File permissions on the server side are enforced by SSH itself: the `~/.ssh` directory must be mode `700` and `authorized_keys` must be mode `600`; any broader permissions cause SSH to reject the file silently.
 
-Generate a key pair on your local machine (not the server):
+Once key authentication is confirmed to work, password authentication should be disabled by setting `PasswordAuthentication no` in `/etc/ssh/sshd_config` and reloading the daemon (service name `ssh` on Debian/Ubuntu, `sshd` on RHEL-family).
 
-```bash
-ssh-keygen -t ed25519 -C "deploy key for web-prod-01"
-```
-
-This creates two files: `~/.ssh/id_ed25519` (private; keep this secret and never share it) and `~/.ssh/id_ed25519.pub` (public; safe to distribute).
-
-Copy the public key to the server:
-
-```bash
-ssh-copy-id -i ~/.ssh/id_ed25519.pub deploy@10.0.1.10
-```
-
-Or place it manually on the server:
-
-```bash
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-echo "<paste public key here>" >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-```
-
-The permissions are not optional: SSH refuses to use `authorized_keys` if it is group- or world-writable.
-
-Once key authentication works, disable password authentication in `/etc/ssh/sshd_config`:
-
-```
-PasswordAuthentication no
-```
-
-Then reload:
-
-```bash
-sudo systemctl reload sshd
-```
-
-<Aside type="caution">
+<Aside type="caution" title="Test Before Disabling Password Auth">
 Test that key authentication works in a separate terminal session before disabling password authentication. Locking yourself out of a remote server requires console access to recover.
 </Aside>
 
@@ -373,9 +295,11 @@ ip route show
 
 You will see at least two interfaces: `lo` (the loopback interface, always 127.0.0.1) and one or more physical or virtual interfaces (commonly named `eth0`, `ens3`, `enp0s3`, or similar).
 
-### Configuring a Static IP with Netplan
+### Configuring a Static IP
 
-Ubuntu uses Netplan for network configuration. Netplan reads YAML files from `/etc/netplan/` and applies them to the underlying network manager (usually `systemd-networkd` on servers). Servers should have predictable, static IP addresses: services and monitoring systems that need to reach them cannot rely on DHCP assigning a different address after a reboot. Here is a configuration that assigns a static IP:
+Servers should have predictable, stable IP addresses: services and monitoring systems that need to reach them cannot rely on DHCP assigning a different address after a reboot. The full mechanics of IP configuration, DNS resolution, and network troubleshooting are covered in the next lecture. The tools vary by distribution: Debian and Ubuntu use **Netplan**, which reads YAML files from `/etc/netplan/` and translates them for `systemd-networkd`; RHEL-family distributions use **NetworkManager**, configured via `nmcli` or connection files in `/etc/NetworkManager/system-connections/`.
+
+Here is a Netplan example for Debian/Ubuntu that assigns a static IP:
 
 ```yaml
 # /etc/netplan/01-static.yaml
@@ -395,15 +319,10 @@ network:
           - 8.8.8.8
 ```
 
-Apply the configuration:
+Apply and verify:
 
 ```bash
 sudo netplan apply
-```
-
-Verify connectivity:
-
-```bash
 ip addr show ens3
 ping -c 3 10.0.1.1
 ```
@@ -431,13 +350,13 @@ Security groups work by default-deny: all inbound traffic is blocked unless you 
 | Allow inbound | 22 | TCP | SSH administration |
 | Allow inbound | 80 | TCP | HTTP |
 | Allow inbound | 443 | TCP | HTTPS |
-| Allow inbound | 25565 | TCP | Minecraft (or whatever your application uses) |
+| Allow inbound | *app port* | TCP | Application-specific (varies by workload) |
 
 Security groups are **stateful**: if you allow an inbound connection, the return traffic is automatically permitted without a separate outbound rule.
 
 A common troubleshooting pattern: you start a service, confirm it is listening with `ss -tlnp`, and still cannot reach it from outside. The service is usually fine; the security group is the first thing to check.
 
-<Aside type="tip">
+<Aside type="tip" title="Limit SSH Access by IP">
 Restricting SSH to "My IP" in the security group means only your current public IP can reach port 22. This is a meaningful security improvement over allowing SSH from `0.0.0.0/0` because it eliminates the vast majority of automated brute-force login attempts.
 </Aside>
 
@@ -447,36 +366,7 @@ Once users and networking are in place, you need to install software. Linux dist
 
 ### apt (Debian/Ubuntu)
 
-Ubuntu uses `apt`, which downloads `.deb` packages from repositories defined in `/etc/apt/sources.list` and `/etc/apt/sources.list.d/`. The workflow follows a predictable pattern:
-
-<Steps>
-1. **Update the package index.** This downloads the latest list of available packages from all configured repositories.
-   ```bash
-   sudo apt update
-   ```
-
-2. **Install packages.** Specify the packages you need by name.
-   ```bash
-   sudo apt install nginx postgresql nodejs npm
-   ```
-
-3. **Upgrade installed packages.** Apply available updates to everything already installed.
-   ```bash
-   sudo apt upgrade
-   ```
-</Steps>
-
-To search for a package:
-
-```bash
-apt search "web server"
-```
-
-To see details about an installed package:
-
-```bash
-apt show nginx
-```
+Debian and Ubuntu use `apt`, which downloads `.deb` packages from repositories defined in `/etc/apt/sources.list` and `/etc/apt/sources.list.d/` (Ubuntu 24.04 and newer use the deb822 format, with sources in `.sources` files inside that directory). The standard workflow is three commands used in sequence: `sudo apt update` refreshes the local package index from all configured repositories; `sudo apt install <name>` resolves and installs a package along with its dependencies; and `sudo apt upgrade` applies available security and feature updates to all installed packages. For exploration, `apt search <term>` queries the index by keyword and `apt show <name>` prints full metadata about a package, including its version, description, and dependencies.
 
 ### dnf (RHEL/AlmaLinux/Rocky)
 
@@ -500,27 +390,15 @@ These formats trade some efficiency for portability. On a server, distribution p
 
 ### Repositories and Pinning
 
-Sometimes the version of a package in the default repositories is not the one you need. You can add third-party repositories (called PPAs, or Personal Package Archives, on Ubuntu) to get newer or specialized builds:
+Sometimes the version of a package in the default repositories is not the one you need. Third-party repositories (called PPAs, or Personal Package Archives, on Ubuntu) supply newer or specialized builds. Vendors typically provide a setup script that registers their signing key and repository definition; the pattern is common but the script should always be reviewed before running it with elevated privileges.
 
-```bash
-# Example: adding the official Node.js 22.x repository on Ubuntu
-curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-sudo apt install nodejs
-```
+<Aside type="tip" title="Adding a Third-Party Repository">
+The official Node.js repository is added by running the vendor's setup script with root privileges, which drops a repository definition and GPG key into `/etc/apt/`, then installing normally with `sudo apt install nodejs`. Many vendors also document a manual installation path (adding the key and `.sources` file separately) that avoids piping untrusted scripts to a root shell.
+</Aside>
 
-If you need to prevent a package from being upgraded automatically (for example, to keep a specific PostgreSQL version), you can pin it:
+If you need to prevent a package from being upgraded automatically (to keep a specific PostgreSQL version, for example), `sudo apt-mark hold <package>` pins it at its current version; `sudo apt-mark unhold <package>` releases the pin later.
 
-```bash
-sudo apt-mark hold postgresql-16
-```
-
-To release the hold later:
-
-```bash
-sudo apt-mark unhold postgresql-16
-```
-
-<Aside type="tip">
+<Aside type="tip" title="Keep Packages Updated">
 Run `sudo apt update && sudo apt upgrade` regularly, or enable unattended security updates with the `unattended-upgrades` package. Unpatched servers are one of the most common vectors for security breaches.
 </Aside>
 
@@ -561,9 +439,13 @@ Combining `enable` and `start` in one command:
 sudo systemctl enable --now nginx
 ```
 
+<Aside type="note" title="Language-Specific Process Managers">
+Some application ecosystems ship their own process managers that complement or wrap systemd. **PM2** is the dominant one for Node.js: it handles clustering (spawning one worker per CPU core), in-process log rotation, and a `pm2 startup` command that generates a systemd unit to keep PM2 itself running across reboots. Other examples include **Gunicorn** for Python WSGI applications and **Puma** for Ruby on Rails, both of which are typically launched by a systemd unit rather than managing the process lifecycle themselves. The guidance here is to understand both layers: the application-level manager handles concerns the application framework understands best (worker counts, graceful reload), while systemd handles boot integration and restart-on-failure uniformly across the whole system.
+</Aside>
+
 ### Unit Files
 
-Systemd services are defined by unit files, typically stored in `/usr/lib/systemd/system/` (distribution-provided) or `/etc/systemd/system/` (administrator overrides). A systemd unit file has three mandatory sections: `[Unit]` declares what this service is and what it depends on; `[Service]` defines how to run it (which user, which binary, restart policy); and `[Install]` tells systemd which target (boot state) should pull this service in. A unit file for a Node.js application might look like this:
+Systemd services are defined by unit files, typically stored in `/usr/lib/systemd/system/` (distribution-provided) or `/etc/systemd/system/` (administrator overrides). A systemd unit file typically has three sections: `[Unit]` declares what this service is and what it depends on; `[Service]` defines how to run it (which user, which binary, restart policy); and `[Install]` tells systemd which target (boot state) should pull this service in when enabled. Only `[Unit]` and the type-specific section (`[Service]` here) are required; `[Install]` is optional and only needed when you want to enable or disable the unit with `systemctl`. A unit file for a Node.js application might look like this:
 
 ```ini
 # /etc/systemd/system/webapp.service
@@ -588,22 +470,13 @@ WantedBy=multi-user.target
 
 The `[Unit]` section declares dependencies: this app should start after the network is up and PostgreSQL is running. The `[Service]` section defines how to run it: as the `deploy` user, from the `/opt/webapp` directory, restarting on failure after a five-second delay. The `[Install]` section tells systemd that this service belongs in the `multi-user.target`, so it starts on a normal boot.
 
-After creating or modifying a unit file, reload the systemd daemon and start the service:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now webapp.service
-```
-
-Check the logs for your service with `journalctl`:
-
-```bash
-sudo journalctl -u webapp.service -f
-```
-
-The `-f` flag follows the log output in real time, similar to `tail -f`.
+After creating or modifying a unit file, `systemctl daemon-reload` reloads the on-disk unit definitions without interrupting running services. The service can then be enabled and started in one step with `systemctl enable --now`. Logs for any unit are accessible through `journalctl -u <service-name>`, with `-f` to follow output in real time.
 
 ### Systemd Timers
+
+<Aside type="note" title="What Is cron?">
+**cron** is the traditional Unix job scheduler, present on Linux systems for decades. It reads a configuration file called a **crontab** (cron table) that maps time expressions (minute, hour, day-of-month, month, day-of-week) to shell commands. For example, a crontab entry of `0 2 * * * /usr/local/bin/backup.sh` runs the backup script at 2 AM every day. The `crontab -e` command opens the current user's crontab for editing; system-wide jobs live in `/etc/cron.d/`. cron is still widely used and available on every Linux distribution, but systemd timers offer tighter integration with the journal (all output is captured and queryable), better dependency handling, and the ability to track missed runs with `Persistent=true`.
+</Aside>
 
 A `.timer` unit schedules a `.service` unit to run at defined times or intervals, replacing cron for many tasks on modern Linux. Timer units always come in pairs with the same base name: `webapp-health.timer` triggers `webapp-health.service`.
 
@@ -636,17 +509,13 @@ WantedBy=timers.target
 
 `OnCalendar=*-*-* *:*:00` means "every minute, on the zero-second mark." `Persistent=true` ensures that if the system was off when a trigger was due, it runs once immediately on next boot.
 
-After creating both files:
+After creating both files, `systemctl daemon-reload` picks up the new units and `systemctl enable --now webapp-health.timer` activates the schedule.
 
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now webapp-health.timer
+<Aside type="tip" title="Verifying Timer Status">
+`systemctl list-timers` shows all active timers alongside their last run time and next scheduled trigger, useful for confirming that a new timer was enabled correctly.
+</Aside>
 
-# List all active timers and when they next fire
-systemctl list-timers
-```
-
-<Aside type="note">
+<Aside type="note" title="After= vs. Requires=">
 The `After=` directive controls ordering (what starts first), while `Requires=` controls dependency (if the dependency fails, this unit fails too). For most application services, `After=` is sufficient; use `Requires=` sparingly.
 </Aside>
 
@@ -663,4 +532,4 @@ The concepts in this lecture form a complete foundation: you now have the vocabu
 - <a href="https://ubuntu.com/server/docs" target="_blank" rel="noopener noreferrer">Ubuntu Server Guide (Official Documentation)</a>
 - <a href="https://netplan.readthedocs.io/en/stable/" target="_blank" rel="noopener noreferrer">Netplan Reference Documentation</a>
 - <a href="https://www.freedesktop.org/software/systemd/man/systemd.service.html" target="_blank" rel="noopener noreferrer">systemd.service man page (freedesktop.org)</a>
-- <a href="https://wiki.archlinux.org/title/Users_and_groups" target="_blank" rel="noopener noreferrer">Users and Groups — Arch Linux Wiki</a>
+- <a href="https://wiki.archlinux.org/title/Users_and_groups" target="_blank" rel="noopener noreferrer">Users and Groups - Arch Linux Wiki</a>
