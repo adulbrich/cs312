@@ -1,15 +1,17 @@
 ---
-title: Network Configuration and Troubleshooting
-description: "Systematic network troubleshooting: VLANs, Wi-Fi, DNS, DHCP, routing, firewalls, and packet capture."
+title: Building and Operating a Company Network
+description: "Design and operate a real company network: hierarchical topology, VLANs, DNS, DHCP, email, TLS certificates, reverse proxies, VPNs, multi-location connectivity, and systematic troubleshooting."
 sidebar:
   order: 9
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-Imagine you arrive at work on Monday morning to a flood of messages: "The website is down." Users cannot reach your company's internal web application. The application server is running, the database is healthy, and nothing changed over the weekend. Somewhere between the users and the server, something is broken.
+Running a company network requires two complementary skills: designing and building it correctly, then diagnosing it when something breaks. This lecture covers both.
 
-This chapter teaches you how to find that "something." We will work through network configuration and troubleshooting from the bottom of the stack upward, using this scenario as a common thread. Along the way, we will cover VLANs, Wi-Fi, DNS, DHCP, routing, firewalls, and packet capture.
+The scenario running through this lecture is a small company with twenty employees, servers in a closet, a handful of remote workers, a cloud presence, and a public website. You will learn how to design the logical structure of that network (VLANs, DHCP, DNS, routing), configure the services that make it usable (firewalls, reverse proxies, TLS certificates, email, VPNs), and connect multiple locations together. Along the way, the same scenario grounds every topic in a concrete troubleshooting problem.
+
+The Monday-morning alert: "The website is down." Users cannot reach the company's internal web application. The application server is running, the database is healthy, and nothing changed over the weekend. Somewhere between the users and the server, something is broken. A sysadmin who built the network knows exactly where to look. This lecture develops that knowledge.
 
 ## A systematic troubleshooting methodology
 
@@ -157,6 +159,27 @@ dig app.example.com @8.8.8.8
 
 The search domain is misconfigured. If `/etc/resolv.conf` has the wrong search domain, short hostnames resolve to the wrong fully qualified domain name, or fail entirely.
 
+### Internal DNS and split-horizon
+
+Most companies run an internal DNS server that answers queries for private hostnames that should never appear in public DNS. For example, `db.company.internal` resolves to `10.0.1.200` for internal clients, while external DNS has no record for it at all.
+
+**Split-horizon DNS** (also called split-brain DNS) takes this further: the same hostname resolves to different addresses depending on where the query originates. `app.company.com` might resolve to `10.0.1.100` for internal clients (going directly to the backend) and to `203.0.113.5` (the public load balancer) for external clients. The internal answer avoids the round-trip through the internet and eliminates a dependency on the load balancer for internal traffic.
+
+On Linux servers, `/etc/resolv.conf` (or its systemd-resolved equivalent) controls which DNS server handles queries:
+
+```bash
+# View the current resolver configuration
+cat /etc/resolv.conf
+# Typical output for a company server:
+# nameserver 10.0.1.2       <- internal DNS server
+# nameserver 10.0.1.3       <- secondary internal DNS
+# search company.internal   <- appended to short hostnames
+```
+
+The `search` directive appends a domain suffix to unqualified hostnames. If you type `ping app01`, the resolver automatically tries `app01.company.internal` before querying bare `app01`. This is why servers on the same internal domain can reach each other by short name rather than fully qualified hostname.
+
+When troubleshooting internal name resolution failures, always check `/etc/resolv.conf` first: is the nameserver IP correct? Is the search domain right? Then use `dig @<nameserver-ip> hostname` to query the internal DNS server directly and bypass any caching layer.
+
 ## DHCP: dynamic addressing
 
 DHCP (Dynamic Host Configuration Protocol) automates IP address assignment. Without it, every device on the network would need manual configuration, a process that scales poorly and invites human error.
@@ -199,6 +222,49 @@ sudo networkctl renew eth0
 ```
 
 In our scenario, if the server recently lost power and came back up, it may have received a different IP address from the DHCP pool. Any DNS records or firewall rules pointing to the old address would now be wrong. This is exactly why servers should use static allocation or reservations.
+
+## Email Infrastructure
+
+Email is rarely set up from scratch today -- most organizations use hosted services like Google Workspace or Microsoft 365. But understanding how email flows through DNS and SMTP is necessary for any sysadmin, because misconfigured email records affect deliverability for the entire domain and debugging delivery failures is a surprisingly common task.
+
+### How email routing works
+
+When you send an email to `user@example.com`, your mail server performs a DNS **MX record** lookup for `example.com`. The MX record returns the hostname (not IP) of the mail server that accepts mail for that domain, along with a priority number. Lower values are preferred; if the primary is unreachable, the sender falls back to higher-priority values.
+
+```bash
+# Look up the mail servers for a domain
+dig MX oregonstate.edu
+```
+
+Typical output:
+```
+oregonstate.edu.  3600  IN  MX  10  smtp.oregonstate.edu.
+```
+
+The number `10` is the priority. With multiple MX records at different priorities, the sending server tries the lowest number first.
+
+### Email authentication: SPF, DKIM, and DMARC
+
+Spam and phishing attacks forge the `From:` address in emails. Three DNS-based mechanisms allow receiving mail servers to verify that an email genuinely came from where it claims.
+
+**SPF (Sender Policy Framework)** is a DNS TXT record that lists the IP addresses authorized to send email for a domain. A receiving server checks whether the sending server's IP is in the SPF record; if not, the email fails SPF and is more likely to be rejected or marked as spam.
+
+```bash
+# Check a domain's SPF record
+dig TXT example.com | grep spf
+```
+
+**DKIM (DomainKeys Identified Mail)** adds a cryptographic signature to every outgoing email. The public key is published in DNS. The receiving server uses it to verify that the email was not modified in transit and was authorized by the domain's private key.
+
+**DMARC (Domain-based Message Authentication, Reporting and Conformance)** ties SPF and DKIM together with a policy (`p=none` for monitoring only, `p=quarantine`, or `p=reject`) and instructs receiving servers where to send aggregate reports. A `p=reject` policy effectively blocks forged email from your domain.
+
+<Aside type="tip">
+When setting up email for a new domain, configure SPF, DKIM, and DMARC before sending any bulk email. Major providers (Gmail, Microsoft) increasingly reject or silently drop mail from domains that lack these records.
+</Aside>
+
+### Why you probably should not run your own mail server
+
+Running a mail server requires a static IP with proper reverse DNS, maintaining a clean sending reputation, staying off spam blacklists, managing TLS certificates, implementing SPF/DKIM/DMARC, and monitoring for abuse 24/7. A misconfigured server that gets blacklisted silently stops delivering email to most recipients. Hosted solutions like Google Workspace or Microsoft 365 handle all of this for a per-user monthly fee and are the right choice for almost every organization. The main reasons to self-host are specific compliance requirements, very high volume that makes hosted costs prohibitive, or strict data sovereignty requirements.
 
 ## Routing and gateway issues
 
@@ -373,6 +439,14 @@ Static routes (manually configured entries in the routing table) work for small,
 
 For most enterprise sysadmin work, OSPF is the interior routing protocol you are most likely to encounter. BGP appears when your organization peers with multiple ISPs or uses cloud connectivity (AWS Direct Connect, Azure ExpressRoute).
 
+### Link aggregation and enterprise connectivity
+
+**Link Aggregation (LAG)**, defined by the 802.3ad standard (also called LACP), bonds multiple physical network interfaces into a single logical interface. Two 10 Gbps links bonded together present as one 20 Gbps interface to the operating system. Beyond throughput, LAG provides redundancy: if one physical link fails, traffic shifts to the remaining links without interruption.
+
+On Linux, bonded interfaces are managed via the `bonding` kernel module or, more commonly on newer distributions, via `systemd-networkd` or NetworkManager. You will encounter LAG on server NICs connecting to switches, and on the uplinks between access and distribution switches.
+
+**Multi-homing** -- connecting an organization's network to two or more ISPs -- requires BGP to advertise the organization's IP block to both providers. If one ISP's link fails, BGP converges on the other within seconds. Large organizations own their own IP address block (allocated from ARIN, RIPE, or another regional registry) and carry that block in BGP rather than using the ISP's address space.
+
 ## Virtual Private Networks (VPNs)
 
 A VPN creates an encrypted tunnel between two endpoints over an untrusted network (typically the internet). All traffic inside the tunnel is encrypted, appearing as ordinary encrypted packets to anyone observing the network.
@@ -388,6 +462,24 @@ Common VPN protocols:
 - **IPsec** (Internet Protocol Security, a suite of protocols that encrypts and authenticates each IP packet): Built into most hardware routers and firewalls; leverages hardware acceleration for high throughput. Widely used in enterprise site-to-site deployments.
 - **OpenVPN**: Open-source, flexible, and easier to configure than IPsec. Runs over TCP or UDP; easy to tunnel through firewalls.
 - **WireGuard**: A modern VPN protocol that uses state-of-the-art cryptography and a much smaller code base than IPsec or OpenVPN, making it easier to audit and often faster in benchmarks. Less legacy hardware support, but increasingly adopted in new deployments.
+
+### Connecting multiple locations
+
+A company with offices in Portland and Seattle needs those networks to communicate securely without traffic crossing the public internet in plaintext. A site-to-site VPN between the two offices' routers creates a permanent encrypted tunnel; from an end device's perspective, the remote office subnet is just another local subnet.
+
+Three approaches are common at different scales:
+
+**Site-to-site VPN** is the standard for a small number of offices. IPsec or WireGuard tunnels are configured between the routers at each site. Routing protocols (usually OSPF or static routes) advertise internal subnets across the tunnel. This is inexpensive and sufficient for two to five locations.
+
+**MPLS (Multiprotocol Label Switching)** is a carrier-provided service where the ISP manages the WAN between your sites. Traffic enters the MPLS cloud at one site and emerges at another without passing through the internet. MPLS provides guaranteed bandwidth and low latency but is expensive. Large enterprises and service providers use it for predictable performance on time-sensitive traffic.
+
+**SD-WAN (Software-Defined Wide Area Network)** is a newer approach that creates an overlay network across multiple underlay connections (broadband internet, LTE, MPLS). A centralized controller defines routing policy; the SD-WAN devices at each site intelligently select the best path per application. A video call might use the low-latency MPLS link while bulk backups use cheap broadband. SD-WAN has largely displaced pure MPLS for new deployments because it delivers similar reliability at lower cost.
+
+**Cloud connectivity**: when one of your "sites" is an AWS VPC or Azure VNet, you have two options. A **VPN Gateway** creates an IPsec tunnel from your office router to the cloud VPC -- inexpensive but limited bandwidth and latency. **AWS Direct Connect** or **Azure ExpressRoute** are dedicated private fiber connections from your office to the cloud provider's colocation facility -- higher cost, predictable latency, and no traffic on the public internet.
+
+<Aside type="note">
+In cloud-first environments, the "company network" increasingly means a hub VPC in AWS or Azure with VPN or Direct Connect back to any physical offices, rather than a traditional office-centric design. The same networking concepts apply; the hardware is just abstracted into APIs.
+</Aside>
 
 ## Firewall Types, Technologies, and Terminology
 
@@ -483,6 +575,43 @@ server {
 ```
 
 The `upstream` block defines a pool of backends. `proxy_pass` forwards all requests to that pool in round-robin order by default. The `proxy_set_header` directives ensure the backend sees the original client IP and hostname rather than the proxy's own values, which matters for access logging and IP-based rate limiting on the backend.
+
+## TLS Certificates
+
+HTTPS requires a TLS certificate: a cryptographically signed document that proves the server owns the private key corresponding to the public key in the certificate, and that a trusted Certificate Authority (CA) has verified this. Without a valid certificate, browsers display security warnings and refuse to connect.
+
+### How certificates work
+
+A certificate contains the server's public key, the domain name(s) it is valid for, a validity period, and the CA's digital signature. The browser already trusts a set of root CAs (pre-installed by the OS or browser vendor). When a browser connects to a server, it verifies that the certificate's signature chains up to one of those trusted roots and that the certificate is not expired or revoked.
+
+### Let's Encrypt and automated certificate management
+
+Before 2016, obtaining a certificate required purchasing one from a commercial CA and manually renewing it every one to two years. Let's Encrypt changed this by providing free certificates via an automated protocol called ACME (Automated Certificate Management Environment). The dominant ACME client is **certbot**:
+
+```bash
+# Install certbot on Ubuntu
+sudo apt install certbot python3-certbot-apache
+
+# Obtain and install a certificate for a domain (Apache)
+sudo certbot --apache -d example.com -d www.example.com
+
+# Certificates renew automatically via a systemd timer
+sudo systemctl status certbot.timer
+```
+
+Certbot contacts Let's Encrypt, proves domain ownership (by temporarily serving a challenge file on port 80 or by adding a DNS TXT record), receives a certificate valid for 90 days, and installs it. A systemd timer runs `certbot renew` twice daily; certificates are renewed automatically when they have less than 30 days remaining.
+
+### Internal certificates
+
+For internal services (the company intranet, internal APIs, database management UIs), public CAs will not issue certificates because the domain is not publicly routable. Two options:
+
+**Self-signed certificates** are generated locally without any CA involvement. They encrypt traffic but browsers do not trust them by default. Suitable for testing or for services where you control all clients and can manually add the certificate to the trust store.
+
+**Internal CA**: generate your own CA certificate, install it in the trust store of all company devices (typically via Active Directory Group Policy or an MDM system), and sign internal service certificates with it. Clients trust anything signed by your internal CA without warnings. This is the standard approach for companies that need HTTPS on internal services without per-device browser exceptions.
+
+<Aside type="caution">
+Never use a wildcard certificate (`*.company.com`) for all services. If the private key is compromised, every service using that certificate is vulnerable. Issue per-service certificates and automate renewal so the overhead of short-lived certificates is manageable.
+</Aside>
 
 ## Network Storage
 

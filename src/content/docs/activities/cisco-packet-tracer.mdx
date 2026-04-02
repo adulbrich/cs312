@@ -1,16 +1,16 @@
 ---
 title: "Cisco Packet Tracer: Small Enterprise Network"
-description: "Build a small enterprise network with VLANs, inter-VLAN routing, DHCP, and wireless using Cisco Packet Tracer."
+description: "Build a small enterprise network with VLANs, inter-VLAN routing, DHCP, and internal DNS using Cisco Packet Tracer."
 sidebar:
-  order: 4
+  order: 9
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
-This activity puts into practice the concepts from the [Networking Fundamentals (LAN/WAN)](/lectures/networking-fundamentals-lan-wan/) and [Network Configuration and Troubleshooting](/lectures/network-configuration-and-troubleshooting/) lectures. You will build a small enterprise network step by step in Cisco Packet Tracer, configuring VLANs, inter-VLAN routing via a multilayer switch, DHCP, and wireless access. By the end, you will have connected all device types on a segmented network and seen how each layer of the design addresses a specific networking concern.
+This activity puts into practice the concepts from the [Building and Operating a Company Network](/lectures/network-configuration-and-troubleshooting/) lecture. You will build a small enterprise network step by step in Cisco Packet Tracer, configuring VLANs, inter-VLAN routing via a multilayer switch, DHCP, and internal DNS. By the end, you will have a fully connected, segmented network where devices get their addresses automatically, reach other VLANs through routing, and resolve internal hostnames through DNS.
 
 <Aside type="tip">
-Read the [Networking Fundamentals (LAN/WAN)](/lectures/networking-fundamentals-lan-wan/) and [Network Configuration and Troubleshooting](/lectures/network-configuration-and-troubleshooting/) lectures before starting. Each section below notes which lecture concept it exercises.
+Read the [Building and Operating a Company Network](/lectures/network-configuration-and-troubleshooting/) lecture before starting. Each section below notes which lecture concept it exercises.
 </Aside>
 
 ## What You Will Need
@@ -222,54 +222,82 @@ Click any device to open its panel. The tabs you will use most:
    </Aside>
 </Steps>
 
-## Part 5: Wireless
+## Part 5: Internal DNS
+
+Every real company network needs DNS. IP addresses work, but nobody types `192.168.10.100` into a browser. In this part you will configure the DHCP server to also run DNS, create an internal A record, and watch a browser request resolve a hostname all the way to an HTTP response.
 
 <Steps>
-1. Add a **Wireless LAN Controller** (WLC 3504) to the canvas. Connect it to the MLS and set the port to Access VLAN 99.
+1. On the existing DHCP server (in VLAN 99), open its **Services** tab. In the left sidebar click **DNS** and turn the service **On**.
 
-2. Configure the WLC's management IP:
-   - **IPv4 Address**: 192.168.99.101
-   - **Subnet Mask**: 255.255.255.0
-   - **Default Gateway**: 192.168.99.1
-   - **DNS Server**: 8.8.8.8
+2. In the DNS record form, create an A record:
+   - **Name**: `web.company.local`
+   - **Type**: A Record
+   - **Address**: the static IP of one of your VLAN 10 PCs (e.g., `192.168.10.10`)
 
-3. Fast-forward, then from any wired PC open the **Web Browser** and navigate to `http://192.168.99.101`.
+   Click **Add**.
 
-   <Aside type="caution">
-   The WLC web interface is very slow in Packet Tracer. Allow 30-60 seconds for the page to load.
+   <Aside type="note">
+   **Lecture connection:** The lecture's DNS section explains A records: they map a hostname to an IPv4 address. The `.local` suffix is a convention for internal, non-internet-routable domains. In a real company this would be something like `app.company.internal`.
    </Aside>
 
-4. Create an admin account. In the setup wizard, confirm the management IP settings and proceed to **Create Your Wireless Networks**. Choose a network name (SSID) and WPA2 passphrase. Click through and apply. The WLC reboots.
+3. Configure one of the VLAN 10 PCs as a simple web server. Click the PC, go to **Services > HTTP**, and turn the HTTP server **On**. You can leave the default index page.
 
-5. While the WLC reboots, add a DHCP pool on the server for VLAN 200 (Wifi), starting at 192.168.200.100, with the WLC address (192.168.99.101) entered in the **WLC Address** field. Add a DHCP relay on the MLS for VLAN 200.
+4. Update both DHCP pools (VLAN 10 and VLAN 20) to tell clients about the DNS server. In each pool, set the **DNS Server** field to `192.168.99.100`.
 
-6. Add two **lightweight access points** (LAP-PT) to the canvas. Connect them to any switch and set the ports to VLAN 200. In each LAP's **Physical** tab, drag the power cord to the power socket.
+   For any PCs already holding DHCP leases, release and renew:
+   - Open the PC → **Desktop > IP Configuration** → switch to **Static**, then back to **DHCP**. Fast-forward until the lease refreshes.
 
-   ![WAP physical tab showing the power connector](./cisco-packet-tracer/cpt-basic-wap-physical.png)
+   Verify the PC received the DNS server address by checking **Desktop > IP Configuration** and confirming **DNS Server** shows `192.168.99.100`.
 
-   Set each LAP to DHCP in the **Config** tab. Fast-forward until they receive IP addresses.
+5. On a PC in **VLAN 20**, open **Desktop > Command Prompt** and run:
 
-7. Log back in to the WLC at `https://192.168.99.101` (note the S). Go to **WLANs > AP Groups**, create a group called `LAP`, add the SSID under **WLANs**, and add both access points under **APs**.
+   ```
+   ping web.company.local
+   ```
 
-8. Add one or two wireless devices (tablets, smartphones, or laptops). In the device's **Config** tab, enter the SSID, enable WPA2-PSK, and enter the passphrase. Fast-forward and verify the device connects to one of the LAPs.
+   If DNS is working, the name resolves to the VLAN 10 PC's IP and ICMP replies come back. This crosses two VLAN boundaries: VLAN 20 → MLS → VLAN 99 (for the DNS query), then VLAN 20 → MLS → VLAN 10 (for the ping reply).
+
+6. Switch to **Simulation mode** and add **DNS** and **HTTP** to the event filter. On the VLAN 20 PC, open **Desktop > Web Browser** and navigate to:
+
+   ```
+   http://web.company.local
+   ```
+
+   Click the play button to step through events. Observe:
+   - The PC first generates a DNS query packet destined for `192.168.99.100`
+   - The query crosses the MLS and reaches the DNS server in VLAN 99
+   - The DNS server returns an A record response containing `192.168.10.10` (or whichever IP you assigned)
+   - The PC sends an HTTP GET to that IP address
+   - The request crosses the MLS again into VLAN 10 and reaches the web server
+   - The web server returns an HTTP 200 response with the default page
+
+   <Aside type="note">
+   **Lecture connection:** This sequence -- DHCP assigns an address, DNS resolves the name, HTTP fetches the page, all three crossing subnet boundaries through the MLS -- is the complete chain the "Putting It All Together" section of the lecture describes. You are watching it happen one packet at a time.
+   </Aside>
+
+7. Test what happens when DNS is unavailable. On the VLAN 20 PC, temporarily change the DNS server in IP Configuration to a non-existent address like `192.168.99.200`. Try to browse to `http://web.company.local` again. What happens? Now try browsing directly to the IP address `http://192.168.10.10`. What does this tell you about the role of DNS in the connection chain?
+
+   Restore the correct DNS server address when done.
 </Steps>
 
 ---
 
 ## Verify Your Understanding
 
-Here is how each part of this activity maps to the lectures:
+Here is how each part of this activity maps to the lecture:
 
 | What you did | Lecture section |
 |---|---|
 | Assigned PCs to subnets and observed broadcast isolation | IP Addressing and Subnetting; VLANs and network segmentation |
-| Created VLANs and assigned ports | VLANs and network segmentation |
+| Created VLANs and assigned access ports | VLANs and network segmentation |
 | Added trunk ports between switches | VLANs and network segmentation |
 | Configured SVIs and enabled IP routing on the MLS | Routing Basics |
 | Set default gateways on endpoints | Routing Basics |
 | Added a /30 point-to-point link to a border router | IP Addressing and Subnetting; Static IP routing |
-| Deployed a DHCP server and relay agents | Core Network Services: DHCP; DHCP: dynamic addressing |
-| Connected wireless devices through a WLC and LAPs | Wi-Fi fundamentals; Enterprise wireless security |
+| Deployed a DHCP server and relay agents | DHCP: dynamic addressing |
+| Configured internal DNS and created an A record | DNS configuration and troubleshooting; Internal DNS |
+| Watched DNS + HTTP packets cross VLAN boundaries in simulation | DNS; Putting it all together |
+| Tested DNS failure by pointing clients at a non-existent resolver | DNS troubleshooting |
 
 Consider the following questions:
 
@@ -277,5 +305,5 @@ Consider the following questions:
 2. **Trunk ports:** Why do the uplinks between switches carry all VLANs instead of just one? What would break if you set those ports to access mode for VLAN 10?
 3. **MLS vs. external router:** You used a multilayer switch for inter-VLAN routing instead of connecting each VLAN to a separate router interface. What are the trade-offs between these two designs?
 4. **DHCP relay:** The DHCP server is on VLAN 99 but serves clients on VLANs 10 and 20. Why does a relay agent work here when a simple broadcast would not reach across subnets?
-5. **WLC vs. standalone APs:** In the enterprise wireless setup, the WLC manages both LAPs centrally. What operational advantages does this provide over configuring each access point independently?
+5. **DNS failure modes:** In step 7 of Part 5, browsing to the hostname failed but browsing to the IP address worked. What does this tell you about how DNS fits into the connection chain? When a user says "the website is down," how would this test help you distinguish a DNS failure from an application failure?
 6. **Static vs. dynamic routing:** You configured static routes between the MLS and the border router. Under what circumstances would you prefer a dynamic routing protocol (like OSPF or BGP) instead?
