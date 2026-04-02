@@ -393,6 +393,67 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    ```
 </Steps>
 
+## Set Up SSH Key Authentication
+
+<Steps>
+1. Install the OpenSSH server:
+
+   ```bash
+   sudo pacman -S openssh
+   ```
+
+2. Enable and start the SSH daemon:
+
+   ```bash
+   sudo systemctl enable --now sshd
+   ```
+
+   <Aside type="note">
+   **Lecture connection:** `enable --now` is the same combined command you already used for `systemd-networkd`. It both registers the service to start at boot and starts it immediately.
+   </Aside>
+
+3. Generate a key pair as `archuser` (not root):
+
+   ```bash
+   ssh-keygen -t ed25519 -C "archuser practice key"
+   ```
+
+   Accept the default path (`~/.ssh/id_ed25519`). You can set a passphrase or leave it empty for this exercise. Two files are created:
+   - `~/.ssh/id_ed25519` — the **private key**. Never share or copy this to another machine.
+   - `~/.ssh/id_ed25519.pub` — the **public key**. Safe to copy anywhere.
+
+4. Install the public key into `authorized_keys`:
+
+   ```bash
+   mkdir -p ~/.ssh
+   chmod 700 ~/.ssh
+   cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
+   chmod 600 ~/.ssh/authorized_keys
+   ```
+
+   The permissions are enforced by SSH itself: if `~/.ssh` or `authorized_keys` are group- or world-writable, SSH will refuse to use them.
+
+5. Test key authentication by connecting to localhost:
+
+   ```bash
+   ssh -i ~/.ssh/id_ed25519 archuser@localhost
+   ```
+
+   You should receive a shell prompt without entering a password. Type `exit` to return.
+
+6. Locate the password authentication setting:
+
+   ```bash
+   grep PasswordAuthentication /etc/ssh/sshd_config
+   ```
+
+   On a production server exposed to the internet you would set this to `no` after confirming key auth works. Do not change it here; you are on a local VM with no remote exposure.
+</Steps>
+
+<Aside type="note">
+**On EC2:** The workflow is slightly different. You generate the key pair on your laptop and AWS places your public key in `~/.ssh/authorized_keys` on the instance at launch time. You then SSH from your laptop using your private key. The mechanics -- key pair, `authorized_keys`, permissions -- are identical. Only the delivery path differs.
+</Aside>
+
 ## Verify Your Understanding
 
 You have now manually performed every step that an Ubuntu installer does automatically. Take a moment to reflect on these connections:
@@ -409,6 +470,7 @@ You have now manually performed every step that an Ubuntu installer does automat
 | Enabled services with `systemctl enable --now` | Systemd Services |
 | Configured hostname and `/etc/hosts` | Hostname and /etc/hosts |
 | Set up DHCP via systemd-networkd | Network Configuration Basics |
+| Generated a key pair and configured `~/.ssh/authorized_keys` | SSH Key Authentication |
 
 Consider the following questions:
 
@@ -416,6 +478,7 @@ Consider the following questions:
 2. **Boot process:** The lecture describes four stages (firmware, bootloader, kernel, systemd). Which steps in this activity correspond to each stage?
 3. **Package management:** Arch uses `pacman` where Ubuntu uses `apt`. What are the equivalent commands for `apt update`, `apt install`, and `apt upgrade` in pacman?
 4. **Users:** The lecture warns that forgetting the `-a` flag with `usermod -G` replaces all supplementary groups. Why did we not need the `-a` flag when we used `useradd -G` to create the user?
+5. **SSH keys:** Why does the `~/.ssh/authorized_keys` file need `chmod 600`, and the `~/.ssh` directory need `chmod 700`? What happens if you set them to `chmod 644` and `chmod 755` instead?
 
 ## Cleanup
 

@@ -420,6 +420,27 @@ We already set the hostname with `hostnamectl`. For local name resolution (befor
 
 This ensures the server can resolve its own fully qualified domain name even if DNS is temporarily unavailable.
 
+### Cloud Security Groups
+
+When a Linux server runs as a cloud instance (an EC2 instance, a DigitalOcean Droplet, etc.), network access is filtered by a second layer before traffic ever reaches the operating system. On AWS, this is a **security group**: a stateful virtual firewall attached to the instance that evaluates inbound and outbound rules.
+
+Security groups work by default-deny: all inbound traffic is blocked unless you explicitly add a rule. A typical server needs at minimum:
+
+| Rule | Port | Protocol | Purpose |
+|------|------|----------|---------|
+| Allow inbound | 22 | TCP | SSH administration |
+| Allow inbound | 80 | TCP | HTTP |
+| Allow inbound | 443 | TCP | HTTPS |
+| Allow inbound | 25565 | TCP | Minecraft (or whatever your application uses) |
+
+Security groups are **stateful**: if you allow an inbound connection, the return traffic is automatically permitted without a separate outbound rule.
+
+A common troubleshooting pattern: you start a service, confirm it is listening with `ss -tlnp`, and still cannot reach it from outside. The service is usually fine; the security group is the first thing to check.
+
+<Aside type="tip">
+Restricting SSH to "My IP" in the security group means only your current public IP can reach port 22. This is a meaningful security improvement over allowing SSH from `0.0.0.0/0` because it eliminates the vast majority of automated brute-force login attempts.
+</Aside>
+
 ## Package Management
 
 Once users and networking are in place, you need to install software. Linux distributions use package managers to install, update, and remove software from curated repositories.
@@ -581,6 +602,49 @@ sudo journalctl -u webapp.service -f
 ```
 
 The `-f` flag follows the log output in real time, similar to `tail -f`.
+
+### Systemd Timers
+
+A `.timer` unit schedules a `.service` unit to run at defined times or intervals, replacing cron for many tasks on modern Linux. Timer units always come in pairs with the same base name: `webapp-health.timer` triggers `webapp-health.service`.
+
+The service unit is written as a `oneshot` type (runs once and exits, rather than staying alive):
+
+```ini
+# /etc/systemd/system/webapp-health.service
+[Unit]
+Description=Webapp health check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/webapp-health.sh
+```
+
+The timer unit controls when it fires:
+
+```ini
+# /etc/systemd/system/webapp-health.timer
+[Unit]
+Description=Run webapp health check every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
+`OnCalendar=*-*-* *:*:00` means "every minute, on the zero-second mark." `Persistent=true` ensures that if the system was off when a trigger was due, it runs once immediately on next boot.
+
+After creating both files:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now webapp-health.timer
+
+# List all active timers and when they next fire
+systemctl list-timers
+```
 
 <Aside type="note">
 The `After=` directive controls ordering (what starts first), while `Requires=` controls dependency (if the dependency fails, this unit fails too). For most application services, `After=` is sufficient; use `Requires=` sparingly.
