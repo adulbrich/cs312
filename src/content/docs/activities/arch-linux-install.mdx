@@ -6,12 +6,9 @@ sidebar:
 ---
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts into practice the concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture. Where Ubuntu's installer handles partitioning, bootloader installation, user creation, and networking automatically, Arch Linux makes you do each step by hand. That is precisely the point: by the end of this exercise, you will have directly touched every layer of a Linux system that most distributions hide behind a setup wizard.
-
-<Aside type="tip">
-Read the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture before starting. Each section below notes which lecture concept it exercises, so you can connect what you are doing to what you read.
-</Aside>
+This activity puts into practice the concepts from the [Linux Server Planning and Configuration](/lectures/linux-server-planning-and-configuration/) lecture. Where Debian's installer handles partitioning, bootloader installation, user creation, and networking automatically, Arch Linux makes you do each step by hand. That is precisely the point: by the end of this exercise, you will have directly touched every layer of a Linux system that most distributions hide behind a setup wizard.
 
 ## What You Will Need
 
@@ -146,6 +143,10 @@ mount /dev/sda1 /mnt/boot/efi
 **Checkpoint:** Run `lsblk` and verify that `/dev/sda3` is mounted at `/mnt` and `/dev/sda1` at `/mnt/boot/efi`. Compare this output to the `lsblk` example in the lecture. The column names and structure are identical; only the device names and sizes differ.
 </Aside>
 
+<ActivityQuestion>
+Why does the EFI System Partition use FAT32 instead of ext4? What would happen if you formatted it as ext4?
+</ActivityQuestion>
+
 ## Install the Base System
 
 This step downloads and installs the core Arch Linux packages into your mounted root partition. The `pacstrap` tool is Arch's equivalent of running an installer, but it is transparent: you can see exactly which packages it installs.
@@ -165,6 +166,10 @@ genfstab -U /mnt > /mnt/etc/fstab
 <Aside type="note">
 **Lecture connection:** `genfstab` automates exactly what the lecture describes in the *Mount Points* section: writing entries to `/etc/fstab` with UUIDs, mount points, filesystem types, and mount options. After it runs, inspect the result with `cat /mnt/etc/fstab` and compare it to the lecture's description.
 </Aside>
+
+<ActivityQuestion>
+`pacstrap` installs Arch packages just as `apt install` installs Debian packages. What are the equivalent `pacman` commands for `apt update`, `apt install <package>`, and `apt upgrade`?
+</ActivityQuestion>
 
 ## Enter the New System
 
@@ -243,6 +248,10 @@ pwd
 **Lecture connection:** The lecture says "you should edit `/etc/default/grub` and then run `sudo update-grub` rather than modifying `grub.cfg` directly." On Arch, `grub-mkconfig` is the equivalent of Ubuntu's `update-grub`. The principle is the same: never edit the generated config directly.
 </Aside>
 
+<ActivityQuestion>
+The lecture describes four boot stages: firmware, bootloader, kernel, systemd. Which specific steps in this activity correspond to each stage? (The firmware stage is handled by the VM; what did you configure in VirtualBox that relates to it?)
+</ActivityQuestion>
+
 ## Configure sudo and Create a User
 
 <Steps>
@@ -282,6 +291,10 @@ pwd
 <Aside type="note">
 **Checkpoint:** Compare the command you just ran to the lecture's user creation example. The flags are identical: `-m` creates the home directory, `-G` adds to a supplementary group, `-s` sets the shell. The only difference is the group name (`wheel` on Arch, `sudo` on Ubuntu).
 </Aside>
+
+<ActivityQuestion>
+The lecture warns that forgetting the `-a` flag with `usermod -aG` replaces all supplementary groups. Why did we not need `-a` here when we used `useradd -G wheel` to create the user?
+</ActivityQuestion>
 
 ## Reboot into Your New System
 
@@ -419,8 +432,8 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    ```
 
    Accept the default path (`~/.ssh/id_ed25519`). You can set a passphrase or leave it empty for this exercise. Two files are created:
-   - `~/.ssh/id_ed25519` — the **private key**. Never share or copy this to another machine.
-   - `~/.ssh/id_ed25519.pub` — the **public key**. Safe to copy anywhere.
+   - `~/.ssh/id_ed25519`: the **private key**. Never share or copy this to another machine.
+   - `~/.ssh/id_ed25519.pub`: the **public key**. Safe to copy anywhere.
 
 4. Install the public key into `authorized_keys`:
 
@@ -454,38 +467,14 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 **On EC2:** The workflow is slightly different. You generate the key pair on your laptop and AWS places your public key in `~/.ssh/authorized_keys` on the instance at launch time. You then SSH from your laptop using your private key. The mechanics -- key pair, `authorized_keys`, permissions -- are identical. Only the delivery path differs.
 </Aside>
 
-## Verify Your Understanding
+<ActivityQuestion>
+Why does `~/.ssh/authorized_keys` need `chmod 600` and `~/.ssh` need `chmod 700`? What would happen if you set them to `644` and `755` instead, and why does SSH enforce this rather than just issuing a warning?
+</ActivityQuestion>
 
-You have now manually performed every step that an Ubuntu installer does automatically. Take a moment to reflect on these connections:
+## Keep This VM
 
-| What you did in this activity | Lecture section it maps to |
-|-------------------------------|---------------------------|
-| Created GPT partitions with gdisk | Filesystem Layout and Disk Management |
-| Formatted with `mkfs.ext4`, `mkfs.fat` | Filesystem Layout and Disk Management |
-| Generated `/etc/fstab` with `genfstab` | Mount Points |
-| Installed GRUB to the EFI partition | The Boot Process |
-| Created a user with `useradd -m -G -s` | User and Group Management |
-| Configured `wheel` group via `visudo` | Privilege Escalation with sudo |
-| Installed packages with `pacman` | Package Management |
-| Enabled services with `systemctl enable --now` | Systemd Services |
-| Configured hostname and `/etc/hosts` | Hostname and /etc/hosts |
-| Set up DHCP via systemd-networkd | Network Configuration Basics |
-| Generated a key pair and configured `~/.ssh/authorized_keys` | SSH Key Authentication |
-
-Consider the following questions:
-
-1. **Partitioning:** Why does the EFI System Partition use FAT32 instead of ext4? What would happen if you formatted it as ext4?
-2. **Boot process:** The lecture describes four stages (firmware, bootloader, kernel, systemd). Which steps in this activity correspond to each stage?
-3. **Package management:** Arch uses `pacman` where Ubuntu uses `apt`. What are the equivalent commands for `apt update`, `apt install`, and `apt upgrade` in pacman?
-4. **Users:** The lecture warns that forgetting the `-a` flag with `usermod -G` replaces all supplementary groups. Why did we not need the `-a` flag when we used `useradd -G` to create the user?
-5. **SSH keys:** Why does the `~/.ssh/authorized_keys` file need `chmod 600`, and the `~/.ssh` directory need `chmod 700`? What happens if you set them to `chmod 644` and `chmod 755` instead?
-
-## Cleanup
-
-When you are finished, shut down the VM:
+You will use this Arch Linux VM in the next activity. Leave it running or shut it down cleanly with:
 
 ```bash
 sudo shutdown -h now
 ```
-
-You can delete the VM if you no longer need it, or keep it as a sandbox for experimenting with Linux commands from future lectures.
