@@ -457,23 +457,23 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 
    `/etc/resolv.conf` tells the system which DNS server to send name queries to. `1.1.1.1` and `1.0.0.1` are Cloudflare's public resolvers. The system tries the first nameserver and falls back to the second if it does not respond. On production systems this file is usually managed automatically by systemd-resolved or NetworkManager; here we write it manually so nothing is hidden.
 
-<Aside type="note" title="Optional Production Variant">
-For production-style setups, avoid manually editing `/etc/resolv.conf`. Use a resolver manager instead.
+   <Aside type="note" title="Optional Production Variant">
+      For production-style setups, avoid manually editing `/etc/resolv.conf`. Use a resolver manager instead.
 
-- If using systemd-networkd, also enable systemd-resolved and let it manage DNS:
+      - If using systemd-networkd, also enable systemd-resolved and let it manage DNS:
 
-   ```bash
-   sudo systemctl enable --now systemd-resolved
-   sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
-   ```
+         ```bash
+         sudo systemctl enable --now systemd-resolved
+         sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+         ```
 
-- If using NetworkManager, let it manage interface addressing and DNS together:
+      - If using NetworkManager, let it manage interface addressing and DNS together:
 
-   ```bash
-   sudo pacman -S networkmanager
-   sudo systemctl enable --now NetworkManager
-   ```
-</Aside>
+         ```bash
+         sudo pacman -S networkmanager
+         sudo systemctl enable --now NetworkManager
+         ```
+   </Aside>
 
 8. Test your connection:
 
