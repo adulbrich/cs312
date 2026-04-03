@@ -68,7 +68,7 @@ In your hypervisor of choice (VirtualBox, UTM, VNWare, etc.), create a new VM wi
    Look for a disk-type device (TYPE=`disk`) with roughly 8 GB of space. On VirtualBox it is typically `/dev/sda`; on UTM it is typically `/dev/vda`. The steps below use tabs to show the correct device name for each.
 </Steps>
 
-<Aside type="note">
+<Aside type="note" title="About the live environment">
 You are currently running from a RAM-based live environment. Nothing you do here persists to disk until you explicitly install it. The live environment is your staging area.
 </Aside>
 
@@ -84,7 +84,7 @@ We will create three partitions using GPT: an EFI System Partition, a swap parti
    gdisk /dev/sda 
    ```
 
-   <Aside type="tip">
+   <Aside type="tip" title="Made a mistake?">
    If you make a mistake at any point, type `o` at the gdisk prompt to wipe the partition table and start over. Changes are not written to disk until you explicitly tell gdisk to do so.
    </Aside>
 
@@ -141,7 +141,7 @@ mkdir -p /mnt/boot/efi
 mount /dev/sda1 /mnt/boot/efi
 ```
 
-<Aside type="note">
+<Aside type="note" title="Checkpoint">
 Run `lsblk` and verify that your root partition is mounted at `/mnt` and your EFI partition at `/mnt/boot/efi`.
 </Aside>
 
@@ -312,7 +312,7 @@ The lecture warns that forgetting the `-a` flag with `usermod -aG` replaces all 
 
 After a few seconds, GRUB should appear, select Arch Linux, and drop you at a login prompt. Log in as `archuser` with the password you set.
 
-<Aside type="caution">
+<Aside type="caution" title="Boot warnings are normal">
 You may see warnings during boot. This is normal for a minimal Arch installation. Let the boot sequence complete on its own.
 </Aside>
 
@@ -450,10 +450,6 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 
    On a production server exposed to the internet you would set this to `no` after confirming key auth works. Do not change it here; you are on a local VM with no remote exposure.
 </Steps>
-
-<Aside type="note">
-**On EC2:** The workflow is slightly different. You generate the key pair on your laptop and AWS places your public key in `~/.ssh/authorized_keys` on the instance at launch time. You then SSH from your laptop using your private key. The mechanics -- key pair, `authorized_keys`, permissions -- are identical. Only the delivery path differs.
-</Aside>
 
 <ActivityQuestion>
 Why does `~/.ssh/authorized_keys` need `chmod 600` and `~/.ssh` need `chmod 700`? What would happen if you set them to `644` and `755` instead, and why does SSH enforce this rather than just issuing a warning?
