@@ -66,9 +66,9 @@ Before starting the installer, we define the VM's virtual hardware: how many vCP
 3. Hardware:
    - Memory: **1024 MB**
    - Number of CPUs: **2**
-   - Disk Size: **8 GB**
-   - Use EFI
-4. After the VM is created, open **Settings > Network > Adapter 1 and set **Adapter Type** to **Paravirtualized Network (virtio-net)**. VirtualBox defaults to an emulated Intel NIC; VirtIO gives you a paravirtualized network adapter instead.
+   - Disk Size: **20 GB** (you can use less but partitioning might be finicky for this specific activity)
+   - **Use EFI**
+4. After the VM is created, open **Settings > Network > Adapter 1** and set **Adapter Type** to **Paravirtualized Network (virtio-net)**. VirtualBox defaults to an emulated Intel NIC; VirtIO gives you a paravirtualized network adapter instead.
 </Steps>
 
 <Aside type="tip" title="Why these resource sizes">
@@ -95,6 +95,7 @@ Starting the VM boots the Debian installer from the ISO, exactly as if you had i
    - Location: United States
    - Keyboard: American English (or whatever matches your physical keyboard)
    - Hostname: `debian-lab`
+   - Domain name: leave blank
    - Root password: set one you will remember
    - New user: create a regular account (you can use your ONID username, e.g., `ulbrical`) with a password
    - Timezone: Pacific (or your local timezone)
@@ -104,7 +105,7 @@ Starting the VM boots the Debian installer from the ISO, exactly as if you had i
 
    The software selection step is significant. Deselecting the desktop environment means the installed system boots to a text prompt with no graphical interface. This is a deliberate choice that reflects real server practice: a GUI consumes memory, installs more software (more attack surface), and is simply unnecessary on a machine you will manage remotely.
 
-3. Let the installer finish. It downloads packages from the internet during installation (5–15 minutes depending on network speed).
+3. Let the installer finish. It downloads packages from the internet during installation (5-15 minutes depending on network speed).
 
 4. When prompted, eject the ISO and reboot.
 </Steps>

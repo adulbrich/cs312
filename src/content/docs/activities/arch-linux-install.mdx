@@ -13,7 +13,7 @@ This activity puts into practice the concepts from the [Linux Server Planning an
 ## What You Will Need
 
 - A laptop with a hypervisor installed (VirtualBox, UTM, or similar)
-- The Arch Linux ISO image:
+- The archboot ISO image (used intentionally on both x86_64 and aarch64 so everyone follows the same workflow and screenshots):
 
 <Tabs syncKey="arch">
 <TabItem label="x86_64 (Intel/AMD)">
@@ -29,7 +29,7 @@ Download the latest aarch64 ISO from [release.archboot.com/aarch64/latest/iso/](
 
 ## Create the Virtual Machine
 
-In your hypervisor of choice (VirtualBox, UTM, VNWare, etc.), create a new VM with the following settings:
+In your hypervisor of choice (VirtualBox, UTM, VMware, etc.), create a new VM with the following settings:
 
 - Memory: 4096 MB
 - CPU: 2 cores
@@ -51,21 +51,14 @@ In your hypervisor of choice (VirtualBox, UTM, VNWare, etc.), create a new VM wi
 
    If this fails, verify that the VM's network adapter is enabled and set to NAT.
 
-3. Update the package database and install the partitioning tool:
+3. Identify the name of your virtual disk:
 
    ```bash
-   pacman -Sy gptfdisk
+   fdisk -l
    ```
 
-   `-S` tells pacman to install a package; `-y` refreshes the local copy of the package database from the mirrors before installing. The `gptfdisk` package provides the `gdisk` command, which is not included in the live environment by default.
-
-4. Identify the name of your virtual disk:
-
-   ```bash
-   lsblk
-   ```
-
-   `lsblk` lists block devices -- the kernel's term for storage devices that read and write data in fixed-size blocks. Each row shows a device name, its size, and type. Look for a device with TYPE=`disk` and roughly 8 GB of space -- that is your virtual hard disk. Partitions appear as children indented beneath it. On VirtualBox the disk is typically `/dev/sda`; on UTM it is typically `/dev/vda`. The steps below use tabs to show the correct device name for each.
+   {/* TODO: update paragraph to `fidsk -l` */}
+   `lsblk` lists block devices -- the kernel's term for storage devices that read and write data in fixed-size blocks. Each row shows a device name, its size, and type. Look for a device with TYPE=`disk` and roughly 8 GB of space -- that is your virtual hard disk. Partitions appear as children indented beneath it. On VirtualBox the disk is typically `/dev/sda`; on UTM it is typically `/dev/vda`. In all commands below, replace `/dev/<disk>` with your actual disk path.
 </Steps>
 
 <Aside type="note" title="About the live environment">
@@ -84,41 +77,50 @@ A raw disk has no structure -- before Linux can use it you must divide it into p
 1. Launch the partitioning tool:
 
    ```bash
-   # replace sda with your disk name if different
-   gdisk /dev/sda 
+   # replace <disk> with your disk name, such as sda or vda
+   fdisk /dev/<disk>
    ```
 
    <Aside type="tip" title="Made a mistake?">
-   If you make a mistake at any point, type `o` at the gdisk prompt to wipe the partition table and start over. Changes are not written to disk until you explicitly tell gdisk to do so.
+   If you make a mistake at any point, type `o` at the fdisk prompt to wipe the partition table and start over. Changes are not written to disk until you explicitly tell fdisk to do so.
    </Aside>
 
-2. **Create the EFI System Partition.** Type `n` for a new partition. Accept the default partition number (1) and default first sector. For the last sector, type `+300M`. When prompted for the hex code, enter `ef00` (EFI System Partition).
+2. **Create the EFI System Partition.** Type `n` for a new partition, then `p` for primary partition. Accept the default partition number (1) and default first sector. For the last sector, type `+300M`. After that type `t`, select partition 1, and set the hex code to `uefi` or `ef` (EFI System Partition).
 
    ```
-   Command (? for help): n
-   Partition number (1-128, default 1):
-   First sector (34-16777182, default = 2048) or {+-}size{KMGTP}:
-   Last sector (...) or {+-}size{KMGTP}: +300M
-   Hex code or GUID (L to show codes, Enter = 8300): ef00
+   Command (m for help): n
+   Partition type
+      p   primary (0 primary, 0 extended, 4 free)
+      e   extended
+   Select (default p): p
+   Partition number (1-4, default 1):
+   First sector (..., default = 2048):
+   Last sector. +/-sectors or +/-size{K,M,G,T,P} (...): +300M
    ```
 
-   The `+300M` notation means "300 megabytes from the current position" -- gdisk calculates the exact sector number for you. The hex code `ef00` sets the partition type flag that tells the firmware "this partition contains bootloader files."
+   The `+300M` notation means "300 megabytes from the current position": fidsk calculates the exact sector number for you.
 
-3. **Create the swap partition.** Type `n` again. Accept defaults for partition number (2) and first sector. For the last sector, type `+400M`. Hex code: `8200` (Linux swap).
+   ```
+   Command (m for help): t
+   Partition number (1-4): 1
+   Hex code (type L to list all codes): uefi
+   ```
+
+3. **Create the swap partition.** Type `n` again, then `p` for primary partition. Accept defaults for partition number (2) and first sector. For the last sector, type `+400M`. After that type `t`, select partition 2, and set the hex code to `swap` or `82` (Linux swap).
 
    400 MB of swap is sufficient for a VM that will not hibernate. On a physical machine you would typically match swap to RAM size or use a swap file instead.
 
-4. **Create the root partition.** Type `n` again. Accept all defaults (partition 3, default first sector, default last sector to use all remaining space). Accept the default hex code `8300` (Linux filesystem).
+4. **Create the root partition.** Type `n` again. Accept all defaults (partition 3, default first sector, default last sector to use all remaining space). By default, fdisk sets the hex code to `Linux filesystem` (83), which is correct for the root partition, so you do not need to change it.
 
-   Accepting the default last sector uses all remaining disk space for the root partition. This is correct -- root gets everything that is left after EFI and swap.
+   Accepting the default last sector uses all remaining disk space for the root partition. This is correct: root gets everything that is left after EFI and swap.
 
 5. **Verify your work.** Type `p` to print the partition table. You should see something like:
 
    ```
-   Number  Start (sector)    End (sector)  Size       Code  Name
-      1            2048          616447   300.0 MiB   EF00  EFI system partition
-      2          616448         1435647   400.0 MiB   8200  Linux swap
-      3         1435648        16777182   7.3 GiB     8300  Linux filesystem
+   Device   Boot Start       End   Sectors  Size Id Type
+   /dev/sda1      2048    616447    614400  300M ef EFI (FAT-12/16/32)
+   /dev/sda2    616448   1437695    821248  400M 82 Linux swap / Solaris
+   /dev/sda3   1437696  16777215  15339520  7.3G 83 Linux
    ```
 
 6. **Write the partition table.** Type `w` and confirm with `Y`.
@@ -126,39 +128,39 @@ A raw disk has no structure -- before Linux can use it you must divide it into p
 
 ### Format the Partitions
 
-Partitioning only defines boundaries on the disk. Formatting writes the actual filesystem data structures -- the inode tables, directory trees, and free-space maps -- that the kernel needs to store files. Each partition gets the filesystem appropriate to its role.
+Partitioning only defines boundaries on the disk. Formatting writes the actual filesystem data structures that the kernel needs to store files. Each partition gets the filesystem appropriate to its role.
 
 ```bash
 # FAT32 on the EFI partition (required by the UEFI specification)
-mkfs.fat -F32 /dev/sda1
+mkfs.fat -F32 /dev/<disk>1
 
 # ext4 on the root partition
-mkfs.ext4 -F /dev/sda3
+mkfs.ext4 -F /dev/<disk>3
 
 # Initialize and activate swap
-mkswap /dev/sda2
-swapon /dev/sda2
+mkswap /dev/<disk>2
+swapon /dev/<disk>2
 ```
 
-`mkfs.fat -F32` writes a FAT32 filesystem. The UEFI specification requires FAT32 on the ESP -- the firmware reads it directly before any OS driver is loaded, so it cannot use a Linux-only format like ext4. `mkfs.ext4 -F` writes an ext4 filesystem; the `-F` flag forces formatting even if the partition looks like it already has data. `mkswap` writes the swap header the kernel needs to recognise the partition as swap space, and `swapon` activates it immediately for the live session.
+`mkfs.fat -F32` writes a FAT32 filesystem. The UEFI specification requires FAT32 on the ESP: the firmware reads it directly before any OS driver is loaded, so it cannot use a Linux-only format like ext4. `mkfs.ext4 -F` writes an ext4 filesystem; the `-F` flag forces formatting even if the partition looks like it already has data. `mkswap` writes the swap header the kernel needs to recognise the partition as swap space, and `swapon` activates it immediately for the live session.
 
 ### Mount the Filesystems
 
-Before `pacstrap` can install packages to the new system, the kernel needs to know where to find the new disk. Mounting makes a partition accessible at a directory path. We use `/mnt` as a temporary staging root -- it is the conventional location for this in the live environment.
+Before `pacstrap` can install packages to the new system, the kernel needs to know where to find the new disk. Mounting makes a partition accessible at a directory path. We use `/mnt` as a temporary staging root: it is the conventional location for this in the live environment.
 
 ```bash
 # Mount the root partition
-mount /dev/sda3 /mnt
+mount /dev/<disk>3 /mnt
 
 # Create and mount the EFI partition
 mkdir -p /mnt/boot/efi
-mount /dev/sda1 /mnt/boot/efi
+mount /dev/<disk>1 /mnt/boot/efi
 ```
 
 The root partition mounts at `/mnt` and the EFI partition mounts at `/mnt/boot/efi`. That path matters: when GRUB is installed later, it will write its EFI files into whatever is mounted at `/boot/efi`, so the mount point and the EFI partition need to match.
 
 <Aside type="note" title="Checkpoint">
-Run `lsblk` and verify that your root partition is mounted at `/mnt` and your EFI partition at `/mnt/boot/efi`.
+Run `lsblk -f` and verify the filesystems of each partition and that your root partition is mounted at `/mnt` and your EFI partition at `/mnt/boot/efi`. If you made a mistake, you can unmount with `umount /mnt/boot/efi` and `umount /mnt`, then fix the partitioning or formatting and start this step again.
 </Aside>
 
 <ActivityQuestion>
@@ -180,13 +182,13 @@ The three packages do different things:
 
 This installs about 120 packages in total. It will take a few minutes depending on your internet speed.
 
-While it runs, generate the filesystem table so the installed system knows how to mount its own partitions at boot:
+After it finishes, generate the filesystem table so the installed system knows how to mount its own partitions at boot:
 
 ```bash
 genfstab -U /mnt > /mnt/etc/fstab
 ```
 
-`/etc/fstab` is a plain-text file that maps partitions to mount points. The system reads it at every boot to know what to mount and where. The `-U` flag tells `genfstab` to identify each partition by its UUID (a unique identifier burned into the filesystem when you ran `mkfs`) rather than by device name. UUID-based entries are more reliable because device names like `/dev/sda` can change if you add or rearrange disks; UUIDs never change. Run `cat /mnt/etc/fstab` to inspect the generated file.
+`/etc/fstab` is a plain-text file that maps partitions to mount points. The system reads it at every boot to know what to mount and where. The `-U` flag tells `genfstab` to identify each partition by its UUID (a unique identifier burned into the filesystem when you ran `mkfs`) rather than by device name. UUID-based entries are more reliable because device names like `/dev/<disk>` can change if you add or rearrange disks; UUIDs never change. Run `cat /mnt/etc/fstab` to inspect the generated file.
 
 <ActivityQuestion>
 `pacstrap` installs Arch packages just as `apt install` installs Debian packages. What are the equivalent `pacman` commands for `apt update`, `apt install <package>`, and `apt upgrade`?
@@ -207,7 +209,7 @@ pwd
 # Should output: /
 ```
 
-Notice that your prompt likely changed. You are now effectively "inside" the new system, running commands that will affect the installed OS on disk -- not the RAM-based live environment.
+Notice that your prompt likely changed. You are now effectively "inside" the new system, running commands that will affect the installed OS on disk, not the RAM-based live environment.
 
 ## Configure Locale and Timezone
 
@@ -220,6 +222,14 @@ Notice that your prompt likely changed. You are now effectively "inside" the new
    ```
 
    `/usr/share/zoneinfo/` contains a database of timezone definitions for every region. Copying one to `/etc/localtime` tells the system which timezone to use for displaying times and for calculating DST transitions. Run `date` to confirm the timezone took effect. You can browse the directory (e.g., `ls /usr/share/zoneinfo/America/`) to find your region.
+
+   <Aside type="tip" title="Optional but recommended">
+   Sync the hardware clock so the RTC and system clock match:
+
+   ```bash
+   hwclock --systohc
+   ```
+   </Aside>
 
 2. Configure the locale. Open the locale configuration file:
 
@@ -274,6 +284,7 @@ Notice that your prompt likely changed. You are now effectively "inside" the new
    ```bash
    grub-install --target=arm64-efi --bootloader-id=arch --removable --recheck
    ```
+
    The `--removable` flag installs the bootloader to the fallback EFI path (`/boot/efi/EFI/BOOT/BOOTAA64.EFI`), which UTM's firmware looks for when no specific boot entry is registered.
    </TabItem>
    </Tabs>
@@ -286,7 +297,7 @@ Notice that your prompt likely changed. You are now effectively "inside" the new
    grub-mkconfig -o /boot/grub/grub.cfg
    ```
 
-   `grub-mkconfig` scans the system for installed kernels and writes a configuration file that tells GRUB what to show in the boot menu and how to load each option. Never edit `grub.cfg` directly -- always regenerate it with this command, because it will be overwritten the next time the kernel updates.
+   `grub-mkconfig` scans the system for installed kernels and writes a configuration file that tells GRUB what to show in the boot menu and how to load each option. Never edit `grub.cfg` directly: always regenerate it with this command, because it will be overwritten the next time the kernel updates.
 </Steps>
 
 <ActivityQuestion>
@@ -305,10 +316,10 @@ The lecture describes four boot stages: firmware, bootloader, kernel, systemd. W
 2. Open the sudoers file (never edit it directly, always use `visudo`):
 
    ```bash
-   visudo
+   EDITOR=/usr/bin/vim VISUAL=/usr/bin/vim visudo
    ```
 
-   `visudo` opens `/etc/sudoers` in a safe wrapper that validates the syntax before saving. A syntax error in sudoers can lock you out of sudo entirely, so direct editing with `vim` is dangerous.
+   `visudo` opens `/etc/sudoers` in a safe wrapper that validates the syntax before saving. Explicitly setting `EDITOR` and `VISUAL` ensures it launches Vim even if the default `vi` path is missing. A syntax error in sudoers can lock you out of sudo entirely, so direct editing with `vim` is dangerous.
 
    Find and uncomment this line:
 
@@ -387,7 +398,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    127.0.1.1   archbox.localdomain archbox
    ```
 
-   `/etc/hosts` is a local DNS override file: the system checks it before querying a DNS server. The first line maps `localhost` to the loopback address, which is required for many local services. The second line maps the machine's own hostname to `127.0.1.1` -- a convention that prevents programs from hanging when they try to resolve the local hostname before the network is fully up.
+   `/etc/hosts` is a local DNS override file: the system checks it before querying a DNS server. The first line maps `localhost` to the loopback address, which is required for many local services. The second line maps the machine's own hostname to `127.0.1.1`: a convention that prevents programs from hanging when they try to resolve the local hostname before the network is fully up.
 
 3. Find your network interface name:
 
@@ -413,7 +424,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    DHCP=yes
    ```
 
-   The `[Match]` section tells systemd-networkd which interface this file applies to -- without it the settings would apply to all interfaces. The `[Network]` section defines what to do with that interface; `DHCP=yes` tells it to request an IP address, gateway, and DNS configuration automatically via DHCP. The filename prefix `20-` controls the order in which configuration files are processed; lower numbers load first.
+   The `[Match]` section tells systemd-networkd which interface this file applies to; without it the settings would apply to all interfaces. The `[Network]` section defines what to do with that interface; `DHCP=yes` tells it to request an IP address, gateway, and DNS configuration automatically via DHCP. The filename prefix `20-` controls the order in which configuration files are processed; lower numbers load first.
 
 5. Enable and start the network service:
 
@@ -440,11 +451,29 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    Add:
 
    ```
-   nameserver 8.8.8.8
-   nameserver 8.8.4.4
+   nameserver 1.1.1.1
+   nameserver 1.0.0.1
    ```
 
-   `/etc/resolv.conf` tells the system which DNS server to send name queries to. `8.8.8.8` and `8.8.4.4` are Google's public resolvers. The system tries the first nameserver and falls back to the second if it does not respond. On production systems this file is usually managed automatically by systemd-resolved or NetworkManager; here we write it manually so nothing is hidden.
+   `/etc/resolv.conf` tells the system which DNS server to send name queries to. `1.1.1.1` and `1.0.0.1` are Cloudflare's public resolvers. The system tries the first nameserver and falls back to the second if it does not respond. On production systems this file is usually managed automatically by systemd-resolved or NetworkManager; here we write it manually so nothing is hidden.
+
+<Aside type="note" title="Optional Production Variant">
+For production-style setups, avoid manually editing `/etc/resolv.conf`. Use a resolver manager instead.
+
+- If using systemd-networkd, also enable systemd-resolved and let it manage DNS:
+
+   ```bash
+   sudo systemctl enable --now systemd-resolved
+   sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
+   ```
+
+- If using NetworkManager, let it manage interface addressing and DNS together:
+
+   ```bash
+   sudo pacman -S networkmanager
+   sudo systemctl enable --now NetworkManager
+   ```
+</Aside>
 
 8. Test your connection:
 
@@ -474,7 +503,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    ssh-keygen -t ed25519 -C "archuser practice key"
    ```
 
-   `-t ed25519` selects the Ed25519 algorithm, which uses elliptic-curve cryptography. It produces shorter keys than RSA, is faster to verify, and is considered more secure against modern attacks. `-C` adds a comment embedded in the public key file -- it has no cryptographic effect but helps identify the key when you see it listed in `authorized_keys`.
+   `-t ed25519` selects the Ed25519 algorithm, which uses elliptic-curve cryptography. It produces shorter keys than RSA, is faster to verify, and is considered more secure against modern attacks. `-C` adds a comment embedded in the public key file: it has no cryptographic effect but helps identify the key when you see it listed in `authorized_keys`.
 
    Accept the default path (`~/.ssh/id_ed25519`). You can set a passphrase or leave it empty for this exercise. Two files are created:
    - `~/.ssh/id_ed25519`: the **private key**. This is the secret half. Never share or copy it to another machine.
@@ -483,7 +512,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 4. Install the public key into `authorized_keys`:
 
    ```bash
-   mkdir -p ~/.ssh
+   mkdir -p ~/.ssh # ignore if you used the default path above
    chmod 700 ~/.ssh
    cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
    chmod 600 ~/.ssh/authorized_keys
@@ -491,7 +520,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 
    `~/.ssh/authorized_keys` is the file sshd reads to decide which public keys are allowed to log in as this user. When you connect with `-i id_ed25519`, sshd checks whether the corresponding public key appears in this file. The `>>` (append) operator means you can add multiple keys to the same file without overwriting existing ones.
 
-   The permissions are enforced by SSH itself: if `~/.ssh` or `authorized_keys` are group- or world-writable, SSH will refuse to use them.
+   The permissions are enforced by SSH itself: if `~/.ssh` or `authorized_keys` are writable by group or others, SSH can refuse to use them. `700` and `600` are secure defaults that avoid this problem.
 
 5. Test key authentication by connecting to localhost:
 
@@ -499,7 +528,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    ssh -i ~/.ssh/id_ed25519 archuser@localhost
    ```
 
-   `-i` specifies which private key to use. You should receive a shell prompt without entering a password -- SSH performed the authentication cryptographically using the key pair. Type `exit` to return.
+   `-i` specifies which private key to use. You should receive a shell prompt without entering a password; SSH performed the authentication cryptographically using the key pair. Type `exit` to return.
 
 6. Locate the password authentication setting:
 
@@ -511,7 +540,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 </Steps>
 
 <ActivityQuestion>
-Why does `~/.ssh/authorized_keys` need `chmod 600` and `~/.ssh` need `chmod 700`? What would happen if you set them to `644` and `755` instead, and why does SSH enforce this rather than just issuing a warning?
+Why are `chmod 700 ~/.ssh` and `chmod 600 ~/.ssh/authorized_keys` good defaults? Which permission bits does SSH actually care about, and why does it enforce this instead of just issuing a warning?
 </ActivityQuestion>
 
 ## Keep This VM
@@ -521,3 +550,9 @@ You will use this Arch Linux VM in the next activity. Leave it running or shut i
 ```bash
 sudo shutdown -h now
 ```
+
+The `-h` flag is the halt flag. Without it, Arch might reboot instead.
+
+## Going Further
+
+Want to install Arch on real hardware? The Arch Wiki has an excellent [installation guide](https://wiki.archlinux.org/title/Installation_guide) that covers the same steps as this activity but with more detail and troubleshooting tips, including more advanced options like LVM, encryption, and desktop environments.
