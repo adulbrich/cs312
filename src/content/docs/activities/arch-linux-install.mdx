@@ -13,16 +13,26 @@ This activity puts into practice the concepts from the [Linux Server Planning an
 ## What You Will Need
 
 - A laptop with a hypervisor installed (VirtualBox, UTM, or similar)
-- The Arch Linux ISO image, downloaded from [archlinux.org](https://archlinux.org/download/) or the [OSU Open Source Lab mirror](https://mirrors.osuosl.org/pub/archlinux/iso/latest/)
+- The Arch Linux ISO image:
+
+<Tabs syncKey="arch">
+<TabItem label="x86_64 (Intel/AMD)">
+Download the latest x86_64 ISO from [release.archboot.com/x86_64/latest/iso/](https://release.archboot.com/x86_64/latest/iso/). Pick the ISO labelled `latest`.
+</TabItem>
+<TabItem label="aarch64 (Apple Silicon / ARM)">
+Download the latest aarch64 ISO from [release.archboot.com/aarch64/latest/iso/](https://release.archboot.com/aarch64/latest/iso/). Pick the ISO labelled `latest`. 
+</TabItem>
+</Tabs>
+
 - About 2 GB of free disk space for the VM
 - An internet connection
 
 ## Create the Virtual Machine
 
-<Tabs>
-<TabItem label="VirtualBox">
+<Tabs syncKey="arch">
+<TabItem label="x86_64 (Intel/AMD)">
 <Steps>
-1. Create a new VM with these settings:
+1. Create a new VM in VirtualBox with these settings:
    - **Type:** Linux
    - **Version:** Arch Linux (64-bit)
    - **Memory:** 1024 MB (1 GB)
@@ -36,10 +46,10 @@ This activity puts into practice the concepts from the [Linux Server Planning an
 3. Under **Storage**, click the empty optical drive and select the Arch Linux ISO.
 </Steps>
 </TabItem>
-<TabItem label="UTM (macOS)">
+<TabItem label="aarch64 (Apple Silicon / ARM)">
 <Steps>
-1. Create a new VM:
-   - Choose **Emulate** (Apple Silicon) or **Virtualize** (Intel).
+1. Create a new VM in UTM:
+   - Choose **Virtualize** (Apple Silicon native).
    - Operating System: **Other**.
    - Select the Arch Linux ISO image.
 
@@ -56,7 +66,16 @@ This activity puts into practice the concepts from the [Linux Server Planning an
 ## Boot into the Live Environment
 
 <Steps>
-1. Start the VM. Select **Arch Linux install medium (x86_64, UEFI)** from the boot menu. After about 30 seconds you will land at a root shell prompt.
+1. Start the VM. Select the Arch Linux install medium from the boot menu.
+
+   <Tabs syncKey="arch">
+   <TabItem label="x86_64 (Intel/AMD)">
+   Select **Arch Linux install medium (x86_64, UEFI)**. After about 30 seconds you will land at a root shell prompt.
+   </TabItem>
+   <TabItem label="aarch64 (Apple Silicon / ARM)">
+   The archboot ISO boots into a setup menu rather than dropping straight to a shell. When you see the menu, press **Ctrl+C** to exit it and reach the root shell prompt.
+   </TabItem>
+   </Tabs>
 
 2. Verify you have an internet connection (the VM's NAT adapter piggybacks on your host's network):
 
@@ -65,10 +84,26 @@ This activity puts into practice the concepts from the [Linux Server Planning an
    ```
 
    If this fails, verify that the VM's network adapter is enabled and set to NAT.
+
+3. Update the package database and install the partitioning tool:
+
+   ```bash
+   pacman -Sy gptfdisk
+   ```
+
+   `gdisk` is not included in the live environment by default. This step fetches it from the Arch mirrors before you need it.
+
+4. Identify the name of your virtual disk:
+
+   ```bash
+   lsblk
+   ```
+
+   Look for a disk-type device (TYPE=`disk`) with roughly 8 GB of space. On VirtualBox it is typically `/dev/sda`; on UTM it is typically `/dev/vda`. The steps below use tabs to show the correct device name for each.
 </Steps>
 
 <Aside type="note">
-You are currently running from a RAM-based live environment called **archiso**. Nothing you do here persists to disk until you explicitly install it. The live environment is your staging area.
+You are currently running from a RAM-based live environment. Nothing you do here persists to disk until you explicitly install it. The live environment is your staging area.
 </Aside>
 
 ## Partition the Disk
@@ -78,9 +113,18 @@ We will create three partitions using GPT: an EFI System Partition, a swap parti
 <Steps>
 1. Launch the partitioning tool:
 
+   <Tabs syncKey="arch">
+   <TabItem label="x86_64 (Intel/AMD)">
    ```bash
    gdisk /dev/sda
    ```
+   </TabItem>
+   <TabItem label="aarch64 (Apple Silicon / ARM)">
+   ```bash
+   gdisk /dev/vda
+   ```
+   </TabItem>
+   </Tabs>
 
    <Aside type="tip">
    If you make a mistake at any point, type `o` at the gdisk prompt to wipe the partition table and start over. Changes are not written to disk until you explicitly tell gdisk to do so.
@@ -116,6 +160,8 @@ We will create three partitions using GPT: an EFI System Partition, a swap parti
 
 Each partition needs a filesystem before it can hold data. This is what `mkfs` does, and it is the same concept as the `mkfs.ext4` example from the lecture's disk management section.
 
+<Tabs syncKey="arch">
+<TabItem label="x86_64 (Intel/AMD)">
 ```bash
 # FAT32 on the EFI partition (required by the UEFI specification)
 mkfs.fat -F32 /dev/sda1
@@ -127,9 +173,26 @@ mkfs.ext4 -F /dev/sda3
 mkswap /dev/sda2
 swapon /dev/sda2
 ```
+</TabItem>
+<TabItem label="aarch64 (Apple Silicon / ARM)">
+```bash
+# FAT32 on the EFI partition (required by the UEFI specification)
+mkfs.fat -F32 /dev/vda1
+
+# ext4 on the root partition
+mkfs.ext4 -F /dev/vda3
+
+# Initialize and activate swap
+mkswap /dev/vda2
+swapon /dev/vda2
+```
+</TabItem>
+</Tabs>
 
 ### Mount the Filesystems
 
+<Tabs syncKey="arch">
+<TabItem label="x86_64 (Intel/AMD)">
 ```bash
 # Mount the root partition
 mount /dev/sda3 /mnt
@@ -138,9 +201,21 @@ mount /dev/sda3 /mnt
 mkdir -p /mnt/boot/efi
 mount /dev/sda1 /mnt/boot/efi
 ```
+</TabItem>
+<TabItem label="aarch64 (Apple Silicon / ARM)">
+```bash
+# Mount the root partition
+mount /dev/vda3 /mnt
+
+# Create and mount the EFI partition
+mkdir -p /mnt/boot/efi
+mount /dev/vda1 /mnt/boot/efi
+```
+</TabItem>
+</Tabs>
 
 <Aside type="note">
-**Checkpoint:** Run `lsblk` and verify that `/dev/sda3` is mounted at `/mnt` and `/dev/sda1` at `/mnt/boot/efi`. Compare this output to the `lsblk` example in the lecture. The column names and structure are identical; only the device names and sizes differ.
+Run `lsblk` and verify that your root partition is mounted at `/mnt` and your EFI partition at `/mnt/boot/efi`.
 </Aside>
 
 <ActivityQuestion>
@@ -162,10 +237,6 @@ While it runs, generate the filesystem table so the installed system knows how t
 ```bash
 genfstab -U /mnt > /mnt/etc/fstab
 ```
-
-<Aside type="note">
-**Lecture connection:** `genfstab` automates exactly what the lecture describes in the *Mount Points* section: writing entries to `/etc/fstab` with UUIDs, mount points, filesystem types, and mount options. After it runs, inspect the result with `cat /mnt/etc/fstab` and compare it to the lecture's description.
-</Aside>
 
 <ActivityQuestion>
 `pacstrap` installs Arch packages just as `apt install` installs Debian packages. What are the equivalent `pacman` commands for `apt update`, `apt install <package>`, and `apt upgrade`?
@@ -229,13 +300,19 @@ pwd
 
 2. Install GRUB to the EFI partition:
 
+   <Tabs syncKey="arch">
+   <TabItem label="x86_64 (Intel/AMD)">
    ```bash
    grub-install --target=x86_64-efi --bootloader-id=arch --recheck
    ```
-
-   <Aside type="tip">
-   If you are using a hypervisor other than VirtualBox and this command fails, try adding the `--removable` flag. Some hypervisors require the bootloader to be installed to the fallback EFI path.
-   </Aside>
+   </TabItem>
+   <TabItem label="aarch64 (Apple Silicon / ARM)">
+   ```bash
+   grub-install --target=arm64-efi --bootloader-id=arch --removable --recheck
+   ```
+   The `--removable` flag installs the bootloader to the fallback EFI path (`/boot/efi/EFI/BOOT/BOOTAA64.EFI`), which UTM's firmware looks for when no specific boot entry is registered.
+   </TabItem>
+   </Tabs>
 
 3. Generate the GRUB configuration:
 
@@ -244,12 +321,8 @@ pwd
    ```
 </Steps>
 
-<Aside type="note">
-**Lecture connection:** The lecture says "you should edit `/etc/default/grub` and then run `sudo update-grub` rather than modifying `grub.cfg` directly." On Arch, `grub-mkconfig` is the equivalent of Ubuntu's `update-grub`. The principle is the same: never edit the generated config directly.
-</Aside>
-
 <ActivityQuestion>
-The lecture describes four boot stages: firmware, bootloader, kernel, systemd. Which specific steps in this activity correspond to each stage? (The firmware stage is handled by the VM; what did you configure in VirtualBox that relates to it?)
+The lecture describes four boot stages: firmware, bootloader, kernel, systemd. Which specific steps in this activity correspond to each stage? (The firmware stage is handled by the VM; what did you configure in your hypervisor that relates to it?)
 </ActivityQuestion>
 
 ## Configure sudo and Create a User
@@ -287,10 +360,6 @@ The lecture describes four boot stages: firmware, bootloader, kernel, systemd. W
    passwd archuser
    ```
 </Steps>
-
-<Aside type="note">
-**Checkpoint:** Compare the command you just ran to the lecture's user creation example. The flags are identical: `-m` creates the home directory, `-G` adds to a supplementary group, `-s` sets the shell. The only difference is the group name (`wheel` on Arch, `sudo` on Ubuntu).
-</Aside>
 
 <ActivityQuestion>
 The lecture warns that forgetting the `-a` flag with `usermod -aG` replaces all supplementary groups. Why did we not need `-a` here when we used `useradd -G wheel` to create the user?
@@ -374,10 +443,6 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    sudo systemctl enable --now systemd-networkd
    ```
 
-   <Aside type="note">
-   **Lecture connection:** `enable --now` is the same combined command from the lecture's systemd section. It both enables the service at boot and starts it immediately.
-   </Aside>
-
 6. Verify you received an IP address:
 
    ```bash
@@ -420,10 +485,6 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    ```bash
    sudo systemctl enable --now sshd
    ```
-
-   <Aside type="note">
-   **Lecture connection:** `enable --now` is the same combined command you already used for `systemd-networkd`. It both registers the service to start at boot and starts it immediately.
-   </Aside>
 
 3. Generate a key pair as `archuser` (not root):
 

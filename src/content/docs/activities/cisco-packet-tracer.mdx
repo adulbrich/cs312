@@ -6,12 +6,9 @@ sidebar:
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 This activity puts into practice the concepts from the [Building and Operating a Company Network](/lectures/network-configuration-and-troubleshooting/) lecture. You will build a small enterprise network step by step in Cisco Packet Tracer, configuring VLANs, inter-VLAN routing via a multilayer switch, DHCP, and internal DNS. By the end, you will have a fully connected, segmented network where devices get their addresses automatically, reach other VLANs through routing, and resolve internal hostnames through DNS.
-
-<Aside type="tip">
-Read the [Building and Operating a Company Network](/lectures/network-configuration-and-troubleshooting/) lecture before starting. Each section below notes which lecture concept it exercises.
-</Aside>
 
 ## What You Will Need
 
@@ -77,10 +74,6 @@ Click any device to open its panel. The tabs you will use most:
 
 3. Add a **distribution switch** (model 2960): `dist-SW`. Connect it to each access switch using **crossover cables** on the GigabitEthernet ports of the access switches and FastEthernet ports on the distribution switch.
 
-   <Aside type="note">
-   **Lecture connection:** The lecture's *Core Network Devices* section explains that straight-through cables connect unlike device types (PC to switch) while crossover cables connect like device types (switch to switch). Modern switches with Auto-MDIX detect the cable type automatically, but Packet Tracer models older hardware that does not.
-   </Aside>
-
 4. Assign IP addresses to the PCs. Use two subnets for the two departments:
    - **192.168.10.0/24** for SALES
    - **192.168.20.0/24** for FINANCE
@@ -119,6 +112,14 @@ Click any device to open its panel. The tabs you will use most:
 8. Set the uplink ports connecting the access switches to the distribution switch to **trunk mode** in the Config tab. The remote end updates automatically.
 </Steps>
 
+<ActivityQuestion>
+Before configuring VLANs, all five PCs were on the same switch. What would happen if PC0 sent an ARP broadcast? After adding VLANs, what changed?
+</ActivityQuestion>
+
+<ActivityQuestion>
+Why do the uplinks between switches carry all VLANs instead of just one? What would break if you set those ports to access mode for VLAN 10?
+</ActivityQuestion>
+
 ## Part 2: Inter-VLAN Routing
 
 <Steps>
@@ -147,10 +148,11 @@ Click any device to open its panel. The tabs you will use most:
 
    Now repeat the ping test from Part 1, Step 5. `PC0` should now be able to reach `PC4`.
 
-   <Aside type="note">
-   **Lecture connection:** The lecture's *Routing Basics* section explains that a default gateway is the IP address a host sends packets to when the destination is outside its own subnet. The SVI acts as the default gateway for every host in that VLAN.
-   </Aside>
 </Steps>
+
+<ActivityQuestion>
+You used a multilayer switch for inter-VLAN routing instead of connecting each VLAN to a separate router interface. What are the trade-offs between these two designs?
+</ActivityQuestion>
 
 ## Part 3: Static Routing to a Border Router
 
@@ -160,10 +162,6 @@ Click any device to open its panel. The tabs you will use most:
 2. On the router, open the **Config** tab, power on the connected interface, then set:
    - **IPv4 Address**: 172.16.1.1
    - **Subnet Mask**: 255.255.255.252
-
-   <Aside type="note">
-   **Lecture connection:** The *IP Addressing and Subnetting* section covers the /30 (255.255.255.252) subnet, which provides exactly two usable host addresses. This is the standard choice for point-to-point links between routers, where only the two endpoints need addresses.
-   </Aside>
 
 3. On the MLS, disable switching on the port connected to the router (converting it from a Layer 2 switch port to a Layer 3 routed port):
 
@@ -180,6 +178,10 @@ Click any device to open its panel. The tabs you will use most:
    ip route 192.168.0.0 255.255.0.0 GigabitEthernet0/0/0   (on the router)
    ```
 </Steps>
+
+<ActivityQuestion>
+You configured static routes between the MLS and the border router. Under what circumstances would you prefer a dynamic routing protocol (like OSPF or BGP) instead?
+</ActivityQuestion>
 
 ## Part 4: DHCP
 
@@ -217,10 +219,11 @@ Click any device to open its panel. The tabs you will use most:
 
    Fast-forward and verify the PCs receive addresses in the expected range.
 
-   <Aside type="note">
-   **Lecture connection:** The *DHCP: dynamic addressing* section's lease process describes the four-step DORA sequence (Discover, Offer, Request, Acknowledge). Switch to simulation mode and add a new DHCP client to watch this exchange step by step.
-   </Aside>
 </Steps>
+
+<ActivityQuestion>
+The DHCP server is on VLAN 99 but serves clients on VLANs 10 and 20. Why does a relay agent work here when a simple broadcast would not reach across subnets?
+</ActivityQuestion>
 
 ## Part 5: Internal DNS
 
@@ -235,10 +238,6 @@ Every real company network needs DNS. IP addresses work, but nobody types `192.1
    - **Address**: the static IP of one of your VLAN 10 PCs (e.g., `192.168.10.10`)
 
    Click **Add**.
-
-   <Aside type="note">
-   **Lecture connection:** The lecture's DNS section explains A records: they map a hostname to an IPv4 address. The `.local` suffix is a convention for internal, non-internet-routable domains. In a real company this would be something like `app.company.internal`.
-   </Aside>
 
 3. Configure one of the VLAN 10 PCs as a simple web server. Click the PC, go to **Services > HTTP**, and turn the HTTP server **On**. You can leave the default index page.
 
@@ -271,39 +270,11 @@ Every real company network needs DNS. IP addresses work, but nobody types `192.1
    - The request crosses the MLS again into VLAN 10 and reaches the web server
    - The web server returns an HTTP 200 response with the default page
 
-   <Aside type="note">
-   **Lecture connection:** This sequence -- DHCP assigns an address, DNS resolves the name, HTTP fetches the page, all three crossing subnet boundaries through the MLS -- is the complete chain the "Putting It All Together" section of the lecture describes. You are watching it happen one packet at a time.
-   </Aside>
-
 7. Test what happens when DNS is unavailable. On the VLAN 20 PC, temporarily change the DNS server in IP Configuration to a non-existent address like `192.168.99.200`. Try to browse to `http://web.company.local` again. What happens? Now try browsing directly to the IP address `http://192.168.10.10`. What does this tell you about the role of DNS in the connection chain?
 
    Restore the correct DNS server address when done.
 </Steps>
 
----
-
-## Verify Your Understanding
-
-Here is how each part of this activity maps to the lecture:
-
-| What you did | Lecture section |
-|---|---|
-| Assigned PCs to subnets and observed broadcast isolation | IP Addressing and Subnetting; VLANs and network segmentation |
-| Created VLANs and assigned access ports | VLANs and network segmentation |
-| Added trunk ports between switches | VLANs and network segmentation |
-| Configured SVIs and enabled IP routing on the MLS | Routing Basics |
-| Set default gateways on endpoints | Routing Basics |
-| Added a /30 point-to-point link to a border router | IP Addressing and Subnetting; Static IP routing |
-| Deployed a DHCP server and relay agents | DHCP: dynamic addressing |
-| Configured internal DNS and created an A record | DNS configuration and troubleshooting; Internal DNS |
-| Watched DNS + HTTP packets cross VLAN boundaries in simulation | DNS; Putting it all together |
-| Tested DNS failure by pointing clients at a non-existent resolver | DNS troubleshooting |
-
-Consider the following questions:
-
-1. **Broadcast domains:** Before configuring VLANs, all five PCs were on the same switch. What would happen if PC0 sent an ARP broadcast? After VLANs, what changed?
-2. **Trunk ports:** Why do the uplinks between switches carry all VLANs instead of just one? What would break if you set those ports to access mode for VLAN 10?
-3. **MLS vs. external router:** You used a multilayer switch for inter-VLAN routing instead of connecting each VLAN to a separate router interface. What are the trade-offs between these two designs?
-4. **DHCP relay:** The DHCP server is on VLAN 99 but serves clients on VLANs 10 and 20. Why does a relay agent work here when a simple broadcast would not reach across subnets?
-5. **DNS failure modes:** In step 7 of Part 5, browsing to the hostname failed but browsing to the IP address worked. What does this tell you about how DNS fits into the connection chain? When a user says "the website is down," how would this test help you distinguish a DNS failure from an application failure?
-6. **Static vs. dynamic routing:** You configured static routes between the MLS and the border router. Under what circumstances would you prefer a dynamic routing protocol (like OSPF or BGP) instead?
+<ActivityQuestion>
+Browsing to `http://web.company.local` failed when DNS was broken, but browsing directly to the IP address worked. What does this tell you about where DNS fits in the connection chain? When a user says "the website is down," how would this test help you distinguish a DNS failure from an application failure?
+</ActivityQuestion>

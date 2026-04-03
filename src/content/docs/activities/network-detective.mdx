@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 This activity puts into practice the concepts from the [Networking Fundamentals (LAN/WAN)](/lectures/networking-fundamentals-lan-wan/) lecture. Instead of simulating a network, you will investigate a real one: the network your machine is connected to right now. By the end, you will be able to sit at any Linux machine, answer the question "what is this machine's network situation?", and trace a packet from the shell prompt to the public internet and back.
 
@@ -58,6 +59,10 @@ Every device on a network has at least one IP address. Before you can do anythin
 **Checkpoint:** If your VM shows `10.0.2.15/24`, the network is `10.0.2.0/24`, the broadcast address is `10.0.2.255`, and there are 254 usable host addresses. What would the equivalent values be for a `/25` network?
 </Aside>
 
+<ActivityQuestion>
+Run `ip neighbor show` on your VM. You should see an entry for your gateway. Why can the VM resolve the gateway's MAC address but not the MAC address of a public server like `8.8.8.8`?
+</ActivityQuestion>
+
 ---
 
 ## Part 2: Routing and the Default Gateway
@@ -104,10 +109,6 @@ Knowing your IP address tells you where you are. The routing table tells you whe
    If the previous step worked but this fails, DNS is broken. If both work, your full connectivity chain is intact.
 </Steps>
 
-<Aside type="note">
-**Lecture connection:** This three-step sequence (gateway → public IP → hostname) directly implements the bottom-up troubleshooting approach from the lecture. Each ping verifies one additional layer. When a user says "the internet is down," working through these three tests in order tells you exactly which layer broke.
-</Aside>
-
 ---
 
 ## Part 3: Tracing the Path to the Internet
@@ -145,10 +146,11 @@ Knowing your IP address tells you where you are. The routing table tells you whe
 
    Compare this address to the IP from `ip addr show`. They are different. This is NAT: VirtualBox translated your private VM address to the host's address, and your host's router translated that to your public address. Depending on your setup, there may be two or three separate NAT translations between this shell prompt and the public internet.
 
-   <Aside type="note">
-   **Lecture connection:** This is exactly the PAT (Port Address Translation) NAT variant the lecture describes. Your private address (`10.0.2.15`) appears as a completely different public IP to Google's servers. The router maintains a translation table so return traffic finds its way back.
-   </Aside>
 </Steps>
+
+<ActivityQuestion>
+Your VM has a private address (e.g., `10.0.2.15`), but `curl https://ifconfig.me` returned a different public IP. How many separate NAT translations are happening between this VM and the internet? Trace each one.
+</ActivityQuestion>
 
 ---
 
@@ -199,6 +201,10 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 <Aside type="note">
 **Checkpoint:** The `ss` (inside view) vs. `nmap` (outside view) relationship is exactly what you will encounter on EC2. `ss` confirms your service is running and listening. `nmap` from outside (or a failed browser connection) tells you whether the security group is letting traffic through. If `ss` shows the port listening but external connections fail, the security group is the next thing to check.
 </Aside>
+
+<ActivityQuestion>
+Under what circumstances would `ss` show a port as listening but `nmap` from outside would not see it as open? Name two different possible reasons.
+</ActivityQuestion>
 
 ---
 
@@ -266,6 +272,10 @@ DNS translates names to addresses. Understanding how your machine resolves names
    Note how long the query takes before timing out. This is what "DNS is broken" feels like from an application's perspective: every network operation that requires a hostname hangs for several seconds before failing.
 </Steps>
 
+<ActivityQuestion>
+`google.com` typically has a TTL of 5 minutes or less. What is the operational reason Google prefers a short TTL over something like 86400 seconds (one day)?
+</ActivityQuestion>
+
 ---
 
 ## Part 6: HTTP and Application-Layer Connectivity
@@ -325,33 +335,6 @@ DNS translates names to addresses. Understanding how your machine resolves names
    ```
 </Steps>
 
----
-
-## Verify Your Understanding
-
-Here is how each part of this activity maps to the networking lecture:
-
-| What you did | Lecture section |
-|---|---|
-| Read IP address and prefix length from `ip addr show` | IP Addressing and Subnetting |
-| Identified the address as private, calculated usable hosts | IP Addressing and Subnetting |
-| Read the default gateway from `ip route show` | Routing Basics |
-| Pinged gateway → public IP → hostname (bottom-up test) | OSI/TCP/IP models; Diagnostic Tools |
-| Used `traceroute` to count hops and find the NAT boundary | Routing Basics; NAT |
-| Confirmed NAT translation with `curl https://ifconfig.me` | NAT |
-| Inspected `ip neighbor show` for ARP cache entries | Address Resolution Protocol (ARP) |
-| Used `ss -tlnp` to list listening ports and processes | Ports and Protocols |
-| Used `nmap` to scan from outside and compared to `ss` | Ports and Protocols; nmap diagnostic tool |
-| Queried DNS with `dig`, read TTL and answer section | DNS |
-| Looked up MX records for a real domain | DNS |
-| Simulated broken DNS (NXDOMAIN, timeout) | DNS |
-| Used `curl -I` to fetch HTTP headers and status codes | Diagnostic Tools |
-| Measured request timing broken down by layer | OSI/TCP/IP models; Diagnostic Tools |
-
-Consider the following questions:
-
-1. **NAT layers:** Your Arch VM has a private address (e.g., `10.0.2.15`), but `curl https://ifconfig.me` returns a different public IP. How many separate NAT translations are happening between this VM and the internet? Trace each one.
-2. **ARP boundary:** You can resolve the gateway's MAC address with `ip neighbor show`. Can you resolve Google's MAC address? Why not?
-3. **DNS TTL:** `google.com` typically has a TTL of 5 minutes or less. What is the operational reason Google prefers a short TTL over something like 86400 seconds (one day)?
-4. **nmap vs. ss:** Under what circumstances would `ss` show a port as listening but `nmap` from outside would not see it as open? Name two different possible reasons.
-5. **Diagnostic workflow:** A user reports "I can reach `8.8.8.8` but I cannot open any website." Based on what you practiced in Parts 1 through 6, what is the most likely cause, and what command would you run to confirm it?
+<ActivityQuestion>
+A user reports "I can reach `8.8.8.8` but I cannot open any website." Based on what you practiced in Parts 1 through 6, what is the most likely cause, and what command would you run to confirm it?
+</ActivityQuestion>
