@@ -57,7 +57,7 @@ In your hypervisor of choice (VirtualBox, UTM, VNWare, etc.), create a new VM wi
    pacman -Sy gptfdisk
    ```
 
-   `gdisk` is not included in the live environment by default. This step fetches it from the Arch mirrors before you need it.
+   `-S` tells pacman to install a package; `-y` refreshes the local copy of the package database from the mirrors before installing. The `gptfdisk` package provides the `gdisk` command, which is not included in the live environment by default.
 
 4. Identify the name of your virtual disk:
 
@@ -65,7 +65,7 @@ In your hypervisor of choice (VirtualBox, UTM, VNWare, etc.), create a new VM wi
    lsblk
    ```
 
-   Look for a disk-type device (TYPE=`disk`) with roughly 8 GB of space. On VirtualBox it is typically `/dev/sda`; on UTM it is typically `/dev/vda`. The steps below use tabs to show the correct device name for each.
+   `lsblk` lists block devices -- the kernel's term for storage devices that read and write data in fixed-size blocks. Each row shows a device name, its size, and type. Look for a device with TYPE=`disk` and roughly 8 GB of space -- that is your virtual hard disk. Partitions appear as children indented beneath it. On VirtualBox the disk is typically `/dev/sda`; on UTM it is typically `/dev/vda`. The steps below use tabs to show the correct device name for each.
 </Steps>
 
 <Aside type="note" title="About the live environment">
@@ -74,7 +74,11 @@ You are currently running from a RAM-based live environment. Nothing you do here
 
 ## Partition the Disk
 
-We will create three partitions using GPT: an EFI System Partition, a swap partition, and a root partition.
+A raw disk has no structure -- before Linux can use it you must divide it into partitions and tell the firmware what each one is for. We will use the GPT (GUID Partition Table) scheme, which is required for UEFI booting and supports disks larger than 2 TB. We need three partitions:
+
+- **EFI System Partition (ESP):** A small FAT32 partition the firmware reads to find the bootloader. Every UEFI system needs one regardless of operating system.
+- **Swap partition:** Disk space the kernel uses as overflow when RAM is full, and for hibernation. It has no filesystem -- the kernel manages it directly.
+- **Root partition:** The main filesystem where the entire Linux directory tree lives (`/bin`, `/etc`, `/home`, and everything else).
 
 <Steps>
 1. Launch the partitioning tool:
@@ -98,9 +102,15 @@ We will create three partitions using GPT: an EFI System Partition, a swap parti
    Hex code or GUID (L to show codes, Enter = 8300): ef00
    ```
 
+   The `+300M` notation means "300 megabytes from the current position" -- gdisk calculates the exact sector number for you. The hex code `ef00` sets the partition type flag that tells the firmware "this partition contains bootloader files."
+
 3. **Create the swap partition.** Type `n` again. Accept defaults for partition number (2) and first sector. For the last sector, type `+400M`. Hex code: `8200` (Linux swap).
 
+   400 MB of swap is sufficient for a VM that will not hibernate. On a physical machine you would typically match swap to RAM size or use a swap file instead.
+
 4. **Create the root partition.** Type `n` again. Accept all defaults (partition 3, default first sector, default last sector to use all remaining space). Accept the default hex code `8300` (Linux filesystem).
+
+   Accepting the default last sector uses all remaining disk space for the root partition. This is correct -- root gets everything that is left after EFI and swap.
 
 5. **Verify your work.** Type `p` to print the partition table. You should see something like:
 
@@ -116,7 +126,7 @@ We will create three partitions using GPT: an EFI System Partition, a swap parti
 
 ### Format the Partitions
 
-Each partition needs a filesystem before it can hold data. This is what `mkfs` does, and it is the same concept as the `mkfs.ext4` example from the lecture's disk management section.
+Partitioning only defines boundaries on the disk. Formatting writes the actual filesystem data structures -- the inode tables, directory trees, and free-space maps -- that the kernel needs to store files. Each partition gets the filesystem appropriate to its role.
 
 ```bash
 # FAT32 on the EFI partition (required by the UEFI specification)
@@ -130,7 +140,11 @@ mkswap /dev/sda2
 swapon /dev/sda2
 ```
 
+`mkfs.fat -F32` writes a FAT32 filesystem. The UEFI specification requires FAT32 on the ESP -- the firmware reads it directly before any OS driver is loaded, so it cannot use a Linux-only format like ext4. `mkfs.ext4 -F` writes an ext4 filesystem; the `-F` flag forces formatting even if the partition looks like it already has data. `mkswap` writes the swap header the kernel needs to recognise the partition as swap space, and `swapon` activates it immediately for the live session.
+
 ### Mount the Filesystems
+
+Before `pacstrap` can install packages to the new system, the kernel needs to know where to find the new disk. Mounting makes a partition accessible at a directory path. We use `/mnt` as a temporary staging root -- it is the conventional location for this in the live environment.
 
 ```bash
 # Mount the root partition
@@ -140,6 +154,8 @@ mount /dev/sda3 /mnt
 mkdir -p /mnt/boot/efi
 mount /dev/sda1 /mnt/boot/efi
 ```
+
+The root partition mounts at `/mnt` and the EFI partition mounts at `/mnt/boot/efi`. That path matters: when GRUB is installed later, it will write its EFI files into whatever is mounted at `/boot/efi`, so the mount point and the EFI partition need to match.
 
 <Aside type="note" title="Checkpoint">
 Run `lsblk` and verify that your root partition is mounted at `/mnt` and your EFI partition at `/mnt/boot/efi`.
@@ -157,7 +173,12 @@ This step downloads and installs the core Arch Linux packages into your mounted 
 pacstrap /mnt base linux vim
 ```
 
-This installs about 120 packages including the Linux kernel itself. It will take a few minutes depending on your internet speed.
+The three packages do different things:
+- `base`: the minimal userland, i.e., the shell, coreutils, systemd, and other tools every Arch system needs. It does not include a kernel.
+- `linux`: the Linux kernel itself and its modules. Without this the system cannot boot.
+- `vim`: a text editor. The installed system has no editor by default; you need one to edit config files in the next steps.
+
+This installs about 120 packages in total. It will take a few minutes depending on your internet speed.
 
 While it runs, generate the filesystem table so the installed system knows how to mount its own partitions at boot:
 
@@ -165,13 +186,15 @@ While it runs, generate the filesystem table so the installed system knows how t
 genfstab -U /mnt > /mnt/etc/fstab
 ```
 
+`/etc/fstab` is a plain-text file that maps partitions to mount points. The system reads it at every boot to know what to mount and where. The `-U` flag tells `genfstab` to identify each partition by its UUID (a unique identifier burned into the filesystem when you ran `mkfs`) rather than by device name. UUID-based entries are more reliable because device names like `/dev/sda` can change if you add or rearrange disks; UUIDs never change. Run `cat /mnt/etc/fstab` to inspect the generated file.
+
 <ActivityQuestion>
 `pacstrap` installs Arch packages just as `apt install` installs Debian packages. What are the equivalent `pacman` commands for `apt update`, `apt install <package>`, and `apt upgrade`?
 </ActivityQuestion>
 
 ## Enter the New System
 
-To configure the installed system, you need to "pivot" into it using `chroot` (change root). This makes `/mnt` appear as `/` so that every command you run applies to the installed system, not the live environment.
+To configure the installed system, you need to "pivot" into it using `chroot` (change root). `arch-chroot` remounts `/mnt` as the root directory (`/`) for this shell session, so every path and every command now refers to the installed system rather than the live environment. It also sets up special kernel filesystems like `/proc` and `/sys` inside the chroot so tools like `grub-install` work correctly.
 
 ```bash
 arch-chroot /mnt
@@ -184,6 +207,8 @@ pwd
 # Should output: /
 ```
 
+Notice that your prompt likely changed. You are now effectively "inside" the new system, running commands that will affect the installed OS on disk -- not the RAM-based live environment.
+
 ## Configure Locale and Timezone
 
 <Steps>
@@ -193,6 +218,8 @@ pwd
    cp /usr/share/zoneinfo/America/Los_Angeles /etc/localtime
    date
    ```
+
+   `/usr/share/zoneinfo/` contains a database of timezone definitions for every region. Copying one to `/etc/localtime` tells the system which timezone to use for displaying times and for calculating DST transitions. Run `date` to confirm the timezone took effect. You can browse the directory (e.g., `ls /usr/share/zoneinfo/America/`) to find your region.
 
 2. Configure the locale. Open the locale configuration file:
 
@@ -207,6 +234,8 @@ pwd
    en_US ISO-8859-1
    ```
 
+   A locale defines the language, character encoding, date format, number format, and other regional conventions for a system. `en_US.UTF-8` is the standard modern choice for English; it supports all Unicode characters. `en_US ISO-8859-1` is an older 8-bit encoding included for compatibility with legacy applications.
+
 3. Generate the locale and set it as default:
 
    ```bash
@@ -214,6 +243,8 @@ pwd
    echo LANG=en_US.UTF-8 > /etc/locale.conf
    export LANG=en_US.UTF-8
    ```
+
+   `locale-gen` reads `/etc/locale.gen` and compiles the enabled locales into binary files under `/usr/lib/locale/`. `locale.conf` stores the default locale that every login session will use. The `export` command sets it for the current shell session so subsequent commands in this chroot also respect it.
 </Steps>
 
 ## Install the Bootloader
@@ -224,6 +255,12 @@ pwd
    ```bash
    pacman -S grub efibootmgr dosfstools mtools
    ```
+
+   Each package has a specific role:
+   - `grub`: the bootloader itself -- the program the firmware hands off to after POST, which then loads the kernel.
+   - `efibootmgr`: a tool that writes entries into the UEFI firmware's boot menu (the list of bootable devices stored in NVRAM). `grub-install` calls it internally.
+   - `dosfstools`: utilities for creating and checking FAT filesystems. Required because the EFI partition is FAT32.
+   - `mtools`: low-level tools for reading FAT filesystems without mounting them, used by GRUB during installation.
 
 2. Install GRUB to the EFI partition:
 
@@ -241,11 +278,15 @@ pwd
    </TabItem>
    </Tabs>
 
+   `--target` specifies the EFI architecture. `--bootloader-id=arch` sets the name that appears in the UEFI firmware's boot menu and creates the directory `/boot/efi/EFI/arch/` where GRUB's EFI binary is written. `--recheck` forces GRUB to re-probe the EFI partition even if a previous installation is detected.
+
 3. Generate the GRUB configuration:
 
    ```bash
    grub-mkconfig -o /boot/grub/grub.cfg
    ```
+
+   `grub-mkconfig` scans the system for installed kernels and writes a configuration file that tells GRUB what to show in the boot menu and how to load each option. Never edit `grub.cfg` directly -- always regenerate it with this command, because it will be overwritten the next time the kernel updates.
 </Steps>
 
 <ActivityQuestion>
@@ -267,19 +308,23 @@ The lecture describes four boot stages: firmware, bootloader, kernel, systemd. W
    visudo
    ```
 
+   `visudo` opens `/etc/sudoers` in a safe wrapper that validates the syntax before saving. A syntax error in sudoers can lock you out of sudo entirely, so direct editing with `vim` is dangerous.
+
    Find and uncomment this line:
 
    ```
    %wheel ALL=(ALL) ALL
    ```
 
-   This grants sudo access to all members of the `wheel` group, the same concept as Ubuntu's `sudo` group that the lecture describes.
+   Breaking down the syntax: `%wheel` means "the group named wheel" (a leading `%` means group). `ALL=(ALL) ALL` means "from any host, as any user, run any command." This grants full sudo access to everyone in the `wheel` group -- the Arch equivalent of Ubuntu's `sudo` group.
 
 3. Create a regular user with a home directory, bash shell, and wheel group membership:
 
    ```bash
    useradd -m -G wheel -s /bin/bash archuser
    ```
+
+   The flags: `-m` creates the home directory at `/home/archuser`; without it the directory is not created and many programs will misbehave. `-G wheel` adds `archuser` to the `wheel` supplementary group so sudo works. `-s /bin/bash` sets the login shell; without this the default shell is `/bin/sh`, which on Arch is a minimal POSIX shell rather than bash.
 
 4. Set the password:
 
@@ -302,6 +347,8 @@ The lecture warns that forgetting the `-a` flag with `usermod -aG` replaces all 
    ```
 
 2. Eject the ISO from the VM's virtual optical drive (use your hypervisor's UI).
+
+   This is important: if the ISO is still attached, the VM may boot back into the live environment instead of the installed system. Remove it before rebooting.
 
 3. Reboot:
 
@@ -340,6 +387,8 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    127.0.1.1   archbox.localdomain archbox
    ```
 
+   `/etc/hosts` is a local DNS override file: the system checks it before querying a DNS server. The first line maps `localhost` to the loopback address, which is required for many local services. The second line maps the machine's own hostname to `127.0.1.1` -- a convention that prevents programs from hanging when they try to resolve the local hostname before the network is fully up.
+
 3. Find your network interface name:
 
    ```bash
@@ -364,11 +413,15 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    DHCP=yes
    ```
 
+   The `[Match]` section tells systemd-networkd which interface this file applies to -- without it the settings would apply to all interfaces. The `[Network]` section defines what to do with that interface; `DHCP=yes` tells it to request an IP address, gateway, and DNS configuration automatically via DHCP. The filename prefix `20-` controls the order in which configuration files are processed; lower numbers load first.
+
 5. Enable and start the network service:
 
    ```bash
    sudo systemctl enable --now systemd-networkd
    ```
+
+   `enable` registers the service to start automatically at every boot. `start` starts it immediately. `--now` combines both into one command. Without `enable`, the service would start this session but not persist after a reboot.
 
 6. Verify you received an IP address:
 
@@ -390,6 +443,8 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    nameserver 8.8.8.8
    nameserver 8.8.4.4
    ```
+
+   `/etc/resolv.conf` tells the system which DNS server to send name queries to. `8.8.8.8` and `8.8.4.4` are Google's public resolvers. The system tries the first nameserver and falls back to the second if it does not respond. On production systems this file is usually managed automatically by systemd-resolved or NetworkManager; here we write it manually so nothing is hidden.
 
 8. Test your connection:
 
@@ -419,9 +474,11 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    ssh-keygen -t ed25519 -C "archuser practice key"
    ```
 
+   `-t ed25519` selects the Ed25519 algorithm, which uses elliptic-curve cryptography. It produces shorter keys than RSA, is faster to verify, and is considered more secure against modern attacks. `-C` adds a comment embedded in the public key file -- it has no cryptographic effect but helps identify the key when you see it listed in `authorized_keys`.
+
    Accept the default path (`~/.ssh/id_ed25519`). You can set a passphrase or leave it empty for this exercise. Two files are created:
-   - `~/.ssh/id_ed25519`: the **private key**. Never share or copy this to another machine.
-   - `~/.ssh/id_ed25519.pub`: the **public key**. Safe to copy anywhere.
+   - `~/.ssh/id_ed25519`: the **private key**. This is the secret half. Never share or copy it to another machine.
+   - `~/.ssh/id_ed25519.pub`: the **public key**. This is what you distribute to servers. It is safe to share.
 
 4. Install the public key into `authorized_keys`:
 
@@ -432,6 +489,8 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    chmod 600 ~/.ssh/authorized_keys
    ```
 
+   `~/.ssh/authorized_keys` is the file sshd reads to decide which public keys are allowed to log in as this user. When you connect with `-i id_ed25519`, sshd checks whether the corresponding public key appears in this file. The `>>` (append) operator means you can add multiple keys to the same file without overwriting existing ones.
+
    The permissions are enforced by SSH itself: if `~/.ssh` or `authorized_keys` are group- or world-writable, SSH will refuse to use them.
 
 5. Test key authentication by connecting to localhost:
@@ -440,7 +499,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    ssh -i ~/.ssh/id_ed25519 archuser@localhost
    ```
 
-   You should receive a shell prompt without entering a password. Type `exit` to return.
+   `-i` specifies which private key to use. You should receive a shell prompt without entering a password -- SSH performed the authentication cryptographically using the key pair. Type `exit` to return.
 
 6. Locate the password authentication setting:
 
@@ -448,7 +507,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    grep PasswordAuthentication /etc/ssh/sshd_config
    ```
 
-   On a production server exposed to the internet you would set this to `no` after confirming key auth works. Do not change it here; you are on a local VM with no remote exposure.
+   On a production server exposed to the internet you would set this to `no` after confirming key auth works. Disabling password auth means an attacker who does not have your private key file cannot log in, even with the correct password. Do not change it here; you are on a local VM with no remote exposure.
 </Steps>
 
 <ActivityQuestion>
