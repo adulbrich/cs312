@@ -34,7 +34,7 @@ In your hypervisor of choice (VirtualBox, UTM, VMware, etc.), create a new VM wi
 - Memory: 4096 MB
 - CPU: 2 cores
 - Disk: 8 GB, dynamically allocated
-- Network: NAT (default)
+- Network: NAT (default). Keep NAT enabled, then add a host-to-guest port-forwarding rule later so SSH from your laptop is seamless.
 - Optical drive: attach the Arch Linux ISO you downloaded above, matching your architecture (x86_64 or aarch64)
 - Make sure you use (U)EFI firmware, not legacy BIOS. This is required for the EFI System Partition we will create.
 
@@ -482,7 +482,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    ```
 </Steps>
 
-## Set Up SSH Key Authentication
+## Set Up SSH for Host-to-VM Access
 
 <Steps>
 1. Install the OpenSSH server:
@@ -497,50 +497,61 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    sudo systemctl enable --now sshd
    ```
 
-3. Generate a key pair as `archuser` (not root):
+3. Add a NAT port-forwarding rule in your hypervisor:
+
+   - Protocol: TCP
+   - Host IP: `127.0.0.1`
+   - Host Port: `2222`
+   - Guest IP: leave blank (or use the VM's NAT IP)
+   - Guest Port: `22`
+
+   This maps `127.0.0.1:2222` on your laptop to `22` inside the Arch VM. You keep NAT for outbound internet access, while still being able to SSH in from the host.
+
+4. From your **host machine** terminal, generate a key pair on your laptop (if you do not already have one):
 
    ```bash
-   ssh-keygen -t ed25519 -C "archuser practice key"
+   ssh-keygen -t ed25519 -C "cs312-arch-host-key"
    ```
 
-   `-t ed25519` selects the Ed25519 algorithm, which uses elliptic-curve cryptography. It produces shorter keys than RSA, is faster to verify, and is considered more secure against modern attacks. `-C` adds a comment embedded in the public key file: it has no cryptographic effect but helps identify the key when you see it listed in `authorized_keys`.
+   Accept the default path (`~/.ssh/id_ed25519`) unless you want a course-specific filename.
 
-   Accept the default path (`~/.ssh/id_ed25519`). You can set a passphrase or leave it empty for this exercise. Two files are created:
-   - `~/.ssh/id_ed25519`: the **private key**. This is the secret half. Never share or copy it to another machine.
-   - `~/.ssh/id_ed25519.pub`: the **public key**. This is what you distribute to servers. It is safe to share.
-
-4. Install the public key into `authorized_keys`:
+5. Copy your host public key into the VM using the forwarded SSH port:
 
    ```bash
-   mkdir -p ~/.ssh # ignore if you used the default path above
-   chmod 700 ~/.ssh
-   cat ~/.ssh/id_ed25519.pub >> ~/.ssh/authorized_keys
-   chmod 600 ~/.ssh/authorized_keys
+   ssh-copy-id -p 2222 archuser@127.0.0.1
    ```
 
-   `~/.ssh/authorized_keys` is the file sshd reads to decide which public keys are allowed to log in as this user. When you connect with `-i id_ed25519`, sshd checks whether the corresponding public key appears in this file. The `>>` (append) operator means you can add multiple keys to the same file without overwriting existing ones.
-
-   The permissions are enforced by SSH itself: if `~/.ssh` or `authorized_keys` are writable by group or others, SSH can refuse to use them. `700` and `600` are secure defaults that avoid this problem.
-
-5. Test key authentication by connecting to localhost:
+   If `ssh-copy-id` is unavailable, use this fallback from your host terminal:
 
    ```bash
-   ssh -i ~/.ssh/id_ed25519 archuser@localhost
+   cat ~/.ssh/id_ed25519.pub | ssh -p 2222 archuser@127.0.0.1 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
    ```
 
-   `-i` specifies which private key to use. You should receive a shell prompt without entering a password; SSH performed the authentication cryptographically using the key pair. Type `exit` to return.
+6. Test key authentication from your host:
 
-6. Locate the password authentication setting:
+   ```bash
+   ssh -p 2222 archuser@127.0.0.1
+   ```
+
+   You should receive a shell prompt without entering the VM password.
+
+7. (Optional) Verify that key login works from inside the VM too:
+
+   ```bash
+   ssh archuser@localhost
+   ```
+
+8. Locate the password authentication setting:
 
    ```bash
    grep PasswordAuthentication /etc/ssh/sshd_config
    ```
 
-   On a production server exposed to the internet you would set this to `no` after confirming key auth works. Disabling password auth means an attacker who does not have your private key file cannot log in, even with the correct password. Do not change it here; you are on a local VM with no remote exposure.
+   On a production server exposed to the internet you would set this to `no` after confirming key auth works. Disabling password auth means an attacker who does not have your private key file cannot log in, even with the correct password. For this course VM, keep password auth enabled unless an activity explicitly tells you to disable it.
 </Steps>
 
 <ActivityQuestion>
-Why are `chmod 700 ~/.ssh` and `chmod 600 ~/.ssh/authorized_keys` good defaults? Which permission bits does SSH actually care about, and why does it enforce this instead of just issuing a warning?
+Why is keeping the private key on your laptop and copying only the public key into the VM a better default than generating the key pair inside the VM?
 </ActivityQuestion>
 
 ## Keep This VM

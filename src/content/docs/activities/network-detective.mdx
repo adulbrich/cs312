@@ -5,28 +5,61 @@ sidebar:
   order: 4
 ---
 
-import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 This activity puts into practice the concepts from the [Networking Fundamentals (LAN/WAN)](/lectures/networking-fundamentals-lan-wan/) lecture. Instead of simulating a network, you will investigate a real one: the network your machine is connected to right now. By the end, you will be able to sit at any Linux machine, answer the question "what is this machine's network situation?", and trace a packet from the shell prompt to the public internet and back.
 
-The exercises work best from inside the Arch Linux VM you built in the previous activity, connected via SSH using the key pair you set up. Running commands over SSH replicates exactly what you will do on EC2.
+The exercises work best from inside the Arch Linux VM you built in the previous activity, connected from your laptop using the NAT port-forwarding and SSH setup you configured there. Running commands over SSH replicates exactly what you will do on EC2.
 
 <Aside type="tip">
-Open two terminal windows: one connected to your Arch VM via SSH (`ssh -i ~/.ssh/id_ed25519 archuser@<vm-ip>`), and one on your laptop. Running the same commands on both gives you a concrete comparison between "inside the VM" and "on the host machine."
+Open two terminal windows: one connected to your Arch VM via SSH (`ssh -p 2222 archuser@127.0.0.1`), and one on your laptop. Running the same commands on both gives you a concrete comparison between "inside the VM" and "on the host machine."
 </Aside>
 
 ## What You Will Need
 
 - Your Arch Linux VM from the previous activity (with networking and SSH configured)
-- `nmap` installed on the VM: `sudo pacman -S nmap`
-- `nmap` on your host machine for the port scanning exercises:
-  - macOS: `brew install nmap`
-  - Ubuntu/Debian: `sudo apt install nmap`
+
+## Where To Run Commands
+
+- Unless a step explicitly says **host machine**, run commands in the **VM terminal** (your SSH session to `archuser@127.0.0.1 -p 2222`).
+- Use the **host machine** terminal only for steps that explicitly call it out (for example, external `nmap` against forwarded port `2222`).
+- Do not expect host and VM networking output to match exactly. The host usually has extra interfaces (Wi-Fi/Ethernet, VPN, Docker/Hypervisor adapters), while the VM usually has a much simpler table.
+
+<Aside type="caution" title="Windows Guidance">
+For this activity, Windows users should run the shell commands in **WSL** so the Linux commands match the instructions. PowerShell equivalents exist for some commands, but not all behavior and output formats are the same, which makes troubleshooting inconsistent.
+</Aside>
+
+## Tool Preflight
+
+Before starting, verify required tools are installed where you will run commands.
+
+- On the Arch VM:
+
+   ```bash
+   sudo pacman -S --needed iproute2 iputils curl traceroute bind nmap
+   ```
+
+- On host machine (only needed for host-side `nmap` steps):
+   - macOS:
+
+      ```bash
+      brew install nmap
+      ```
+
+   - Ubuntu/Debian (or WSL Ubuntu):
+
+      ```bash
+      sudo apt update && sudo apt install -y nmap traceroute dnsutils
+      ```
+
+   - Windows without WSL:
+      - Install Nmap from [nmap.org](https://nmap.org/download.html)
+      - Run host-side commands in PowerShell only where explicitly noted
 
 ---
 
-## Part 1: Layer 3 Identity
+## Layer 3 Identity
 
 Every device on a network has at least one IP address. Before you can do anything else, you need to know this machine's address and what network it belongs to.
 
@@ -53,11 +86,15 @@ Every device on a network has at least one IP address. Before you can do anythin
    - `192.168.0.0/16`
 
 3. Compare the VM's address to your host machine's address. They are likely on different subnets because VirtualBox's default NAT networking creates its own virtual network for each VM.
+
+   Host-side quick checks:
+   - macOS/Linux: `ip addr show` (or `ifconfig`)
+   - Windows PowerShell: `ipconfig`
 </Steps>
 
-<Aside type="note">
-**Checkpoint:** If your VM shows `10.0.2.15/24`, the network is `10.0.2.0/24`, the broadcast address is `10.0.2.255`, and there are 254 usable host addresses. What would the equivalent values be for a `/25` network?
-</Aside>
+<ActivityQuestion>
+If your VM shows `10.0.2.15/24`, the network is `10.0.2.0/24`, the broadcast address is `10.0.2.255`, and there are 254 usable host addresses. What would the equivalent values be for a `/25` network?
+</ActivityQuestion>
 
 <ActivityQuestion>
 Run `ip neighbor show` on your VM. You should see an entry for your gateway. Why can the VM resolve the gateway's MAC address but not the MAC address of a public server like `8.8.8.8`?
@@ -65,7 +102,7 @@ Run `ip neighbor show` on your VM. You should see an entry for your gateway. Why
 
 ---
 
-## Part 2: Routing and the Default Gateway
+## Routing and the Default Gateway
 
 Knowing your IP address tells you where you are. The routing table tells you where traffic goes.
 
@@ -76,13 +113,19 @@ Knowing your IP address tells you where you are. The routing table tells you whe
    ip route show
    ```
 
-   You will see two kinds of entries:
+   You will see at least two important kinds of entries:
    - A `default via` entry: traffic for any unknown destination goes to this IP (your default gateway).
-   - A direct-link route for your subnet: traffic to addresses in your local subnet is delivered directly, without going through the gateway.
+   - A direct-link route for your subnet: traffic to addresses in your local subnet is delivered directly, without going through the gateway. This route is often shown with `scope link`.
+
+   You may also see additional routes (for example, extra `scope link` entries, host-specific routes, or routes from VPN/container adapters). That is normal. For this activity, focus on identifying the **default route** and the **connected subnet route**.
 
    Record:
    - **Default gateway address**
    - **Interface used for the default route**
+
+   Optional host comparison:
+   - macOS/Linux: `ip route show`
+   - Windows PowerShell: `Get-NetRoute -AddressFamily IPv4`
 
 2. Can you reach the gateway?
 
@@ -106,12 +149,14 @@ Knowing your IP address tells you where you are. The routing table tells you whe
    ping -c 4 google.com
    ```
 
-   If the previous step worked but this fails, DNS is broken. If both work, your full connectivity chain is intact.
+   If the previous step worked but this fails, there might be several possible causes. The most likely is that the IP address returned by our Cloudflare resolver is one where Google is blocking ICMP traffic, which is common. We'll explore that later. 
+
+   If this fails, try a different hostname (e.g., `oregonstate.edu`) to rule out a Google-specific issue. If all hostnames fail, DNS is likely broken.
 </Steps>
 
 ---
 
-## Part 3: Tracing the Path to the Internet
+## Tracing the Path to the Internet
 
 `ping` tells you whether a host is reachable. `traceroute` shows the path packets take to get there.
 
@@ -127,7 +172,11 @@ Knowing your IP address tells you where you are. The routing table tells you whe
    Record:
    - How many hops until you reach `8.8.8.8`?
    - Where does the address space transition from private (`10.x.x.x`, `172.x.x.x`, `192.168.x.x`) to public? At which hop?
-   - What do `* * *` entries mean? (The router at that hop is not responding to traceroute probes, either by firewall policy or because it is a backbone router configured not to respond.)
+   - What do `* * *` entries mean?
+
+   When you see `* * *`, the router at that hop is not responding to traceroute probes, either by firewall policy or because it is a backbone router configured not to respond.
+
+   As long as the traceroute eventually reaches its destination, the `* * *` entries are not a problem.
 
 2. Compare a nearby host to a distant one:
 
@@ -137,6 +186,10 @@ Knowing your IP address tells you where you are. The routing table tells you whe
    ```
 
    Does the path to Australia diverge from the path to Oregon State at some point? At which hop? What does that tell you about the structure of the internet?
+
+   <Aside type="note" title="Alternative to Traceroute">
+   A good alternative to `traceroute` is `mtr`, which continuously probes the path and gives you a live view of latency and packet loss at each hop. You can install it with `sudo pacman -S mtr` on Arch, `sudo apt install mtr` on Ubuntu, or `brew install mtr` on macOS. Run it with `sudo mtr -r <destination>`.
+   </Aside>
 
 3. Find your own public IP address. Ask a public server to reflect it back:
 
@@ -154,7 +207,7 @@ Your VM has a private address (e.g., `10.0.2.15`), but `curl https://ifconfig.me
 
 ---
 
-## Part 4: What Is Running on This Machine?
+## What Is Running on This Machine?
 
 A server exposes services through TCP and UDP ports. `ss` shows you which ports are open from the inside; `nmap` shows you what is visible from the outside. The difference between the two tells you what a firewall is blocking.
 
@@ -180,13 +233,13 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 3. Now scan this machine from the outside. On your **host machine** (not inside the VM), open a terminal and run:
 
    ```bash
-   nmap -sV -Pn -p T:22 <vm-ip-address>
+   nmap -sV -Pn -p T:2222 127.0.0.1
    ```
 
-   Replace `<vm-ip-address>` with the IP you found in Part 1. By default VirtualBox NAT does not expose VM ports to the host, so this may show `filtered`. That is not a bug -- it is NAT working as designed.
+   This scans the forwarded host port that maps to SSH on the VM. If this port shows open, the host-to-guest forwarding path is working.
 
    <Aside type="tip">
-   To make the VM's SSH port reachable from the host, you would configure port forwarding in VirtualBox: Settings → Network → Advanced → Port Forwarding → add a rule forwarding host port 2222 to guest port 22. Then `ssh -p 2222 archuser@127.0.0.1` would reach the VM. This is exactly how exposing a service through a NAT gateway works.
+   If `nmap` reports the port as closed or filtered, verify your VM still has the NAT forwarding rule from the Arch activity: host `127.0.0.1:2222` to guest `:22`. Then verify `sshd` is running in the VM with `sudo systemctl status sshd`.
    </Aside>
 
 4. Scan the VM's localhost from inside:
@@ -198,8 +251,8 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
    This scans from within the machine, bypassing any network-level firewall. Does the output match `ss -tlnp`? If they differ, what would explain the discrepancy?
 </Steps>
 
-<Aside type="note">
-**Checkpoint:** The `ss` (inside view) vs. `nmap` (outside view) relationship is exactly what you will encounter on EC2. `ss` confirms your service is running and listening. `nmap` from outside (or a failed browser connection) tells you whether the security group is letting traffic through. If `ss` shows the port listening but external connections fail, the security group is the next thing to check.
+<Aside type="note" title="How To Interpret Inside vs Outside Results">
+The `ss` (inside view) vs. `nmap` (outside view) relationship is exactly what you will encounter on EC2. `ss` confirms your service is running and listening. `nmap` from outside (or a failed browser connection) tells you whether the security group is letting traffic through. If `ss` shows the port listening but external connections fail, the security group is the next thing to check.
 </Aside>
 
 <ActivityQuestion>
@@ -208,7 +261,7 @@ Under what circumstances would `ss` show a port as listening but `nmap` from out
 
 ---
 
-## Part 5: DNS Investigation
+## DNS Investigation
 
 DNS translates names to addresses. Understanding how your machine resolves names -- and how to query DNS manually -- is essential for diagnosing the most common category of "the internet is down" complaints.
 
@@ -278,7 +331,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 ---
 
-## Part 6: HTTP and Application-Layer Connectivity
+## HTTP and Application-Layer Connectivity
 
 `curl` reaches into layer 7 and talks directly to a web server. Combined with the tools above, it completes the diagnostic chain from physical link to application response.
 
@@ -318,10 +371,9 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
    (`93.184.216.34` is `example.com`.) This simulates verifying that a web server is running even when DNS is broken.
 
-4. Practice the exact nmap command you will use in the Minecraft server assignment. From your host machine, scan the SSH port on your Arch VM (using port forwarding if you set it up, otherwise scan localhost):
+4. Practice the exact nmap command you will use in the Minecraft server assignment. From your host machine, scan the SSH port on your Arch VM through the forwarding rule:
 
    ```bash
-   # On the host, if you set up port forwarding to 2222:
    nmap -sV -Pn -p T:2222 127.0.0.1
 
    # On the VM itself, scanning its own port:
