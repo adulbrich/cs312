@@ -29,39 +29,13 @@ Download the latest aarch64 ISO from [release.archboot.com/aarch64/latest/iso/](
 
 ## Create the Virtual Machine
 
-<Tabs syncKey="arch">
-<TabItem label="x86_64 (Intel/AMD)">
-<Steps>
-1. Create a new VM in VirtualBox with these settings:
-   - **Type:** Linux
-   - **Version:** Arch Linux (64-bit)
-   - **Memory:** 1024 MB (1 GB)
-   - **Hard disk:** Create a virtual hard disk, VDI format, dynamically allocated, 8 GB
+In your hypervisor of choice (VirtualBox, UTM, VNWare, etc.), create a new VM with the following settings:
 
-2. Before booting, open **Settings** and adjust:
-   - **System > Motherboard:** Uncheck **Floppy** from boot order. Check **Enable EFI (special OSes only)**.
-   - **System > Processor:** Set to 2 CPUs.
-   - **Display:** Set video memory to 128 MB.
-
-3. Under **Storage**, click the empty optical drive and select the Arch Linux ISO.
-</Steps>
-</TabItem>
-<TabItem label="aarch64 (Apple Silicon / ARM)">
-<Steps>
-1. Create a new VM in UTM:
-   - Choose **Virtualize** (Apple Silicon native).
-   - Operating System: **Other**.
-   - Select the Arch Linux ISO image.
-
-2. Configure resources:
-   - Memory: 1024 MB
-   - CPU Cores: 2
-   - Drive size: 8 GB
-
-3. No shared directory needed. Name the VM and save.
-</Steps>
-</TabItem>
-</Tabs>
+- Memory: 4096 MB
+- CPU: 2 cores
+- Disk: 8 GB, dynamically allocated
+- Network: NAT (default)
+- Optical drive: attach the Arch Linux ISO you downloaded above, matching your architecture (x86_64 or aarch64)
 
 ## Boot into the Live Environment
 
