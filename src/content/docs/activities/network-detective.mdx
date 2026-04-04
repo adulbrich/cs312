@@ -363,15 +363,16 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
    Slow DNS shows up in the first number. A slow or distant server shows up in Connect and Total. A TLS misconfiguration shows up in the TLS line.
 
-3. Test a server by IP address, bypassing DNS:
+3. Test a server by IP address while preserving the hostname context:
 
    ```bash
-   curl -I http://93.184.216.34
+   ip=$(dig +short oregonstate.edu A | head -n 1)
+   curl -I --resolve oregonstate.edu:443:$ip https://oregonstate.edu
    ```
 
-   (`93.184.216.34` is `example.com`.) This simulates verifying that a web server is running even when DNS is broken.
+   This sends the request to an explicit IP (bypassing normal DNS lookup during the request) while still using the hostname for TLS and Host header handling.
 
-4. Practice the exact nmap command you will use in the Minecraft server assignment. From your host machine, scan the SSH port on your Arch VM through the forwarding rule:
+4. From your host machine, scan the SSH port on your Arch VM through the forwarding rule:
 
    ```bash
    nmap -sV -Pn -p T:2222 127.0.0.1
