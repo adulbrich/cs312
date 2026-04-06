@@ -1,42 +1,48 @@
 ---
 title: Containerization with Docker
-description: "From bare metal to containers: how Docker packages applications into portable, reproducible units using images, Dockerfiles, volumes, and Compose."
+description: "From bare metal to containers: how Linux namespaces and cgroups power container isolation, how Docker images are built and layered, how volumes and Compose manage state and multi-service applications, and how Podman and the OCI standard define the broader container ecosystem."
 sidebar:
   order: 5
 draft: true
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
-Suppose you have written a small Python Flask web application. It works perfectly on your laptop, but when you hand it to a teammate or deploy it to a server, something breaks: a missing library, a different Python version, a conflicting system package. This class of problem ("it works on my machine") has plagued software teams for decades. Containers solve it by packaging an application together with everything it needs to run (libraries, runtime, configuration) into a single, portable artifact that behaves the same everywhere.
+A dependency version your application needs conflicts with the one another service requires on the same server. A build that passes every test in CI fails on the first deploy because the server is running a different OS version. A traffic spike demands twenty identical application instances in under a minute, but each one takes ten minutes to configure by hand. These are the problems containers solve.
 
-This chapter traces the journey from bare metal to containers, explains Docker's architecture and core concepts, and walks through building, running, and composing containerized applications. Throughout, we will use a simple Flask web app as a running example.
+A container packages an application together with everything it needs to run: libraries, runtime, and configuration. It does this in a portable artifact that usually behaves the same from a developer's laptop to a production server to a cloud instance, as long as the target environment provides a compatible CPU architecture and kernel. Unlike a virtual machine, a container shares the host kernel and often starts in under a second. Unlike a bare-metal deployment, it is isolated from other processes and carries no dependency on the host's user-space software.
+
+This lecture explains how containers work from the kernel features that make them possible, through Docker's architecture and image model, to the tools for building, running, and composing containerized applications. It also covers Podman, the OCI standard that governs container interoperability, and where containers fit in a broader production deployment picture.
 
 ## From Bare Metal to Containers
 
-To understand why containers exist, it helps to see where they sit in the evolution of how we run software.
+To understand why containers exist, it helps to trace the evolution of how software is deployed.
 
-**Bare metal** means installing your application directly on a physical server. The operating system, libraries, and application all share the same kernel and filesystem. This is simple, but fragile: installing a dependency for one application can break another, and scaling means buying more hardware.
+**Bare metal** means installing your application directly on a physical server. The operating system, libraries, and application all share the same kernel and filesystem. This is simple but fragile: installing a dependency for one application can break another, and scaling requires buying more hardware.
 
-**Virtual machines** (covered in an earlier lecture) improved things dramatically. A hypervisor lets you run multiple isolated operating systems on the same physical host, each with its own kernel. However, each VM carries the overhead of a full OS: hundreds of megabytes of disk, its own memory footprint, and boot times measured in seconds to minutes.
+**Virtual machines** improved things dramatically. A hypervisor lets you run multiple isolated operating systems on the same physical host, each with its own kernel. However, each VM carries the overhead of a full OS: hundreds of megabytes of disk, its own memory footprint, and boot times measured in seconds to minutes.
 
 **Containers** take a different approach. Instead of virtualizing hardware, they use kernel features (namespaces and cgroups on Linux) to isolate processes while sharing the host's kernel. A container holds only the application and its user-space dependencies. The result is an artifact measured in megabytes rather than gigabytes, with startup times under a second.
 
-### A Brief History: chroot, cgroups, and Namespaces
+<Aside type="tip" title="When Containers, When VMs">
+Containers and VMs answer different questions. Use a container when you want to package and isolate a single application process with its user-space dependencies. Use a VM when you need kernel-level isolation (different OS, kernel modules, or security boundaries that require separate kernels), or when you need to run a Windows workload on a Linux host. In production, the two are often layered: a fleet of VMs provides the host baseline, and containers run application workloads on top.
+</Aside>
+
+## How Containers Work: Namespaces and cgroups
 
 The ideas behind containers were developed incrementally over decades.
 
-**chroot (1979):** Unix introduced the `chroot` system call, which changes the apparent root directory for a process and its children. If you `chroot` into `/tmp`, then what the process sees as `/data` is actually `/tmp/data`. This creates a "chroot jail" that hides portions of the filesystem. However, it has significant limitations: root users can escape the jail, it only restricts filesystem access (not CPU, RAM, or network), and it is not a security mechanism per se.
+**chroot (1979):** Unix introduced the `chroot` system call, which changes the apparent root directory for a process and its children. This creates a "chroot jail" that hides portions of the filesystem. However, it only restricts filesystem access; it does not limit CPU, RAM, or network resources. Root users can escape it, so it is not a security mechanism on its own.
 
-**cgroups (2006/2008):** "Control Groups" were developed by Google engineers in 2006 and merged into the Linux kernel in 2008. cgroups allow the OS to limit, account for, and control the resource usage of a collection of processes. Key capabilities include:
+**cgroups (2006/2008):** "Control Groups" were developed by Google engineers and merged into the Linux kernel in 2008. cgroups allow the OS to limit, account for, and control the resource usage of a collection of processes:
 
-- **Resource limiting:** cap RAM, CPU, and I/O usage for a group of processes.
+- **Resource limiting:** cap RAM, CPU, and I/O usage for a process group.
 - **Prioritization:** give certain process groups higher priority for disk access.
 - **Accounting:** track how much CPU and memory a group has consumed.
-- **Control:** pause, checkpoint, or restart a process group.
+- **Control:** freeze, kill, or checkpoint a process group.
 
-**Namespaces (2002-present):** Linux namespaces wrap a global resource so that processes within the namespace get their own isolated instance. A process in a PID namespace sees a different set of process IDs than the host; a process in a network namespace has its own network interfaces, routing table, and firewall rules. There are currently eight namespace types in the Linux kernel:
+**Namespaces (2002-present):** Linux namespaces wrap a global resource so that processes within the namespace see their own isolated instance of it. There are currently eight namespace types in the Linux kernel:
 
 | Namespace | What it isolates |
 |-----------|-----------------|
@@ -49,17 +55,17 @@ The ideas behind containers were developed incrementally over decades.
 | Cgroup | The cgroup root seen by processes |
 | Time | System clock offsets (added in kernel 5.6, 2020) |
 
-The network namespace deserves special attention: each container gets its own list of network interfaces, its own IP address space, its own routing table, its own sockets, and its own firewall rules. This is what allows multiple containers on the same host to each bind to port 80 without conflicting.
+The network namespace deserves special attention: each container gets its own list of network interfaces, its own IP address space, its own routing table, and its own firewall rules. This is what allows multiple containers on the same host to each bind to port 80 without conflicting: they have separate network namespaces, so port 80 inside each container is an independent socket.
 
-**LXC (Linux Containers):** Combining cgroups and namespaces, LXC (Linux Containers) appeared around 2008 as a way to run a full "virtual operating system" without a hypervisor. An LXC container might run Ubuntu inside even though the host runs Debian. Both containers share the same host kernel: there is no separate "Ubuntu kernel." This makes LXC very resource-efficient, but because the kernel is shared, a kernel vulnerability could potentially be exploited across container boundaries, making LXC somewhat less isolated than a full VM.
+The PID namespace is equally important: the first process started inside a container becomes PID 1 within that namespace, even though the host kernel assigns it a different PID on the host. Other processes inside the same container receive their own namespace-local PIDs. Processes in the container cannot enumerate or signal processes outside their namespace. From inside, the system appears to have only the processes that belong to the container.
 
-**Docker's paradigm shift:** Earlier containerization approaches like LXC virtualized an entire OS environment. Docker's insight was to discard the OS portion entirely and virtualize only the single application you want to run. A Docker container is not "a small Ubuntu"; it is your application process, packaged with the user-space libraries it needs. Docker originally used LXC internally, but newer versions use **libcontainer** (now part of the `runc` project), a purpose-built library that directly uses cgroups and namespaces without needing the LXC userland tools.
+**LXC (Linux Containers):** Combining cgroups and namespaces, LXC appeared around 2008 as a way to run a full "virtual operating system" without a hypervisor. An LXC container might run Ubuntu inside even though the host runs Debian, while sharing the same host kernel. This makes LXC very resource-efficient, but because the kernel is shared, a kernel vulnerability could potentially be exploited across container boundaries.
+
+**Docker's paradigm shift:** Earlier containerization approaches like LXC virtualized an entire OS environment. Docker's insight was to discard the OS portion entirely and virtualize only the single application you want to run. A Docker container is not "a small Ubuntu"; it is your application process, packaged with the user-space libraries it needs. Docker originally used LXC internally, but now uses **libcontainer** (part of the `runc` project), a purpose-built library that directly uses cgroups and namespaces.
 
 <Aside type="note" title="Containers Are Not Lightweight VMs">
-A common misconception is that containers are "small VMs." They are not. A VM virtualizes hardware and runs a complete guest kernel. A container is a regular process (or group of processes) on the host, isolated through kernel namespaces (separate views of PIDs, network, filesystem) and constrained through cgroups (CPU, memory limits). The host kernel is shared, which is why you cannot run a Windows container on a Linux host without a VM intermediary.
+A common misconception is that containers are "small VMs." They are not. A VM virtualizes hardware and runs a complete guest kernel. A container is a regular process (or group of processes) on the host, isolated through kernel namespaces and constrained through cgroups. The host kernel is shared, which is why you cannot run a Windows container on a Linux host without a VM intermediary. The tradeoff is clear: containers offer speed and density at the cost of weaker isolation, while VMs offer stronger isolation at the cost of resource overhead.
 </Aside>
-
-The tradeoff is clear: containers offer speed and density at the cost of weaker isolation (shared kernel), while VMs offer stronger isolation at the cost of resource overhead. In practice, many organizations layer both: VMs provide the host baseline, and containers run application workloads on top.
 
 <HistoricalNote title="Docker's Five-Minute Lightning Talk (PyCon 2013)">
 Docker originated as a side project at dotCloud, a French-American platform-as-a-service startup. Solomon Hykes, dotCloud's founder, almost did not bother presenting it: he gave a five-minute lightning talk at PyCon Santa Clara in March 2013, half-expecting it to go unnoticed. The audience immediately understood why packaging an application together with its dependencies solved a real problem, and the GitHub repository hit 1,000 stars within 24 hours. Docker was open-sourced a few weeks later. dotCloud pivoted its entire business to Docker, renamed the company Docker Inc., and raised $15 million in Series B funding within months. The technology that would reshape how software is deployed globally began as an internal tool at a small company that nearly kept it to themselves.
@@ -77,71 +83,38 @@ The system has four main components:
 
 **Images** are read-only templates that contain a filesystem snapshot plus metadata (default command, environment variables, exposed ports). An image is the blueprint; a container is a running instance of that blueprint.
 
-**Registries** are servers that store and distribute images. Docker Hub is the default public registry, but organizations often use private registries such as GitHub Container Registry (GHCR), Amazon ECR (Elastic Container Registry, AWS's managed image storage service), or a self-hosted registry. When you `docker pull nginx`, the client asks the daemon to download the `nginx` image from Docker Hub.
-
-<Aside type="tip" title="Verifying Your Docker Installation">
-After installing Docker, confirm everything is working:
-
-```bash
-docker version
-docker info
-docker run hello-world
-```
-
-The `hello-world` image is tiny. If it prints a greeting, the daemon is running and can pull images from Docker Hub.
-</Aside>
+**Registries** are servers that store and distribute images. Docker Hub is the default public registry, but organizations often use private registries such as GitHub Container Registry (GHCR), Amazon ECR (Elastic Container Registry), or a self-hosted registry. When you run `docker pull nginx`, the client asks the daemon to download the `nginx` image from Docker Hub.
 
 ## Images and Layers
 
-A Docker image is not a single monolithic file. It is a stack of read-only layers, each representing a set of filesystem changes. This layered design uses a union filesystem to present all the layers as a single coherent directory tree.
+A Docker image is not a single monolithic file. It is a stack of read-only layers, each representing a set of filesystem changes. This layered design uses a **union filesystem** to present all the layers as a single coherent directory tree to a running container.
 
-Consider a simple image built from the following instructions: start with a base Python image, copy in your application code, then install dependencies. Each instruction produces a new layer:
+Consider an image for a web application built in sequence: start from a base runtime image, copy in the dependency manifest, install the dependencies, then copy in the application source code. Each instruction produces a new layer:
 
-1. **Base layer**: the Python runtime and its OS dependencies (from `python:3.12-slim`)
-2. **Copy layer**: your `requirements.txt` file added to the filesystem
-3. **Install layer**: the result of running `pip install`, adding packages to the filesystem
-4. **Application layer**: your application source code
+1. **Base layer**: the runtime and its OS dependencies
+2. **Manifest layer**: the dependency file added to the filesystem
+3. **Install layer**: the result of running the package installer
+4. **Application layer**: the application source code
 
-The power of this design is **layer caching**. If you rebuild the image and only your application code has changed, Docker reuses the cached base, copy, and install layers and only rebuilds the application layer. This makes rebuilds fast. It also means that if ten images on the same host all use `python:3.12-slim` as their base, that layer is stored only once on disk.
+The power of this design is **layer caching**. If you rebuild the image and only the application code has changed, Docker reuses the cached base, manifest, and install layers and only rebuilds the application layer. This makes rebuilds fast. It also means that if ten images on the same host all use the same base image, that layer is stored only once on disk.
 
 <Aside type="caution" title="Layer Order Matters for Caching">
-Docker invalidates the cache for a layer and all layers after it when something changes. If you copy your entire source code before installing dependencies, then every code change forces a reinstall. Always copy dependency manifests first, install, and then copy the rest of your source code. This pattern maximizes cache reuse.
+Docker invalidates the cache for a layer and all layers after it when something changes. If you copy your entire source code before installing dependencies, then every code change forces a full reinstall. The correct pattern is: copy dependency manifests first, install, then copy the rest of your source code. This maximizes cache reuse because dependencies change far less frequently than application code.
 </Aside>
 
 You can inspect the layers of any image with:
 
 ```bash
-docker history python:3.12-slim
+docker history nginx:alpine
 ```
 
-This shows each layer's size, the instruction that created it, and when it was built.
+This shows each layer's size, the instruction that created it, and when it was built. In many application images, one of the largest layers is the dependency installation step, though the base image or copied build artifacts can also dominate.
 
-## Writing a Dockerfile
+## Dockerfiles: Building Images
 
-A Dockerfile is a text file containing instructions that Docker executes in sequence to build an image. Let us write one for a minimal Flask application.
+A **Dockerfile** is a text file containing instructions that Docker executes in sequence to build an image. Each instruction produces a layer, and the final stack of layers becomes the image.
 
-First, the application itself. Create a file called `app.py`:
-
-```python
-from flask import Flask
-
-app = Flask(__name__)
-
-@app.route("/")
-def hello():
-    return "Hello from inside a container!\n"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-```
-
-And a `requirements.txt`:
-
-```
-flask==3.1.*
-```
-
-Now the Dockerfile:
+A typical web application Dockerfile follows a predictable structure:
 
 ```dockerfile
 FROM python:3.12-slim
@@ -153,86 +126,63 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 5000
+EXPOSE 8080
 
-CMD ["python", "app.py"]
+CMD ["python", "server.py"]
 ```
 
 Each instruction serves a specific purpose:
 
-- **FROM** sets the base image. We use `python:3.12-slim`, a Debian-based image with Python pre-installed but without extra development tools, keeping it small.
-- **WORKDIR** sets the working directory inside the container. Subsequent commands run relative to this path.
-- **COPY requirements.txt .** copies only the dependency manifest first (for layer caching).
-- **RUN** executes a command during the build. Here it installs Python packages. The `--no-cache-dir` flag prevents pip from storing download caches in the image, saving space.
-- **COPY . .** copies the rest of the application source code.
-- **EXPOSE** documents which port the application listens on. It does not actually publish the port; that happens at runtime.
-- **CMD** sets the default command that runs when a container starts from this image.
-
-Build the image with:
-
-```bash
-docker build -t flask-app .
-```
-
-The `-t` flag tags the image with a human-readable name. The `.` tells Docker to use the current directory as the build context (the set of files available to `COPY` instructions).
+- **FROM** sets the base image. `python:3.12-slim` is a Debian-based image with Python pre-installed but without extra development tools, keeping it small. Every image descends from a base, ultimately tracing back to `scratch` (an empty filesystem).
+- **WORKDIR** sets the working directory inside the container. Subsequent `COPY`, `RUN`, and `CMD` instructions execute relative to this path. Using `WORKDIR` avoids `cd` commands scattered through the file.
+- **COPY requirements.txt .** copies only the dependency manifest first. This is a deliberate caching optimization: the install step only re-runs when the manifest changes.
+- **RUN** executes a command during the build and commits the result as a new layer. Here it installs packages. The `--no-cache-dir` flag prevents pip from storing download caches in the image, saving space.
+- **COPY . .** copies the rest of the application source code after the install step so that code changes do not bust the install cache.
+- **EXPOSE** documents which port the application listens on. It does not actually publish the port; that happens at runtime with `-p`.
+- **CMD** sets the default command that runs when a container starts from this image. It can be overridden at runtime.
 
 ### Multi-Stage Builds
 
-For compiled languages or applications that need build tools, multi-stage builds let you use one image for building and a different (smaller) image for running. Even for Python applications, this pattern can be useful to separate dependency compilation from the final runtime image.
+For compiled languages, the toolchain required to build an application (compiler, linker, development headers) is much larger than what is needed to run the resulting binary. Multi-stage builds let you use one image for compilation and a different, smaller image for the final artifact.
 
 ```dockerfile
-# Stage 1: build dependencies
-FROM python:3.12-slim AS builder
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-# Stage 2: production image
-FROM python:3.12-slim
-WORKDIR /app
-COPY --from=builder /install /usr/local
+# Build stage: compile the application
+FROM golang:1.22 AS build
+WORKDIR /src
 COPY . .
-EXPOSE 5000
-CMD ["python", "app.py"]
+RUN CGO_ENABLED=0 go build -o /app ./cmd/server
+
+# Runtime stage: copy only the compiled binary
+FROM scratch
+COPY --from=build /app /app
+ENTRYPOINT ["/app"]
 ```
 
-The final image contains only the runtime and installed packages, not the build tools or intermediate files. For languages like Go or Rust, where compilation produces a static binary, the final stage can use an extremely minimal base image such as `alpine` or even `scratch` (an empty filesystem).
+The final image contains only the binary, produced from an empty `scratch` base. There are no shell, no package manager, no Go toolchain in the deployed image. The attack surface is minimal and the image size might be 10 MB where the build stage weighed 1 GB.
+
+Multi-stage builds are useful for any language that produces distributable artifacts: Go, Rust, Java (producing a JAR or native image), and C/C++. They can also be used to separate test execution from the production image.
 
 ## Running Containers
 
-With an image built, you can create and start a container:
+With an image available, `docker run` creates a container from it and starts the application process:
 
 ```bash
-docker run -d -p 8080:5000 --name my-flask flask-app
+docker run -d -p 8080:80 --name webserver nginx:alpine
 ```
 
-Let us break down the flags:
+The most commonly used flags:
 
-- **`-d`** (detach) runs the container in the background and prints its ID.
-- **`-p 8080:5000`** maps port 8080 on the host to port 5000 inside the container. You access the app at `http://localhost:8080`.
-- **`--name my-flask`** gives the container a memorable name instead of a random one.
-
-Verify it is running and test it:
-
-```bash
-docker ps
-curl http://localhost:8080
-```
-
-You should see the "Hello from inside a container!" response.
-
-### Other Useful Flags
-
-The `docker run` command accepts many options. Here are the most commonly used:
-
+- **`-d`** (detach) runs the container in the background and prints its ID. Without `-d`, the container's output streams to your terminal and the container stops when you press Ctrl+C.
+- **`-p host:container`** maps a port on the host to a port inside the container. Traffic arriving at the host port is forwarded to the container's internal IP on the container port.
+- **`--name`** gives the container a memorable name instead of a randomly generated one. Named containers are easier to reference in subsequent `docker` commands.
 - **`-e KEY=VALUE`** sets an environment variable inside the container. This is the standard way to pass configuration (database URLs, API keys, feature flags) without baking values into the image.
-- **`-v /host/path:/container/path`** creates a bind mount, mapping a directory on the host into the container. Changes are visible in both directions.
+- **`-v /host/path:/container/path`** creates a bind mount, mapping a host directory into the container. Changes are visible in both directions immediately.
 - **`--rm`** automatically removes the container when it exits, useful for one-off commands.
-- **`--restart unless-stopped`** tells Docker to restart the container if it crashes or if the host reboots, unless you explicitly stopped it.
+- **`--restart unless-stopped`** tells Docker to restart the container if it crashes or if the host reboots, unless you explicitly stop it.
 
 ## Container Lifecycle
 
-Containers move through a simple lifecycle: created, running, stopped, removed. Docker provides commands for each transition.
+Containers move through a simple lifecycle: created, running, stopped, removed. Docker provides commands for each state:
 
 ```bash
 # View running containers
@@ -242,110 +192,154 @@ docker ps
 docker ps -a
 
 # Stop a running container (sends SIGTERM, then SIGKILL after timeout)
-docker stop my-flask
+docker stop webserver
 
 # Start a stopped container
-docker start my-flask
+docker start webserver
 
 # Restart a container
-docker restart my-flask
+docker restart webserver
 
 # View container logs (stdout/stderr)
-docker logs my-flask
+docker logs webserver
 
 # Follow logs in real time
-docker logs -f my-flask
+docker logs -f webserver
 
 # Execute a command inside a running container
-docker exec -it my-flask /bin/bash
+docker exec -it webserver sh
 
-# Show port mappings for a container
-docker port my-flask
-
-# Live resource usage stats (CPU, memory, network I/O)
-docker stats          # all containers
-docker stats my-flask # one container (Ctrl+C to exit)
+# Show resource usage (CPU, memory, network I/O)
+docker stats
 
 # Remove a stopped container
-docker rm my-flask
+docker rm webserver
 
 # Force-remove a running container
-docker rm -f my-flask
+docker rm -f webserver
 ```
 
-The `docker exec` command is particularly useful for debugging. The `-it` flags allocate an interactive terminal, giving you a shell inside the running container. `docker stats` provides a real-time view of CPU and memory consumption, useful when diagnosing performance issues without installing extra tooling inside the container.
+The `docker exec -it` command is particularly useful for debugging. The `-it` flags allocate an interactive terminal, giving you a shell inside the running container. `docker stats` provides a real-time view of CPU and memory consumption without installing extra tooling inside the container.
 
 <Aside type="caution" title="Containers Are Ephemeral">
-When you remove a container, any data written inside the container's filesystem is gone. Containers are designed to be disposable. If your application produces data that must survive container replacement (database files, uploaded images, logs), you need to use volumes or bind mounts, which are covered in the next section.
+When you remove a container, any data written inside the container's filesystem is gone. Containers are designed to be disposable: the application process, its dependencies, and its filesystem are all temporary. If your application produces data that must survive container replacement (database files, uploaded content, logs), you must store that data outside the container using volumes or bind mounts.
 </Aside>
 
-## Volumes and Bind Mounts
+## Container Networking
 
-Docker provides two mechanisms for persistent data: **volumes** and **bind mounts**.
+Every container gets its own network namespace, but Docker also needs to make containers reachable from the host and from each other. It does this through a set of network drivers, each with different isolation and connectivity characteristics.
 
-**Bind mounts** map a specific path on the host filesystem into the container. They are useful during development, when you want the container to see your source code changes in real time:
+### Bridge Networks
+
+The default network mode is **bridge**. On a typical Linux Docker installation, Docker creates a virtual bridge interface on the host (usually `docker0`) and assigns each container a private IP address within that bridge's subnet, often `172.17.0.0/16` unless the daemon or host networking has been customized. On Docker Desktop for macOS or Windows, the bridge exists inside the Linux VM Docker manages, so the exact private subnet may differ. Containers can reach the internet through NAT. However, a container on the default bridge network is not directly reachable from the host network without explicit port publishing.
+
+**Port publishing** (`-p host:container`) maps a port on the host to a port inside the container. Docker configures a NAT rule forwarding traffic arriving at the host port to the container's private IP on the container port. The container process only knows it is listening on, say, port 80; the host port is a translation that exists outside the container's view. This is why two containers can both "listen on port 80" without conflicting: they each have a unique private IP, and only the host-side ports (which must be unique) are exposed externally.
+
+### User-Defined Networks and Container DNS
+
+The default bridge network has one significant limitation: containers on it cannot reach each other by name, only by IP. When you create a **user-defined bridge network**, Docker adds an embedded DNS resolver. Containers attached to the same user-defined network can reach each other by container name or service name, without knowing IP addresses.
 
 ```bash
-docker run -d -p 8080:5000 -v $(pwd):/app --name my-flask flask-app
+# Create a named network
+docker network create myapp
+
+# Run two containers on it
+docker run -d --network myapp --name database postgres:16-alpine
+docker run -d --network myapp --name web alpine:3.20 sleep infinity
+
+# 'web' can resolve 'database' by name on the shared network
+docker exec web ping -c 1 database
 ```
 
-Now edits to `app.py` on your host are immediately visible inside the container (though Flask would need to be running in debug/reload mode to pick them up automatically).
+This DNS-based service discovery is how Docker Compose inter-service communication works: Compose creates a user-defined network for each project and attaches all services to it. A `web` service can reach a `database` service at the hostname `database` without any manual network configuration. Name resolution only tells you the other container is reachable on the network; it does not guarantee the application inside that container is ready to serve requests.
 
-**Volumes** are managed by Docker and stored in a Docker-controlled area of the host filesystem (`/var/lib/docker/volumes/` on Linux). They are the preferred mechanism for production data because Docker handles permissions and lifecycle:
+### Host and None Networking
+
+**Host networking** (`--network host`) removes the network namespace entirely: the container process binds directly to the host's network interfaces. There is no port mapping; if the container listens on port 8080, the host is also exposing port 8080. This is useful for network tooling or performance-sensitive applications but sacrifices the isolation that container networking normally provides.
+
+**No networking** (`--network none`) gives the container only a loopback interface. It cannot make or receive network connections. This is appropriate for batch processing jobs that read and write files and have no reason to access the network.
+
+<Aside type="note" title="Container Networking on macOS and Windows">
+For Linux containers on macOS and Windows, Docker Desktop runs the containers inside a Linux VM. The bridge network exists inside that VM, not on your host directly. Port publishing still works the same way from your perspective (ports appear on `localhost`), but tools like `docker network inspect` will show the VM's internal addressing rather than your host's network. This is transparent for most use cases but explains why you generally cannot ping a container's private IP directly from a macOS or Windows terminal.
+</Aside>
+
+## Persistent Data: Volumes and Bind Mounts
+
+Docker provides two mechanisms for data that must outlive a container: **volumes** and **bind mounts**.
+
+**Bind mounts** map a specific path on the host filesystem into the container. They are useful during development when you want the container to see your source code changes in real time without rebuilding the image, or when you need to inject configuration files from the host.
+
+**Volumes** are managed by Docker and stored in a Docker-controlled area of the host filesystem (`/var/lib/docker/volumes/` on Linux). Docker handles their permissions and lifecycle. They are the preferred mechanism for application data that must persist across container replacements.
 
 ```bash
 # Create a named volume
-docker volume create app-data
+docker volume create db-data
 
-# Use it in a container
-docker run -d -p 8080:5000 -v app-data:/app/data --name my-flask flask-app
+# Attach it to a container
+docker run -d -v db-data:/var/lib/postgresql/data postgres:16-alpine
 
 # List volumes
 docker volume ls
 
-# Remove a volume (only works if no container is using it)
-docker volume rm app-data
+# Inspect where a volume lives on the host
+docker volume inspect db-data
+
+# Remove a volume (only if no container is currently using it)
+docker volume rm db-data
 ```
 
-The key difference is intent: bind mounts are for sharing host files with a container (development workflows, configuration files); volumes are for data that belongs to the container's application and should persist across container replacements (databases, upload directories).
+The key distinction between the two mechanisms: bind mounts express "share this specific host path with the container," while volumes express "give this container persistent storage that Docker manages." For production databases, volumes are preferred because they are not tied to a specific host path and Docker can manage backups, migration, and cleanup.
 
-## Docker Compose
+## Docker Compose: Multi-Container Applications
 
-Real applications rarely consist of a single container. A web application typically needs a web server, a database, and perhaps a cache or message queue. Docker Compose lets you define and manage multi-container applications using a single YAML file.
+Real applications rarely consist of a single container. A web application typically needs a web server, a database, and perhaps a cache or message queue. **Docker Compose** lets you define and manage multi-container applications using a single YAML file.
 
-Consider extending our Flask app to use a Redis cache for counting page visits. The `compose.yml` file describes both services:
+Consider a web application that needs a database. The `compose.yml` file describes both services and their relationship:
 
 ```yaml
 services:
   web:
     build: .
     ports:
-      - "8080:5000"
+      - "8080:80"
     environment:
-      - REDIS_HOST=redis
+      - DATABASE_URL=postgres://app:secret@database:5432/appdb
     depends_on:
-      - redis
+      database:
+        condition: service_healthy
+    restart: unless-stopped
 
-  redis:
-    image: redis:7-alpine
+  database:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=appdb
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=secret
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d appdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     volumes:
-      - redis-data:/data
+      - db-data:/var/lib/postgresql/data
 
 volumes:
-  redis-data:
+  db-data:
 ```
 
 Several things to notice:
 
-**Services** are the containers you want to run. Each service can either `build` from a Dockerfile or pull a pre-built `image` from a registry.
+**Services** are the containers you want to run. Each service can either `build` from a local Dockerfile (as `web` does here) or pull a pre-built `image` from a registry (as `database` does).
 
-**Networking** is automatic. Compose creates a bridge network for the application, and each service is reachable by its service name as a DNS hostname. The Flask app can connect to Redis at the hostname `redis` on port 6379 without any manual network configuration.
+**Networking is automatic.** Compose creates a user-defined bridge network for the application and attaches all services to it. The `web` service can connect to the database at the hostname `database` on port 5432 without manual network configuration. The connection string `postgres://app:secret@database:5432/appdb` works because `database` resolves to the database container's IP address within the shared network.
 
-**Volumes** declared at the top level are named volumes that persist across `docker compose down` and `docker compose up` cycles (unless you explicitly pass `--volumes` to the down command).
+**Environment variables** are the standard mechanism for injecting configuration. Values that differ between environments (development, staging, production) such as database URLs, API keys, and feature flags are passed in at runtime, not baked into the image.
 
-**depends_on** controls startup order. Here, the `web` service waits for the `redis` service to start before it begins. Note that "started" means the container process has launched, not necessarily that the service inside is ready to accept connections.
+**Volumes** declared at the top level are named volumes that persist across `docker compose down` and `docker compose up` cycles unless you explicitly pass `--volumes` to the down command.
 
-The workflow is simple:
+**`depends_on`** controls startup order. In its simplest form, it only means the dependency container is started first, not that the service inside is actually ready to accept connections. In the example above, the long form with `condition: service_healthy` works together with the database `healthcheck` so the `web` service waits for PostgreSQL to report readiness. Even then, production applications should still include retry logic, because distributed systems can fail after startup too.
+
+The workflow is:
 
 ```bash
 # Build images and start all services in the background
@@ -360,7 +354,7 @@ docker compose logs
 # Follow logs from a specific service
 docker compose logs -f web
 
-# Stop and remove containers (but preserve volumes)
+# Stop and remove containers (preserves volumes)
 docker compose down
 
 # Stop and remove containers AND volumes
@@ -368,87 +362,80 @@ docker compose down --volumes
 ```
 
 <Aside type="tip" title="Compose File Naming">
-Docker Compose looks for `compose.yml` or `docker-compose.yml` in the current directory by default. The shorter `compose.yml` name is preferred in modern usage. You can specify a different file with `docker compose -f custom.yml up`.
+Docker Compose looks for `compose.yml` or `docker-compose.yml` in the current directory by default. The shorter `compose.yml` is preferred in modern usage. You can specify a different file with `docker compose -f custom.yml up`.
 </Aside>
 
-To make the example complete, here is the updated `app.py` that uses Redis:
+## Image Registries
 
-```python
-import os
-from flask import Flask
-import redis
-
-app = Flask(__name__)
-r = redis.Redis(host=os.environ.get("REDIS_HOST", "localhost"), port=6379)
-
-@app.route("/")
-def hello():
-    count = r.incr("hits")
-    return f"Hello! This page has been viewed {count} time(s).\n"
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-```
-
-And the updated `requirements.txt`:
-
-```
-flask==3.1.*
-redis==5.*
-```
-
-With `docker compose up --build`, both containers start, share a network, and the Flask app can immediately reach Redis by hostname.
-
-## Registries: Sharing and Distributing Images
-
-An image built on your laptop is only useful if you can share it. **Registries** are servers that store and distribute images. The most common are:
+An image built locally is only useful if it can be shared and deployed. **Registries** are servers that store and distribute images. The most common:
 
 - **Docker Hub** (`hub.docker.com`): the default public registry; hosts official images for nginx, postgres, redis, and thousands of community images.
-- **GitHub Container Registry (GHCR)** (`ghcr.io`): integrated with GitHub; useful when your source code is already on GitHub.
-- **Amazon ECR, Google Artifact Registry, Azure Container Registry**: cloud-provider registries for production deployments.
+- **GitHub Container Registry (GHCR)** (`ghcr.io`): integrated with GitHub; images are published alongside source code in the same organization.
+- **Amazon ECR, Google Artifact Registry, Azure Container Registry**: cloud-provider registries for production deployments, typically used with CI/CD pipelines.
 
-### Tagging Images
+### Tagging and Pushing
 
-Before you can push an image, you need to tag it with the destination repository path:
+Before pushing, an image must be tagged with the destination repository path. The format is `registry/repository:tag`. If no registry is specified, Docker assumes Docker Hub.
 
 ```bash
-# Tag a locally-built image for Docker Hub
-docker tag flask-app myusername/flask-app:1.0.0
-docker tag flask-app myusername/flask-app:latest
+# Tag for Docker Hub
+docker tag my-app myusername/my-app:1.0.0
+docker tag my-app myusername/my-app:latest
 
 # Tag for GitHub Container Registry
-docker tag flask-app ghcr.io/myusername/flask-app:latest
+docker tag my-app ghcr.io/myusername/my-app:latest
+
+# Push
+docker push myusername/my-app:latest
+
+# Pull on another machine
+docker pull myusername/my-app:latest
 ```
 
-The format is `registry/repository:tag`. If no registry is specified, Docker assumes Docker Hub.
-
-### Pushing and Pulling
-
-```bash
-# Log in to Docker Hub (reads password from stdin for security)
-docker login --username myusername --password-stdin < ~/.docker/creds
-
-# Push an image
-docker push myusername/flask-app:latest
-
-# Pull an image
-docker pull myusername/flask-app:latest
-
-# Log out
-docker logout
-```
-
-For GHCR, use `docker login ghcr.io` and authenticate with a GitHub personal access token. In CI/CD workflows, the `GITHUB_TOKEN` secret can be used directly (as shown in the GitHub Actions lecture), so no manual credentials are needed.
+Tags are mutable pointers. `latest` is a convention, not a guarantee of recency -- a registry administrator can point `latest` at any image version. For reproducible deployments, use specific version tags like `1.0.0` or image digest references (`@sha256:...`), which are immutable.
 
 <Aside type="caution">
-When pushing to a public repository, remember that the image layers are publicly accessible. Never bake secrets, passwords, or private keys into an image layer, even in an intermediate layer that was later overwritten. Use multi-stage builds and runtime secrets injection instead.
+When pushing to a public repository, every layer is publicly accessible. Never bake secrets, passwords, or private keys into an image layer, even in an intermediate layer that was later overwritten. All layers in the build history are accessible to anyone who pulls the image. Use multi-stage builds and runtime secrets injection instead.
 </Aside>
+
+## Container Runtimes: Docker, Podman, and OCI
+
+Docker popularized containers, but it is not the only tool in the ecosystem. Understanding the standards that govern container interoperability helps you reason about alternatives.
+
+### The Open Container Initiative (OCI)
+
+The **Open Container Initiative (OCI)**, formed in 2015 by Docker, Red Hat, Google, and others, defines two standards:
+
+- **OCI Image Specification**: how container images are formatted and stored (layers, manifests, configuration).
+- **OCI Runtime Specification**: the interface a container runtime must implement to create and manage containers.
+
+Because Docker images conform to the OCI image specification, any OCI-compatible runtime can run them. This is what makes the ecosystem of alternative tools possible.
+
+**runc** is the OCI reference runtime: a small, low-level tool that directly calls Linux namespaces and cgroups to create and run containers. Both Docker and Podman use runc (or a compatible implementation) under the hood. In Docker's architecture, **containerd** sits between the Docker daemon and runc. It is the component that manages container lifecycle tasks such as pulling images, unpacking layers, and supervising running containers. When you run `docker run`, the chain is: Docker client → Docker daemon → containerd → runc, with runc making the actual kernel calls to create namespaces and apply cgroups.
+
+### Podman
+
+**Podman** is an OCI-compatible container engine developed by Red Hat. It is the default container tool on RHEL 8+, Fedora, and AlmaLinux, and is available on all major Linux distributions and macOS.
+
+Podman differs from Docker in two important ways:
+
+**Daemonless.** There is no long-running background process. Each `podman` command is a direct process that creates and manages containers itself, then exits. There is no single daemon running as root to which all operations are delegated.
+
+**Rootless by default.** Containers run as your own user identity on the host rather than requiring root privileges or a root-owned daemon. If an attacker were to escape the container's namespace isolation, they would land as an unprivileged user, not as root.
+
+Podman's CLI is deliberately compatible with Docker's. Most `docker` commands work identically with `podman` substituted, and users who have transitioned often run `alias docker=podman` without changing any existing scripts. Podman reads OCI images, so it can pull and run images from Docker Hub, GHCR, or any other OCI registry. For Compose-style workflows, `podman compose` (or the separate `podman-compose` package) handles the same `compose.yml` syntax.
+
+### OrbStack
+
+On macOS, and in many Windows setups that run Linux containers, containers require a Linux VM because container isolation depends on Linux kernel features. Docker Desktop and Podman Desktop manage this VM transparently. **OrbStack** began as a macOS-focused alternative to Docker Desktop and is still primarily associated with macOS, but it is no longer strictly macOS-only. It runs a lightweight Linux VM with faster startup time, lower memory overhead, and better filesystem performance than Docker Desktop on supported platforms. OrbStack is fully compatible with the Docker CLI and Docker socket, so all `docker` commands work without modification.
+
+The practical implication: because the OCI standard defines both image format and runtime interface, the concepts in this lecture -- images, layers, Dockerfiles, volumes, Compose -- apply regardless of whether you use Docker, Podman, or OrbStack. The image format, Dockerfile syntax, and Compose file format are all standardized or widely compatible across the ecosystem.
 
 ## Container Orchestration
 
 Managing a handful of containers manually works for development and small deployments. At scale, you need **container orchestration**: a system that automatically deploys, scales, heals, and load-balances containers across a cluster of machines.
 
-**Kubernetes** (abbreviated **K8s**, where 8 represents the eight letters between "K" and "s") is the dominant orchestration platform. A Kubernetes cluster consists of a control plane (the set of components that make scheduling and management decisions) and worker nodes (the machines that actually run your containers). You describe the desired state (run three replicas of this image, expose them on this port, restart if they fail) and Kubernetes continuously works to make reality match that description. Key capabilities include:
+**Kubernetes** (abbreviated **K8s**, where 8 represents the eight letters between "K" and "s") is the dominant orchestration platform. A Kubernetes cluster consists of a **control plane** (the components that make scheduling and management decisions) and **worker nodes** (the machines that actually run containers). You describe desired state in YAML manifests ("run three replicas of this image, expose them on this port, restart if they fail"), and Kubernetes continuously works to make reality match that description. Key capabilities include:
 
 - Automated deployment and rollback
 - Horizontal scaling (add more replicas under load)
@@ -456,19 +443,19 @@ Managing a handful of containers manually works for development and small deploy
 - Load balancing across replicas
 - Rolling updates with zero downtime
 
-Docker's own simpler orchestration tool is **Docker Swarm**, which is easier to set up but less capable than Kubernetes. For most new projects, Kubernetes (or a managed version like Amazon EKS, Google GKE, or Azure AKS, where the cloud provider operates the control plane for you) is the industry standard.
+Kubernetes will be discussed later in more depth.
+
+**Docker Swarm** is Docker's own simpler orchestration tool. It is easier to set up than Kubernetes but less capable. For most new projects, Kubernetes (or a managed variant like Amazon EKS, Google GKE, or Azure AKS, where the cloud provider operates the control plane) is the industry standard.
 
 ## Best Practices
 
-As you work with Docker in more complex scenarios, several practices will save you time and prevent common problems.
-
 ### Use Small Base Images
 
-The `python:3.12` image is over 900 MB; `python:3.12-slim` is around 150 MB. Alpine-based images can be even smaller, though they use `musl` instead of `glibc`, which can cause compatibility issues with some compiled C extensions. Start with `-slim` variants and move to Alpine only if your dependencies support it.
+The `python:3.12` image is over 900 MB; `python:3.12-slim` is around 150 MB. Alpine-based images can be even smaller, though they use `musl` instead of `glibc`, which can cause compatibility issues with some compiled C extensions. Start with `-slim` variants and switch to Alpine only if your dependencies support it and image size is a significant concern.
 
 ### Add a .dockerignore File
 
-Just as `.gitignore` prevents unnecessary files from entering your repository, `.dockerignore` prevents unnecessary files from entering the build context. Without it, `docker build` sends everything in the current directory to the daemon, including `.git/`, `node_modules/`, virtual environments, and other large directories.
+Just as `.gitignore` prevents unnecessary files from entering version control, `.dockerignore` prevents unnecessary files from entering the build context. Without it, `docker build` sends everything in the current directory to the daemon, including `.git/`, virtual environments, `node_modules/`, and other large directories. This slows builds and risks including sensitive files in the image.
 
 ```
 .git
@@ -476,13 +463,12 @@ Just as `.gitignore` prevents unnecessary files from entering your repository, `
 __pycache__
 *.pyc
 .env
+node_modules
 ```
-
-This speeds up builds and prevents sensitive files (like `.env` containing secrets) from accidentally ending up in the image.
 
 ### Run as a Non-Root User
 
-By default, processes inside a container run as root. If an attacker exploits a vulnerability in your application, they gain root access inside the container, and depending on misconfigurations, potentially on the host. Create a dedicated user in your Dockerfile:
+By default, processes inside a container run as root. If an attacker exploits a vulnerability in your application, they gain root access inside the container, which may translate to host access through misconfigurations. Create a dedicated user in your Dockerfile and switch to it before the runtime command:
 
 ```dockerfile
 FROM python:3.12-slim
@@ -497,46 +483,37 @@ COPY . .
 
 USER appuser
 
-EXPOSE 5000
-CMD ["python", "app.py"]
+EXPOSE 8080
+CMD ["python", "server.py"]
 ```
 
-The `USER` instruction switches all subsequent commands (and the container's runtime process) to the non-privileged `appuser`.
+The `USER` instruction switches all subsequent commands and the container's runtime process to the non-privileged `appuser`.
 
 ### Add Health Checks
 
-A container can be "running" (the process has not exited) without being "healthy" (the application is accepting requests). Docker supports a `HEALTHCHECK` instruction that periodically runs a command to verify the application's state:
+A container can be "running" (the process has not exited) without being "healthy" (the application is actually responding). Docker supports a `HEALTHCHECK` instruction that periodically runs a command to verify the application's state:
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD curl -f http://localhost:5000/ || exit 1
+  CMD curl -f http://localhost:8080/ || exit 1
 ```
 
-Docker marks the container as `healthy`, `unhealthy`, or `starting` based on the result. Orchestrators like Docker Compose and Kubernetes use health status to make routing and restart decisions.
+Docker marks the container as `healthy`, `unhealthy`, or `starting` based on the result. Docker and Docker Compose can surface this state directly, and orchestrators provide analogous mechanisms such as readiness and liveness probes in Kubernetes. The underlying idea is the same: a process can still be running even when the application is not yet ready or has become unhealthy.
 
 ### Keep Secrets Out of Images
 
-Never put passwords, API keys, or certificates directly in a Dockerfile or in files that get copied into the image. Anyone who pulls the image can extract them. Instead, inject secrets at runtime through environment variables, Docker secrets (in Swarm mode), or external secret managers. Even environment variables are visible via `docker inspect`, so for highly sensitive values, mount a secrets file from a volume or use a dedicated secrets management tool.
+Never put passwords, API keys, or certificates in a Dockerfile or in files that get copied into the image. Anyone who pulls the image can extract them from any layer. Inject secrets at runtime through environment variables, Docker secrets (in Swarm mode), or external secret managers (HashiCorp Vault, AWS Secrets Manager). Even environment variables are visible via `docker inspect`, so for highly sensitive values, mount a secrets file from a volume or use a dedicated secrets management tool.
 
-## Pulling It All Together
+## Putting It All Together
 
-Let us review the full journey by tracing what happens when you work with our Flask application:
+The container model introduces a clean separation of concerns: the **image** is the immutable, versioned artifact; the **container** is the ephemeral runtime instance; **volumes** hold the state that must outlive any individual instance; **Compose** wires services together with automatic networking; and **registries** distribute images to wherever they need to run. Namespaces and cgroups enforce the isolation and resource limits that make this safe on a shared host.
 
-<Steps>
-1. You write a `Dockerfile` that starts from `python:3.12-slim`, installs dependencies, copies source code, and sets the startup command.
-
-2. `docker build -t flask-app .` reads the Dockerfile, executes each instruction to produce a layer, and tags the final image.
-
-3. `docker run -d -p 8080:5000 flask-app` creates a container from the image, sets up an isolated network namespace, maps ports, and starts the application process.
-
-4. `docker compose up --build` scales this to multiple services (Flask plus Redis), connected by a shared network, with Redis data persisted in a named volume.
-
-5. `docker compose down` stops and removes the containers. The named volume survives, so Redis data is intact when you bring the stack back up.
-</Steps>
-
-Containers do not replace the need to understand operating systems, networking, or security. They are a packaging and isolation tool that, when used well, makes software delivery more predictable. What Docker adds is a standard interface: build an image once, run it anywhere that has a compatible container runtime.
+What containers do not replace is the need to understand the underlying systems. A containerized application still depends on networking, storage, security, and the OS. Containers change where you manage these concerns: from the host configuration to the container definition. But they do not make those concerns disappear. A Dockerfile, a Compose file, and an understanding of port publishing and volumes are the tools that translate operational knowledge into reproducible, portable deployments.
 
 ## Resources
 
-- <a href="https://www.youtube.com/watch?v=pg19Z8LL06w" target="_blank" rel="noopener noreferrer">Docker Crash Course for Absolute Beginners (YouTube)</a>
-- <a href="https://www.youtube.com/watch?v=3c-iBn73dDE" target="_blank" rel="noopener noreferrer">Docker Tutorial for Beginners: Full Course 3 Hours (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=pg19Z8LL06w" target="_blank" rel="noopener noreferrer">Docker Crash Course for Absolute Beginners (TechWorld with Nana) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=3c-iBn73dDE" target="_blank" rel="noopener noreferrer">Docker Tutorial for Beginners: Full Course (TechWorld with Nana) (YouTube)</a>
+- <a href="https://docs.docker.com/" target="_blank" rel="noopener noreferrer">Docker Documentation</a>
+- <a href="https://podman.io/docs" target="_blank" rel="noopener noreferrer">Podman Documentation</a>
+- <a href="https://opencontainers.org/" target="_blank" rel="noopener noreferrer">Open Container Initiative</a>

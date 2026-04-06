@@ -1,112 +1,572 @@
 ---
-title: "Docker Image Exploration"
-description: "Pull images, inspect layers, run containers, and write a minimal Dockerfile on your local machine."
+title: "Container Exploration"
+description: "Pull images, investigate namespace isolation, observe ephemeral storage, persist data with volumes, build a layered image, explore container networking, and run a multi-service Compose stack."
 sidebar:
   order: 5
 draft: true
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity builds familiarity with Docker's core mechanics before the lab introduces Docker Compose. You need Docker installed on your laptop (see the [Windows Users](/practicalities/windows-users/) page if you are on Windows).
+This activity puts into practice the concepts from the Containerization with Docker lecture. Instead of following a tutorial, you will investigate how containers actually behave: what isolation they provide, what they do and do not preserve, and how the tools you use every day translate into kernel-level operations.
 
-## Steps
+<Aside type="note" title="Podman Users">
+All commands in this activity work identically with `podman` substituted for `docker`. If you are on a Linux system with Podman installed, or prefer Podman for its rootless defaults, just replace `docker` with `podman` throughout. Where behavior differs meaningfully, a note will call it out.
+</Aside>
+
+---
+
+## Prerequisites
+
+You need a container runtime installed on your laptop before starting.
+
+<Tabs syncKey="os">
+<TabItem label="macOS">
+Two options:
+
+**Docker Desktop** (standard): Download and install from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). After installation, start Docker Desktop from your Applications folder and wait for the whale icon in the menu bar to show "Docker Desktop is running."
+
+**OrbStack** (lightweight alternative): Download from [orbstack.dev](https://orbstack.dev/). OrbStack is a macOS-native container runtime that uses less memory and starts faster than Docker Desktop. It is fully compatible with the Docker CLI: all `docker` commands work without modification.
+
+Verify your installation:
+
+```bash
+docker version
+docker run --rm hello-world
+```
+</TabItem>
+<TabItem label="Linux">
+**Docker Engine**: Follow the official installation guide for your distribution at [docs.docker.com/engine/install/](https://docs.docker.com/engine/install/). After installing, add your user to the `docker` group so you can run commands without `sudo`:
+
+```bash
+sudo usermod -aG docker $USER
+# Log out and back in for the group change to take effect
+```
+
+**Podman** (rootless alternative): Available in most package managers:
+
+```bash
+# Ubuntu/Debian
+sudo apt install -y podman
+
+# Fedora / AlmaLinux / RHEL
+sudo dnf install -y podman
+
+# Arch Linux
+sudo pacman -S podman
+```
+
+Podman runs rootless by default: no daemon, no `sudo` required.
+
+Verify:
+
+```bash
+docker version   # or: podman version
+docker run --rm hello-world
+```
+</TabItem>
+<TabItem label="Windows">
+**Docker Desktop with WSL2**: Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). Docker Desktop requires WSL2 to be enabled. During installation, Docker Desktop will offer to enable WSL2 if it is not already configured.
+
+After installation, open a WSL2 terminal (e.g., Ubuntu from the Start menu) and run:
+
+```bash
+docker version
+docker run --rm hello-world
+```
+
+**Podman Desktop** (alternative): Download from [podman-desktop.io](https://podman-desktop.io/). Podman Desktop provides a Podman environment on Windows using a WSL2-backed Linux VM. All `docker` commands work with `podman` substituted.
+</TabItem>
+</Tabs>
+
+<Aside type="tip" title="Using EC2 Instead of Your Laptop">
+All commands in this activity also work on a Linux EC2 instance with Docker Engine installed. If you prefer to run the activity in the cloud, launch an Amazon Linux 2023 or Ubuntu instance, install Docker Engine, and SSH in. The steps are identical.
+</Aside>
+
+---
+
+## Part 1: Pulling and Inspecting Images
+
+Before running anything, let us look at what an image actually is.
 
 <Steps>
-
-1. **Verify Docker is running**
-
-   ```bash
-   docker version
-   docker run --rm hello-world
-   ```
-
-2. **Pull and compare two official images**
+1. Pull two variants of the nginx image:
 
    ```bash
    docker pull nginx:alpine
    docker pull nginx:latest
+   ```
+
+2. Compare their sizes:
+
+   ```bash
    docker images nginx
    ```
 
-   Note the size difference between the two tags. Record both sizes.
+   Record the size of each. The `alpine` variant should be considerably smaller.
 
-3. **Inspect image layers**
+3. Inspect the layers of the alpine image:
 
    ```bash
    docker history nginx:alpine
    ```
 
-   Count the number of layers. Find the layer with the largest size and note what command created it.
+   Each row is one layer. The columns show the instruction that created it, when it was built, and how much disk space it added.
 
-4. **Run a container and explore it**
+   Record:
+   - How many layers does `nginx:alpine` have?
+   - Which layer is the largest, and what instruction created it?
+   - Why are some layers listed with size `0B`?
+
+4. Examine the image's metadata:
 
    ```bash
-   docker run -d --name my-nginx -p 8080:80 nginx:alpine
-   docker exec -it my-nginx sh
+   docker inspect nginx:alpine
    ```
 
-   Inside the container, run:
+   In the JSON output, find:
+   - **`ExposedPorts`**: what port does the image declare as its service port?
+   - **`Entrypoint`** and **`Cmd`**: what command runs when a container starts from this image?
+   - **`Env`**: what environment variables are set by default?
+</Steps>
 
-   ```sh
+<ActivityQuestion>
+`nginx:latest` is based on Debian and `nginx:alpine` is based on Alpine Linux. `nginx:latest` is several times larger. What is the operational reason to choose the smaller image for production deployments? What tradeoff, if any, does Alpine introduce?
+</ActivityQuestion>
+
+<ActivityQuestion>
+`docker history` shows layers oldest-first (at the bottom) or newest-first (at the top). Looking at the output, which layer represents the base OS, and which layers represent nginx-specific installation steps? How does this reflect the order of instructions in a Dockerfile?
+</ActivityQuestion>
+
+---
+
+## Part 2: Inside the Container: Namespace Isolation
+
+A running container is an isolated process with its own view of the system. This section makes that isolation visible.
+
+<Steps>
+1. Start an nginx container in the background and then open an interactive shell inside it:
+
+   ```bash
+   docker run -d --name sandbox nginx:alpine
+   docker exec -it sandbox sh
+   ```
+
+   You are now inside the container's namespace.
+
+2. Explore what the container can see:
+
+   ```bash
+   # What is this machine's hostname?
+   hostname
+
+   # Who is the current user?
    whoami
+
+   # What processes are running?
+   ps aux
+
+   # What does the filesystem look like?
+   ls /
+
+   # What OS is this?
    cat /etc/os-release
-   ls /usr/share/nginx/html
-   exit
    ```
 
-5. **Write a custom identifier into the container**
+   Record each result.
 
-   From your host machine (not inside the container), run:
+3. Exit the container and run the same commands on your host machine:
 
    ```bash
-   docker exec my-nginx sh -c 'echo "Built by: YOUR_NAME" > /usr/share/nginx/html/index.html'
+   exit
+   hostname
+   whoami
+   ps aux | wc -l
+   cat /etc/os-release
+   ```
+
+   Compare the two sets of results.
+</Steps>
+
+<ActivityQuestion>
+Inside the container, `ps aux` showed only a handful of processes, and the nginx process appeared as PID 1 (or close to it). On your host, `ps aux` shows many more. Both are running on the same physical machine with the same kernel. What Linux feature explains why the container sees a different, smaller set of process IDs?
+</ActivityQuestion>
+
+<ActivityQuestion>
+Inside the container, `whoami` returned `root`. On your host, you are probably running as a regular user. What does "root inside the container" actually mean, and how does it differ from root access on the host? What would need to go wrong for container root to translate into host root?
+</ActivityQuestion>
+
+---
+
+## Part 3: Ephemeral Storage: What Containers Don't Keep
+
+A container's writable layer disappears when the container is removed. This section makes that concrete.
+
+<Steps>
+1. Run a container and write something to its filesystem:
+
+   ```bash
+   docker run -d --name ephemeral nginx:alpine
+   docker exec ephemeral sh -c 'echo "this will not survive" > /tmp/testfile.txt'
+   docker exec ephemeral cat /tmp/testfile.txt
+   ```
+
+   Confirm the file is there.
+
+2. Stop and remove the container completely:
+
+   ```bash
+   docker stop ephemeral
+   docker rm ephemeral
+   ```
+
+3. Start a fresh container from the same image:
+
+   ```bash
+   docker run -d --name ephemeral2 nginx:alpine
+   docker exec ephemeral2 cat /tmp/testfile.txt
+   ```
+
+   The file is gone.
+
+4. Now modify nginx's web content in the same way:
+
+   ```bash
+   docker exec ephemeral2 sh -c 'echo "<h1>Modified</h1>" > /usr/share/nginx/html/index.html'
+   docker stop ephemeral2
+   docker rm ephemeral2
+   docker run -d --name ephemeral3 nginx:alpine
+   docker exec ephemeral3 cat /usr/share/nginx/html/index.html
+   ```
+
+   The original content is back.
+</Steps>
+
+<ActivityQuestion>
+An engineer proposes writing application logs to `/var/log/app/` inside the container and reading them with `docker exec ... cat`. Another engineer suggests this is a reliability problem. Explain specifically what happens to those logs when the container is stopped and replaced during a deployment.
+</ActivityQuestion>
+
+<ActivityQuestion>
+You modified the running container's filesystem in step 4, but the base image was unchanged. Where was your modification stored, and why did it disappear when you removed the container?
+</ActivityQuestion>
+
+---
+
+## Part 4: Persistent Storage with Volumes
+
+Volumes live outside the container's writable layer and survive container replacement.
+
+<Steps>
+1. Create a named volume:
+
+   ```bash
+   docker volume create mydata
+   docker volume ls
+   ```
+
+2. Run a container with the volume attached and write to it:
+
+   ```bash
+   docker run -d --name writer -v mydata:/data nginx:alpine
+   docker exec writer sh -c 'echo "persisted across containers" > /data/record.txt'
+   docker exec writer cat /data/record.txt
+   ```
+
+3. Remove the container and start a completely new one with the same volume:
+
+   ```bash
+   docker stop writer
+   docker rm writer
+   docker run -d --name reader -v mydata:/data nginx:alpine
+   docker exec reader cat /data/record.txt
+   ```
+
+   The data is still there, even though the original container no longer exists.
+
+4. Find where Docker stores the volume on your host:
+
+   ```bash
+   docker volume inspect mydata
+   ```
+
+   Look for the `Mountpoint` field. On Linux, you can read the files directly at that path (as root). On macOS and Windows, this path is inside the Linux VM that Docker Desktop manages.
+
+5. Clean up:
+
+   ```bash
+   docker stop reader
+   docker rm reader
+   docker volume rm mydata
+   ```
+</Steps>
+
+<ActivityQuestion>
+Compare named volumes to bind mounts (`-v /host/path:/container/path`). Describe a scenario where a bind mount is the right choice and a scenario where a named volume is the right choice. What is the key operational difference between the two?
+</ActivityQuestion>
+
+---
+
+## Part 5: Building an Image and Observing Layer Caching
+
+This section shows how Docker's layer cache behaves in practice: both when it helps and when it gets invalidated.
+
+<Steps>
+1. Create a working directory and add two files:
+
+   ```bash
+   mkdir mysite && cd mysite
+   ```
+
+   Create `index.html`:
+
+   ```html
+   <h1>Hello from my container</h1>
+   ```
+
+   Create `Dockerfile`:
+
+   ```dockerfile
+   FROM nginx:alpine
+   COPY index.html /usr/share/nginx/html/index.html
+   ```
+
+2. Build the image and note the output carefully:
+
+   ```bash
+   docker build -t mysite:v1 .
+   ```
+
+   Each step that runs shows `RUN` or `COPY` output. Note which steps say `CACHED`.
+
+3. Build again without changing anything:
+
+   ```bash
+   docker build -t mysite:v1 .
+   ```
+
+   Every step should now say `CACHED`. Docker reused all layers from the first build.
+
+4. Change only `index.html` (edit the file to say something different), then rebuild:
+
+   ```bash
+   docker build -t mysite:v2 .
+   ```
+
+   Observe which steps are cached and which re-run.
+
+5. Now change the `FROM` line in the Dockerfile to `FROM nginx:latest` and rebuild:
+
+   ```bash
+   docker build -t mysite:v3 .
+   ```
+
+   Observe what happens to the cache.
+
+6. Run the resulting image and verify it serves your content:
+
+   ```bash
+   docker run -d -p 8080:80 --name mysite mysite:v2
+   curl http://localhost:8080
+   docker stop mysite && docker rm mysite
+   ```
+
+   Clean up your working directory when done: `cd .. && rm -rf mysite`
+</Steps>
+
+<ActivityQuestion>
+In step 5, changing the `FROM` line invalidated the cache for every subsequent step. Explain why. What does this mean for how you should manage base image versions in a production Dockerfile?
+</ActivityQuestion>
+
+<ActivityQuestion>
+Consider two Dockerfile patterns for a Python application:
+
+- **Pattern A**: `COPY . .` then `RUN pip install -r requirements.txt`
+- **Pattern B**: `COPY requirements.txt .` then `RUN pip install -r requirements.txt` then `COPY . .`
+
+Pattern B is recommended. Based on what you observed about layer caching, explain why Pattern B produces faster rebuilds when you change only application code.
+</ActivityQuestion>
+
+---
+
+## Part 6: Port Mapping and Container Networking
+
+Containers have their own network namespace. Port mapping is how services inside that namespace become reachable from outside.
+
+<Steps>
+1. Start a container with port mapping and verify you can reach it from your host:
+
+   ```bash
+   docker run -d -p 8080:80 --name webserver nginx:alpine
    curl http://localhost:8080
    ```
 
-   Replace `YOUR_NAME` with your actual name. The curl output should show your name.
+   You made an HTTP request to your host on port 8080. It was forwarded to the container on port 80.
 
-6. **Write a minimal Dockerfile**
-
-   Create a new directory and write a `Dockerfile` that:
-   - Uses `nginx:alpine` as the base
-   - Adds a comment at the top: `# Author: Your Name`
-   - Copies a custom `index.html` (which you also create) into `/usr/share/nginx/html/`
-
-   Build and run it:
+2. Inspect the container's network configuration:
 
    ```bash
-   docker build -t my-custom-nginx .
-   docker run -d --name custom -p 8081:80 my-custom-nginx
-   curl http://localhost:8081
+   docker inspect webserver
    ```
 
-7. **Clean up**
+   In the `NetworkSettings` section, find:
+   - **`IPAddress`**: the container's private IP on the Docker bridge network
+   - **`Ports`**: the port mapping Docker configured
+
+3. Try to reach the container's private IP directly from your host:
 
    ```bash
-   docker stop my-nginx custom
-   docker rm my-nginx custom
+   # Substitute the IP address you found in step 2
+   curl http://<container-ip>:80
    ```
 
+   On Linux with Docker Engine this will work. On macOS and Windows with Docker Desktop it likely will not, because the bridge network is inside a Linux VM.
+
+4. List the Docker networks on your system and inspect the default bridge:
+
+   ```bash
+   docker network ls
+   docker network inspect bridge
+   ```
+
+   Find the `webserver` container listed under `Containers`. Note the bridge network's subnet.
+
+5. Create a user-defined network and run two containers on it:
+
+   ```bash
+   docker network create mynet
+   docker run -d --network mynet --name server1 nginx:alpine
+   docker run -d --network mynet --name server2 nginx:alpine
+
+   # From server2, reach server1 by container name
+   docker exec server2 wget -qO- http://server1
+   ```
+
+   Container DNS resolves `server1` to `server1`'s IP within `mynet`.
+
+6. Confirm that containers on different networks cannot reach each other:
+
+   ```bash
+   # webserver is on the default bridge, server1 is on mynet
+   docker exec server2 wget -qO- http://webserver 2>&1
+   ```
+
+   This should fail or time out: `webserver` is not on `mynet`.
+
+7. Clean up:
+
+   ```bash
+   docker stop webserver server1 server2
+   docker rm webserver server1 server2
+   docker network rm mynet
+   ```
 </Steps>
 
-## Questions to Answer
+<ActivityQuestion>
+The container listens on port 80. The host uses port 8080. Describe what Docker configures at the network level to make this forwarding work. Why does this mean two different containers can both "listen on port 80" without conflicting?
+</ActivityQuestion>
 
-1. What is the size difference between `nginx:latest` and `nginx:alpine`? Why does it matter?
-2. How many layers does `nginx:alpine` have, and what created the largest layer?
-3. What user does nginx run as inside the alpine container?
-4. What is one security or operational advantage of writing a Dockerfile instead of modifying a running container?
+<ActivityQuestion>
+In step 6, `server2` could not reach `webserver` by name even though both are running on the same physical host. What is the reason, and what would you need to do to allow them to communicate?
+</ActivityQuestion>
 
-## Deliverable
+---
 
-Submit a PDF to Canvas containing:
-- A screenshot of `curl http://localhost:8080` showing your name in the response body
-- A screenshot of `curl http://localhost:8081` showing your custom index page
-- Your `Dockerfile` (copy-pasted into the PDF, with your name in the comment)
-- Answers to the four questions
+## Part 7: A Multi-Service Stack with Compose
 
-Your **full name and student ID** must appear in the PDF header.
+Compose wires multiple containers together with automatic networking, shared configuration, and volume management.
 
-<Aside type="note">
-If you are on Windows, run these commands in WSL2 or Git Bash. The `curl` commands can be replaced by opening `http://localhost:8080` in a browser and taking a screenshot.
-</Aside>
+<Steps>
+1. Create a working directory and write a `compose.yml`:
+
+   ```bash
+   mkdir mystack && cd mystack
+   ```
+
+   `compose.yml`:
+
+   ```yaml
+   services:
+     web:
+       image: nginx:alpine
+       ports:
+         - "8080:80"
+       volumes:
+         - ./html:/usr/share/nginx/html:ro
+       depends_on:
+         - echo
+
+     echo:
+       image: mendhak/http-https-echo:latest
+       # not exposed to the host; only reachable from within the Compose network
+
+   volumes: {}
+   ```
+
+   Create a `html/` directory with an `index.html`:
+
+   ```bash
+   mkdir html
+   echo "<h1>Compose stack</h1>" > html/index.html
+   ```
+
+2. Start the stack:
+
+   ```bash
+   docker compose up -d
+   ```
+
+   Docker pulls any missing images, creates a shared network, and starts both services.
+
+3. Explore the running stack:
+
+   ```bash
+   docker compose ps
+   docker compose logs
+   ```
+
+   Check the network Compose created:
+
+   ```bash
+   docker network ls
+   # You should see a network named something like mystack_default
+   docker network inspect mystack_default
+   ```
+
+4. Verify that the `web` container can reach the `echo` service by name:
+
+   ```bash
+   docker exec mystack-web-1 wget -qO- http://echo:8080
+   ```
+
+   The hostname `echo` resolves to the echo container's IP within the Compose network.
+
+5. Verify that `echo` is not exposed to your host:
+
+   ```bash
+   curl http://localhost:8080      # reaches web (nginx); succeeds
+   curl http://localhost:8081      # nothing mapped here for echo; fails
+   ```
+
+6. Stop the stack and observe what persists:
+
+   ```bash
+   docker compose down
+   docker compose ps   # containers are gone
+   ls html/            # bind-mounted host directory is unchanged
+   ```
+
+7. Clean up:
+
+   ```bash
+   cd .. && rm -rf mystack
+   ```
+</Steps>
+
+<ActivityQuestion>
+Compose created a network automatically and attached both services to it. Compare this to what you did manually in Part 6 (creating a network and running containers with `--network`). What does Compose automate, and what would you have had to do by hand without it?
+</ActivityQuestion>
+
+<ActivityQuestion>
+The `echo` service in this stack is intentionally not exposed to the host with a `ports:` mapping; it is only reachable from within the Compose network. Describe a real-world service (database, cache, internal API) that should be configured this way, and explain the security reasoning.
+</ActivityQuestion>

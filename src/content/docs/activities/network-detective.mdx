@@ -110,9 +110,9 @@ Every device on a network has at least one IP address. Before you can do anythin
    ```
 
    The `state` field tells you how fresh the mapping is:
-   - `REACHABLE` -- confirmed recently via ARP reply
-   - `STALE` -- not confirmed recently but still usable; will be verified on next use
-   - `FAILED` -- ARP request was sent but no reply came back; the host is unreachable at layer 2
+   - `REACHABLE`: confirmed recently via ARP reply
+   - `STALE`: not confirmed recently but still usable; will be verified on next use
+   - `FAILED`: ARP request was sent but no reply came back; the host is unreachable at layer 2
 
    A `FAILED` entry for your default gateway is an important signal during troubleshooting: it means the layer-2 path is broken (wrong VLAN, bad cable, or gateway down) even if the IP configuration looks correct.
 </Steps>
@@ -122,14 +122,14 @@ If your VM shows `10.0.2.15/24`, the network is `10.0.2.0/24`, the broadcast add
 </ActivityQuestion>
 
 <ActivityQuestion>
-Your ARP table shows an entry for the VirtualBox gateway (`10.0.2.2`) but nothing for `8.8.8.8`. ARP is a broadcast protocol -- a device sends "who has this IP?" to the entire local network and waits for a reply. Why does that mechanism mean you can never get an ARP entry for a public server like `8.8.8.8`?
+Your ARP table shows an entry for the VirtualBox gateway (`10.0.2.2`) but nothing for `8.8.8.8`. ARP is a broadcast protocol: a device sends "who has this IP?" to the entire local network and waits for a reply. Why does that mechanism mean you can never get an ARP entry for a public server like `8.8.8.8`?
 </ActivityQuestion>
 
 ---
 
 ## DHCP: Where Your Address Came From
 
-You have an IP address because `systemd-networkd` requested one from VirtualBox's built-in DHCP server when the VM booted. DHCP hands out more than just an address -- it also provides the default gateway and a DNS server. This section shows you how to see what DHCP actually provided versus what your system is configured to use.
+You have an IP address because `systemd-networkd` requested one from VirtualBox's built-in DHCP server when the VM booted. DHCP hands out more than just an address; it also provides the default gateway and a DNS server. This section shows you how to see what DHCP actually provided versus what your system is configured to use.
 
 <Steps>
 1. Check which network interfaces `systemd-networkd` is managing:
@@ -159,7 +159,7 @@ You have an IP address because `systemd-networkd` requested one from VirtualBox'
    cat /etc/resolv.conf
    ```
 
-   You will see `1.1.1.1` and `1.0.0.1` -- Cloudflare's public resolvers that you set manually during the Arch Linux install. These are different from what DHCP offered.
+   You will see `1.1.1.1` and `1.0.0.1`: Cloudflare's public resolvers that you set manually during the Arch Linux install. These are different from what DHCP offered.
 
    This is an important distinction: DHCP offers configuration, but the system only uses it if nothing overrides it. When you wrote `/etc/resolv.conf` by hand, you overrode the DHCP-provided DNS server.
 
@@ -310,7 +310,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 
    UDP has far fewer listening services on a minimal server than TCP. On this VM you may see very little or nothing, depending on which optional services you enabled during setup. If you enabled `systemd-resolved`, you will see it listening on port `53` (DNS). If you have a DHCP client socket open, it may appear on port `68`.
 
-   This contrast is intentional: most application protocols (SSH, HTTP, databases) run over TCP because they need the reliability guarantees. DNS and DHCP use UDP because they favor speed and simplicity -- a single small request and reply -- and handle retries in the application layer rather than the transport layer.
+   This contrast is intentional: most application protocols (SSH, HTTP, databases) run over TCP because they need the reliability guarantees. DNS and DHCP use UDP because they favor speed and simplicity; a single small request and reply, with retries handled in the application layer rather than the transport layer.
 
 3. Find sshd. You should see:
 
@@ -353,7 +353,7 @@ Under what circumstances would `ss` show a port as listening but `nmap` from out
 
 ## DNS Investigation
 
-DNS translates names to addresses. Understanding how your machine resolves names -- and how to query DNS manually -- is essential for diagnosing the most common category of "the internet is down" complaints.
+DNS translates names to addresses. Understanding how your machine resolves names and how to query DNS manually is essential for diagnosing the most common category of "the internet is down" complaints.
 
 <Steps>
 1. Confirm which resolver your machine sends queries to:
@@ -362,7 +362,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
    cat /etc/resolv.conf
    ```
 
-   The `nameserver` line is the address `dig` and all other tools will use by default when you do not specify `@`. On this VM you will see `1.1.1.1` (Cloudflare) -- the value you set manually. Compare this to the DHCP-offered DNS you saw with `networkctl status`: your system is bypassing the DHCP-provided resolver entirely.
+   The `nameserver` line is the address `dig` and all other tools will use by default when you do not specify `@`. On this VM you will see `1.1.1.1` (Cloudflare), the value you set manually. Compare this to the DHCP-offered DNS you saw with `networkctl status`: your system is bypassing the DHCP-provided resolver entirely.
 
 2. Perform a full DNS lookup and read the output:
 
