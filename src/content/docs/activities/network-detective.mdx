@@ -16,6 +16,10 @@ The exercises work best from inside the Arch Linux VM you built in the previous 
 Open two terminal windows: one connected to your Arch VM via SSH (`ssh -p 2222 archuser@127.0.0.1`), and one on your laptop. Running the same commands on both gives you a concrete comparison between "inside the VM" and "on the host machine."
 </Aside>
 
+<Aside type="note" title="The Network You Are Working In">
+There are at least two NAT translations between your VM's shell prompt and the public internet. VirtualBox's NAT adapter assigns the VM a private address (likely `10.0.2.15`) and translates its outbound traffic to your laptop's address. Your laptop is itself behind your home or campus router, which performs a second translation before packets reach the internet. This is a hierarchical topology: a point-to-point link from the VM to VirtualBox's virtual router, which connects to a star network of devices on your home network, which connects upstream to the ISP. Tracing the packet path through all of those hops is one of the things this activity is designed to show you.
+</Aside>
+
 ## What You Will Need
 
 - Your Arch Linux VM from the previous activity (with networking and SSH configured)
@@ -90,6 +94,27 @@ Every device on a network has at least one IP address. Before you can do anythin
    Host-side quick checks:
    - macOS/Linux: `ip addr show` (or `ifconfig`)
    - Windows PowerShell: `ipconfig`
+
+4. Inspect the layer-2 neighbor (ARP) table:
+
+   ```bash
+   ip neighbor show
+   ```
+
+   This is the ARP cache. For every IP address the VM has communicated with on the local subnet, the cache stores the corresponding MAC address so that frames can be delivered correctly at layer 2. You should see at least one entry for the VirtualBox gateway.
+
+   A typical entry looks like:
+
+   ```
+   10.0.2.2 dev enp0s3 lladdr 52:54:00:12:35:02 REACHABLE
+   ```
+
+   The `state` field tells you how fresh the mapping is:
+   - `REACHABLE` -- confirmed recently via ARP reply
+   - `STALE` -- not confirmed recently but still usable; will be verified on next use
+   - `FAILED` -- ARP request was sent but no reply came back; the host is unreachable at layer 2
+
+   A `FAILED` entry for your default gateway is an important signal during troubleshooting: it means the layer-2 path is broken (wrong VLAN, bad cable, or gateway down) even if the IP configuration looks correct.
 </Steps>
 
 <ActivityQuestion>
@@ -97,7 +122,62 @@ If your VM shows `10.0.2.15/24`, the network is `10.0.2.0/24`, the broadcast add
 </ActivityQuestion>
 
 <ActivityQuestion>
-Run `ip neighbor show` on your VM. You should see an entry for your gateway. Why can the VM resolve the gateway's MAC address but not the MAC address of a public server like `8.8.8.8`?
+Your ARP table shows an entry for the VirtualBox gateway (`10.0.2.2`) but nothing for `8.8.8.8`. ARP is a broadcast protocol -- a device sends "who has this IP?" to the entire local network and waits for a reply. Why does that mechanism mean you can never get an ARP entry for a public server like `8.8.8.8`?
+</ActivityQuestion>
+
+---
+
+## DHCP: Where Your Address Came From
+
+You have an IP address because `systemd-networkd` requested one from VirtualBox's built-in DHCP server when the VM booted. DHCP hands out more than just an address -- it also provides the default gateway and a DNS server. This section shows you how to see what DHCP actually provided versus what your system is configured to use.
+
+<Steps>
+1. Check which network interfaces `systemd-networkd` is managing:
+
+   ```bash
+   networkctl
+   ```
+
+   You will see a table of interfaces. The `enp0s3` (or similar) interface should show `routable` and `configured`, confirming that `systemd-networkd` received a DHCP lease and applied it.
+
+2. Inspect the DHCP lease details for your interface:
+
+   ```bash
+   networkctl status enp0s3
+   ```
+
+   (Substitute your interface name from step 1 of the previous section if it differs.)
+
+   In the output, find:
+   - **Address**: the IP and prefix length assigned by DHCP
+   - **Gateway**: the default gateway DHCP provided
+   - **DNS**: the DNS server address DHCP offered (likely `10.0.2.3`, VirtualBox's internal resolver)
+
+3. Now compare that DNS server to what your system actually uses for name resolution:
+
+   ```bash
+   cat /etc/resolv.conf
+   ```
+
+   You will see `1.1.1.1` and `1.0.0.1` -- Cloudflare's public resolvers that you set manually during the Arch Linux install. These are different from what DHCP offered.
+
+   This is an important distinction: DHCP offers configuration, but the system only uses it if nothing overrides it. When you wrote `/etc/resolv.conf` by hand, you overrode the DHCP-provided DNS server.
+
+   <Aside type="note" title="How Production Systems Handle This">
+   On servers where you want DHCP to manage DNS automatically, you use `systemd-resolved` and symlink `/etc/resolv.conf` to the stub resolver (as in the optional step at the end of the Arch install). `systemd-resolved` reads the DNS server from the DHCP lease and keeps `/etc/resolv.conf` up to date. On Ubuntu servers, Netplan and `systemd-resolved` handle this for you.
+   </Aside>
+
+4. Look at the persistent network configuration file you created:
+
+   ```bash
+   cat /etc/systemd/network/20-wired.network
+   ```
+
+   This is the file that tells `systemd-networkd` to use DHCP on this interface. The `ip addr` and `ip route` commands you have been running show the *current state* derived from this configuration -- the transient values that disappear on reboot. The `.network` file is the *persistent* source of truth that recreates that state at every boot.
+</Steps>
+
+<ActivityQuestion>
+Production servers (web servers, databases, DNS servers) typically have their addresses assigned via DHCP reservations rather than static IP configuration in the OS. A reservation is a DHCP rule that always assigns the same IP to a specific MAC address. What operational advantage does a DHCP reservation have over hard-coding the IP directly in the server's network configuration file?
 </ActivityQuestion>
 
 ---
@@ -222,7 +302,17 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 
    Record every listening port and the process next to it.
 
-2. Find sshd. You should see:
+2. Check UDP listening sockets:
+
+   ```bash
+   sudo ss -ulnp
+   ```
+
+   UDP has far fewer listening services on a minimal server than TCP. On this VM you may see very little or nothing, depending on which optional services you enabled during setup. If you enabled `systemd-resolved`, you will see it listening on port `53` (DNS). If you have a DHCP client socket open, it may appear on port `68`.
+
+   This contrast is intentional: most application protocols (SSH, HTTP, databases) run over TCP because they need the reliability guarantees. DNS and DHCP use UDP because they favor speed and simplicity -- a single small request and reply -- and handle retries in the application layer rather than the transport layer.
+
+3. Find sshd. You should see:
 
    ```
    LISTEN  0  128  0.0.0.0:22  0.0.0.0:*  users:(("sshd",pid=...,fd=...))
@@ -230,7 +320,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 
    `0.0.0.0:22` means sshd is listening on all interfaces. If you saw `127.0.0.1:22` instead, it would only accept connections from localhost, which is why SSH from your host machine would fail.
 
-3. Now scan this machine from the outside. On your **host machine** (not inside the VM), open a terminal and run:
+4. Now scan this machine from the outside. On your **host machine** (not inside the VM), open a terminal and run:
 
    ```bash
    nmap -sV -Pn -p T:2222 127.0.0.1
@@ -242,7 +332,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
    If `nmap` reports the port as closed or filtered, verify your VM still has the NAT forwarding rule from the Arch activity: host `127.0.0.1:2222` to guest `:22`. Then verify `sshd` is running in the VM with `sudo systemctl status sshd`.
    </Aside>
 
-4. Scan the VM's localhost from inside:
+5. Scan the VM's localhost from inside:
 
    ```bash
    sudo nmap -sV -Pn -p T:1-1024 127.0.0.1
@@ -266,13 +356,13 @@ Under what circumstances would `ss` show a port as listening but `nmap` from out
 DNS translates names to addresses. Understanding how your machine resolves names -- and how to query DNS manually -- is essential for diagnosing the most common category of "the internet is down" complaints.
 
 <Steps>
-1. Check your current DNS configuration:
+1. Confirm which resolver your machine sends queries to:
 
    ```bash
    cat /etc/resolv.conf
    ```
 
-   Record the `nameserver` IP address(es). Are they private addresses (a local DNS server, like your router) or public resolvers (`8.8.8.8`, `1.1.1.1`)?
+   The `nameserver` line is the address `dig` and all other tools will use by default when you do not specify `@`. On this VM you will see `1.1.1.1` (Cloudflare) -- the value you set manually. Compare this to the DHCP-offered DNS you saw with `networkctl status`: your system is bypassing the DHCP-provided resolver entirely.
 
 2. Perform a full DNS lookup and read the output:
 
@@ -294,7 +384,24 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
    Do you get the same IP? Large sites like Google often return different addresses from different resolvers in different regions, routing users to the nearest data center.
 
-4. Look up a mail server record:
+4. Explore CNAME (alias) records:
+
+   ```bash
+   dig www.oregonstate.edu
+   ```
+
+   Look at the ANSWER SECTION. If the response contains a `CNAME` record, the name is an alias pointing to another name, which is then resolved to an A record. For example:
+
+   ```
+   www.oregonstate.edu.    300  IN  CNAME  oregonstate.edu.
+   oregonstate.edu.        60   IN  A      128.193.4.130
+   ```
+
+   The resolver followed the chain automatically. CNAMEs are commonly used to point `www.example.com` at the apex domain, or to delegate a hostname to a CDN provider without exposing the CDN's IP directly.
+
+   If the response shows only an A record with no CNAME, that hostname is configured directly. Try a few others to find a CNAME chain in the wild.
+
+5. Look up a mail server record:
 
    ```bash
    dig MX oregonstate.edu
@@ -302,7 +409,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
    The `MX` records show which servers accept email for this domain. The number before the hostname is the priority -- lower is preferred. If you have multiple MX records, the sender tries the lowest priority first and falls back if it is unreachable.
 
-5. Do a reverse lookup on your default gateway:
+6. Do a reverse lookup on your default gateway:
 
    ```bash
    dig -x <your-gateway-address>
@@ -310,7 +417,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
    Does your gateway have a hostname? What does it tell you about your network provider?
 
-6. Simulate broken DNS. Ask for a hostname that does not exist:
+7. Simulate broken DNS. Ask for a hostname that does not exist:
 
    ```bash
    dig nonexistent.example.invalid

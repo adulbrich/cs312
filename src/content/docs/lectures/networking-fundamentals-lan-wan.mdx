@@ -5,10 +5,12 @@ sidebar:
   order: 4
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
-Every server you provision, every container you deploy, and every cloud instance you launch depends on a network to be useful. In this chapter we will build a mental model of how networks operate by following a single scenario throughout: you have been asked to network a small office of 20 employees that needs internal file sharing, a web application server, DNS, DHCP, and reliable internet access. By the end you should be able to trace a packet from a user's laptop to the public internet and back, read a subnet mask, interpret a routing table, and use command-line tools to diagnose the most common connectivity failures. The concepts here apply equally to a physical office wired with Ethernet and to a cloud Virtual Private Cloud (VPC), because the protocols and addressing rules are the same in both environments.
+Every server you provision, every container you deploy, and every cloud instance you launch depends on a network to be useful. A server that nobody can connect to, a web application that times out intermittently, a database that suddenly stops responding: these are networking problems, and they will land on your desk. You do not need to be a network engineer, but you do need enough understanding of how packets move, how addresses work, and where firewalls intervene to diagnose failures quickly and configure services correctly.
+
+This lecture builds that understanding from the ground up. By the end you should be able to trace a packet from a shell prompt to the public internet and back, read a subnet mask, interpret a routing table, and use command-line tools to diagnose the most common connectivity failures. The concepts apply equally to a physical network wired with Ethernet and to a cloud Virtual Private Cloud (VPC), because the protocols and addressing rules are the same in both environments.
 
 ## Network Models: OSI and TCP/IP
 
@@ -22,7 +24,7 @@ The **TCP/IP model** collapses these into four practical layers: Link (covering 
 When something breaks, start at the bottom and work up. Can you see a link light on the switch port (layer 1)? Does the interface have an IP address (layer 3)? Can you ping the default gateway (layer 3)? Can you resolve DNS names (layer 7)? Can you reach the application port (layer 4)? This bottom-up approach prevents you from spending an hour debugging your web server configuration when the Ethernet cable is unplugged.
 </Aside>
 
-For our small office, the layers map to concrete things. Layer 1 is the Cat6 cabling running from each desk to a patch panel in the server closet. Layer 2 is the Ethernet switch connecting those cables. Layer 3 is the router forwarding packets between subnets. DHCP assigns IP addresses, while the router handles packet forwarding. Layer 4 is the TCP connections carrying HTTP, SSH, and database traffic. Layer 7 is the web application itself. Every diagnostic step you take later in this chapter targets a specific layer.
+On a typical server, the layers map to concrete things. Layer 1 is the Ethernet cable (or the virtual network interface on a cloud instance). Layer 2 is the switch connecting devices within a subnet. Layer 3 is the router forwarding packets between subnets, using IP addresses to decide where each packet goes. Layer 4 is the TCP or UDP connections carrying HTTP, SSH, and database traffic. Layer 7 is the application itself: the web server, the DNS resolver, or the game server listening for connections. Every diagnostic step you take later in this chapter targets a specific layer.
 
 ## Network Topologies
 
@@ -51,7 +53,7 @@ Three ranges of IPv4 addresses are reserved for private use and will never appea
 - `172.16.0.0/12` (1,048,574 usable hosts)
 - `192.168.0.0/16` (65,534 usable hosts)
 
-Our small office will use the `10.0.1.0/24` range, giving us 254 usable addresses, more than enough for 20 employees plus servers, printers, and access points.
+A small network might use `10.0.1.0/24`, giving 254 usable addresses, enough for workstations, servers, printers, and access points. In AWS, a VPC commonly uses `10.0.0.0/16` (65,534 addresses) and is then divided into smaller subnets across availability zones.
 
 ### Classful Addressing (Historical Context)
 
@@ -67,14 +69,16 @@ The "-2" for usable hosts accounts for the network address (first IP in the bloc
 
 ### Subnetting in Practice
 
-Suppose you want to separate the employee workstations from the servers for security reasons. You could split `10.0.1.0/24` into two `/25` subnets, each with 126 usable addresses:
+Suppose you want to separate workstations from servers for security reasons. You could split `10.0.1.0/24` into two `/25` subnets, each with 126 usable addresses:
 
 - `10.0.1.0/25` (hosts `10.0.1.1` through `10.0.1.126`) for workstations
 - `10.0.1.128/25` (hosts `10.0.1.129` through `10.0.1.254`) for servers
 
 Notice that `10.0.1.130` is not in the workstation subnet. Once you split the `/24` into two `/25`s, any workstation traffic to `10.0.1.130` must go through the router.
 
-This separation lets you apply different firewall rules to each subnet. Workstations might be allowed outbound internet access but blocked from reaching the database server directly, while the web application server can reach the database but has no outbound internet access. On a Linux machine, you can inspect your current address and subnet with:
+This separation lets you apply different firewall rules to each subnet. Workstations might be allowed outbound internet access but blocked from reaching the database server directly, while the application server can reach the database but has no outbound internet access. The same principle applies in cloud environments: an AWS VPC is typically divided into public subnets (for resources that need direct internet access) and private subnets (for databases and internal services), with security groups controlling which traffic flows between them.
+
+On a Linux machine, you can inspect your current address and subnet with:
 
 ```bash
 ip addr show
@@ -92,9 +96,9 @@ Three services make a network usable in practice. Without them, every user would
 
 ### DHCP (Dynamic Host Configuration Protocol)
 
-When an employee plugs in a laptop or connects to Wi-Fi, **DHCP** automatically assigns an IP address, subnet mask, default gateway, and DNS server addresses. The process works in four steps (often called DORA): the client sends a Discover broadcast, the DHCP server responds with an Offer, the client sends a Request confirming it wants that address, and the server sends an Acknowledgment. Each address comes with a lease time; when the lease expires, the client must renew it.
+When a device plugs into a network or connects to Wi-Fi, **DHCP** automatically assigns an IP address, subnet mask, default gateway, and DNS server addresses. The process works in four steps (often called DORA): the client sends a Discover broadcast, the DHCP server responds with an Offer, the client sends a Request confirming it wants that address, and the server sends an Acknowledgment. Each address comes with a lease time; when the lease expires, the client must renew it.
 
-For our office, the DHCP server (often running on the router or a dedicated Linux server) might be configured to hand out addresses from `10.0.1.10` through `10.0.1.126` in the workstation subnet, with the default gateway set to `10.0.1.1` and DNS pointed to `10.0.1.130` (the DNS server in the server subnet). Servers themselves typically use either **static addresses** or **DHCP reservations** so their addresses remain stable; clients and other services depend on those addresses being predictable.
+For example, a DHCP server on a network using `10.0.1.0/24` might hand out addresses from `10.0.1.10` through `10.0.1.200`, with the default gateway set to `10.0.1.1` and DNS pointed to a known resolver. The DHCP server itself often runs on the router or on a dedicated Linux server. Servers and other infrastructure typically use either **static addresses** or **DHCP reservations** (a DHCP configuration that always assigns the same address to a specific device's MAC address) so their addresses remain stable; clients and other services depend on those addresses being predictable.
 
 You can inspect your current DHCP lease on a Linux system:
 
@@ -109,9 +113,7 @@ sudo dhclient eth0
 
 ### DNS (Domain Name System)
 
-**DNS** translates human-readable names like `wiki.office.example` into IP addresses like `10.0.1.131`. Without DNS, users would need to type IP addresses into their browsers and every configuration file would break whenever a server moved to a new address. DNS is hierarchical: your office DNS server knows about local names and forwards everything else to an upstream resolver (such as `8.8.8.8` or `1.1.1.1`), which in turn queries the global DNS infrastructure.
-
-For teaching examples, this chapter uses names under `office.example`. Avoid using `.local` for ordinary unicast DNS in real deployments because `.local` is widely reserved for multicast DNS (mDNS/Bonjour) and can produce confusing resolution behavior.
+**DNS** translates human-readable names like `wiki.example.com` into IP addresses like `93.184.216.34`. Without DNS, users would need to type IP addresses into their browsers and every configuration file would break whenever a server moved to a new address. DNS is hierarchical: a local DNS server knows about internal names and forwards everything else to an upstream resolver (such as `8.8.8.8` or `1.1.1.1`), which in turn queries the global DNS infrastructure.
 
 The most common record types are **A records** (mapping a name to an IPv4 address), **AAAA records** (mapping to IPv6), **CNAME records** (aliases pointing one name to another), and **MX records** (mail routing). When a DNS lookup fails, the symptom is usually "the internet is down" even though the network is perfectly functional; the user simply cannot resolve names to addresses.
 
@@ -119,13 +121,13 @@ You can query DNS from the command line:
 
 ```bash
 # Look up the A record for a hostname
-dig wiki.office.example
+dig example.com
 
 # Shorter output showing just the answer
-dig +short wiki.office.example
+dig +short example.com
 
 # Use nslookup for a quick interactive check
-nslookup wiki.office.example
+nslookup example.com
 ```
 
 <HistoricalNote title="DNS Was Designed to Replace a Text File (1983)">
@@ -134,9 +136,9 @@ Before DNS, every computer on ARPANET maintained a flat file called HOSTS.TXT, d
 
 ### NAT (Network Address Translation)
 
-Our office uses private addresses in the `10.0.0.0/8` range, but these addresses are not routable on the public internet. **NAT** solves this by having the router rewrite the source address of outgoing packets from the private address (e.g., `10.0.1.10`) to the router's public address (e.g., `203.0.113.5`). When replies come back, the router reverses the translation and forwards the packet to the correct internal host. This allows all 20 employees to share a single public IP address for internet access.
+Private addresses (like those in the `10.0.0.0/8` range) are not routable on the public internet. **NAT** solves this by having the router rewrite the source address of outgoing packets from the private address (e.g., `10.0.1.10`) to the router's public address (e.g., `203.0.113.5`). When replies come back, the router reverses the translation and forwards the packet to the correct internal host. This is how dozens or hundreds of devices share a single public IP address for internet access.
 
-NAT is so fundamental that most home and office routers perform it transparently. In a cloud environment like AWS, a **NAT Gateway** serves the same function for instances in private subnets.
+NAT is so fundamental that every home router performs it transparently. When you connect to Wi-Fi at home and browse the web, your laptop's private address is being translated to your ISP-assigned public address by your router. In a cloud environment like AWS, a **NAT Gateway** serves the same function: instances in a private subnet that need to download updates or call external APIs route their outbound traffic through a NAT Gateway, which rewrites their private addresses to a public Elastic IP.
 
 There are three common NAT variants:
 
@@ -145,7 +147,7 @@ There are three common NAT variants:
 - **Static NAT**: A one-to-one permanent mapping between a specific private address and a specific public address. Used for servers that must be consistently reachable from the internet under the same public IP.
 
 <Aside type="caution" title="When NAT Breaks Things">
-NAT works well for outbound connections, but it complicates inbound connections. If you need an external user to reach your office web server, you must configure **port forwarding** (also called DNAT) on the router to send incoming traffic on a specific port to the correct internal server. In cloud environments, you would instead place the server in a public subnet with a public IP, or use a load balancer.
+NAT works well for outbound connections, but it complicates inbound connections. If you need an external user to reach a server behind NAT, you must configure **port forwarding** (also called DNAT) on the router to send incoming traffic on a specific port to the correct internal server. You already used this when you forwarded port 2222 on your host to port 22 in your VirtualBox VM. In cloud environments, you would instead place the server in a public subnet with a public IP, or use a load balancer.
 </Aside>
 
 #### NAT Traversal
@@ -159,7 +161,7 @@ Peer-to-peer and real-time applications (VoIP, video conferencing, online gaming
 
 ## Routing Basics
 
-A **router** connects two or more networks and forwards packets between them. Every host on a network has a **default gateway**, the router address to which it sends any packet whose destination is not on the local subnet. In our office, the workstation at `10.0.1.10/25` has a default gateway of `10.0.1.1`. When that workstation tries to reach the server at `10.0.1.130` (a different subnet), it sends the packet to the gateway, which then forwards it to the server subnet.
+A **router** connects two or more networks and forwards packets between them. Every host on a network has a **default gateway**, the router address to which it sends any packet whose destination is not on the local subnet. For example, a workstation at `10.0.1.10/25` with a default gateway of `10.0.1.1` will send all non-local traffic to that gateway. If the workstation tries to reach `10.0.1.130` (which falls outside the `/25` subnet), the packet goes to the gateway first, and the router forwards it to the correct subnet.
 
 The router makes forwarding decisions based on its **routing table**, a list of destination networks and the next-hop address or interface to use for each. You can inspect the routing table on a Linux machine:
 
@@ -168,7 +170,7 @@ The router makes forwarding decisions based on its **routing table**, a list of 
 ip route show
 ```
 
-Typical output for a workstation in our office might look like:
+Typical output on a workstation might look like:
 
 ```
 default via 10.0.1.1 dev eth0
@@ -177,7 +179,7 @@ default via 10.0.1.1 dev eth0
 
 The first line says "for any destination not otherwise listed, send the packet to `10.0.1.1` via the `eth0` interface." The second line says "for destinations in `10.0.1.0/25`, deliver directly on `eth0` because we are on that subnet."
 
-On the router itself, the routing table is more complex. It has entries for both internal subnets plus a default route pointing to the ISP's gateway:
+On a router connecting two subnets to the internet, the routing table is more complex. It has entries for both internal subnets plus a default route pointing to the ISP's gateway:
 
 ```bash
 # On the router
@@ -202,18 +204,18 @@ Cloud VPCs use the same routing concepts. AWS route tables, for example, contain
 
 Understanding the physical (or virtual) devices on a network helps you reason about where packets go and where problems can occur.
 
-A **switch** operates at layer 2 and connects devices within a single network segment. It learns which MAC addresses live on which ports and forwards Ethernet frames only to the correct port, rather than broadcasting everything. In our office, a 24-port switch in the server closet connects all the employee workstations and servers.
+A **switch** operates at layer 2 and connects devices within a single network segment. It learns which MAC addresses live on which ports and forwards Ethernet frames only to the correct port, rather than broadcasting everything.
 
 Switches come in two broad categories:
 
 - **Unmanaged switches** require no configuration; you plug them in and they start forwarding traffic immediately. They support only simple topologies and have no remote management, VLAN, or QoS capabilities. Use them where simplicity matters and advanced features are not needed.
 - **Managed switches** add remote management, software-defined networking support, Quality of Service (QoS) to prioritize traffic (e.g., VoIP over bulk transfers), security features (port security, 802.1X authentication, ARP inspection), and VLAN configuration. They are standard in any environment requiring segmentation or centralized control.
 
-Managed switches can also create **VLANs** (Virtual LANs), logically separating traffic on the same physical switch into distinct broadcast domains, which is another way to segment our workstation and server traffic without needing separate physical switches. VLANs are discussed in detail in Network Configuration and Troubleshooting.
+Managed switches can also create **VLANs** (Virtual LANs), logically separating traffic on the same physical switch into distinct broadcast domains, which is another way to segment workstation and server traffic without needing separate physical switches. VLANs are discussed in detail in Building and Operating a Company Network.
 
-A **router** operates at layer 3 and forwards packets between different subnets or networks based on IP addresses. Our office router connects the workstation subnet, the server subnet, and the ISP uplink. It runs DHCP, performs NAT, and maintains the routing table.
+A **router** operates at layer 3 and forwards packets between different subnets or networks based on IP addresses. A typical small network router connects the internal subnets to the ISP uplink, runs DHCP, performs NAT, and maintains the routing table.
 
-A **firewall** inspects traffic and enforces security policies. It can operate at multiple layers: a simple firewall might block or allow traffic based on IP addresses and port numbers (layers 3 and 4), while an advanced firewall might inspect HTTP headers or application content (layer 7). In our office, the router likely includes basic firewall functionality, blocking inbound connections from the internet by default and only allowing specific traffic through.
+A **firewall** inspects traffic and enforces security policies. It can operate at multiple layers: a simple firewall might block or allow traffic based on IP addresses and port numbers (layers 3 and 4), while an advanced firewall might inspect HTTP headers or application content (layer 7). Most routers include basic firewall functionality, blocking inbound connections from the internet by default and only allowing specific traffic through.
 
 In cloud environments, **security groups** act as virtual firewalls associated with virtual network interfaces and commonly managed at the instance level. A security group rule like "allow TCP port 443 from `0.0.0.0/0`" is equivalent to a firewall rule permitting HTTPS traffic from any source. One important difference from some traditional packet filters is that security groups are stateful: if you allow an outbound connection, the return traffic is automatically permitted.
 
@@ -285,24 +287,6 @@ This tells you that SSH is listening on port 22 on all interfaces and Nginx is l
 <Aside type="tip" title="Firewalls and Ports">
 A common troubleshooting pattern: the application is running and the port is listening (confirmed with `ss`), but external clients cannot connect. The next thing to check is the firewall. On a Linux host, `sudo iptables -L -n` or `sudo nft list ruleset` shows the local firewall rules. In a cloud environment, check the security group and network ACL attached to the instance.
 </Aside>
-
-## Designing a Simple Network
-
-Let us pull everything together and sketch the network for our 20-person office. The design needs to provide workstation connectivity, host internal services, and allow internet access.
-
-<Steps>
-1. **Define the address space.** We allocate `10.0.1.0/24` as our overall block, then split it into two `/25` subnets: `10.0.1.0/25` for workstations and `10.0.1.128/25` for servers.
-
-2. **Assign infrastructure addresses.** The router gets `10.0.1.1` on the workstation subnet and `10.0.1.129` on the server subnet. The DNS server is `10.0.1.130`, and the web application server is `10.0.1.131`.
-
-3. **Configure DHCP.** The DHCP server hands out `10.0.1.10` through `10.0.1.126` to workstations, with the default gateway set to `10.0.1.1` and the DNS server set to `10.0.1.130`. Server addresses are statically assigned.
-
-4. **Set up routing and NAT.** The router has a default route pointing to the ISP gateway. NAT is configured so that all outbound traffic from both subnets appears to come from the router's public IP.
-
-5. **Apply firewall rules.** Inbound traffic from the internet is blocked by default. Port forwarding is configured for any services that need external access. Between subnets, workstations can reach the web server (port 443) and DNS (port 53), but direct access to the database server is restricted to the web server only.
-</Steps>
-
-This design maps closely to cloud concepts. In AWS, the overall `10.0.1.0/24` block would be a VPC, each `/25` would be a subnet, the router is the VPC's implicit router, NAT is provided by a NAT Gateway, and firewall rules are expressed as security groups and network ACLs. Whether a subnet is public or private depends on its route table and gateway configuration, not on the CIDR block alone.
 
 ## Configuring IP Addresses on Linux
 
@@ -380,34 +364,34 @@ These tools query DNS servers directly and show you exactly what the resolver re
 # Full DNS query with all sections
 dig example.com
 
-# Query a specific DNS server
-dig @10.0.1.130 wiki.office.example
+# Query a specific DNS server (e.g., Google's public resolver)
+dig @8.8.8.8 example.com
 
-# Reverse DNS lookup
-dig -x 10.0.1.131
+# Reverse DNS lookup (find the hostname for an IP)
+dig -x 93.184.216.34
 
 # Quick lookup with nslookup
-nslookup wiki.office.example 10.0.1.130
+nslookup example.com 8.8.8.8
 ```
 
-The `dig` output includes the answer section (the actual records), the authority section (which name server is responsible), and timing information. If `dig @10.0.1.130` works but `dig` alone does not, the workstation is probably configured to use the wrong DNS server or is reaching a resolver with different data.
+The `dig` output includes the answer section (the actual records), the authority section (which name server is responsible), and timing information. If `dig @8.8.8.8` returns the correct answer but `dig` alone does not, the machine is probably configured to use a different DNS server that has stale or incorrect data.
 
 ### curl: Testing Application-Layer Connectivity
 
-`curl` makes HTTP (and many other protocol) requests from the command line. It is invaluable for testing whether a web service is actually responding. In this example, assume the office wiki is served over HTTPS on port 443:
+`curl` makes HTTP (and many other protocol) requests from the command line. It is invaluable for testing whether a web service is actually responding:
 
 ```bash
-# Test if the web server responds
-curl -I https://wiki.office.example
+# Test if the web server responds (fetch headers only)
+curl -I https://example.com
 
 # Test with verbose output to see TLS and header details
-curl -v https://wiki.office.example
+curl -v https://example.com
 
-# Test the server by IP when DNS is suspect (-k ignores certificate-name mismatch)
-curl -kI https://10.0.1.131
+# Test a server by IP when DNS is suspect (-k ignores certificate-name mismatch)
+curl -kI https://93.184.216.34
 
 # Follow redirects and show timing
-curl -o /dev/null -s -w "HTTP %{http_code} in %{time_total}s\n" https://wiki.office.example
+curl -o /dev/null -s -w "HTTP %{http_code} in %{time_total}s\n" https://example.com
 ```
 
 The `-I` flag fetches only headers, which is useful for a quick check without downloading the entire page. The `-v` flag shows the TLS handshake and request/response headers, which helps diagnose certificate problems and redirect loops.
@@ -447,20 +431,21 @@ Three possible states: `open` means the port accepted the connection; `filtered`
 <Aside type="tip" title="A Systematic Diagnostic Workflow">
 When a user reports "the website is down," work through the layers:
 
-1. `ping 10.0.1.1` to verify local connectivity
-2. `ping 10.0.1.131` to verify you can reach the server
-3. `dig wiki.office.example` to verify DNS resolution
-4. `curl -I https://wiki.office.example` to verify the web service is responding
+1. `ping <default-gateway>` to verify local connectivity
+2. `ping <server-ip>` to verify you can reach the server
+3. `dig <hostname>` to verify DNS resolution
+4. `curl -I https://<hostname>` to verify the web service is responding
 5. `sudo ss -tlnp` (on the server) to verify the process is listening
+6. `nmap -sV -Pn -p T:443 <public-ip>` (from outside the network) to confirm the port is reachable through any firewall or security group
 
 Each step targets a different layer, and the first one that fails tells you exactly where to focus your investigation.
-
-6. `nmap -sV -Pn -p T:443 <public-ip>` (from outside the network) to confirm the port is reachable through any firewall or security group between you and the server.
 </Aside>
 
 ## Putting It All Together
 
-Networking can feel abstract until you connect the pieces. In our small office scenario, a single web request from an employee's laptop to `wiki.office.example` touches every concept in this chapter. The laptop uses DHCP to get an address, sends a DNS query over UDP port 53 to resolve the hostname, constructs an IP packet destined for `10.0.1.131`, determines via the routing table that this address is on a different subnet and sends the packet to the default gateway, the switch forwards the Ethernet frame to the router port, the router forwards it to the server subnet, the server accepts the HTTPS connection on port 443, and Nginx serves the wiki page. Understanding this chain, and knowing which tool to use at each step, is the core skill that separates confident troubleshooting from guesswork.
+Networking can feel abstract until you connect the pieces. Consider what happens when you SSH into an EC2 instance to manage a server. Your laptop uses DHCP to get an IP address and default gateway from the local network. It sends a DNS query over UDP port 53 to resolve the instance's hostname (or you use the public IP directly). Your OS constructs a TCP packet destined for port 22, consults the routing table, and sends it to the default gateway. Your home router performs NAT, rewriting the source address to your public IP. The packet traverses multiple ISP routers (each visible as a hop in `traceroute`) until it reaches AWS's network. The VPC's route table directs it to the correct subnet. The security group checks whether inbound TCP port 22 is allowed from your IP. The instance's network interface receives the packet, and `sshd` (listening on port 22, as confirmed by `ss -tlnp`) accepts the connection.
+
+If any step in that chain fails, you have a specific layer to investigate: no link light (layer 1), no IP address (layer 3), DNS timeout (layer 7), security group blocking the port (layer 4), or `sshd` not running (application). Understanding this chain, and knowing which tool to use at each step, is the core skill that separates confident troubleshooting from guesswork.
 
 ## Resources
 
