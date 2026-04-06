@@ -22,7 +22,7 @@ The **TCP/IP model** collapses these into four practical layers: Link (covering 
 When something breaks, start at the bottom and work up. Can you see a link light on the switch port (layer 1)? Does the interface have an IP address (layer 3)? Can you ping the default gateway (layer 3)? Can you resolve DNS names (layer 7)? Can you reach the application port (layer 4)? This bottom-up approach prevents you from spending an hour debugging your web server configuration when the Ethernet cable is unplugged.
 </Aside>
 
-For our small office, the layers map to concrete things. Layer 1 is the Cat6 cabling running from each desk to a patch panel in the server closet. Layer 2 is the Ethernet switch connecting those cables. Layer 3 is the router assigning IP addresses and forwarding traffic. Layer 4 is the TCP connections carrying HTTP, SSH, and database traffic. Layer 7 is the web application itself. Every diagnostic step you take later in this chapter targets a specific layer.
+For our small office, the layers map to concrete things. Layer 1 is the Cat6 cabling running from each desk to a patch panel in the server closet. Layer 2 is the Ethernet switch connecting those cables. Layer 3 is the router forwarding packets between subnets. DHCP assigns IP addresses, while the router handles packet forwarding. Layer 4 is the TCP connections carrying HTTP, SSH, and database traffic. Layer 7 is the web application itself. Every diagnostic step you take later in this chapter targets a specific layer.
 
 ## Network Topologies
 
@@ -72,6 +72,8 @@ Suppose you want to separate the employee workstations from the servers for secu
 - `10.0.1.0/25` (hosts `10.0.1.1` through `10.0.1.126`) for workstations
 - `10.0.1.128/25` (hosts `10.0.1.129` through `10.0.1.254`) for servers
 
+Notice that `10.0.1.130` is not in the workstation subnet. Once you split the `/24` into two `/25`s, any workstation traffic to `10.0.1.130` must go through the router.
+
 This separation lets you apply different firewall rules to each subnet. Workstations might be allowed outbound internet access but blocked from reaching the database server directly, while the web application server can reach the database but has no outbound internet access. On a Linux machine, you can inspect your current address and subnet with:
 
 ```bash
@@ -92,7 +94,7 @@ Three services make a network usable in practice. Without them, every user would
 
 When an employee plugs in a laptop or connects to Wi-Fi, **DHCP** automatically assigns an IP address, subnet mask, default gateway, and DNS server addresses. The process works in four steps (often called DORA): the client sends a Discover broadcast, the DHCP server responds with an Offer, the client sends a Request confirming it wants that address, and the server sends an Acknowledgment. Each address comes with a lease time; when the lease expires, the client must renew it.
 
-For our office, the DHCP server (often running on the router or a dedicated Linux server) might be configured to hand out addresses from `10.0.1.10` through `10.0.1.126` in the workstation subnet, with the default gateway set to `10.0.1.1` and DNS pointed to `10.0.1.129` (a server in the server subnet). Servers themselves typically use **static addresses** (also called reservations) so their addresses never change; clients and other services depend on those addresses being stable.
+For our office, the DHCP server (often running on the router or a dedicated Linux server) might be configured to hand out addresses from `10.0.1.10` through `10.0.1.126` in the workstation subnet, with the default gateway set to `10.0.1.1` and DNS pointed to `10.0.1.130` (the DNS server in the server subnet). Servers themselves typically use either **static addresses** or **DHCP reservations** so their addresses remain stable; clients and other services depend on those addresses being predictable.
 
 You can inspect your current DHCP lease on a Linux system:
 
@@ -107,7 +109,9 @@ sudo dhclient eth0
 
 ### DNS (Domain Name System)
 
-**DNS** translates human-readable names like `wiki.office.local` into IP addresses like `10.0.1.130`. Without DNS, users would need to type IP addresses into their browsers and every configuration file would break whenever a server moved to a new address. DNS is hierarchical: your office DNS server knows about local names and forwards everything else to an upstream resolver (such as `8.8.8.8` or `1.1.1.1`), which in turn queries the global DNS infrastructure.
+**DNS** translates human-readable names like `wiki.office.example` into IP addresses like `10.0.1.131`. Without DNS, users would need to type IP addresses into their browsers and every configuration file would break whenever a server moved to a new address. DNS is hierarchical: your office DNS server knows about local names and forwards everything else to an upstream resolver (such as `8.8.8.8` or `1.1.1.1`), which in turn queries the global DNS infrastructure.
+
+For teaching examples, this chapter uses names under `office.example`. Avoid using `.local` for ordinary unicast DNS in real deployments because `.local` is widely reserved for multicast DNS (mDNS/Bonjour) and can produce confusing resolution behavior.
 
 The most common record types are **A records** (mapping a name to an IPv4 address), **AAAA records** (mapping to IPv6), **CNAME records** (aliases pointing one name to another), and **MX records** (mail routing). When a DNS lookup fails, the symptom is usually "the internet is down" even though the network is perfectly functional; the user simply cannot resolve names to addresses.
 
@@ -115,13 +119,13 @@ You can query DNS from the command line:
 
 ```bash
 # Look up the A record for a hostname
-dig wiki.office.local
+dig wiki.office.example
 
 # Shorter output showing just the answer
-dig +short wiki.office.local
+dig +short wiki.office.example
 
 # Use nslookup for a quick interactive check
-nslookup wiki.office.local
+nslookup wiki.office.example
 ```
 
 <HistoricalNote title="DNS Was Designed to Replace a Text File (1983)">
@@ -211,11 +215,11 @@ A **router** operates at layer 3 and forwards packets between different subnets 
 
 A **firewall** inspects traffic and enforces security policies. It can operate at multiple layers: a simple firewall might block or allow traffic based on IP addresses and port numbers (layers 3 and 4), while an advanced firewall might inspect HTTP headers or application content (layer 7). In our office, the router likely includes basic firewall functionality, blocking inbound connections from the internet by default and only allowing specific traffic through.
 
-In cloud environments, **security groups** act as virtual firewalls attached to individual instances. A security group rule like "allow TCP port 443 from `0.0.0.0/0`" is equivalent to a firewall rule permitting HTTPS traffic from any source. The key difference from traditional firewalls is that security groups are stateful: if you allow an outbound connection, the return traffic is automatically permitted.
+In cloud environments, **security groups** act as virtual firewalls associated with virtual network interfaces and commonly managed at the instance level. A security group rule like "allow TCP port 443 from `0.0.0.0/0`" is equivalent to a firewall rule permitting HTTPS traffic from any source. One important difference from some traditional packet filters is that security groups are stateful: if you allow an outbound connection, the return traffic is automatically permitted.
 
 ## Address Resolution Protocol (ARP)
 
-IP addresses are layer-3 identifiers used for routing between networks. But within a single subnet, devices communicate at layer 2 using **MAC addresses** -- hardware addresses burned into each network interface. **ARP** (Address Resolution Protocol) bridges the gap: when a host needs to send a packet to an IP address on the same subnet and does not already know that address's MAC address, it broadcasts "who has `10.0.1.10`?" across the local network, and the device with that IP replies with its MAC.
+IP addresses are layer-3 identifiers used for routing between networks. But within a single IPv4 subnet, devices communicate at layer 2 using **MAC addresses**. **ARP** (Address Resolution Protocol) bridges the gap: when a host needs to send a packet to an IP address on the same subnet and does not already know that address's MAC address, it broadcasts "who has `10.0.1.10`?" across the local network, and the device with that IP replies with its MAC.
 
 Each host caches these mappings in an **ARP table** to avoid repeating the broadcast for every packet. On Linux you can inspect it directly:
 
@@ -232,7 +236,7 @@ ip neighbor show
 
 A `FAILED` entry for your default gateway means your machine cannot reach the gateway at layer 2, even if the IP configuration looks correct. This is a reliable indicator of a layer-2 problem: wrong VLAN assignment, a bad cable, or the gateway being down.
 
-ARP only operates within a single broadcast domain. When traffic crosses a router, the router resolves the *next hop's* MAC using its own ARP cache. The original source MAC is never forwarded beyond the local segment, which is why IP routing and MAC addressing are separate concerns.
+ARP only operates within a single broadcast domain and applies to IPv4. When traffic crosses a router, the router resolves the *next hop's* MAC using its own ARP cache. The original source MAC is never forwarded beyond the local segment, which is why IP routing and MAC addressing are separate concerns. IPv6 uses Neighbor Discovery Protocol (NDP) instead of ARP.
 
 ## Ports and Protocols
 
@@ -242,7 +246,7 @@ Layer 4 of the TCP/IP model distinguishes between different services running on 
 
 **UDP (User Datagram Protocol)** is simpler and faster but provides no delivery guarantees. DNS queries, DHCP, video streaming, and VoIP use UDP because speed matters more than perfect delivery, or because the application handles retransmission itself.
 
-Well-known port numbers (0 through 1023) are standardized. The ones you will encounter most often as a system administrator include:
+Common service ports are standardized or conventionally assigned. Well-known ports occupy 0 through 1023, while many widely used application ports live in the registered range above 1023. The ones you will encounter most often as a system administrator include:
 
 | Port | Protocol | Service |
 |------|----------|---------|
@@ -295,16 +299,17 @@ Let us pull everything together and sketch the network for our 20-person office.
 
 4. **Set up routing and NAT.** The router has a default route pointing to the ISP gateway. NAT is configured so that all outbound traffic from both subnets appears to come from the router's public IP.
 
-5. **Apply firewall rules.** Inbound traffic from the internet is blocked by default. Port forwarding is configured for any services that need external access. Between subnets, workstations can reach the web server (port 443) and DNS (port 53), but direct access to the database server is restricted to the web application server only.
+5. **Apply firewall rules.** Inbound traffic from the internet is blocked by default. Port forwarding is configured for any services that need external access. Between subnets, workstations can reach the web server (port 443) and DNS (port 53), but direct access to the database server is restricted to the web server only.
 </Steps>
 
-This design maps directly to cloud concepts. In AWS, the overall `10.0.1.0/24` block would be a VPC, each `/25` would be a subnet (one public, one private), the router is the VPC's implicit router, NAT is provided by a NAT Gateway, and firewall rules are expressed as security groups and network ACLs.
+This design maps closely to cloud concepts. In AWS, the overall `10.0.1.0/24` block would be a VPC, each `/25` would be a subnet, the router is the VPC's implicit router, NAT is provided by a NAT Gateway, and firewall rules are expressed as security groups and network ACLs. Whether a subnet is public or private depends on its route table and gateway configuration, not on the CIDR block alone.
 
 ## Configuring IP Addresses on Linux
 
 Linux provides several different tools and frameworks for network configuration, and which one applies depends on the distribution:
 
-- **ifupdown** (Debian/Ubuntu): Configuration lives in `/etc/network/interfaces`. Simple and declarative, but lacks dynamic management.
+- **Netplan** (modern Ubuntu): Configuration lives in `/etc/netplan/` as YAML and is rendered to backends such as NetworkManager or `systemd-networkd`.
+- **ifupdown** (older Debian-based systems and some minimal installs): Configuration lives in `/etc/network/interfaces`. Simple and declarative, but less common on current Ubuntu releases.
 - **NetworkManager** (common on AlmaLinux, Fedora, and RHEL): A daemon that manages connections dynamically. Configured via the `nmcli` command-line utility or `nmtui` text UI.
 - **systemd-networkd**: Increasingly used on server distributions; configuration files live in `/etc/systemd/network/`.
 
@@ -325,12 +330,12 @@ sudo ip route add default via 10.0.1.1
 ```
 
 <Aside type="caution" title="Temporary vs. Persistent Configuration">
-Changes made with `ip addr` and `ip route` commands are not persistent. They disappear on reboot. Always apply permanent configuration through your distribution's network management tool (NetworkManager, systemd-networkd, or `/etc/network/interfaces`). The older `ifconfig` and `route` commands are deprecated; use `ip` instead.
+Changes made with `ip addr` and `ip route` commands are not persistent. They disappear on reboot. Always apply permanent configuration through your distribution's network management tool such as Netplan, NetworkManager, systemd-networkd, or `/etc/network/interfaces`. The older `ifconfig` and `route` commands are deprecated; use `ip` instead.
 </Aside>
 
 ## Enterprise Networks
 
-Enterprise networks add requirements beyond what a small office needs: fiber backbone links, **Link Aggregation (LAG)** to bond multiple physical cables into one logical interface for throughput and redundancy, large delegated address blocks (a university might own an entire `/16`, giving it 65,534 addresses to delegate to departments), and dynamic routing protocols like OSPF and BGP that automatically reroute traffic around failures in seconds. Designing and operating networks at this scale -- including multi-location connectivity, cloud integration, and advanced firewall architectures -- is covered in the Building and Operating a Company Network lecture.
+Enterprise networks add requirements beyond what a small office needs: fiber backbone links, **Link Aggregation (LAG)** to bond multiple physical cables into one logical interface for throughput and redundancy, large delegated address blocks (a university might own an entire `/16`, giving it 65,534 addresses to delegate to departments), and dynamic routing protocols like OSPF and BGP that can automatically reroute traffic around failures. Designing and operating networks at this scale, including multi-location connectivity, cloud integration, and advanced firewall architectures, is covered in the Building and Operating a Company Network lecture.
 
 ## Practical Diagnostic Tools
 
@@ -376,33 +381,33 @@ These tools query DNS servers directly and show you exactly what the resolver re
 dig example.com
 
 # Query a specific DNS server
-dig @10.0.1.130 wiki.office.local
+dig @10.0.1.130 wiki.office.example
 
 # Reverse DNS lookup
 dig -x 10.0.1.131
 
 # Quick lookup with nslookup
-nslookup wiki.office.local 10.0.1.130
+nslookup wiki.office.example 10.0.1.130
 ```
 
-The `dig` output includes the answer section (the actual records), the authority section (which name server is responsible), and timing information. If `dig @10.0.1.130` works but `dig` alone does not, the workstation is configured to use the wrong DNS server.
+The `dig` output includes the answer section (the actual records), the authority section (which name server is responsible), and timing information. If `dig @10.0.1.130` works but `dig` alone does not, the workstation is probably configured to use the wrong DNS server or is reaching a resolver with different data.
 
 ### curl: Testing Application-Layer Connectivity
 
-`curl` makes HTTP (and many other protocol) requests from the command line. It is invaluable for testing whether a web service is actually responding:
+`curl` makes HTTP (and many other protocol) requests from the command line. It is invaluable for testing whether a web service is actually responding. In this example, assume the office wiki is served over HTTPS on port 443:
 
 ```bash
 # Test if the web server responds
-curl -I https://wiki.office.local
+curl -I https://wiki.office.example
 
 # Test with verbose output to see TLS and header details
-curl -v https://wiki.office.local
+curl -v https://wiki.office.example
 
-# Test a specific port to bypass DNS
-curl -I http://10.0.1.131:8080
+# Test the server by IP when DNS is suspect (-k ignores certificate-name mismatch)
+curl -kI https://10.0.1.131
 
 # Follow redirects and show timing
-curl -o /dev/null -s -w "HTTP %{http_code} in %{time_total}s\n" https://wiki.office.local
+curl -o /dev/null -s -w "HTTP %{http_code} in %{time_total}s\n" https://wiki.office.example
 ```
 
 The `-I` flag fetches only headers, which is useful for a quick check without downloading the entire page. The `-v` flag shows the TLS handshake and request/response headers, which helps diagnose certificate problems and redirect loops.
@@ -444,18 +449,18 @@ When a user reports "the website is down," work through the layers:
 
 1. `ping 10.0.1.1` to verify local connectivity
 2. `ping 10.0.1.131` to verify you can reach the server
-3. `dig wiki.office.local` to verify DNS resolution
-4. `curl -I http://10.0.1.131:8080` to verify the application is responding
+3. `dig wiki.office.example` to verify DNS resolution
+4. `curl -I https://wiki.office.example` to verify the web service is responding
 5. `sudo ss -tlnp` (on the server) to verify the process is listening
 
 Each step targets a different layer, and the first one that fails tells you exactly where to focus your investigation.
 
-6. `nmap -sV -Pn -p T:8080 10.0.1.131` (from outside the network) to confirm the port is reachable through any firewall or security group between you and the server.
+6. `nmap -sV -Pn -p T:443 <public-ip>` (from outside the network) to confirm the port is reachable through any firewall or security group between you and the server.
 </Aside>
 
 ## Putting It All Together
 
-Networking can feel abstract until you connect the pieces. In our small office scenario, a single web request from an employee's laptop to `wiki.office.local` touches every concept in this chapter. The laptop uses DHCP to get an address (layer 7 service), sends a DNS query over UDP port 53 to resolve the hostname (layers 4 and 7), constructs an IP packet destined for `10.0.1.131` (layer 3), determines via the routing table that this address is on a different subnet and sends the packet to the default gateway (layer 3), the switch forwards the Ethernet frame to the router port (layer 2), the router forwards it to the server subnet (layer 3), the server's TCP stack accepts the connection on port 8080 (layer 4), and Nginx serves the wiki page (layer 7). Understanding this chain, and knowing which tool to use at each step, is the core skill that separates confident troubleshooting from guesswork.
+Networking can feel abstract until you connect the pieces. In our small office scenario, a single web request from an employee's laptop to `wiki.office.example` touches every concept in this chapter. The laptop uses DHCP to get an address, sends a DNS query over UDP port 53 to resolve the hostname, constructs an IP packet destined for `10.0.1.131`, determines via the routing table that this address is on a different subnet and sends the packet to the default gateway, the switch forwards the Ethernet frame to the router port, the router forwards it to the server subnet, the server accepts the HTTPS connection on port 443, and Nginx serves the wiki page. Understanding this chain, and knowing which tool to use at each step, is the core skill that separates confident troubleshooting from guesswork.
 
 ## Resources
 
