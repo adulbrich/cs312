@@ -300,7 +300,9 @@ Notice that your prompt likely changed. You are now effectively "inside" the new
    `grub-mkconfig` scans the system for installed kernels and writes a configuration file that tells GRUB what to show in the boot menu and how to load each option. Never edit `grub.cfg` directly: always regenerate it with this command, because it will be overwritten the next time the kernel updates.
 
    <Aside type="note" title="UTM aarch64 kernel detection tip">
-   On some Apple Silicon installs, the kernel file is named `/boot/Image` and GRUB may not detect it automatically. If `grub-mkconfig` does not find Arch, create a compatibility symlink and regenerate the config:
+   The name `vmlinuz` is historical: `vm` stands for virtual memory (the kernel was compiled with virtual memory support), `linux` is the OS name, and the trailing `z` means the image is compressed: the bootloader decompresses it into RAM before handing control to it. The uncompressed version is called `vmlinux`. `grub-mkconfig` scans `/boot/` for files matching the pattern `vmlinuz*` to build the boot menu automatically.
+
+   On some Apple Silicon installs, the kernel file is named `/boot/Image` instead, which does not match that pattern, so GRUB may not detect it automatically. If `grub-mkconfig` does not find Arch, create a compatibility symlink and regenerate the config:
 
    ```bash
    ln -sf /boot/Image /boot/vmlinuz-linux
