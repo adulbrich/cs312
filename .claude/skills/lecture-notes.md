@@ -202,6 +202,7 @@ No annotations or descriptions on resource links; the title should be self-expla
 - **No tutorial-style walkthroughs.** Lecture notes explain concepts and show illustrative commands. They do not guide students step-by-step through a task. That belongs in activities.
 - **No running scenarios that thread through the entire lecture.** Use multiple independent examples. A "20-person office" or "building a web app" scenario that persists across all sections creates artificial coupling and makes individual sections harder to reference independently.
 - **No setup instructions** (installing Docker, creating an AWS account, etc.). Those belong in activities or labs.
+- **No mention of "students" or "you will do in class."** The lecture notes are a timeless reference, not a course schedule. They should not assume any particular timeline or mode of engagement.
 
 ### What Lecture Notes SHOULD Contain
 

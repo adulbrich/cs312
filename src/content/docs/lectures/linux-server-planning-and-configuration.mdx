@@ -7,6 +7,8 @@ sidebar:
 
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
+import FigureWithCaption from '/src/components/FigureWithCaption.astro';
+import StorageManagementLayers from './linux-server-planning-and-configuration/storage-management-layers.svg';
 
 A Linux server is just Linux, with the same kernel, the same commands, and the same file hierarchy, but configured deliberately: right-sized for its workload, secured for network exposure, and arranged so that services start reliably and can be debugged when they do not. This lecture walks through the decisions and tools that matter from the moment you choose a distribution to the moment a service is running and monitored. Every section builds on the last; by the end, you will have the vocabulary and the commands to set up and maintain a Linux server from scratch.
 
@@ -16,8 +18,8 @@ Linux servers run on bare metal (a physical machine you can touch), inside a vir
 
 Any of the following will work:
 
-- **Cloud instance (easiest to start).** Launch a `t3.micro` or `t3.small` EC2 (Elastic Compute Cloud, AWS's virtual machine service) instance using a Linux LTS AMI (Amazon Machine Image, a pre-built OS snapshot used to launch instances). You get a running server in under a minute and can tear it down when you are done.
-- **Local VM.** Create a virtual machine in VirtualBox or UTM (macOS) with 2 GB of RAM and 20 GB of disk. Download the ISO for your chosen distribution and install from it. This gives you the full installation experience including the boot process, partitioning, and first-boot configuration.
+- **Cloud instance (easiest to start).** Launch an EC2 (Elastic Compute Cloud, AWS's virtual machine service) instance using a Linux LTS AMI (Amazon Machine Image, a pre-built OS snapshot used to launch instances). You get a running server in under a minute and can tear it down when you are done.
+- **Local VM.** Create a virtual machine in VirtualBox or UTM (macOS). Download the ISO for your chosen distribution and install from it. This gives you the full installation experience including the boot process, partitioning, and first-boot configuration.
 - **Bare metal.** If you have a spare physical machine, install your chosen Linux distribution directly. This is the most complete experience (you will see real firmware, real disk detection, real network interfaces), but it requires dedicated hardware.
 
 <Aside type="tip" title="VM vs. Cloud Instance: Which to Use">
@@ -26,26 +28,36 @@ If you want to practice the installation process itself (partitioning, bootloade
 
 ## Choosing a Linux Distribution
 
-The first decision you face when building a server is which Linux distribution to run. This choice affects your package ecosystem, support lifecycle, default tooling, and the community you turn to when things break.
+The first decision you face when building a server is which Linux distribution to run. This choice affects your package ecosystem, release cadence, support window, default tooling, vendor support, and the community you turn to when things break. It also affects how often change arrives. Some distributions deliberately change slowly so operations teams can standardize on them for years. Others move quickly so developers get newer kernels, drivers, and language runtimes sooner.
 
 Linux distributions fall into a small number of family trees that share a common ancestry, package format, and tooling. Knowing the lineage helps you transfer skills from one distro to another.
 
-- **Debian family**: Debian is the upstream root. Ubuntu is built on Debian and is the most widely used server distribution. Mint, Kali, and Knoppix all derive from Ubuntu or Debian. Package format: `.deb`; package manager: `apt`.
+- **Debian family**: Debian is the upstream root. Ubuntu is built on Debian and is the most widely used server distribution. Mint, Kali, and Knoppix all derive from Ubuntu or Debian. Proxmox is also built on top of Debian. Package format: `.deb`; package manager: `apt`.
 - **Red Hat / Fedora family**: Red Hat Enterprise Linux (RHEL) is the commercial flagship. Fedora is the upstream community project. AlmaLinux and Rocky Linux are free rebuilds of RHEL. Amazon Linux is based on this family as well. Package format: `.rpm`; package manager: `dnf` (formerly `yum`).
 - **Arch family**: Arch Linux follows a rolling-release model. Manjaro is a more beginner-friendly derivative. Package manager: `pacman`.
-- **Other notable distributions**: openSUSE (dominant in Europe), Gentoo (source-based), Slackware (one of the oldest maintained distros). ChromeOS is Linux-based. FreeBSD and other BSDs are Unix-like but are not Linux.
+- **Other notable distributions**: openSUSE has both the stable Leap line and the rolling Tumbleweed line. Gentoo is source-based. Slackware is one of the oldest maintained distros. ChromeOS is Linux-based. FreeBSD and other BSDs are Unix-like but are not Linux.
 
-**Ubuntu Server (LTS)** is one of the most popular choices for new deployments. Canonical publishes Long Term Support releases every two years, each backed by five years of security patches (ten with Ubuntu Pro). Ubuntu uses the `apt` package manager and has an enormous ecosystem of community packages. Ubuntu 24.04 LTS ships with recent versions of Nginx, PostgreSQL, and Node.js, and its documentation is extensive.
+The biggest practical difference between distributions is often the **release model**. A **stable** or **LTS (Long Term Support)** distribution freezes package versions for a defined release and then backports security patches. That means you keep the same major version of many packages for a long time, but receive security fixes without chasing constant feature churn. Debian Stable, Ubuntu LTS, and RHEL all follow this model. The operational advantage is predictability: documentation stays accurate longer, automation is less likely to break, and maintenance windows are easier to plan. The tradeoff is that package versions can look old compared to blog posts or tutorials written for newer releases.
 
-**Debian** is the upstream project that Ubuntu is built on. Debian Stable prioritizes rock-solid reliability over cutting-edge software. Release cycles are longer (roughly every two years), and packages tend to be older than Ubuntu's. Debian is a strong choice when you want maximum stability and minimal surprises, but you may need to pull newer software from backports or third-party repositories.
+A **rolling-release** distribution continuously publishes new package versions instead of bundling them into large, infrequent releases. Arch is the canonical example. The advantage is freshness: new kernels, drivers, compilers, and language runtimes appear quickly. The tradeoff is operational volatility. A server on a rolling distribution asks you to absorb change continuously, which is useful for learning and desktop experimentation but usually a poor default for production infrastructure unless your team is intentionally staffed and tooled for that pace.
 
-**RHEL and its rebuilds (AlmaLinux, Rocky Linux)** dominate enterprise environments. Red Hat Enterprise Linux uses the `dnf` package manager (formerly `yum`) and follows a ten-year support lifecycle. AlmaLinux and Rocky Linux are community rebuilds that track RHEL releases without the subscription cost. If your organization already runs RHEL-family systems, staying in that ecosystem reduces the number of things your team needs to know.
+Some distributions split the difference. Fedora has a regular release cadence and relatively short support window, so it moves much faster than RHEL while still shipping in distinct releases. openSUSE offers both Leap and Tumbleweed for this reason: one track for stability, one for constant updates.
+
+**Ubuntu Server (LTS)** is one of the most popular choices for new deployments. Canonical publishes Long Term Support releases every two years, each backed by five years of security patches (ten with Ubuntu Pro). Ubuntu has an enormous ecosystem of community packages. Ubuntu is a strong default when you want current-enough software, broad documentation, and lots of third-party instructions that match what you are running.
+
+**Debian** is the upstream project that Ubuntu is built on. Debian Stable prioritizes rock-solid reliability over cutting-edge software. Debian also maintains **Testing** and **Unstable** branches, but when administrators say "Debian on a server" they usually mean Stable. Debian is a strong choice when you want maximum stability and minimal surprises, but you may need backports or third-party repositories if your application stack requires newer software.
+
+**RHEL and its rebuilds (AlmaLinux, Rocky Linux)** dominate enterprise environments. Red Hat Enterprise Linux follows a long support lifecycle measured in many years, not months. AlmaLinux and Rocky Linux are community rebuilds that track the RHEL ecosystem without the subscription cost. If your organization already runs RHEL-family systems, staying in that ecosystem reduces the number of things your team needs to know and keeps you aligned with enterprise vendor support matrices.
+
+**Arch Linux** is excellent for understanding Linux because it exposes more of the system directly and assumes less. That same quality makes it less forgiving operationally. On a production server, the question is not "Can Arch do this?" but "Do you want this server to require constant careful attention?" Usually the answer is no.
+
+In practice, you should choose a distribution using three filters. First, does the software you need officially support it? Database vendors, security agents, and monitoring tools often document only a subset of distributions. Second, does your team already know it? A familiar distribution with boring tooling is often safer than a theoretically superior one nobody can operate confidently at 2 AM. Third, does its release model match the workload? Production usually wants slow change; experimentation often benefits from fast change.
 
 <Aside type="tip" title="Prefer LTS and Stable Releases">
 For servers, always prefer an LTS or Stable release over a rolling or short-lived release. A server that quietly drifts out of security support is a liability you may not notice until it is too late.
 </Aside>
 
-**Server vs. Desktop editions.** Most distributions offer both. A server edition omits the graphical desktop environment, reducing the installed package count, memory footprint, and attack surface. Server administration is done entirely over SSH.
+Most distributions offer both a desktop and server edition. A server edition omits the graphical desktop environment, reducing the installed package count, memory footprint, and attack surface. Server administration is done entirely over SSH.
 
 ## Pre-Install Planning
 
@@ -53,9 +65,9 @@ Resist the urge to boot the installer immediately. A few minutes of planning wil
 
 ### Purpose and Sizing
 
-Start by writing down what the server will do. For example, a server running a web application might need CPU for request handling, enough RAM for the database buffer pool and the application runtime, and enough disk for the OS, application code, database files, and logs.
+Start by writing down what the server will do, what software it must run, and who will operate it. A server running a web application might need CPU for request handling, enough RAM for the database buffer pool and the application runtime, and enough disk for the OS, application code, database files, and logs. But sizing is not just about hardware. It is also about software requirements and operational maturity. PostgreSQL, Docker, Kubernetes agents, antivirus tools, backup agents, and observability collectors all consume resources. Some software also imposes hard support requirements: a vendor may support only certain kernels, distributions, or CPU architectures.
 
-A reasonable starting point for a small web application might be 2 vCPUs (virtual CPUs, the share of a physical processor allocated to a VM or cloud instance), 4 GB of RAM, and a 40 GB root disk. You can always resize later (especially in the cloud), but having a baseline prevents both over-provisioning (wasting money) and under-provisioning (dropping requests under load).
+A reasonable starting point for a small web application might be 2 vCPUs (virtual CPUs, the share of a physical processor allocated to a VM or cloud instance), 4 GB of RAM, and a 40 GB root disk. That is only a starting hypothesis. If the application stack includes Java, Elasticsearch, large caches, or a local database, that baseline may be far too small. If the team is inexperienced with Linux, a more conservative choice can also be wise: use a familiar LTS distribution, leave extra disk space for logs and mistakes, and avoid exotic layouts until you have a reason for them. You can usually resize later, especially in the cloud, but having a baseline prevents both over-provisioning (wasting money) and under-provisioning (dropping requests under load).
 
 ### Naming Conventions
 
@@ -63,17 +75,52 @@ Every server needs a hostname. In a small environment, a simple convention like 
 
 ## The Boot Process
 
-Understanding how a Linux server starts up helps you diagnose problems when it does not. The boot sequence has four major stages.
+Understanding how a Linux server starts up helps you diagnose problems when it does not. Boot failures often look mysterious because the machine fails before you ever get a shell. In reality the process is a chain of handoffs: firmware hands off to a boot manager or bootloader, that component hands off to the kernel, the kernel hands off to the init system, and only then do the normal user-space services begin. If you know which stage failed, your debugging becomes much narrower.
 
-**1. Firmware (UEFI or BIOS).** When the machine powers on, the firmware initializes hardware and looks for a bootable device. Modern servers use UEFI, which reads from an EFI System Partition (ESP) formatted as FAT32. Older systems use legacy BIOS, which reads the first 512 bytes of the boot disk (the Master Boot Record).
+The boot sequence has four major stages.
 
-**2. Bootloader (GRUB2).** The firmware hands control to the bootloader. On most Linux systems this is GRUB2 (the current standard, replacing Legacy GRUB). GRUB2 presents a menu of available kernels and passes boot parameters to the one you select. Its configuration lives in `/boot/grub/grub.cfg`, but you should edit `/etc/default/grub` and then run `sudo update-grub` rather than modifying that file directly. New kernels are usually installed alongside older versions so that you can roll back if a new kernel causes problems; GRUB's menu lists all available kernels for this reason.
+### 1. Firmware (UEFI or BIOS)
 
-**3. Kernel initialization.** The Linux kernel decompresses itself into memory, detects hardware, mounts an initial ramdisk (`initramfs`) to load essential drivers, and then mounts the real root filesystem. The kernel executable itself lives in `/boot/vmlinuz*`.
+Firmware is the low-level software that starts before the operating system. On older PCs this was the **BIOS (Basic Input/Output System)**. On modern systems it is **UEFI (Unified Extensible Firmware Interface)**, which is more flexible, understands filesystems, and stores boot entries in non-volatile memory. UEFI does not load Linux directly. Instead, it looks in a special partition called the **EFI System Partition (ESP)** for a bootloader executable. The ESP is formatted as **FAT32** because the UEFI specification requires a simple, universally readable filesystem that firmware vendors can implement consistently. FAT32 is not chosen because it is modern or secure; it is chosen because firmware can read it reliably before any Linux driver exists.
 
-**4. Init system (systemd).** Once the kernel has mounted the root filesystem, it starts PID 1: the init system. On virtually all modern distributions, this is `systemd`. Systemd reads its unit files, builds a dependency graph of services, and starts them in parallel. It brings the system to a defined "target" (analogous to the older concept of a runlevel). The default target for a server is `multi-user.target`, which provides a full multi-user environment without a graphical desktop.
+On a cloud VM, the same basic stages still exist, but they are partially hidden from you. An AWS EC2 instance is still a virtual machine with virtual firmware and a virtual disk image. You usually do not watch GRUB appear or manually partition an EFI System Partition because the cloud image already includes those pieces. The handoff chain is still there; the provider simply gives you a prepared disk image that has already been installed.
 
-A few special process IDs are worth knowing. PID 0 is the scheduler and memory page daemon, a kernel-internal entity that never appears as a normal user-space process. PID 1 is `systemd` (or `init` on older systems), the first user-space process. PID 2 is typically `kthreadd`, which spawns kernel threads on demand; many of the low-level daemons visible in `ps` output are children of PID 2.
+### 2. Boot manager or bootloader
+
+The firmware hands control to the next stage, but the exact component depends on the boot design. On many Linux systems that component is **GRUB2 (GRand Unified Bootloader, version 2)**. Embedded systems frequently use **U-Boot**. On UEFI systems, though, you may instead encounter a lighter **boot manager** such as `systemd-boot` or `rEFInd`. Those do not provide the same kind of scripting and filesystem logic as GRUB. They primarily select and launch EFI executables, which may then load the kernel directly or hand off to another loader.
+
+For this course, the important operational idea is that this stage chooses which kernel entry to start and supplies boot parameters. GRUB is popular because it is flexible and works across many hardware and filesystem combinations. Its configuration lives in `/boot/grub/grub.cfg`, but you should edit `/etc/default/grub` and regenerate the real config rather than modifying `grub.cfg` directly. New kernels are usually installed alongside older versions so that you can roll back if a new kernel causes problems.
+
+### 3. Kernel initialization and the initramfs
+
+The Linux kernel decompresses itself into memory, detects hardware, and mounts an **initramfs (initial RAM filesystem)**, historically also called an initial ramdisk. This is a tiny temporary root filesystem stored in memory. Its job is to provide just enough user-space tooling and just enough drivers to let the kernel reach the real root filesystem on disk. This matters because many real root filesystems live behind layers that the bare kernel may not yet understand: NVMe controllers, RAID, encryption, Logical Volume Manager (LVM), network boot, or unusual storage drivers. Once the kernel can see and mount the real root filesystem, it discards the temporary one and switches over.
+
+The **root filesystem** is the filesystem mounted at `/`. It is called "root" not because it belongs to the root user, but because it is the root of the entire directory tree. `/etc`, `/var`, `/home`, `/usr`, and every other path either live on that filesystem or are mounted somewhere beneath it. A machine may have many filesystems on many disks, but there is always exactly one filesystem mounted at `/` at boot.
+
+### 4. Init system (usually systemd)
+
+Once the kernel has mounted the root filesystem, it starts **PID 1**, the first normal user-space process. On virtually all modern Linux distributions this process is `systemd`. The init system's job is to bring the machine from "kernel is alive" to "multi-user server is ready": mount remaining filesystems, start logging, bring up networking, start daemons, and supervise services after boot.
+
+At this point it helps to define **PID (Process ID)** explicitly. Every running process in Linux has a numeric identifier assigned by the kernel. PID 1 is special because other user-space processes ultimately descend from it. If PID 1 fails, the system cannot operate normally. PID 0 is a kernel-internal scheduler context that you do not see as a regular process. PID 2 is typically `kthreadd`, which creates kernel threads on demand. If you run `ps -p 1 -o pid,comm=`, you can see which init system your machine is actually using.
+
+<HistoricalNote title="MBR, GPT, and Why Old Booting Was So Constrained">
+Before UEFI and GPT (GUID Partition Table) became normal, PCs commonly booted using legacy BIOS and the **MBR (Master Boot Record)**. The MBR is the first 512-byte sector of a disk. It contained both a tiny piece of boot code and the partition table. That design was historically important but severely constrained: 512 bytes is barely enough for a stub loader, and the classic MBR partition table supports only four primary partitions and has a 2 TB addressing limit.
+
+```text
+Legacy BIOS disk layout:
+
++----------------------+  sector 0
+| MBR boot code        |
+| partition table      |
++----------------------+
+| partition 1          |
+| partition 2          |
+| ...                  |
++----------------------+
+```
+
+UEFI with GPT separates these concerns. The partition table can be much larger and more robust, and the firmware loads a normal file from the EFI System Partition instead of squeezing logic into the first sector of the disk.
+</HistoricalNote>
 
 <Aside type="note" title="Boot Troubleshooting with GRUB">
 If your server hangs during boot, GRUB lets you interrupt the process and edit kernel parameters. Appending `systemd.unit=rescue.target` to the kernel command line boots into single-user rescue mode, which is invaluable for troubleshooting.
@@ -87,18 +134,9 @@ Choosing the right filesystem for your workload matters more on Linux than on mo
 
 **ext4** is the default filesystem for most Debian/Ubuntu installations and the workhorse of the Linux world. It is stable, well-understood, and works well for general-purpose servers. It supports large files and volumes and includes journaling to recover gracefully from crashes.
 
-**xfs** is the default on RHEL-family distributions. It was designed for high-throughput workloads and large files and handles large filesystems efficiently. It is a good choice for database servers and file storage systems.
+**xfs** is the default on RHEL-family distributions. It was designed for high-throughput workloads and scales well to multi-terabyte filesystems, very large files, and workloads that stream lots of data continuously. That is what administrators usually mean when they say XFS handles "large filesystems" well. They mean not just capacity in the abstract, but sustained performance and predictable behavior when the filesystem contains huge amounts of data.
 
-**ZFS** was created in 2001 by Sun Microsystems and became open-source as OpenZFS in 2013. It acts simultaneously as both a filesystem and a volume manager, giving it complete knowledge of the physical disks, volumes, and the files stored on them. ZFS is mature and production-ready. It is especially well-suited to large-scale storage:
-
-- **Data integrity**: ZFS checksums all data and metadata, detecting and automatically repairing silent corruption (bit rot). This self-healing property sets it apart from traditional filesystems.
-- **Storage pools (zpools)**: instead of formatting individual disks, you add disks to a pool and ZFS manages the allocation. Pools can grow dynamically by adding more disks.
-- **Snapshots and clones**: point-in-time read-only snapshots can be created almost instantly and take up minimal space initially (only changed blocks consume additional space). Writable clones derive from snapshots.
-- **RAID-Z**: ZFS's own RAID (Redundant Array of Independent Disks, a technique for spreading data across multiple drives for redundancy or performance) implementation that avoids the RAID-5 write-hole vulnerability.
-- **Compression and deduplication**: both happen transparently on the fly.
-- **Native encryption**: introduced in later OpenZFS versions.
-
-ZFS can be resource-intensive (it benefits from ample RAM for its adaptive replacement cache), but its data integrity guarantees make it a compelling choice wherever data loss is unacceptable.
+**ZFS** was created in 2001 by Sun Microsystems and became open-source as OpenZFS in 2013. It acts as both a filesystem and a volume manager, so it understands the storage stack end to end rather than treating the underlying disks as an opaque block device. Its major appeal is data integrity: checksums, snapshots, pooled storage, and strong administrative tooling. The tradeoff is complexity and higher resource appetite, especially RAM. ZFS is important and widely used, but the main point here is that it represents a different design philosophy from ext4 and XFS, not just "another format option."
 
 **Btrfs** (B-tree filesystem) was designed as a modern alternative to ext4 and shares several goals with ZFS. It is lighter on resources than ZFS and is the default filesystem for Fedora Workstation and openSUSE (Fedora Server defaults to XFS instead). Key features include copy-on-write semantics, snapshots, transparent automatic compression, and subvolumes (virtual partitions within a single Btrfs volume that can be mounted independently). Btrfs is generally considered less production-ready than ZFS for mission-critical storage but is a common choice for desktop machines and workstations.
 
@@ -106,11 +144,41 @@ For high-performance computing and distributed storage, Linux supports specializ
 
 ## Filesystem Layout and Disk Management
 
-Linux organizes files according to the Filesystem Hierarchy Standard (FHS). Understanding this layout helps you decide where to put things and how to size your partitions.
+Linux organizes files according to the [Filesystem Hierarchy Standard (FHS)](https://refspecs.linuxfoundation.org/FHS_3.0/fhs/index.html). Understanding that layout helps you decide where to put things and how to size your partitions. Before that, though, it helps to separate four concepts: disks, partitions, volumes, and filesystems.
+
+### Disks, Partitions, Volumes, and Filesystems
+
+A **block device** is any device that reads and writes data in fixed-size chunks called blocks and supports random access rather than strictly sequential access. In Linux, block devices appear as device files such as `/dev/sda`, `/dev/vda`, or `/dev/nvme0n1`.
+
+A **storage device** in this context is a block device intended to hold data. It can be a physical hard disk, SSD, USB flash drive, hardware RAID array, or a network-based block device presented from elsewhere. As long as Linux exposes it as a block device file, the operating system can treat it as storage.
+
+A **partition** is a fixed-size slice of a storage device. Each partition gets its own device file and behaves like a smaller, independent disk. The partition table, whether MBR or GPT, is stored in a small reserved area on the device and tells the system where each partition begins and ends.
+
+An **LVM (Logical Volume Manager)** layer sits above physical devices or partitions and lets administrators pool them into a **volume group**, then carve out flexible **logical volumes** from that pool. For example, you could combine a 6 TB disk and a 2 TB disk into one 8 TB volume group, then create two separate 4 TB logical volumes from it. The practical advantage is flexibility: logical volumes can often be resized or snapshotted much more easily than traditional fixed partitions.
+
+**RAID (Redundant Array of Independent Disks)** combines multiple storage devices into a single virtual device. Depending on the RAID level, the goal may be better performance through parallelism, better reliability through mirroring or parity, or some combination of both. RAID can be implemented in hardware or software and works with block devices generally, not just with raw physical drives.
+
+A **filesystem** is the top software layer that organizes the raw blocks provided by a partition, logical volume, RAID device, or plain disk into a usable structure. The filesystem is what gives you filenames, directories, permissions, metadata, and recovery behavior after a crash. Most user data lives inside filesystems, but not all storage does. Swap space, for example, bypasses the normal filesystem layer entirely, and some specialized applications also manage raw blocks directly for performance or control reasons.
+
+<FigureWithCaption
+  src={StorageManagementLayers}
+  alt="Storage management layers showing the relationship between block devices, partitions, volumes, filesystems, and mount points."
+  caption="Storage Management Layers (including some that will be discussed later)"
+/>
+
+Those layers matter because the commands and the failure modes differ. Partitioning changes the layout of a device. RAID or LVM may create new virtual block devices on top of lower ones. Formatting writes a filesystem onto whichever layer will store files. Mounting attaches that formatted filesystem to some directory in the live directory tree. If you confuse those stages, it becomes hard to reason about what a command is actually doing.
+
+### Partitioning Strategy and Swap
+
+Before a fresh Linux install can store files, the disk needs a layout. On a simple UEFI server, a common beginner-friendly scheme is three partitions: a small EFI System Partition for boot files, a swap area, and one large root partition for everything else. That layout is popular because it is easy to understand and hard to mismanage.
+
+**Swap** is disk space the kernel can use as an overflow area for memory pages that are not currently active. Swap is much slower than RAM, so it is not a performance feature. It is a pressure-relief valve. A small amount of swap can keep a machine alive long enough to recover from a memory spike instead of immediately killing processes. Some systems use a dedicated swap partition; others use a swap file created inside an existing filesystem. Both are valid. A swap partition is simple and traditional. A swap file is easier to resize later.
+
+You can absolutely divide the disk more aggressively, with separate filesystems for `/var`, `/home`, `/tmp`, or database data. That can be useful when you want isolation: if logs in `/var/log` explode, they cannot fill the entire root filesystem. The tradeoff is planning overhead. For a first installation or a small general-purpose server, one EFI partition, one swap area, and one large root filesystem is a sensible starting point.
 
 ### Key Directories
 
-The Filesystem Hierarchy Standard (FHS) defines where things live. The table below covers the directories you will encounter most often:
+Once the root filesystem is mounted, Linux expects the directory tree to follow the FHS conventions. The table below covers the directories you will encounter most often. Remember that these are paths in one unified tree. Some may live on the root filesystem and others may be separate mounted filesystems, but they all appear under the same `/` root.
 
 | Path              | Purpose                                                                                    |
 |-------------------|--------------------------------------------------------------------------------------------|
@@ -131,9 +199,13 @@ The Filesystem Hierarchy Standard (FHS) defines where things live. The table bel
 | `/var`            | Variable data: logs (`/var/log`), databases, mail, caches                                  |
 | `/tmp`            | Temporary files, often cleared on reboot                                                   |
 | `/opt`            | Optional third-party software packages                                                     |
-| `/media`          | Mount points for removable media (USB drives, optical discs)                               |
+| `/media`          | Mount points for removable media (USB drives, optical discs)                              |
 
-**Notable `/etc` files.** `/etc` is where almost all system configuration lives. Some frequently referenced files include:
+Application code typically lives in `/opt/<appname>`, database files are managed by their respective services under `/var/lib/`, and logs accumulate in `/var/log`.
+
+#### `/etc`
+
+`/etc` is where almost all system configuration lives. Some frequently referenced files include:
 
 | File                   | Purpose                                                    |
 |------------------------|------------------------------------------------------------|
@@ -148,7 +220,9 @@ The Filesystem Hierarchy Standard (FHS) defines where things live. The table bel
 | `/etc/apt/sources.list`| APT repository definitions (Debian/Ubuntu)                 |
 | `/etc/yum.repos.d/`    | YUM/DNF repository definitions (RHEL family)               |
 
-**`/dev`: device files.** In Linux, hardware devices are represented as files in `/dev`. Hard drives appear as `/dev/sda`, `/dev/sdb`, and so on (or `/dev/nvme0n1` for NVMe drives). In addition to real hardware, a few special pseudo-devices are useful in scripting:
+#### `/dev`
+
+In Linux, hardware devices are represented as files in `/dev`. Hard drives appear as `/dev/sda`, `/dev/sdb`, and so on (or `/dev/nvme0n1` for NVMe drives). In addition to real hardware, a few special pseudo-devices are useful in scripting:
 
 | Path           | Behavior                                                         |
 |----------------|------------------------------------------------------------------|
@@ -157,19 +231,21 @@ The Filesystem Hierarchy Standard (FHS) defines where things live. The table bel
 | `/dev/random`  | Returns cryptographically random bytes                          |
 | `/dev/tty`     | Refers to the current terminal; writing to it outputs to screen |
 
-**`/proc`: the process virtual filesystem.** `/proc` is not stored on disk; it is created and destroyed dynamically by the kernel. Each running process has a subdirectory `/proc/<PID>/` containing virtual files like `cmdline`, `status`, and the standard streams (`stdin`, `stdout`, `stderr`). The `/proc/sys/` subtree exposes many kernel tuning parameters. Because the data is hard to read directly, higher-level tools like `top`, `ps`, and `htop` parse it for you. For example, `/proc/1/stat` contains the state information for PID 1 (systemd).
+#### `/proc`
 
-Application code typically lives in `/opt/<appname>`, database files are managed by their respective services under `/var/lib/`, and logs accumulate in `/var/log`.
+`/proc` (for the process virtual filesystem) is not stored on disk; it is created and destroyed dynamically by the kernel. Each running process has a subdirectory `/proc/<PID>/` containing virtual files like `cmdline`, `status`, and the standard streams (`stdin`, `stdout`, `stderr`). The `/proc/sys/` subtree exposes many kernel tuning parameters. Because the data is hard to read directly, higher-level tools like `top`, `ps`, and `htop` parse it for you. For example, `/proc/1/stat` contains the state information for PID 1 (systemd).
 
 ### Inspecting Disks and Usage
 
-Three commands form the core of daily storage inspection. `lsblk` lists all block devices and their partitions in a tree view, showing sizes, device names (which vary by bus type: `sda` for SATA, `vda` for virtio, `nvme0n1` for NVMe), and current mount points. `df -h` reports how much space each mounted filesystem has consumed and how much remains, a quick health check that can be run at any time. `du -sh <path>` drills into a specific directory to measure its total footprint, useful when `/var/log` or a database directory is growing faster than expected.
+Three commands form the core of daily storage inspection. `lsblk` lists all block devices and their partitions in a tree view, showing sizes, device names, and current mount points. `df -h` reports how much space each mounted filesystem has consumed and how much remains, which is a quick health check for mounted storage. `du -sh <path>` drills into a specific directory to measure its total footprint, which is useful when `/var/log` or a database directory is growing faster than expected.
 
 ### Mount Points
 
-In Linux, every storage device is accessed by mounting it at a directory in the filesystem tree. The `/etc/fstab` file defines which filesystems are mounted automatically at boot; examining it with `cat /etc/fstab` reveals the current mount configuration.
+In Linux, a filesystem becomes usable only when it is **mounted** at some directory in the tree. Mounting does not copy data into that directory. It attaches a filesystem so that the directory becomes the entry point into it. The `/etc/fstab` file defines which filesystems are mounted automatically at boot.
 
-Separating data-intensive directories (like a database's storage path) onto their own volume isolates their growth from the root filesystem and allows independent backup policies. Adding a new disk follows a predictable three-step pattern: format the partition with the appropriate filesystem type (`mkfs.ext4` or `mkfs.xfs`), create the directory that will serve as its mount point, then mount it and record the entry in `/etc/fstab` so it persists across reboots. Use the device's UUID (retrieved with `blkid`) rather than the device-name path like `/dev/vdb1`, since device names can shift when disks are added or removed.
+This is where the earlier distinction between formatting and mounting matters. A command like `mkfs.ext4 /dev/vdb1` writes an ext4 filesystem onto a partition. A command like `mount /dev/vdb1 /srv/data` then attaches that filesystem at `/srv/data`. Until you mount it, the filesystem exists on disk but is not part of the live directory tree.
+
+Separating data-intensive directories onto their own volume isolates their growth from the root filesystem and allows independent backup policies. Use the device's UUID (retrieved with `blkid`) rather than the device-name path like `/dev/vdb1` in `/etc/fstab`, because device names can shift when disks are added or removed.
 
 <Aside type="caution" title="Validate fstab Before Rebooting">
 Always verify your `fstab` entry with `sudo mount -a` before rebooting. A malformed `fstab` can prevent the system from booting, requiring you to fix it from a rescue environment.
@@ -187,9 +263,9 @@ A freshly installed Linux server has a root account and the admin user you creat
 
 Linux enforces access control through ownership: every file, directory, process, and socket belongs to a user and a group. The kernel checks these identities for every operation. On a server, this matters in two ways.
 
-First, **service accounts** are unprivileged system users that own the processes running your services. When Nginx starts, it runs as the `www-data` user, not as root. If an attacker exploits a vulnerability in Nginx, they land in a shell as `www-data`, a user with very limited capabilities, rather than as root. System accounts like `www-data` have UIDs below 1000 (reserved by most distributions for system use), have no login shell (set to `/sbin/nologin` or `/bin/false`), and often have no home directory. Creating them with `useradd -r` (system account flag) signals this intent.
+First, **service accounts** are unprivileged system users that own the processes running your services. For example, **nginx** is a widely used web server and reverse proxy. On many Linux systems it runs as the `www-data` user rather than as root after startup. If an attacker exploits a vulnerability in nginx, they land in a shell as `www-data`, a user with very limited capabilities, rather than as root. System accounts like `www-data` have UIDs below 1000 (reserved by most distributions for system use), have no login shell (set to `/sbin/nologin` or `/bin/false`), and often have no home directory. Creating them with `useradd -r` signals this intent.
 
-Second, **groups** manage shared access. If both your application process and your Nginx process need to read the same set of files, you add both service accounts to a common group and set group read permissions on those files. This avoids giving more permissions than necessary to either account.
+Second, **groups** manage shared access. If both your application process and your nginx process need to read the same set of files, you add both service accounts to a common group and set group read permissions on those files. This avoids giving more permissions than necessary to either account.
 
 The principle behind all of this is **least privilege**: every user and process should have exactly the access it needs and nothing more.
 
@@ -225,8 +301,7 @@ User account information is stored in two files:
 You can inspect a user's entry with:
 
 ```bash
-getent passwd deploy
-# deploy:x:1001:1001::/home/deploy:/bin/bash
+getent passwd deploy # deploy:x:1001:1001::/home/deploy:/bin/bash
 ```
 
 ### Modifying Users and Groups
@@ -243,19 +318,25 @@ The `-aG` flags mean "append to the supplementary group list." Forgetting the `-
 To create a group explicitly:
 
 ```bash
-sudo groupadd appteam
+sudo groupadd <group_name>
 ```
 
-### Privilege Escalation with sudo
+### Privilege Escalation with su and sudo
 
-The `sudo` command lets a permitted user run commands as root (or another user) without sharing the root password. On Debian-family distributions, users in the `sudo` group gain full sudo privileges by default; on RHEL-family distributions, the equivalent group is `wheel`. For a deploy user, you might grant more targeted access:
+Administrative work raises an unavoidable question: how do you become root when you need to? Historically the answer was `su`, short for **substitute user**. Running `su` starts a shell as another user, usually root, after you enter that user's password. This works, but it centralizes power in the root password and makes accountability weaker because multiple administrators may share the same credential.
+
+Modern Linux systems usually prefer `sudo`, originally short for **superuser do**. `sudo` lets a permitted user run one command as root, or as another user, using their own password and a policy defined in `/etc/sudoers`. That policy can be broad or narrow. You can allow full root access, or only allow a specific operator to restart one specific service. This is why `sudo` is so common in multi-user administration: it gives you auditing and finer-grained delegation.
+
+One caveat matters in practice: not every distribution enables `sudo` by default. Ubuntu does. Minimal Debian installs often do not unless you selected it during installation. On such systems, you may need to become root with `su` first and then install and configure `sudo`.
+
+The `/etc/sudoers` file is the policy database that tells `sudo` who may do what. A rule like `deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx` means the user `deploy` may run exactly that command as any target user, from any host, without being prompted for a password. For a deploy user, you might grant more targeted access like this:
 
 ```bash
 # Open the sudoers file safely
 sudo visudo
 ```
 
-Add a line that lets the deploy user restart Nginx without a password prompt:
+Add a line that lets the deploy user restart nginx without a password prompt:
 
 ```
 deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
@@ -267,7 +348,9 @@ Never edit `/etc/sudoers` with a regular text editor. The `visudo` command valid
 
 ### SSH Key Authentication
 
-Password authentication over SSH is convenient but weak. SSH key authentication uses asymmetric cryptography: a key pair consists of a **private key** that the client keeps secret and a **public key** that is placed on the server. During authentication the client proves it holds the private key through a cryptographic challenge without ever transmitting it over the network.
+SSH (Secure Shell) is the standard protocol for remote administration on Linux. It gives you an encrypted terminal session over the network, and it can also transfer files and forward ports. When people say they "SSH into a server," they mean they authenticate to the SSH daemon on that server and receive a shell over an encrypted channel.
+
+Password authentication over SSH is convenient but weak because Internet-exposed servers are constantly probed for password logins. SSH key authentication uses asymmetric cryptography instead. A key pair consists of a **private key** that the client keeps secret and a **public key** that is placed on the server. During authentication the client proves it holds the private key through a cryptographic challenge without ever transmitting it over the network. That is the core conceptual improvement: the server verifies possession of a secret without learning the secret itself.
 
 Key pairs are generated with `ssh-keygen`. Ed25519 is the recommended algorithm: `ssh-keygen -t ed25519` produces `~/.ssh/id_ed25519` (private, never shared) and `~/.ssh/id_ed25519.pub` (public, safe to distribute). The public key is appended to `~/.ssh/authorized_keys` on the server, either with `ssh-copy-id` or by pasting it in manually. File permissions on the server side are enforced by SSH itself: the `~/.ssh` directory must be mode `700` and `authorized_keys` must be mode `600`; any broader permissions cause SSH to reject the file silently.
 
@@ -279,7 +362,7 @@ Test that key authentication works in a separate terminal session before disabli
 
 ## Network Configuration Basics
 
-A server that cannot be reached over the network is not very useful. Configuring networking correctly before installing software ensures that package downloads and remote access work reliably.
+A server that cannot reach package repositories or accept remote administration is not very useful. At this stage, though, you only need the minimum networking concepts required to get a Linux server installed and reachable. The deeper topics, including subnetting, routing logic, DNS behavior, and cloud firewalls, will be discussed later.
 
 ### Viewing the Current Configuration
 
@@ -295,37 +378,11 @@ ip route show
 
 You will see at least two interfaces: `lo` (the loopback interface, always 127.0.0.1) and one or more physical or virtual interfaces (commonly named `eth0`, `ens3`, `enp0s3`, or similar).
 
-### Configuring a Static IP
+### Hostname, DHCP, and Basic Reachability
 
-Servers should have predictable, stable IP addresses: services and monitoring systems that need to reach them cannot rely on DHCP assigning a different address after a reboot. The full mechanics of IP configuration, DNS resolution, and network troubleshooting are covered in the next lecture. The tools vary by distribution: Debian and Ubuntu use **Netplan**, which reads YAML files from `/etc/netplan/` and translates them for `systemd-networkd`; RHEL-family distributions use **NetworkManager**, configured via `nmcli` or connection files in `/etc/NetworkManager/system-connections/`.
+During an installation or first boot, you typically need three things to work: the machine needs a hostname, the primary interface needs an IP configuration, and DNS needs to resolve package mirrors or remote hosts. Many server installs start with **DHCP (Dynamic Host Configuration Protocol)** because it is the fastest way to get an address, default route, and DNS server automatically. Production servers often move to static addressing or DHCP reservations later so other systems can depend on a stable address.
 
-Here is a Netplan example for Debian/Ubuntu that assigns a static IP:
-
-```yaml
-# /etc/netplan/01-static.yaml
-network:
-  version: 2
-  renderer: networkd
-  ethernets:
-    ens3:
-      addresses:
-        - 10.0.1.10/24
-      routes:
-        - to: default
-          via: 10.0.1.1
-      nameservers:
-        addresses:
-          - 10.0.1.1
-          - 8.8.8.8
-```
-
-Apply and verify:
-
-```bash
-sudo netplan apply
-ip addr show ens3
-ping -c 3 10.0.1.1
-```
+The exact configuration tool varies by distribution. Debian and Ubuntu commonly use Netplan and `systemd-networkd`; RHEL-family systems commonly use NetworkManager. The important concept at this point is not the exact syntax. It is that Linux needs an interface configuration, a route to the outside world, and a resolver configuration before remote administration and package installation feel normal.
 
 ### Hostname and /etc/hosts
 
@@ -339,26 +396,7 @@ We already set the hostname with `hostnamectl`. For local name resolution (befor
 
 This ensures the server can resolve its own fully qualified domain name even if DNS is temporarily unavailable.
 
-### Cloud Security Groups
-
-When a Linux server runs as a cloud instance (an EC2 instance, a DigitalOcean Droplet, etc.), network access is filtered by a second layer before traffic ever reaches the operating system. On AWS, this is a **security group**: a stateful virtual firewall attached to the instance that evaluates inbound and outbound rules.
-
-Security groups work by default-deny: all inbound traffic is blocked unless you explicitly add a rule. A typical server needs at minimum:
-
-| Rule | Port | Protocol | Purpose |
-|------|------|----------|---------|
-| Allow inbound | 22 | TCP | SSH administration |
-| Allow inbound | 80 | TCP | HTTP |
-| Allow inbound | 443 | TCP | HTTPS |
-| Allow inbound | *app port* | TCP | Application-specific (varies by workload) |
-
-Security groups are **stateful**: if you allow an inbound connection, the return traffic is automatically permitted without a separate outbound rule.
-
-A common troubleshooting pattern: you start a service, confirm it is listening with `ss -tlnp`, and still cannot reach it from outside. The service is usually fine; the security group is the first thing to check.
-
-<Aside type="tip" title="Limit SSH Access by IP">
-Restricting SSH to "My IP" in the security group means only your current public IP can reach port 22. This is a meaningful security improvement over allowing SSH from `0.0.0.0/0` because it eliminates the vast majority of automated brute-force login attempts.
-</Aside>
+If you can resolve your own hostname, acquire an IP address, and reach a package mirror or another known host, that is enough networking to continue with basic server setup.
 
 ## Package Management
 
@@ -404,12 +442,14 @@ Run `sudo apt update && sudo apt upgrade` regularly, or enable unattended securi
 
 ## Systemd Services
 
-With packages installed, we need to manage the services they provide. Systemd is the service manager on modern Linux, and `systemctl` is the command you will use constantly.
+With packages installed, you need a way to start services, stop them, restart them on failure, order them correctly at boot, and inspect their logs. On modern Linux, that job is handled by `systemd`. `systemd` is both the init system that owns PID 1 and the service manager that supervises long-running background processes, traditionally called **daemons**.
+
+This matters because a server is not just "a machine with software installed." It is a machine whose services come up predictably after reboot and stay supervised while running. `systemctl` is the administrative interface to that system.
 
 ### Basic Service Management
 
 ```bash
-# Check the status of Nginx
+# Check the status of nginx
 sudo systemctl status nginx
 
 # Start, stop, and restart
@@ -440,7 +480,7 @@ sudo systemctl enable --now nginx
 ```
 
 <Aside type="note" title="Language-Specific Process Managers">
-Some application ecosystems ship their own process managers that complement or wrap systemd. **PM2** is the dominant one for Node.js: it handles clustering (spawning one worker per CPU core), in-process log rotation, and a `pm2 startup` command that generates a systemd unit to keep PM2 itself running across reboots. Other examples include **Gunicorn** for Python WSGI applications and **Puma** for Ruby on Rails, both of which are typically launched by a systemd unit rather than managing the process lifecycle themselves. The guidance here is to understand both layers: the application-level manager handles concerns the application framework understands best (worker counts, graceful reload), while systemd handles boot integration and restart-on-failure uniformly across the whole system.
+Some application ecosystems ship their own process managers that complement or wrap systemd. **PM2** is the dominant one for Node.js: it handles clustering (spawning one worker per CPU core), in-process log rotation, and a `pm2 startup` command that generates a systemd unit to keep PM2 itself running across reboots. The guidance here is to understand both layers: the application-level manager handles concerns the application framework understands best (worker counts, graceful reload), while systemd handles boot integration and restart-on-failure uniformly across the whole system.
 </Aside>
 
 ### Unit Files
@@ -469,6 +509,10 @@ WantedBy=multi-user.target
 ```
 
 The `[Unit]` section declares dependencies: this app should start after the network is up and PostgreSQL is running. The `[Service]` section defines how to run it: as the `deploy` user, from the `/opt/webapp` directory, restarting on failure after a five-second delay. The `[Install]` section tells systemd that this service belongs in the `multi-user.target`, so it starts on a normal boot.
+
+<Aside type="note" title="After= vs. Requires=">
+The `After=` directive controls ordering (what starts first), while `Requires=` controls dependency (if the dependency fails, this unit fails too). For most application services, `After=` is sufficient; use `Requires=` sparingly.
+</Aside>
 
 After creating or modifying a unit file, `systemctl daemon-reload` reloads the on-disk unit definitions without interrupting running services. The service can then be enabled and started in one step with `systemctl enable --now`. Logs for any unit are accessible through `journalctl -u <service-name>`, with `-f` to follow output in real time.
 
@@ -515,13 +559,11 @@ After creating both files, `systemctl daemon-reload` picks up the new units and 
 `systemctl list-timers` shows all active timers alongside their last run time and next scheduled trigger, useful for confirming that a new timer was enabled correctly.
 </Aside>
 
-<Aside type="note" title="After= vs. Requires=">
-The `After=` directive controls ordering (what starts first), while `Requires=` controls dependency (if the dependency fails, this unit fails too). For most application services, `After=` is sufficient; use `Requires=` sparingly.
-</Aside>
-
 <HistoricalNote title="The Init Wars: SysV to systemd (2010-2015)">
 For most of Linux's first two decades, PID 1 was SysV init: a collection of shell scripts that started services one at a time in a fixed sequence. It was simple but slow; each service had to finish before the next could start, and dependency ordering was fragile and largely manual. In 2006 Apple released launchd for macOS, which parallelized service startup. Lennart Poettering proposed systemd for Linux in 2010, drawing on launchd's ideas. systemd parallelized startup using socket activation, managed logging through a unified journal, and eventually absorbed login sessions, device management, and dozens of other system functions that had previously required separate daemons. The adoption provoked significant debate. Critics argued it violated Unix's "do one thing well" philosophy and that its centralized scope made debugging harder. Despite the controversy, every major Linux distribution had made systemd its default by 2015.
 </HistoricalNote>
+
+## Putting It All Together
 
 The concepts in this lecture form a complete foundation: you now have the vocabulary and commands to go from a blank machine to a running, maintained Linux server. Distribution selection determines your package ecosystem and support lifecycle. Filesystem and disk choices shape reliability and growth capacity. User and group management enforces least privilege across services and operators. Network configuration gives the server a predictable identity on the network. Package management keeps software current and secure. And systemd ties it together, starting services in the right order, restarting them on failure, and capturing their output in a queryable journal. The next lectures build on this foundation with automation tools (Ansible and Terraform) that apply this configuration at scale.
 
@@ -529,6 +571,7 @@ The concepts in this lecture form a complete foundation: you now have the vocabu
 
 - <a href="https://www.youtube.com/watch?v=26QPDBe-NB8" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #18: Operating Systems (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=KN8YgJnShPM" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #20: Files and File Systems (YouTube)</a>
+- <a href="https://refspecs.linuxfoundation.org/FHS_3.0/fhs/index.html" target="_blank" rel="noopener noreferrer">Filesystem Hierarchy Standard 3.0 (Official Specification)</a>
 - <a href="https://ubuntu.com/server/docs" target="_blank" rel="noopener noreferrer">Ubuntu Server Guide (Official Documentation)</a>
 - <a href="https://netplan.readthedocs.io/en/stable/" target="_blank" rel="noopener noreferrer">Netplan Reference Documentation</a>
 - <a href="https://www.freedesktop.org/software/systemd/man/systemd.service.html" target="_blank" rel="noopener noreferrer">systemd.service man page (freedesktop.org)</a>
