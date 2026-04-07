@@ -201,6 +201,8 @@ Once the root filesystem is mounted, Linux expects the directory tree to follow 
 | `/opt`            | Optional third-party software packages                                                     |
 | `/media`          | Mount points for removable media (USB drives, optical discs)                              |
 
+On most modern distributions that use *usr-merge*, `/bin`, `/sbin`, and `/lib` are often symlinks into `/usr` (for example, `/bin -> /usr/bin`).
+
 Application code typically lives in `/opt/<appname>`, database files are managed by their respective services under `/var/lib/`, and logs accumulate in `/var/log`.
 
 #### `/etc`
@@ -233,7 +235,7 @@ In Linux, hardware devices are represented as files in `/dev`. Hard drives appea
 
 #### `/proc`
 
-`/proc` (for the process virtual filesystem) is not stored on disk; it is created and destroyed dynamically by the kernel. Each running process has a subdirectory `/proc/<PID>/` containing virtual files like `cmdline`, `status`, and the standard streams (`stdin`, `stdout`, `stderr`). The `/proc/sys/` subtree exposes many kernel tuning parameters. Because the data is hard to read directly, higher-level tools like `top`, `ps`, and `htop` parse it for you. For example, `/proc/1/stat` contains the state information for PID 1 (systemd).
+`/proc` (for the process virtual filesystem) is not stored on disk; it is created and destroyed dynamically by the kernel. Each running process has a subdirectory `/proc/<PID>/` containing virtual files like `cmdline`, `status`, and file descriptor links under `/proc/<PID>/fd/` (for example, file descriptors 0, 1, and 2 correspond to stdin, stdout, and stderr). The `/proc/sys/` subtree exposes many kernel tuning parameters. Because the data is hard to read directly, higher-level tools like `top`, `ps`, and `htop` parse it for you. For example, `/proc/1/stat` contains the state information for PID 1 (systemd).
 
 ### Inspecting Disks and Usage
 
@@ -263,7 +265,7 @@ A freshly installed Linux server has a root account and the admin user you creat
 
 Linux enforces access control through ownership: every file, directory, process, and socket belongs to a user and a group. The kernel checks these identities for every operation. On a server, this matters in two ways.
 
-First, **service accounts** are unprivileged system users that own the processes running your services. For example, **nginx** is a widely used web server and reverse proxy. On many Linux systems it runs as the `www-data` user rather than as root after startup. If an attacker exploits a vulnerability in nginx, they land in a shell as `www-data`, a user with very limited capabilities, rather than as root. System accounts like `www-data` have UIDs below 1000 (reserved by most distributions for system use), have no login shell (set to `/sbin/nologin` or `/bin/false`), and often have no home directory. Creating them with `useradd -r` signals this intent.
+First, **service accounts** are unprivileged system users that own the processes running your services. For example, **nginx** is a widely used web server and reverse proxy. On many Linux systems it runs as the `www-data` user rather than as root after startup. If an attacker exploits a vulnerability in nginx, they land in a shell as `www-data`, a user with very limited capabilities, rather than as root. System accounts like `www-data` typically have UIDs below 1000 on many distributions (the exact range is distro-defined), have no login shell (set to `/sbin/nologin` or `/bin/false`), and often have no home directory. Creating them with `useradd -r` signals this intent.
 
 Second, **groups** manage shared access. If both your application process and your nginx process need to read the same set of files, you add both service accounts to a common group and set group read permissions on those files. This avoids giving more permissions than necessary to either account.
 
@@ -491,7 +493,9 @@ Systemd services are defined by unit files, typically stored in `/usr/lib/system
 # /etc/systemd/system/webapp.service
 [Unit]
 Description=Node.js Web Application
-After=network.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+After=network-online.target postgresql.service
 
 [Service]
 Type=simple
@@ -508,7 +512,7 @@ Environment=PORT=3000
 WantedBy=multi-user.target
 ```
 
-The `[Unit]` section declares dependencies: this app should start after the network is up and PostgreSQL is running. The `[Service]` section defines how to run it: as the `deploy` user, from the `/opt/webapp` directory, restarting on failure after a five-second delay. The `[Install]` section tells systemd that this service belongs in the `multi-user.target`, so it starts on a normal boot.
+The `[Unit]` section declares ordering and dependency behavior: this app starts after the network is considered online, and `Requires=postgresql.service` means this unit fails if PostgreSQL is not available. The `[Service]` section defines how to run it: as the `deploy` user, from the `/opt/webapp` directory, restarting on failure after a five-second delay. The `[Install]` section tells systemd that this service belongs in the `multi-user.target`, so it starts on a normal boot.
 
 <Aside type="note" title="After= vs. Requires=">
 The `After=` directive controls ordering (what starts first), while `Requires=` controls dependency (if the dependency fails, this unit fails too). For most application services, `After=` is sufficient; use `Requires=` sparingly.
@@ -519,7 +523,7 @@ After creating or modifying a unit file, `systemctl daemon-reload` reloads the o
 ### Systemd Timers
 
 <Aside type="note" title="What Is cron?">
-**cron** is the traditional Unix job scheduler, present on Linux systems for decades. It reads a configuration file called a **crontab** (cron table) that maps time expressions (minute, hour, day-of-month, month, day-of-week) to shell commands. For example, a crontab entry of `0 2 * * * /usr/local/bin/backup.sh` runs the backup script at 2 AM every day. The `crontab -e` command opens the current user's crontab for editing; system-wide jobs live in `/etc/cron.d/`. cron is still widely used and available on every Linux distribution, but systemd timers offer tighter integration with the journal (all output is captured and queryable), better dependency handling, and the ability to track missed runs with `Persistent=true`.
+**cron** is the traditional Unix job scheduler, present on Linux systems for decades. It reads a configuration file called a **crontab** (cron table) that maps time expressions (minute, hour, day-of-month, month, day-of-week) to shell commands. For example, a crontab entry of `0 2 * * * /usr/local/bin/backup.sh` runs the backup script at 2 AM every day. The `crontab -e` command opens the current user's crontab for editing; system-wide jobs live in `/etc/cron.d/`. cron is still widely used and commonly available on Linux distributions (though minimal images may not install it by default), but systemd timers offer tighter integration with the journal (all output is captured and queryable), better dependency handling, and the ability to track missed runs with `Persistent=true`.
 </Aside>
 
 A `.timer` unit schedules a `.service` unit to run at defined times or intervals, replacing cron for many tasks on modern Linux. Timer units always come in pairs with the same base name: `webapp-health.timer` triggers `webapp-health.service`.
@@ -560,7 +564,7 @@ After creating both files, `systemctl daemon-reload` picks up the new units and 
 </Aside>
 
 <HistoricalNote title="The Init Wars: SysV to systemd (2010-2015)">
-For most of Linux's first two decades, PID 1 was SysV init: a collection of shell scripts that started services one at a time in a fixed sequence. It was simple but slow; each service had to finish before the next could start, and dependency ordering was fragile and largely manual. In 2006 Apple released launchd for macOS, which parallelized service startup. Lennart Poettering proposed systemd for Linux in 2010, drawing on launchd's ideas. systemd parallelized startup using socket activation, managed logging through a unified journal, and eventually absorbed login sessions, device management, and dozens of other system functions that had previously required separate daemons. The adoption provoked significant debate. Critics argued it violated Unix's "do one thing well" philosophy and that its centralized scope made debugging harder. Despite the controversy, every major Linux distribution had made systemd its default by 2015.
+For most of Linux's first two decades, PID 1 was SysV init: a collection of shell scripts that started services one at a time in a fixed sequence. It was simple but slow; each service had to finish before the next could start, and dependency ordering was fragile and largely manual. In 2006 Apple released launchd for macOS, which parallelized service startup. Lennart Poettering proposed systemd for Linux in 2010, drawing on launchd's ideas. systemd parallelized startup using socket activation, managed logging through a unified journal, and eventually absorbed login sessions, device management, and dozens of other system functions that had previously required separate daemons. The adoption provoked significant debate. Critics argued it violated Unix's "do one thing well" philosophy and that its centralized scope made debugging harder. Despite the controversy, most major mainstream Linux distributions had made systemd their default by 2015.
 </HistoricalNote>
 
 ## Putting It All Together
