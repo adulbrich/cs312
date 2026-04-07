@@ -163,7 +163,7 @@ A **filesystem** is the top software layer that organizes the raw blocks provide
 <FigureWithCaption
   src={StorageManagementLayers}
   alt="Storage management layers showing the relationship between block devices, partitions, volumes, filesystems, and mount points."
-  caption="Storage Management Layers (including some that will be discussed later)"
+  caption="Storage Management Layers"
 />
 
 Those layers matter because the commands and the failure modes differ. Partitioning changes the layout of a device. RAID or LVM may create new virtual block devices on top of lower ones. Formatting writes a filesystem onto whichever layer will store files. Mounting attaches that formatted filesystem to some directory in the live directory tree. If you confuse those stages, it becomes hard to reason about what a command is actually doing.
@@ -388,15 +388,28 @@ The exact configuration tool varies by distribution. Debian and Ubuntu commonly 
 
 ### Hostname and /etc/hosts
 
-We already set the hostname with `hostnamectl`. For local name resolution (before DNS is consulted), edit `/etc/hosts`:
+We already set the hostname with `hostnamectl`. That command writes a short label (for example `web-prod-01`) to `/etc/hostname`, which is the name the kernel uses to identify the machine locally. Many programs and protocols also expect a **Fully Qualified Domain Name (FQDN)** that includes the domain, for example `web-prod-01.example.com`. The FQDN is the machine's globally unambiguous network identity: the name DNS has a record for, and what TLS certificates, mail servers, and other services use to refer to this machine. The short hostname alone is not externally resolvable; it carries no domain context. Use `/etc/hosts` to map the machine's own address to both names so they resolve locally before DNS is ever consulted.
 
-```bash
-# /etc/hosts
-127.0.0.1   localhost
-10.0.1.10   web-prod-01.example.com web-prod-01
+Each non-comment line has the format:
+
+```text
+IP_address  canonical_hostname  [alias ...]
 ```
 
-This ensures the server can resolve its own fully qualified domain name even if DNS is temporarily unavailable.
+Fields are separated by any amount of whitespace (spaces or tabs). Lines starting with `#` are comments. A minimal server entry looks like this:
+
+```text
+# /etc/hosts
+127.0.0.1       localhost
+127.0.1.1       web-prod-01.example.com web-prod-01
+::1             localhost ip6-localhost ip6-loopback
+```
+
+The first hostname on a line is the **canonical name**: the one authoritative name the system returns when a program resolves the machine's full identity. Any additional hostnames on the same line are aliases that reach the same address but are not returned as the canonical name. Ordering matters because of how resolution works: when the kernel resolves its own name, it calls `gethostname()` to get the short label (`web-prod-01`), looks that alias up in `/etc/hosts` to find the IP address, and then returns the first hostname on that line. Placing the FQDN first means programs that perform canonical-name lookups (mail software, TLS libraries, Java's `InetAddress.getCanonicalHostName()`) receive `web-prod-01.example.com` rather than the bare short label.
+
+The `127.0.1.1` line is the conventional place for a server's own FQDN on Debian/Ubuntu systems where the machine does not have a permanent static IP. On RHEL-family systems or machines with a static IP, the real IP address is typically used instead of `127.0.1.1`. The `::1` line provides the equivalent loopback mapping for IPv6.
+
+Together, these entries ensure the server can resolve its own hostname and FQDN locally even if DNS is temporarily unavailable.
 
 If you can resolve your own hostname, acquire an IP address, and reach a package mirror or another known host, that is enough networking to continue with basic server setup.
 
