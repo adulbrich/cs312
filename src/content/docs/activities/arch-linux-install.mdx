@@ -58,7 +58,7 @@ In your hypervisor of choice (VirtualBox, UTM, VMware, etc.), create a new VM wi
    ```
 
    {/* TODO: update paragraph to `fidsk -l` */}
-   `lsblk` lists block devices -- the kernel's term for storage devices that read and write data in fixed-size blocks. Each row shows a device name, its size, and type. Look for a device with TYPE=`disk` and roughly 8 GB of space -- that is your virtual hard disk. Partitions appear as children indented beneath it. On VirtualBox the disk is typically `/dev/sda`; on UTM it is typically `/dev/vda`. In all commands below, replace `/dev/<disk>` with your actual disk path.
+   `lsblk` lists block devices, the kernel's term for storage devices that read and write data in fixed-size blocks. Each row shows a device name, its size, and type. Look for a device with TYPE=`disk` and roughly 8 GB of space: that is your virtual hard disk. Partitions appear as children indented beneath it. On VirtualBox the disk is typically `/dev/sda`; on UTM it is typically `/dev/vda`. In all commands below, replace `/dev/<disk>` with your actual disk path.
 </Steps>
 
 <Aside type="note" title="About the live environment">
@@ -67,10 +67,10 @@ You are currently running from a RAM-based live environment. Nothing you do here
 
 ## Partition the Disk
 
-A raw disk has no structure -- before Linux can use it you must divide it into partitions and tell the firmware what each one is for. We will use the GPT (GUID Partition Table) scheme, which is required for UEFI booting and supports disks larger than 2 TB. We need three partitions:
+A raw disk has no structure. Before Linux can use it, you must divide it into partitions and tell the firmware what each one is for. We will use the GPT (GUID Partition Table) scheme, which is required for UEFI booting and supports disks larger than 2 TB. We need three partitions:
 
 - **EFI System Partition (ESP):** A small FAT32 partition the firmware reads to find the bootloader. Every UEFI system needs one regardless of operating system.
-- **Swap partition:** Disk space the kernel uses as overflow when RAM is full, and for hibernation. It has no filesystem -- the kernel manages it directly.
+- **Swap partition:** Disk space the kernel uses as overflow when RAM is full, and for hibernation. It has no filesystem; the kernel manages it directly.
 - **Root partition:** The main filesystem where the entire Linux directory tree lives (`/bin`, `/etc`, `/home`, and everything else).
 
 <Steps>
@@ -123,7 +123,7 @@ A raw disk has no structure -- before Linux can use it you must divide it into p
    /dev/sda3   1437696  16777215  15339520  7.3G 83 Linux
    ```
 
-6. **Write the partition table.** Type `w` and confirm with `Y`.
+6. **Write the partition table.** Type `w`.
 </Steps>
 
 ### Format the Partitions
@@ -267,7 +267,7 @@ Notice that your prompt likely changed. You are now effectively "inside" the new
    ```
 
    Each package has a specific role:
-   - `grub`: the bootloader itself -- the program the firmware hands off to after POST, which then loads the kernel.
+   - `grub`: the bootloader itself, the program the firmware hands off to after POST, which then loads the kernel.
    - `efibootmgr`: a tool that writes entries into the UEFI firmware's boot menu (the list of bootable devices stored in NVRAM). `grub-install` calls it internally.
    - `dosfstools`: utilities for creating and checking FAT filesystems. Required because the EFI partition is FAT32.
    - `mtools`: low-level tools for reading FAT filesystems without mounting them, used by GRUB during installation.
@@ -298,6 +298,17 @@ Notice that your prompt likely changed. You are now effectively "inside" the new
    ```
 
    `grub-mkconfig` scans the system for installed kernels and writes a configuration file that tells GRUB what to show in the boot menu and how to load each option. Never edit `grub.cfg` directly: always regenerate it with this command, because it will be overwritten the next time the kernel updates.
+
+   <Aside type="note" title="UTM aarch64 kernel detection tip">
+   On some Apple Silicon installs, the kernel file is named `/boot/Image` and GRUB may not detect it automatically. If `grub-mkconfig` does not find Arch, create a compatibility symlink and regenerate the config:
+
+   ```bash
+   ln -sf /boot/Image /boot/vmlinuz-linux
+   grub-mkconfig -o /boot/grub/grub.cfg
+   ```
+
+   You can verify detection by checking that `grub-mkconfig` output includes a `Found linux image:` line.
+   </Aside>
 </Steps>
 
 <ActivityQuestion>
@@ -327,7 +338,7 @@ The lecture describes four boot stages: firmware, bootloader, kernel, systemd. W
    %wheel ALL=(ALL) ALL
    ```
 
-   Breaking down the syntax: `%wheel` means "the group named wheel" (a leading `%` means group). `ALL=(ALL) ALL` means "from any host, as any user, run any command." This grants full sudo access to everyone in the `wheel` group -- the Arch equivalent of Ubuntu's `sudo` group.
+   Breaking down the syntax: `%wheel` means "the group named wheel" (a leading `%` means group). `ALL=(ALL) ALL` means "from any host, as any user, run any command." This grants full sudo access to everyone in the `wheel` group, the Arch equivalent of Ubuntu's `sudo` group.
 
 3. Create a regular user with a home directory, bash shell, and wheel group membership:
 
@@ -530,7 +541,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 6. Test key authentication from your host:
 
    ```bash
-   ssh -p 2222 archuser@127.0.0.1
+   ssh -p 2222 archuser@127.0.0.1 # -i keyfile if you used a non-default filename
    ```
 
    You should receive a shell prompt without entering the VM password.
@@ -552,6 +563,57 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 
 <ActivityQuestion>
 Why is keeping the private key on your laptop and copying only the public key into the VM a better default than generating the key pair inside the VM?
+</ActivityQuestion>
+
+## Explore Process IDs (PIDs)
+
+Now that your system boots and services are running, inspect live process IDs so the PID concepts from the lecture become concrete.
+
+<Steps>
+1. Confirm which process is PID 1:
+
+   ```bash
+   ps -p 1 -o pid,ppid,comm,args
+   ```
+
+   You should see `systemd` as PID 1.
+
+2. Find PID 2 and identify what it does:
+
+   ```bash
+   ps -p 2 -o pid,ppid,comm,args
+   ```
+
+   On most Linux systems this is `kthreadd`, the kernel thread manager.
+
+3. Inspect the process tree from the top:
+
+   ```bash
+   ps -e -o pid,ppid,comm --forest | head -40
+   ```
+
+   Notice how many processes ultimately descend from PID 1.
+
+4. Pick a service you enabled, then inspect its PID and parent:
+
+   ```bash
+   systemctl status sshd
+   ps -C sshd -o pid,ppid,comm,args
+   ```
+
+   Compare the service's PID to its PPID to see how `systemd` supervises it.
+
+5. Inspect `/proc` for one running process:
+
+   ```bash
+   cat /proc/1/status | head -20
+   ```
+
+   This shows the kernel's process metadata view, including name, state, and PID values.
+</Steps>
+
+<ActivityQuestion>
+What is the practical difference between PID and PPID, and why is PID 1 a special process on Linux?
 </ActivityQuestion>
 
 ## Keep This VM
