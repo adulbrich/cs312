@@ -97,9 +97,9 @@ The Linux kernel decompresses itself into memory, detects hardware, and mounts a
 
 The **root filesystem** is the filesystem mounted at `/`. It is called "root" not because it belongs to the root user, but because it is the root of the entire directory tree. `/etc`, `/var`, `/home`, `/usr`, and every other path either live on that filesystem or are mounted somewhere beneath it. A machine may have many filesystems on many disks, but there is always exactly one filesystem mounted at `/` at boot.
 
-### 4. Init system (usually systemd)
+### 4. Init system
 
-Once the kernel has mounted the root filesystem, it starts **PID 1**, the first normal user-space process. On virtually all modern Linux distributions this process is `systemd`. The init system's job is to bring the machine from "kernel is alive" to "multi-user server is ready": mount remaining filesystems, start logging, bring up networking, start daemons, and supervise services after boot.
+Once the kernel has mounted the root filesystem, it starts **PID 1**, the first normal user-space process. On virtually all modern Linux distributions this process is [systemd](https://systemd.io/). The init system's job is to bring the machine from "kernel is alive" to "multi-user server is ready": mount remaining filesystems, start logging, bring up networking, start daemons, and supervise services after boot.
 
 At this point it helps to define **PID (Process ID)** explicitly. Every running process in Linux has a numeric identifier assigned by the kernel. PID 1 is special because other user-space processes ultimately descend from it. If PID 1 fails, the system cannot operate normally. PID 0 is a kernel-internal scheduler context that you do not see as a regular process. PID 2 is typically `kthreadd`, which creates kernel threads on demand. If you run `ps -p 1 -o pid,comm=`, you can see which init system your machine is actually using.
 
@@ -580,16 +580,15 @@ After creating both files, `systemctl daemon-reload` picks up the new units and 
 For most of Linux's first two decades, PID 1 was SysV init: a collection of shell scripts that started services one at a time in a fixed sequence. It was simple but slow; each service had to finish before the next could start, and dependency ordering was fragile and largely manual. In 2006 Apple released launchd for macOS, which parallelized service startup. Lennart Poettering proposed systemd for Linux in 2010, drawing on launchd's ideas. systemd parallelized startup using socket activation, managed logging through a unified journal, and eventually absorbed login sessions, device management, and dozens of other system functions that had previously required separate daemons. The adoption provoked significant debate. Critics argued it violated Unix's "do one thing well" philosophy and that its centralized scope made debugging harder. Despite the controversy, most major mainstream Linux distributions had made systemd their default by 2015.
 </HistoricalNote>
 
-## Putting It All Together
+## Takeaways
 
-The concepts in this lecture form a complete foundation: you now have the vocabulary and commands to go from a blank machine to a running, maintained Linux server. Distribution selection determines your package ecosystem and support lifecycle. Filesystem and disk choices shape reliability and growth capacity. User and group management enforces least privilege across services and operators. Network configuration gives the server a predictable identity on the network. Package management keeps software current and secure. And systemd ties it together, starting services in the right order, restarting them on failure, and capturing their output in a queryable journal. The next lectures build on this foundation with automation tools (Ansible and Terraform) that apply this configuration at scale.
+The concepts in this lecture form a complete foundation: you now have the vocabulary and commands to go from a blank machine to a running, maintained Linux server. Distribution selection determines your package ecosystem and support lifecycle. Filesystem and disk choices shape reliability and growth capacity. User and group management enforces least privilege across services and operators. Network configuration gives the server a predictable identity on the network. Package management keeps software current and secure. And systemd ties it together, starting services in the right order, restarting them on failure, and capturing their output in a queryable journal.
 
 ## Resources
 
 - <a href="https://www.youtube.com/watch?v=26QPDBe-NB8" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #18: Operating Systems (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=KN8YgJnShPM" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #20: Files and File Systems (YouTube)</a>
-- <a href="https://refspecs.linuxfoundation.org/FHS_3.0/fhs/index.html" target="_blank" rel="noopener noreferrer">Filesystem Hierarchy Standard 3.0 (Official Specification)</a>
-- <a href="https://ubuntu.com/server/docs" target="_blank" rel="noopener noreferrer">Ubuntu Server Guide (Official Documentation)</a>
-- <a href="https://netplan.readthedocs.io/en/stable/" target="_blank" rel="noopener noreferrer">Netplan Reference Documentation</a>
+- <a href="https://ubuntu.com/server/docs" target="_blank" rel="noopener noreferrer">Ubuntu Server Documentation</a>
+- <a href="https://netplan.readthedocs.io/en/stable/" target="_blank" rel="noopener noreferrer">Netplan Documentation</a>
 - <a href="https://www.freedesktop.org/software/systemd/man/systemd.service.html" target="_blank" rel="noopener noreferrer">systemd.service man page (freedesktop.org)</a>
 - <a href="https://wiki.archlinux.org/title/Users_and_groups" target="_blank" rel="noopener noreferrer">Users and Groups - Arch Linux Wiki</a>
