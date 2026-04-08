@@ -8,7 +8,7 @@ sidebar:
 import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts into practice the concepts from the [Networking Fundamentals (LAN/WAN)](/lectures/networking-fundamentals-lan-wan/) lecture. Instead of simulating a network, you will investigate a real one: the network your machine is connected to right now. By the end, you will be able to sit at any Linux machine, answer the question "what is this machine's network situation?", and trace a packet from the shell prompt to the public internet and back.
+This activity puts into practice the concepts from the [Networking Fundamentals (LAN/WAN)](/lectures/networking-fundamentals/) lecture. Instead of simulating a network, you will investigate a real one: the network your machine is connected to right now. By the end, you will be able to sit at any Linux machine, answer the question "what is this machine's network situation?", and trace a packet from the shell prompt to the public internet and back.
 
 The exercises work best from inside the Arch Linux VM you built in the previous activity, connected from your laptop using the NAT port-forwarding and SSH setup you configured there. Running commands over SSH replicates exactly what you will do on EC2.
 
@@ -41,7 +41,7 @@ Before starting, verify required tools are installed where you will run commands
 - On the Arch VM:
 
    ```bash
-   sudo pacman -S --needed iproute2 iputils curl traceroute bind nmap
+   sudo pacman -S --needed iproute2 iputils curl traceroute bind nmap openssl
    ```
 
 - On host machine (only needed for host-side `nmap` steps):
@@ -63,12 +63,20 @@ Before starting, verify required tools are installed where you will run commands
 
 ---
 
-## Layer 3 Identity
+## Layer 1–3 Identity
 
-Every device on a network has at least one IP address. Before you can do anything else, you need to know this machine's address and what network it belongs to.
+Before diagnosing anything else, establish that the machine has a physical link, an IP address, and a reachable gateway. These three facts cover the bottom three layers of the OSI model and are the foundation for every check that follows.
 
 <Steps>
-1. Show all network interfaces and their addresses:
+1. Check whether the network interface has a link:
+
+   ```bash
+   ip link show
+   ```
+
+   Every interface has a state: `UP` means the hardware link is active; `DOWN` means no physical or virtual link was detected. Look for your main interface (likely `enp0s3` in VirtualBox) and confirm it shows `state UP`. If it shows `DOWN`, no higher-layer tools will work: the cable is disconnected, the virtual NIC is unconfigured, or the interface was manually brought down.
+
+2. Show all network interfaces and their IP addresses:
 
    ```bash
    ip addr show
@@ -82,20 +90,20 @@ Every device on a network has at least one IP address. Before you can do anythin
    - **Prefix length** (the number after the `/`)
    - **Broadcast address** (the number after `brd`)
 
-2. Identify your subnet. Given a prefix length of `/24`, the network has 254 usable addresses. Given `/25`, it has 126. Given `/16`, it has 65,534.
-
-   Which private range does your address fall in?
-   - `10.0.0.0/8`
-   - `172.16.0.0/12`
-   - `192.168.0.0/16`
-
 3. Compare the VM's address to your host machine's address. They are likely on different subnets because VirtualBox's default NAT networking creates its own virtual network for each VM.
 
    Host-side quick checks:
    - macOS/Linux: `ip addr show` (or `ifconfig`)
    - Windows PowerShell: `ipconfig`
 
-4. Inspect the layer-2 neighbor (ARP) table:
+4. Identify your subnet. Given a prefix length of `/24`, the network has 254 usable addresses. Given `/25`, it has 126. Given `/16`, it has 65,534.
+
+   Which private range does your address fall in?
+   - `10.0.0.0/8`
+   - `172.16.0.0/12`
+   - `192.168.0.0/16`
+
+5. Inspect the layer-2 neighbor (ARP) table:
 
    ```bash
    ip neighbor show
@@ -475,7 +483,21 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
    This sends the request to an explicit IP (bypassing normal DNS lookup during the request) while still using the hostname for TLS and Host header handling.
 
-4. From your host machine, scan the SSH port on your Arch VM through the forwarding rule:
+4. Inspect the TLS handshake directly with `openssl s_client`:
+
+   ```bash
+   openssl s_client -connect oregonstate.edu:443
+   ```
+
+   You will see several hundred lines of output. Look for:
+   - `Certificate chain`: the chain of certificates from the server's cert up to the root CA
+   - `subject`: the hostname the certificate was issued for
+   - `notBefore` / `notAfter`: the certificate's validity window
+   - `Verify return code: 0 (ok)`: this line at the end confirms the certificate validated successfully
+
+   If the verify return code is anything other than `0 (ok)`, you have a TLS problem. Common non-zero codes: `10` means the certificate has expired, `20` means a certificate in the chain could not be found, `62` means the hostname does not match the certificate. These are the same errors `curl` would report as a failed TLS handshake, but `openssl s_client` shows you exactly where in the chain the failure occurred.
+
+5. From your host machine, scan the SSH port on your Arch VM through the forwarding rule:
 
    ```bash
    nmap -sV -Pn -p T:2222 127.0.0.1
@@ -526,6 +548,7 @@ You have used six different tools to investigate this machine from layer 2 throu
 
 ## Going Further
 
+- [Mess with DNS](https://messwithdns.net/)!
 - Read `man ip-route` and `man ip-address` for the full reference on iproute2 commands. Most of what `ifconfig` and `netstat` used to do lives here now.
 - Try `mtr 8.8.8.8` (install with `sudo pacman -S mtr`) for a live view of packet loss and latency at each hop along the path. It is more informative than a single `traceroute` run.
 - Use `dig +trace google.com` to watch the full DNS resolution chain from root servers down to the authoritative nameserver. It shows how delegation actually works.

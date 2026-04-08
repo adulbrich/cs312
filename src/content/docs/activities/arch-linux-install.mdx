@@ -574,33 +574,38 @@ Your Arch system boots but has no hostname and no network service configured. Th
    ssh-keygen -t ed25519 -C "cs312-arch-host-key"
    ```
 
-   Accept the default path (`~/.ssh/id_ed25519`) unless you want a course-specific filename.
+   Accept the default path (`~/.ssh/id_ed25519`) unless you want a course-specific filename. Remember the path you choose; you will need it in the next step.
 
 5. Copy your host public key into the VM using the forwarded SSH port:
 
    ```bash
    ssh-copy-id -p 2222 archuser@127.0.0.1
+   # If you used a non-default key name, add: -i /path/to/your/key
    ```
 
    If `ssh-copy-id` is unavailable, use this fallback from your host terminal:
 
    ```bash
    cat ~/.ssh/id_ed25519.pub | ssh -p 2222 archuser@127.0.0.1 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+   # Replace id_ed25519.pub with your key name if you chose a different one
    ```
 
 6. Test key authentication from your host:
 
    ```bash
-   ssh -p 2222 archuser@127.0.0.1 # -i keyfile if you used a non-default filename
+   ssh -p 2222 archuser@127.0.0.1 
+   # If you used a non-default key name, add: -i /path/to/your/k
    ```
 
    You should receive a shell prompt without entering the VM password.
 
-7. (Optional) Verify that key login works from inside the VM too:
+7. (Optional) Verify that the SSH service is working from inside the VM using password authentication:
 
    ```bash
    ssh archuser@localhost
    ```
+
+   When prompted for a password, enter the password you set for `archuser` during installation. This confirms SSH is working; you are using password auth here since the private key exists only on your host machine.
 
 8. Locate the password authentication setting:
 

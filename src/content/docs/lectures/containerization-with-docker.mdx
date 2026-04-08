@@ -387,7 +387,7 @@ Several things to notice:
 
 **Environment variables** are the standard mechanism for injecting configuration. Values that differ between environments (development, staging, production) such as database URLs, API keys, and feature flags are passed in at runtime, not baked into the image.
 
-**Volumes** declared at the top level are named volumes that persist across `docker compose down` and `docker compose up` cycles unless you explicitly pass `--volumes` to the down command.
+**Volumes** declared at the top level (the `volumes:` key) are **named volumes** that Docker creates and manages. In the example, `db-data:` declares a named volume. When a service references it with `- db-data:/var/lib/postgresql/data`, that volume is mounted into the container at that path. Named volumes persist across `docker compose down` and `docker compose up` cycles unless you explicitly pass `--volumes` to the down command. If instead you wanted a **bind mount** (host directory), you would write `- ./local-path:/var/lib/postgresql/data`, using a relative or absolute path instead of a volume name.
 
 **`depends_on`** controls startup order. In its simplest form, it only means the dependency container is started first, not that the service inside is actually ready to accept connections. In the example above, the long form with `condition: service_healthy` works together with the database `healthcheck` so the `web` service waits for PostgreSQL to report readiness. Even then, production applications should still include retry logic, because distributed systems can fail after startup too.
 
