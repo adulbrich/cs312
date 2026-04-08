@@ -31,6 +31,10 @@ Containers and VMs answer different questions. Use a container when you want to 
 
 ## How Containers Work: Namespaces and cgroups
 
+Containers are isolated not by virtualized hardware but by two Linux kernel features: **namespaces** and **cgroups** (control groups). Namespaces give a process a private, isolated view of system resources: its own filesystem tree, network interfaces, process table, and hostname, each independent from the rest of the host. cgroups limit how much CPU, RAM, and I/O a process group can consume, so no single container can starve others on the same host. A container runtime creates a set of namespaces and a cgroup hierarchy, then launches the application process inside them. From inside, the container appears to be a standalone system. From outside, it is just a process tree with extra kernel bookkeeping.
+
+Understanding these mechanisms matters because they define both what containers isolate and what they do not. Containers share the host kernel; they are not separate OS instances. The isolation is process-level, not hardware-level. The history of how these features were built up over time makes this architecture clear.
+
 The ideas behind containers were developed incrementally over decades.
 
 **chroot (1979):** Unix introduced the `chroot` system call, which changes the apparent root directory for a process and its children. This creates a "chroot jail" that hides portions of the filesystem. However, it only restricts filesystem access; it does not limit CPU, RAM, or network resources. Root users can escape it, so it is not a security mechanism on its own.
@@ -85,6 +89,24 @@ The system has four main components:
 
 **Registries** are servers that store and distribute images. Docker Hub is the default public registry, but organizations often use private registries such as GitHub Container Registry (GHCR), Amazon ECR (Elastic Container Registry), or a self-hosted registry. When you run `docker pull nginx`, the client asks the daemon to download the `nginx` image from Docker Hub.
 
+The diagram below shows how these components relate. Every `docker` command flows from the CLI through the daemon to containerd, which delegates the actual kernel work to runc. The daemon reaches outward to a registry only when an image needs to be pulled or pushed.
+
+```mermaid
+flowchart TB
+  CLI["docker\nCLI client"]
+  daemon["dockerd\nDocker daemon"]
+  containerd["containerd\ncontainer lifecycle"]
+  runc["runc\nOCI runtime"]
+  kernel["Linux Kernel\nnamespaces · cgroups"]
+  registry["Registry\nDocker Hub · GHCR · ECR"]
+
+  CLI -- "API (Unix socket)" --> daemon
+  daemon <-- "pull / push images" --> registry
+  daemon --> containerd
+  containerd --> runc
+  runc -- "kernel calls" --> kernel
+```
+
 ## Images and Layers
 
 A Docker image is not a single monolithic file. It is a stack of read-only layers, each representing a set of filesystem changes. This layered design uses a **union filesystem** to present all the layers as a single coherent directory tree to a running container.
@@ -97,6 +119,19 @@ Consider an image for a web application built in sequence: start from a base run
 4. **Application layer**: the application source code
 
 The power of this design is **layer caching**. If you rebuild the image and only the application code has changed, Docker reuses the cached base, manifest, and install layers and only rebuilds the application layer. This makes rebuilds fast. It also means that if ten images on the same host all use the same base image, that layer is stored only once on disk.
+
+The diagram below shows the layer stack for a Python web application. The image layers (read-only) are shared across all containers started from this image. Each container adds its own writable layer on top for any changes it makes at runtime; that layer is discarded when the container is removed.
+
+```mermaid
+flowchart TB
+  W("Writable layer\ncontainer runtime only, ephemeral")
+  L4["COPY . . \napplication source code"]
+  L3["RUN pip install\ninstalled packages"]
+  L2["COPY requirements.txt ."]
+  L1["FROM python:3.12-slim\nbase OS + Python runtime"]
+
+  L1 --> L2 --> L3 --> L4 --> W
+```
 
 <Aside type="caution" title="Layer Order Matters for Caching">
 Docker invalidates the cache for a layer and all layers after it when something changes. If you copy your entire source code before installing dependencies, then every code change forces a full reinstall. The correct pattern is: copy dependency manifests first, install, then copy the rest of your source code. This maximizes cache reuse because dependencies change far less frequently than application code.
@@ -234,6 +269,23 @@ Every container gets its own network namespace, but Docker also needs to make co
 The default network mode is **bridge**. On a typical Linux Docker installation, Docker creates a virtual bridge interface on the host (usually `docker0`) and assigns each container a private IP address within that bridge's subnet, often `172.17.0.0/16` unless the daemon or host networking has been customized. On Docker Desktop for macOS or Windows, the bridge exists inside the Linux VM Docker manages, so the exact private subnet may differ. Containers can reach the internet through NAT. However, a container on the default bridge network is not directly reachable from the host network without explicit port publishing.
 
 **Port publishing** (`-p host:container`) maps a port on the host to a port inside the container. Docker configures a NAT rule forwarding traffic arriving at the host port to the container's private IP on the container port. The container process only knows it is listening on, say, port 80; the host port is a translation that exists outside the container's view. This is why two containers can both "listen on port 80" without conflicting: they each have a unique private IP, and only the host-side ports (which must be unique) are exposed externally.
+
+The diagram below shows two containers both listening on their internal port 80. Docker's NAT maps distinct host ports to each one. From the host, the two services are distinguishable by port; from inside each container, there is no port conflict because each has its own network namespace.
+
+```mermaid
+flowchart LR
+  subgraph host["Host"]
+    h1[":8080"]
+    h2[":9090"]
+  end
+  subgraph bridge["docker0 bridge  172.17.0.0/16"]
+    cA["Container A\n172.17.0.2:80\nnginx"]
+    cB["Container B\n172.17.0.3:80\nnginx"]
+  end
+
+  h1 -- "NAT" --> cA
+  h2 -- "NAT" --> cB
+```
 
 ### User-Defined Networks and Container DNS
 
@@ -392,9 +444,9 @@ docker push myusername/my-app:latest
 docker pull myusername/my-app:latest
 ```
 
-Tags are mutable pointers. `latest` is a convention, not a guarantee of recency -- a registry administrator can point `latest` at any image version. For reproducible deployments, use specific version tags like `1.0.0` or image digest references (`@sha256:...`), which are immutable.
+Tags are mutable pointers. `latest` is a convention, not a guarantee of recency; a registry administrator can point `latest` at any image version. For reproducible deployments, use specific version tags like `1.0.0` or image digest references (`@sha256:...`), which are immutable.
 
-<Aside type="caution">
+<Aside type="caution" title="Secrets Are Permanent in Public Images">
 When pushing to a public repository, every layer is publicly accessible. Never bake secrets, passwords, or private keys into an image layer, even in an intermediate layer that was later overwritten. All layers in the build history are accessible to anyone who pulls the image. Use multi-stage builds and runtime secrets injection instead.
 </Aside>
 
@@ -448,6 +500,8 @@ Kubernetes will be discussed later in more depth.
 **Docker Swarm** is Docker's own simpler orchestration tool. It is easier to set up than Kubernetes but less capable. For most new projects, Kubernetes (or a managed variant like Amazon EKS, Google GKE, or Azure AKS, where the cloud provider operates the control plane) is the industry standard.
 
 ## Best Practices
+
+The following practices are not optional refinements to apply later. They address failure modes that appear early in real deployments. Oversized images slow down CI pipelines and increase attack surface. Secrets baked into image layers have caused publicized security incidents. Missing health checks cause orchestrators to route traffic to instances that are not yet ready. Processes running as root inside containers have led to host compromise when container escapes were discovered. Each practice below translates directly into images that are smaller, more secure, and more reliable.
 
 ### Use Small Base Images
 
@@ -504,11 +558,15 @@ Docker marks the container as `healthy`, `unhealthy`, or `starting` based on the
 
 Never put passwords, API keys, or certificates in a Dockerfile or in files that get copied into the image. Anyone who pulls the image can extract them from any layer. Inject secrets at runtime through environment variables, Docker secrets (in Swarm mode), or external secret managers (HashiCorp Vault, AWS Secrets Manager). Even environment variables are visible via `docker inspect`, so for highly sensitive values, mount a secrets file from a volume or use a dedicated secrets management tool.
 
-## Putting It All Together
+## Takeaways
 
-The container model introduces a clean separation of concerns: the **image** is the immutable, versioned artifact; the **container** is the ephemeral runtime instance; **volumes** hold the state that must outlive any individual instance; **Compose** wires services together with automatic networking; and **registries** distribute images to wherever they need to run. Namespaces and cgroups enforce the isolation and resource limits that make this safe on a shared host.
+Consider what deploying a Python web application with a PostgreSQL database looks like using everything in this lecture. You write a Dockerfile starting from `python:3.12-slim`, copy `requirements.txt` first, run `pip install`, then copy the rest of the source code. That ordering is deliberate: it keeps the install layer cached across code changes, so rebuilds are fast. You add a `HEALTHCHECK` instruction so the container does not report healthy until the application is actually serving requests, and you switch to a non-root `appuser` before the `CMD` so the runtime process has minimal privileges.
 
-What containers do not replace is the need to understand the underlying systems. A containerized application still depends on networking, storage, security, and the OS. Containers change where you manage these concerns: from the host configuration to the container definition. But they do not make those concerns disappear. A Dockerfile, a Compose file, and an understanding of port publishing and volumes are the tools that translate operational knowledge into reproducible, portable deployments.
+In `compose.yml` you declare two services: `web` and `database`. Compose creates a user-defined bridge network for the project and attaches both services to it, so `web` can connect to `database` by hostname without any manual network configuration. The `database` service uses a named volume for its data files so they survive container replacement. The `web` service declares `depends_on` with `condition: service_healthy` to wait for the database before starting. You bring everything up with `docker compose up --build -d` and follow startup with `docker compose logs -f`.
+
+When it is time to deploy, you tag the image with a specific version and push it to GHCR. On the target server, `docker compose pull` fetches the new image, and `docker compose up -d` replaces the running container while leaving the volume intact.
+
+The container model introduces a clean separation of concerns: the image is the immutable artifact, the container is the ephemeral runtime instance, volumes hold the state that outlives any individual instance, and registries distribute images wherever they need to run. What containers do not replace is the need to understand the underlying systems. A containerized application still depends on networking, storage, and security. Containers change where you manage those concerns, from the host configuration to the container definition, but they do not make those concerns disappear.
 
 ## Resources
 

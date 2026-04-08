@@ -9,7 +9,7 @@ draft: true
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts into practice the concepts from the Containerization with Docker lecture. Instead of following a tutorial, you will investigate how containers actually behave: what isolation they provide, what they do and do not preserve, and how the tools you use every day translate into kernel-level operations.
+This activity puts into practice the concepts from the [Containerization with Docker](/lectures/containerization-with-docker/) lecture. You will investigate how containers actually behave: namespace isolation, ephemeral storage, volumes, image layer caching, port mapping, and multi-service Compose stacks. By the end, you will have run, built, and inspected containers and seen for yourself exactly what isolation they provide and where it ends.
 
 <Aside type="note" title="Podman Users">
 All commands in this activity work identically with `podman` substituted for `docker`. If you are on a Linux system with Podman installed, or prefer Podman for its rootless defaults, just replace `docker` with `podman` throughout. Where behavior differs meaningfully, a note will call it out.
@@ -17,7 +17,7 @@ All commands in this activity work identically with `podman` substituted for `do
 
 ---
 
-## Prerequisites
+## What You Will Need
 
 You need a container runtime installed on your laptop before starting.
 
@@ -135,10 +135,6 @@ Before running anything, let us look at what an image actually is.
 `nginx:latest` is based on Debian and `nginx:alpine` is based on Alpine Linux. `nginx:latest` is several times larger. What is the operational reason to choose the smaller image for production deployments? What tradeoff, if any, does Alpine introduce?
 </ActivityQuestion>
 
-<ActivityQuestion>
-`docker history` shows layers oldest-first (at the bottom) or newest-first (at the top). Looking at the output, which layer represents the base OS, and which layers represent nginx-specific installation steps? How does this reflect the order of instructions in a Dockerfile?
-</ActivityQuestion>
-
 ---
 
 ## Part 2: Inside the Container: Namespace Isolation
@@ -188,10 +184,6 @@ A running container is an isolated process with its own view of the system. This
 
    Compare the two sets of results.
 </Steps>
-
-<ActivityQuestion>
-Inside the container, `ps aux` showed only a handful of processes, and the nginx process appeared as PID 1 (or close to it). On your host, `ps aux` shows many more. Both are running on the same physical machine with the same kernel. What Linux feature explains why the container sees a different, smaller set of process IDs?
-</ActivityQuestion>
 
 <ActivityQuestion>
 Inside the container, `whoami` returned `root`. On your host, you are probably running as a regular user. What does "root inside the container" actually mean, and how does it differ from root access on the host? What would need to go wrong for container root to translate into host root?
@@ -245,10 +237,6 @@ A container's writable layer disappears when the container is removed. This sect
 
 <ActivityQuestion>
 An engineer proposes writing application logs to `/var/log/app/` inside the container and reading them with `docker exec ... cat`. Another engineer suggests this is a reliability problem. Explain specifically what happens to those logs when the container is stopped and replaced during a deployment.
-</ActivityQuestion>
-
-<ActivityQuestion>
-You modified the running container's filesystem in step 4, but the base image was unchanged. Where was your modification stored, and why did it disappear when you removed the container?
 </ActivityQuestion>
 
 ---
@@ -570,3 +558,69 @@ Compose created a network automatically and attached both services to it. Compar
 <ActivityQuestion>
 The `echo` service in this stack is intentionally not exposed to the host with a `ports:` mapping; it is only reachable from within the Compose network. Describe a real-world service (database, cache, internal API) that should be configured this way, and explain the security reasoning.
 </ActivityQuestion>
+
+---
+
+## Your Image
+
+You have explored existing images, observed isolation, built a simple image, and run a Compose stack. Now build a small image that carries your identity.
+
+<Steps>
+1. Create a working directory and a personalized HTML file:
+
+   ```bash
+   mkdir myapp && cd myapp
+   ```
+
+   Create `index.html` with your ONID in it:
+
+   ```html
+   <h1>Built by: YOUR_ONID</h1>
+   ```
+
+2. Create a `Dockerfile`:
+
+   ```dockerfile
+   FROM nginx:alpine
+   COPY index.html /usr/share/nginx/html/index.html
+   ```
+
+3. Build the image and run it:
+
+   ```bash
+   docker build -t myapp:v1 .
+   docker run -d -p 9090:80 --name myapp myapp:v1
+   ```
+
+4. Confirm your content is served:
+
+   ```bash
+   curl http://localhost:9090
+   ```
+
+   You should see your ONID in the response.
+
+5. Inspect the image layers:
+
+   ```bash
+   docker history myapp:v1
+   ```
+
+   Notice the two layers: the base `nginx:alpine` layer inherited from the parent image, and your `COPY` layer on top.
+
+6. Clean up:
+
+   ```bash
+   docker stop myapp
+   docker rm myapp
+   cd .. && rm -rf myapp
+   ```
+</Steps>
+
+## Going Further
+
+- <a href="https://docs.docker.com/compose/" target="_blank" rel="noopener noreferrer">Docker Compose Documentation</a>
+- <a href="https://docs.docker.com/build/building/multi-stage/" target="_blank" rel="noopener noreferrer">Multi-Stage Builds (Docker Documentation)</a>
+- <a href="https://docs.docker.com/engine/security/" target="_blank" rel="noopener noreferrer">Docker Security Documentation</a>
+- <a href="https://github.com/hadolint/hadolint" target="_blank" rel="noopener noreferrer">hadolint: a Dockerfile linter that catches common mistakes</a>
+- <a href="https://www.youtube.com/watch?v=pg19Z8LL06w" target="_blank" rel="noopener noreferrer">Docker Crash Course for Absolute Beginners (TechWorld with Nana) (YouTube)</a>
