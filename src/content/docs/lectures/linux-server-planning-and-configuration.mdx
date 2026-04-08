@@ -463,6 +463,8 @@ This matters because a server is not just "a machine with software installed." I
 
 ### Basic Service Management
 
+`systemctl` is the command-line interface to systemd's service manager. The operations you will reach for constantly are checking a service's current state, starting or stopping it, restarting it after a configuration change, and controlling whether it comes up automatically at boot.
+
 ```bash
 # Check the status of nginx
 sudo systemctl status nginx
@@ -582,7 +584,9 @@ For most of Linux's first two decades, PID 1 was SysV init: a collection of shel
 
 ## Takeaways
 
-The concepts in this lecture form a complete foundation: you now have the vocabulary and commands to go from a blank machine to a running, maintained Linux server. Distribution selection determines your package ecosystem and support lifecycle. Filesystem and disk choices shape reliability and growth capacity. User and group management enforces least privilege across services and operators. Network configuration gives the server a predictable identity on the network. Package management keeps software current and secure. And systemd ties it together, starting services in the right order, restarting them on failure, and capturing their output in a queryable journal.
+Consider what provisioning a web application server actually looks like, from a blank machine to a running service. You choose Ubuntu 24.04 LTS because the application vendor officially supports it and your team already knows it. You size the instance at 2 vCPUs and 4 GB of RAM with a 40 GB root filesystem and a 1 GB swap area. You create a `deploy` user for the application and rely on the `www-data` system account (already present on Ubuntu) for nginx to run as. You disable SSH password authentication after adding your public key to `~/.ssh/authorized_keys`, set the hostname with `hostnamectl`, and add the FQDN to `/etc/hosts`. You install nginx and PostgreSQL with `apt`, verify both are running with `systemctl status`, and enable them at boot with `systemctl enable`. You write a unit file for the application process that declares `Requires=postgresql.service` and `Restart=on-failure`, reload the daemon, and start it.
+
+At that point the server comes up cleanly after a reboot, restarts services after a crash, and logs everything to the journal. The Linux layer is in good shape. Making it reliably reachable from the outside requires a separate body of knowledge: how IP addressing and subnetting work, how routing decisions are made, how DNS resolves names, how firewalls filter traffic, and which diagnostic tools tell you why a packet is or is not arriving. Those are networking fundamentals, and they sit alongside everything in this lecture as a parallel layer of understanding rather than a continuation of it.
 
 ## Resources
 

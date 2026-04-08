@@ -29,14 +29,21 @@ Download the latest aarch64 ISO from [release.archboot.com/aarch64/latest/iso/](
 
 ## Create the Virtual Machine
 
-In your hypervisor of choice (VirtualBox, UTM, VMware, etc.), create a new VM with the following settings:
+Before booting the ISO, you need a virtual machine configured with the right resources and firmware.
 
-- Memory: 4096 MB
-- CPU: 2 cores
-- Disk: 8 GB, dynamically allocated
-- Network: NAT (default). Keep NAT enabled, then add a host-to-guest port-forwarding rule later so SSH from your laptop is seamless.
-- Optical drive: attach the Arch Linux ISO you downloaded above, matching your architecture (x86_64 or aarch64)
-- Make sure you use (U)EFI firmware, not legacy BIOS. This is required for the EFI System Partition we will create.
+<Steps>
+1. In your hypervisor (VirtualBox, UTM, VMware, etc.), create a new virtual machine with these settings:
+
+   - Memory: 4096 MB
+   - CPU: 2 cores
+   - Disk: 8 GB, dynamically allocated
+   - Network: NAT (the default)
+   - Make sure (U)EFI is enabled
+
+2. Attach the Arch Linux ISO you downloaded as the optical drive (or virtual DVD), matching your architecture (x86_64 or aarch64).
+
+3. Make sure the firmware is set to (U)EFI, not legacy BIOS. In VirtualBox this is under **Settings > System > Motherboard > Enable EFI**. In UTM this is selected during VM creation. UEFI is required for the EFI System Partition you will create in the next section.
+</Steps>
 
 ## Boot into the Live Environment
 
@@ -57,8 +64,7 @@ In your hypervisor of choice (VirtualBox, UTM, VMware, etc.), create a new VM wi
    fdisk -l
    ```
 
-   {/* TODO: update paragraph to `fidsk -l` */}
-   `lsblk` lists block devices, the kernel's term for storage devices that read and write data in fixed-size blocks. Each row shows a device name, its size, and type. Look for a device with TYPE=`disk` and roughly 8 GB of space: that is your virtual hard disk. Partitions appear as children indented beneath it. On VirtualBox the disk is typically `/dev/sda`; on UTM it is typically `/dev/vda`. In all commands below, replace `/dev/<disk>` with your actual disk path.
+   `fdisk -l` lists all block devices and their partitions, showing the size, type, and sector layout of each. Look for a disk with roughly 8 GB of space: that is your virtual hard disk. On VirtualBox the disk is typically `/dev/sda`; on UTM it is typically `/dev/vda`. In all commands below, replace `/dev/<disk>` with your actual disk path.
 </Steps>
 
 <Aside type="note" title="About the live environment">
@@ -130,34 +136,53 @@ A raw disk has no structure. Before Linux can use it, you must divide it into pa
 
 Partitioning only defines boundaries on the disk. Formatting writes the actual filesystem data structures that the kernel needs to store files. Each partition gets the filesystem appropriate to its role.
 
-```bash
-# FAT32 on the EFI partition (required by the UEFI specification)
-mkfs.fat -F32 /dev/<disk>1
+<Steps>
+1. Format the EFI partition as FAT32:
 
-# ext4 on the root partition
-mkfs.ext4 -F /dev/<disk>3
+   ```bash
+   mkfs.fat -F32 /dev/<disk>1
+   ```
 
-# Initialize and activate swap
-mkswap /dev/<disk>2
-swapon /dev/<disk>2
-```
+   The UEFI specification requires FAT32 on the ESP. The firmware reads it directly before any OS driver is loaded, so it cannot use a Linux-only format like ext4.
 
-`mkfs.fat -F32` writes a FAT32 filesystem. The UEFI specification requires FAT32 on the ESP: the firmware reads it directly before any OS driver is loaded, so it cannot use a Linux-only format like ext4. `mkfs.ext4 -F` writes an ext4 filesystem; the `-F` flag forces formatting even if the partition looks like it already has data. `mkswap` writes the swap header the kernel needs to recognise the partition as swap space, and `swapon` activates it immediately for the live session.
+2. Format the root partition as ext4:
+
+   ```bash
+   mkfs.ext4 -F /dev/<disk>3
+   ```
+
+   The `-F` flag forces formatting even if the partition looks like it already has data.
+
+3. Initialize and activate swap:
+
+   ```bash
+   mkswap /dev/<disk>2
+   swapon /dev/<disk>2
+   ```
+
+   `mkswap` writes the swap header the kernel needs to recognize the partition as swap space. `swapon` activates it immediately for the live session.
+</Steps>
 
 ### Mount the Filesystems
 
-Before `pacstrap` can install packages to the new system, the kernel needs to know where to find the new disk. Mounting makes a partition accessible at a directory path. We use `/mnt` as a temporary staging root: it is the conventional location for this in the live environment.
+Before `pacstrap` can install packages to the new system, the partitions need to be accessible as directories. We use `/mnt` as a temporary staging root.
 
-```bash
-# Mount the root partition
-mount /dev/<disk>3 /mnt
+<Steps>
+1. Mount the root partition:
 
-# Create and mount the EFI partition
-mkdir -p /mnt/boot/efi
-mount /dev/<disk>1 /mnt/boot/efi
-```
+   ```bash
+   mount /dev/<disk>3 /mnt
+   ```
 
-The root partition mounts at `/mnt` and the EFI partition mounts at `/mnt/boot/efi`. That path matters: when GRUB is installed later, it will write its EFI files into whatever is mounted at `/boot/efi`, so the mount point and the EFI partition need to match.
+2. Create the EFI mount point and mount the EFI partition:
+
+   ```bash
+   mkdir -p /mnt/boot/efi
+   mount /dev/<disk>1 /mnt/boot/efi
+   ```
+
+   When GRUB is installed later, it will write its EFI files into whatever is mounted at `/boot/efi`, so the mount point and the EFI partition need to match.
+</Steps>
 
 <Aside type="note" title="Checkpoint">
 Run `lsblk -f` and verify the filesystems of each partition and that your root partition is mounted at `/mnt` and your EFI partition at `/mnt/boot/efi`. If you made a mistake, you can unmount with `umount /mnt/boot/efi` and `umount /mnt`, then fix the partitioning or formatting and start this step again.
@@ -169,49 +194,60 @@ Why does the EFI System Partition use FAT32 instead of ext4? What would happen i
 
 ## Install the Base System
 
-This step downloads and installs the core Arch Linux packages into your mounted root partition. The `pacstrap` tool is Arch's equivalent of running an installer, but it is transparent: you can see exactly which packages it installs.
+With the partitions mounted, `pacstrap` can download and install the core Arch Linux packages directly to your mounted root. The installation is transparent: you can see exactly which packages it installs and why.
 
-```bash
-pacstrap /mnt base linux vim
-```
+<Steps>
+1. Install the base packages:
 
-The three packages do different things:
-- `base`: the minimal userland, i.e., the shell, coreutils, systemd, and other tools every Arch system needs. It does not include a kernel.
-- `linux`: the Linux kernel itself and its modules. Without this the system cannot boot.
-- `vim`: a text editor. The installed system has no editor by default; you need one to edit config files in the next steps.
+   ```bash
+   pacstrap /mnt base linux vim
+   ```
 
-This installs about 120 packages in total. It will take a few minutes depending on your internet speed.
+   The three packages do different things:
+   - `base`: the minimal userland (shell, coreutils, systemd, and other tools every Arch system needs). It does not include a kernel.
+   - `linux`: the Linux kernel itself and its modules. Without this the system cannot boot.
+   - `vim`: a text editor. The installed system has no editor by default; you need one to edit config files in the next steps.
 
-After it finishes, generate the filesystem table so the installed system knows how to mount its own partitions at boot:
+   This installs about 120 packages in total and will take a few minutes depending on your internet speed.
 
-```bash
-genfstab -U /mnt > /mnt/etc/fstab
-```
+2. Generate the filesystem table:
 
-`/etc/fstab` is a plain-text file that maps partitions to mount points. The system reads it at every boot to know what to mount and where. The `-U` flag tells `genfstab` to identify each partition by its UUID (a unique identifier burned into the filesystem when you ran `mkfs`) rather than by device name. UUID-based entries are more reliable because device names like `/dev/<disk>` can change if you add or rearrange disks; UUIDs never change. Run `cat /mnt/etc/fstab` to inspect the generated file.
+   ```bash
+   genfstab -U /mnt > /mnt/etc/fstab
+   ```
+
+   `genfstab` generates `/etc/fstab`, which maps partitions to mount points. The system reads it at every boot. The `-U` flag identifies each partition by UUID rather than by device name; UUIDs never change even if you add or rearrange disks. Run `cat /mnt/etc/fstab` to inspect the result.
+</Steps>
 
 <ActivityQuestion>
-`pacstrap` installs Arch packages just as `apt install` installs Debian packages. What are the equivalent `pacman` commands for `apt update`, `apt install <package>`, and `apt upgrade`?
+`pacstrap` installed about 120 packages even though you named only three. The lecture explains that Linux distributions differ significantly in what they include by default. What does Arch's decision to separate `base` and `linux` into distinct packages tell you about its philosophy compared to distributions like Ubuntu, where the kernel is bundled into the installer automatically?
 </ActivityQuestion>
 
 ## Enter the New System
 
 To configure the installed system, you need to "pivot" into it using `chroot` (change root). `arch-chroot` remounts `/mnt` as the root directory (`/`) for this shell session, so every path and every command now refers to the installed system rather than the live environment. It also sets up special kernel filesystems like `/proc` and `/sys` inside the chroot so tools like `grub-install` work correctly.
 
-```bash
-arch-chroot /mnt
-```
+<Steps>
+1. Enter the chroot:
 
-Verify you are inside the chroot:
+   ```bash
+   arch-chroot /mnt
+   ```
 
-```bash
-pwd
-# Should output: /
-```
+   Notice that your prompt likely changed. You are now running commands that affect the installed OS on disk, not the RAM-based live environment.
 
-Notice that your prompt likely changed. You are now effectively "inside" the new system, running commands that will affect the installed OS on disk, not the RAM-based live environment.
+2. Verify you are inside the chroot:
+
+   ```bash
+   pwd
+   ```
+
+   The output should be `/`.
+</Steps>
 
 ## Configure Locale and Timezone
+
+Inside the chroot, every change you make writes to the installed system on disk. Without a timezone and locale set, the system uses defaults that may display times incorrectly and cause internationalization issues in some programs.
 
 <Steps>
 1. Set the timezone (adjust if you are not on the US West Coast):
@@ -258,6 +294,8 @@ Notice that your prompt likely changed. You are now effectively "inside" the new
 </Steps>
 
 ## Install the Bootloader
+
+GRUB bridges the UEFI firmware and the Linux kernel. The firmware finds GRUB on the EFI System Partition and hands control to it; GRUB then locates the kernel and starts it. Without a bootloader installed to the EFI partition, the VM will boot to a firmware error screen instead of Linux.
 
 <Steps>
 1. Install GRUB and supporting EFI tools:
@@ -319,6 +357,8 @@ The lecture describes four boot stages: firmware, bootloader, kernel, systemd. W
 
 ## Configure sudo and Create a User
 
+Logging in as root directly is unsafe for everyday use. You need a regular user account and a way to run administrative commands when needed. These steps create that account and grant it controlled root access via `sudo`.
+
 <Steps>
 1. Install sudo:
 
@@ -363,6 +403,8 @@ The lecture warns that forgetting the `-a` flag with `usermod -aG` replaces all 
 
 ## Reboot into Your New System
 
+The chroot session has given you a complete installed system. Exit it, remove the ISO so the VM boots from disk instead of the live environment, and reboot.
+
 <Steps>
 1. Exit the chroot:
 
@@ -389,14 +431,20 @@ You may see warnings during boot. This is normal for a minimal Arch installation
 
 ## Configure Networking
 
+Your Arch system boots but has no hostname and no network service configured. These steps give the machine an identity and connect it to the network so you can install packages and administer it remotely.
+
 <Steps>
-1. Set a hostname (the lecture covers this with `hostnamectl`):
+1. Set a hostname:
 
    ```bash
-   sudo vim /etc/hostname
+   sudo hostnamectl set-hostname archbox
    ```
 
-   Type a single word (e.g., `archbox`) and save the file.
+   Replace `archbox` with whatever single-word name you want for this machine. Verify it took effect:
+
+   ```bash
+   hostnamectl
+   ```
 
 2. Configure `/etc/hosts`:
 
@@ -518,7 +566,7 @@ You may see warnings during boot. This is normal for a minimal Arch installation
    - Guest IP: leave blank (or use the VM's NAT IP)
    - Guest Port: `22`
 
-   This maps `127.0.0.1:2222` on your laptop to `22` inside the Arch VM. You keep NAT for outbound internet access, while still being able to SSH in from the host.
+   This maps `127.0.0.1:2222` on your laptop to `22` inside the Arch VM. You keep NAT for outbound internet access, while still being able to SSH in from the host. In UTM, you might need to switch the network mode to "Emulated VLAN" to enable port forwarding, as UTM's "Shared Network" mode does not support it.
 
 4. From your **host machine** terminal, generate a key pair on your laptop (if you do not already have one):
 
@@ -618,15 +666,53 @@ Now that your system boots and services are running, inspect live process IDs so
 What is the practical difference between PID and PPID, and why is PID 1 a special process on Linux?
 </ActivityQuestion>
 
-## Keep This VM
+## Verify Your Installation
 
-You will use this Arch Linux VM in the next activity. Leave it running or shut it down cleanly with:
+Your Arch Linux system is installed, networked, and running. Run these commands to confirm everything is in order.
 
-```bash
-sudo shutdown -h now
-```
+<Steps>
+1. Show system identity and kernel version:
 
-The `-h` flag is the halt flag. Without it, Arch might reboot instead.
+   ```bash
+   hostnamectl
+   ```
+
+   You will see the hostname you chose, the architecture, and the kernel version you installed.
+
+2. Confirm your user and group memberships:
+
+   ```bash
+   id
+   ```
+
+   The output should show `archuser` with `wheel` as a supplementary group, confirming that `sudo` access is configured correctly.
+
+3. Show active services:
+
+   ```bash
+   systemctl list-units --type=service --state=active
+   ```
+
+   You should see `sshd` and `systemd-networkd` in the list alongside core system services.
+
+4. Confirm network reachability:
+
+   ```bash
+   ping -c 3 archlinux.org
+   ```
+
+   All three pings should succeed.
+
+5. You can now safely shut down the VM:
+
+   ```bash
+   sudo shutdown -h now
+   ```
+
+   The `-h` flag is the halt flag. Without it, Arch might reboot instead. Alternatively, you can use `sudo poweroff`.
+</Steps>
+
+**Don't delete your VM just yet!** You will use it again in the next activity.
 
 ## Going Further
 
