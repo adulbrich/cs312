@@ -118,10 +118,6 @@ Every device on a network has at least one IP address. Before you can do anythin
 </Steps>
 
 <ActivityQuestion>
-If your VM shows `10.0.2.15/24`, the network is `10.0.2.0/24`, the broadcast address is `10.0.2.255`, and there are 254 usable host addresses. What would the equivalent values be for a `/25` network?
-</ActivityQuestion>
-
-<ActivityQuestion>
 Your ARP table shows an entry for the VirtualBox gateway (`10.0.2.2`) but nothing for `8.8.8.8`. ARP is a broadcast protocol: a device sends "who has this IP?" to the entire local network and waits for a reply. Why does that mechanism mean you can never get an ARP entry for a public server like `8.8.8.8`?
 </ActivityQuestion>
 
@@ -328,7 +324,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 
    This scans the forwarded host port that maps to SSH on the VM. If this port shows open, the host-to-guest forwarding path is working.
 
-   <Aside type="tip">
+   <Aside type="tip" title="Port Closed or Filtered?">
    If `nmap` reports the port as closed or filtered, verify your VM still has the NAT forwarding rule from the Arch activity: host `127.0.0.1:2222` to guest `:22`. Then verify `sshd` is running in the VM with `sudo systemctl status sshd`.
    </Aside>
 
@@ -498,3 +494,39 @@ DNS translates names to addresses. Understanding how your machine resolves names
 <ActivityQuestion>
 A user reports "I can reach `8.8.8.8` but I cannot open any website." Based on what you practiced in Parts 1 through 6, what is the most likely cause, and what command would you run to confirm it?
 </ActivityQuestion>
+
+---
+
+## Network Summary
+
+You have used six different tools to investigate this machine from layer 2 through layer 7. Produce a clean terminal snapshot that captures your findings in one place.
+
+<Steps>
+1. Print your machine's identity and address information:
+
+   ```bash
+   printf "Hostname: %s\nLocal IP: %s\nGateway:  %s\nPublic IP: %s\nDNS:      %s\n" \
+     "$(hostname)" \
+     "$(ip -4 addr show scope global | awk '/inet /{print $2}' | head -1)" \
+     "$(ip route show default | awk '{print $3}')" \
+     "$(curl -s https://ifconfig.me)" \
+     "$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)"
+   ```
+
+   Your hostname is the personal identifier in this output: it is the name you set during the Arch Linux install and it appears in your terminal prompt as well. You should see your local address in the `10.0.2.x` range, a different public IP (confirming NAT is working), and the DNS resolver you configured manually.
+
+2. List all TCP services currently listening:
+
+   ```bash
+   sudo ss -tlnp
+   ```
+
+   At minimum you should see SSH on port 22. Together, the hostname, the local and public IP pair, and the listening port for SSH are a complete, verifiable picture of what this machine is and how it is reachable from the network.
+</Steps>
+
+## Going Further
+
+- Read `man ip-route` and `man ip-address` for the full reference on iproute2 commands. Most of what `ifconfig` and `netstat` used to do lives here now.
+- Try `mtr 8.8.8.8` (install with `sudo pacman -S mtr`) for a live view of packet loss and latency at each hop along the path. It is more informative than a single `traceroute` run.
+- Use `dig +trace google.com` to watch the full DNS resolution chain from root servers down to the authoritative nameserver. It shows how delegation actually works.
+- Explore `/proc/net/` on the VM. Files like `/proc/net/tcp`, `/proc/net/arp`, and `/proc/net/route` are what tools like `ss` and `ip` read under the hood. They show that network state on Linux is just files.

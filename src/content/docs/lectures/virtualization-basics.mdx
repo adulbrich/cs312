@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-import { Aside, Steps, LinkCard, CardGrid } from '@astrojs/starlight/components';
+import { Aside, LinkCard } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Suppose you need to test a risky kernel upgrade before touching your production server. Or you need three environments (Ubuntu with `apt`, AlmaLinux with `dnf`, and Arch Linux with `pacman`) to verify your deployment scripts work across distributions with genuinely different package managers and release models. Or you want to give each developer on your team an isolated sandbox so that a misconfiguration in one environment cannot affect another. Buying separate physical hardware for every scenario is slow and expensive; rebuilding from scratch after every mistake wastes hours. Virtualization solves all three problems by letting you run multiple isolated operating systems on the same physical machine simultaneously, and roll back any of them to a clean state in seconds.
@@ -71,7 +71,7 @@ flowchart LR
 
 The diagram shows two guests running their own applications and kernels, while privileged hardware access is mediated by the hypervisor. The important boundary is that Guest A does not touch Guest B's memory or devices directly; both must go through the hypervisor layer.
 
-<Aside type="tip">
+<Aside type="tip" title="Install Paravirtualized Drivers">
 Install paravirtualized device drivers (for example virtio storage and network drivers) inside every VM. Also install your platform's guest agent for lifecycle integration and observability. The performance difference over fully-emulated devices is measurable.
 </Aside>
 
@@ -150,7 +150,7 @@ For practical sizing: start a VM with the minimum memory its OS and baseline ser
 
 **Reading `free -h` correctly:** Linux deliberately uses spare RAM as a disk cache; pages read from disk recently are kept in memory so repeat reads are fast. This is normal and healthy behavior; unused RAM is wasted RAM. As a result, `free -h` will always show far less "free" memory than you allocated. The column to watch is **available**, which estimates how much memory could realistically be reclaimed for new processes (including cache that would be released on demand). Only act if "available" approaches zero under normal workloads. To detect actual memory pressure, run `vmstat 1` and watch the `si` (swap in) and `so` (swap out) columns: non-zero values mean the guest is actively swapping and needs more RAM.
 
-<Aside type="caution">
+<Aside type="caution" title="Host Swapping Affects Every Guest">
 If the host machine is swapping, every guest suffers. Sustained swap activity is the clearest sign that the host as a whole is over-provisioned on memory.
 </Aside>
 
@@ -167,7 +167,7 @@ A virtual disk is often a file on the host's filesystem that stores all of the b
 
 For a laptop lab environment, thin-provisioned qcow2 or vdi is the right choice. The performance difference is not noticeable for typical workloads, and the space savings are useful when you have multiple VMs.
 
-<Aside type="note">
+<Aside type="note" title="LVM and ZFS as Storage Backends">
 You may encounter references to LVM (Logical Volume Manager) and ZFS as storage backends for virtual disks. These are advanced storage technologies that provide additional features like efficient snapshots at the storage layer, checksumming, and pooled storage management. They are common in server and production environments. You will encounter them in later lectures when storage is covered in depth; for now, treat them as future topics.
 </Aside>
 
@@ -263,9 +263,17 @@ An organization runs a Proxmox cluster (VM layer) hosting three Ubuntu VMs formi
 
 Containers will be covered in a later lecture.
 
-## Resources
+## Takeaways
 
-{/* TODO: find better resources like video etc. */}
+The thread running through this lecture is a single insight: hardware is a fixed constraint, but the resources derived from it (CPU time, memory pages, block I/O, network bandwidth) can be sliced, multiplied, and reassigned by software. The hypervisor is that software. Understanding how it works, what it can guarantee, and where it cannot protect you, changes how you approach the rest of this course.
+
+When you provision a VM for a service, you are making a set of interlocking decisions: how many vCPUs to assign (enough to avoid CPU ready time, not so many that scheduling overhead grows), how much memory to allocate (enough to keep swap at zero under normal load), which disk format to use (thin-provisioned for space efficiency in a lab, preallocated for write-intensive production workloads), and which networking mode serves your connectivity needs (NAT for isolated outbound-only guests, host-only for multi-VM lab networks, bridged when the guest needs a real presence on the LAN).
+
+Consider a realistic scenario: you are standing up a two-VM lab with a web server and a database server on your workstation. You assign both to a host-only network so they can communicate with each other and with your laptop, but neither is reachable from outside. You give each VM 2 vCPUs and 1 GB of RAM, sufficient for a minimal Debian install. Before making any changes, you take a snapshot of each. After verifying the services are running, you test a schema migration on the database VM. The migration corrupts a table. You revert the snapshot in seconds and try again with a corrected script. The web server continued running throughout; the two guests are isolated at the kernel level, so the database incident did not touch the web VM.
+
+That pattern, provision conservatively, observe, snapshot before changes, revert when needed, then commit, is what makes virtualization a safety net rather than just a way to run multiple operating systems. The Linux Server Planning and Configuration lecture builds on this foundation directly: you now have a stable VM platform to install and configure Linux servers on. Containers, covered later in the course, take the same isolation concept in a different direction: instead of isolating whole operating systems, they isolate processes while sharing the host kernel.
+
+## Resources
 
 - <a href="https://www.youtube.com/watch?v=mQP0wqNT_DI" target="_blank" rel="noopener noreferrer">Virtual Machines explained in 15 Mins (YouTube)</a>
 - <a href="https://www.linux-kvm.org/page/Documents" target="_blank" rel="noopener noreferrer">KVM Documentation (linux-kvm.org)</a>

@@ -147,7 +147,7 @@ There are three common NAT variants:
 - **Static NAT**: A one-to-one permanent mapping between a specific private address and a specific public address. Used for servers that must be consistently reachable from the internet under the same public IP.
 
 <Aside type="caution" title="When NAT Breaks Things">
-NAT works well for outbound connections, but it complicates inbound connections. If you need an external user to reach a server behind NAT, you must configure **port forwarding** (also called DNAT) on the router to send incoming traffic on a specific port to the correct internal server. You already used this when you forwarded port 2222 on your host to port 22 in your VirtualBox VM. In cloud environments, you would instead place the server in a public subnet with a public IP, or use a load balancer.
+NAT works well for outbound connections, but it complicates inbound connections. If you need an external user to reach a server behind NAT, you must configure **port forwarding** (also called DNAT) on the router to send incoming traffic on a specific port to the correct internal server. A common example is exposing SSH on a non-standard external port that the router maps to port 22 on an internal host. In cloud environments, you would instead place the server in a public subnet with a public IP, or use a load balancer.
 </Aside>
 
 #### NAT Traversal
@@ -424,7 +424,7 @@ PORT      STATE     SERVICE   VERSION
 
 Three possible states: `open` means the port accepted the connection; `filtered` means a firewall is silently dropping packets (your connection just times out); `closed` means the port is reachable but nothing is listening.
 
-<Aside type="tip">
+<Aside type="tip" title="Authorized Use Only">
 `nmap` is a standard tool for testing your own infrastructure. Running it against machines you own or have explicit written authorization to test is normal practice. Running it against systems you do not own may violate computer access laws.
 </Aside>
 
@@ -441,11 +441,13 @@ When a user reports "the website is down," work through the layers:
 Each step targets a different layer, and the first one that fails tells you exactly where to focus your investigation.
 </Aside>
 
-## Putting It All Together
+## Takeaways
 
 Networking can feel abstract until you connect the pieces. Consider what happens when you SSH into an EC2 instance to manage a server. Your laptop uses DHCP to get an IP address and default gateway from the local network. It sends a DNS query over UDP port 53 to resolve the instance's hostname (or you use the public IP directly). Your OS constructs a TCP packet destined for port 22, consults the routing table, and sends it to the default gateway. Your home router performs NAT, rewriting the source address to your public IP. The packet traverses multiple ISP routers (each visible as a hop in `traceroute`) until it reaches AWS's network. The VPC's route table directs it to the correct subnet. The security group checks whether inbound TCP port 22 is allowed from your IP. The instance's network interface receives the packet, and `sshd` (listening on port 22, as confirmed by `ss -tlnp`) accepts the connection.
 
 If any step in that chain fails, you have a specific layer to investigate: no link light (layer 1), no IP address (layer 3), DNS timeout (layer 7), security group blocking the port (layer 4), or `sshd` not running (application). Understanding this chain, and knowing which tool to use at each step, is the core skill that separates confident troubleshooting from guesswork.
+
+These concepts extend directly into the container and cloud work ahead. When you run a Docker container and map a host port to a container port, you are configuring a form of DNAT. When Docker creates a virtual bridge network for your containers, each container gets its own IP address from a private range, and traffic between containers and the outside world flows through NAT. The address ranges are private, the protocols are TCP and UDP, the routing happens in the kernel, and the diagnostic tools are the same `ip`, `ss`, `dig`, and `curl` you already know. Networking is one of the few layers that stays conceptually constant as you move from physical hardware to virtual machines to containers to cloud infrastructure.
 
 ## Resources
 

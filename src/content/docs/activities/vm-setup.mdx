@@ -1,14 +1,14 @@
 ---
 title: "Virtual Machine Fundamentals"
-description: "Install a hypervisor, configure a Linux guest, practice the snapshot safety-net workflow, explore networking modes, and compare hypervisors."
+description: "Install VirtualBox, configure a Debian guest, verify paravirtualized drivers, collect baseline metrics, practice the snapshot safety-net workflow, and observe the difference between NAT and host-only networking."
 sidebar:
-  order: 1
+  order: 2
 ---
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts the concepts from the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture into practice across four parts. By the end you will have a running Debian VM, have executed the snapshot safety-net workflow, observed how networking modes affect connectivity, and researched how the major hypervisors compare.
+This activity puts into practice the concepts from the [Virtualization and Virtual Machines](/lectures/virtualization-basics/) lecture. You will install a hypervisor, configure a Debian guest, run the snapshot safety-net workflow end to end, and observe how NAT and host-only networking modes differ in practice. By the end you will have a running VM you can control, break, and recover from in seconds.
 
 
 ## What You Will Need
@@ -16,6 +16,10 @@ This activity puts the concepts from the [Virtualization and Virtual Machines](/
 - A laptop with at least 8 GB of RAM and 20 GB of free disk space
 - Administrator access to your laptop
 - An internet connection
+- **VirtualBox installed** before class: download the installer and Extension Pack from [virtualbox.org/wiki/Downloads](https://www.virtualbox.org/wiki/Downloads)
+- **Debian 12 netinstall ISO downloaded** before class:
+  - Apple Silicon (ARM): `debian-12.x.x-arm64-netinst.iso` from [cdimage.debian.org/debian-cd/current/arm64/iso-cd/](https://cdimage.debian.org/debian-cd/current/arm64/iso-cd/)
+  - Intel/Windows/Linux (x86-64): `debian-12.x.x-amd64-netinst.iso` from [cdimage.debian.org/debian-cd/current/amd64/iso-cd/](https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/)
 
 ---
 
@@ -124,57 +128,60 @@ If you accidentally click outside the VM window and your mouse or keyboard stops
 
 The hypervisor can expose virtual hardware to the guest in two ways: fully emulated (slower, universally compatible) or paravirtualized (faster, requires a cooperative driver in the guest). Here we check which type is active for storage and networking, because the difference is measurable.
 
-**Check the storage driver:**
+<Steps>
+1. Check which storage devices the kernel sees:
 
-```bash
-lsblk -d -o NAME,TYPE,TRAN
-```
+   ```bash
+   lsblk -d -o NAME,TYPE,TRAN
+   ```
 
-`lsblk` lists block devices, which are the kernel's view of storage hardware. The `-d` flag shows disks only (no partitions), and `-o NAME,TYPE,TRAN` selects the columns: device name, type, and transport protocol.
+   `lsblk` lists block devices. The `-d` flag shows disks only (no partitions), and `-o NAME,TYPE,TRAN` selects name, type, and transport. You will see something like:
 
-You will see something like this:
+   ```
+   NAME TYPE TRAN
+   sda  disk
+   sr0  rom
+   ```
 
-```
-NAME TYPE TRAN
-sda  disk
-sr0  rom
-```
+   The disk appears as `sda` because VirtualBox uses a VirtIO SCSI controller, which uses SCSI device naming. The TRAN column is empty because `lsblk` does not report a transport for virtio.
 
-The disk appears as `sda` because VirtualBox uses a VirtIO SCSI controller, which uses SCSI device naming (`sda`, `sdb`, ...) rather than the virtio-blk naming (`vda`). The TRAN column is empty because lsblk does not report a transport for virtio. To confirm the virtio controller is actually active, check the PCI devices:
+2. Confirm the VirtIO controller is active by checking the PCI device list:
 
-```bash
-lspci | grep -i virtio
-```
+   ```bash
+   lspci | grep -i virtio
+   ```
 
-You should see a line containing `Virtio SCSI` for storage and `Virtio network` for networking.
+   You should see lines containing `Virtio SCSI` for storage and `Virtio network` for networking.
 
-**Install guest utilities and ethtool:**
+3. Install `ethtool` to query the network driver. On Debian, `sudo` is not installed by default, so switch to root first:
 
-<Aside type="note" title="sudo vs. su: Debian vs. Ubuntu">
-Ubuntu pre-installs `sudo` and disables direct root login by default, so you never need `su`. Debian takes the opposite approach: `sudo` is not installed on a fresh system, and root has a real password you set during installation. To run commands as root on Debian, use `su -` (the `-` loads root's full environment, including the correct `PATH`) and then run commands directly without any prefix. If you later want `sudo`-style access, you can install it with `apt install sudo` and add your user to the `sudo` group.
-</Aside>
+   ```bash
+   su -
+   apt update
+   apt install ethtool
+   exit
+   ```
 
-```bash
-su -
-apt update
-apt install ethtool
-```
+   <Aside type="note" title="su vs. sudo on Debian">
+   Debian ships without `sudo`. Use `su -` to become root (the `-` loads root's full environment including the correct `PATH`). Type `exit` when done to return to your regular user. Ubuntu takes the opposite approach and pre-installs `sudo` instead.
+   </Aside>
 
-`apt update` refreshes the package index from Debian's servers. Without this step, `apt install` would use a stale index and might not find the latest versions. `ethtool` is a utility for querying network interface driver information.
+4. Find your main network interface name:
 
-**Check the network driver:**
+   ```bash
+   ip link show
+   ```
 
-```bash
-# Show all network interfaces
-ip link show
-# Substitute your non-loopback interface name from the output above
-ethtool -i enp0s3 | grep driver
-# Expected output: driver: virtio_net
-```
+   You will see at least two interfaces: `lo` (loopback) and your main interface, named something like `enp0s3`, `eth0`, or `ens3`. Note the name.
 
-`ip link show` lists every network interface on the machine. You will see at least two: `lo` (the loopback interface, used for traffic that stays within the machine) and your main network interface (named something like `enp0s3`, `eth0`, or `ens3`; the exact name depends on the hypervisor and the kernel's device detection order).
+5. Check which driver is managing the network interface (substitute your interface name):
 
-`ethtool -i` queries driver information for a network interface. The `driver:` line tells you which kernel module is managing the device. `virtio_net` confirms paravirtualized networking is active; `e1000` or `pcnet32` would indicate a fully-emulated NIC.
+   ```bash
+   ethtool -i enp0s3 | grep driver
+   ```
+
+   Expected output: `driver: virtio_net`. This confirms paravirtualized networking is active. If you saw `e1000` or `pcnet32`, it would indicate a fully-emulated NIC.
+</Steps>
 
 <ActivityQuestion>
 The storage device appears as `sda` even though the controller is VirtIO SCSI. Why does VirtIO SCSI use SCSI device naming instead of `vda`? What would `lspci` show differently if the VM were using a fully-emulated SATA controller instead?
@@ -182,37 +189,43 @@ The storage device appears as `sda` even though the controller is VirtIO SCSI. W
 
 ### Collect Baseline Metrics
 
-Before making any changes to a system, record what "normal" looks like. This baseline is your reference point: if something feels slow later, you can compare current numbers to these. The commands below each measure one aspect of system health.
+Before making any changes to a system, record what "normal" looks like. This baseline is your reference point: if something feels slow later, you can compare current numbers to these.
 
-```bash
-# CPU: idle percentage over a short sample
-top -b -n 3 | grep "Cpu(s)" | tail -1
-```
+<Steps>
+1. Sample the CPU idle percentage:
 
-`top` is an interactive process viewer. The `-b` flag runs it in batch mode (non-interactive, suitable for capturing output) and `-n 3` tells it to sample 3 times then exit. Each sample produces a `Cpu(s)` line showing percentages for user time, system time, and idle time. We take the last of the three samples with `tail -1`. A freshly booted VM should show high idle (90%+).
+   ```bash
+   top -b -n 3 | grep "Cpu(s)" | tail -1
+   ```
 
-```bash
-# Memory: used vs available
-free -h
-```
+   `top -b -n 3` runs three samples in batch mode and exits. Each sample produces a `Cpu(s)` line showing percentages for user, system, and idle time. Taking the last sample with `tail -1` avoids the startup spike. A freshly booted VM should show idle above 90%.
 
-`free -h` shows memory usage in human-readable units. The key column is **available**: this is what the kernel estimates is realistically free for new processes, including memory currently used for disk cache that would be released if needed. "Available" is almost always lower than "total" because the kernel eagerly uses free RAM for caching. This is normal and healthy behavior: unused RAM is wasted RAM.
+2. Check memory usage:
 
-```bash
-# Disk: used space on root filesystem
-df -h /
-```
+   ```bash
+   free -h
+   ```
 
-`df -h /` shows how much of the root filesystem is used. The `Use%` column is what to watch over time. On a freshly installed Debian system, this should be well under 20%.
+   The key column is **available**: the kernel's estimate of memory realistically free for new processes, including cache that would be released if needed. "Available" is almost always lower than "total" because the kernel uses free RAM for disk caching. This is normal; unused RAM is wasted RAM.
 
-```bash
-# Uptime and load average
-uptime
-```
+3. Check disk usage on the root filesystem:
 
-`uptime` reports how long the system has been running and three **load average** figures (1-minute, 5-minute, 15-minute). Load average is a rolling count of processes waiting to run. On a 2-vCPU VM, a sustained load average above 2.0 indicates the CPU is saturated.
+   ```bash
+   df -h /
+   ```
 
-Record all these values. You will refer back to them in later activities when diagnosing whether a service is having a measurable impact on system resources.
+   The `Use%` column is what to watch over time. On a freshly installed Debian system it should be well under 20%.
+
+4. Check uptime and load average:
+
+   ```bash
+   uptime
+   ```
+
+   `uptime` reports three load average figures (1-minute, 5-minute, 15-minute): a rolling count of processes waiting to run. On a 2-vCPU VM, a sustained load average above 2.0 indicates the CPU is saturated.
+
+   Record all four values. They give you a baseline to compare against after you start running services.
+</Steps>
 
 <ActivityQuestion>
 The `free -h` output shows less than 1 GB available, even though you allocated 1 GB to the VM. Where did the rest go? Is this a problem, and how would you tell if the VM were actually memory-constrained?
@@ -228,12 +241,16 @@ Before making any risky change to a running system, a snapshot gives you a guara
 
 Log in to the VM and verify the SSH service and disk state are clean before creating the snapshot. Taking a snapshot of a broken system is not useful.
 
-```bash
-systemctl status ssh
-df -h /
-```
+<Steps>
+1. Verify SSH is running and the disk has free space:
 
-Both should show normal output: SSH active and running, root filesystem with free space.
+   ```bash
+   systemctl status ssh
+   df -h /
+   ```
+
+   Both should show normal output: SSH active and running, root filesystem with free space. If SSH shows failed, resolve it before continuing.
+</Steps>
 
 ### Take a Pre-Change Snapshot
 
@@ -248,31 +265,39 @@ When you take a snapshot, the hypervisor marks the current disk image read-only 
 
 ### Make a Destructive Change
 
-We will simulate a common real-world mistake: a typo in a configuration file that breaks a service. In practice this could be a misconfigured firewall rule, a bad nginx config, or an incorrect database connection string. Here we corrupt the SSH service config with an invalid port value.
+We will simulate a common real-world mistake: a typo in a configuration file that breaks a service. Here we corrupt the SSH config with an invalid port value.
 
-```bash
-sh -c 'echo "Port INVALID_VALUE" >> /etc/ssh/sshd_config'
-systemctl reload ssh
-```
+<Steps>
+1. Append a bad config line and reload the service:
 
-Verify the damage:
+   ```bash
+   su -
+   sh -c 'echo "Port INVALID_VALUE" >> /etc/ssh/sshd_config'
+   systemctl reload ssh
+   exit
+   ```
 
-```bash
-systemctl status ssh
-sshd -T
-```
+2. Verify the damage:
 
-`systemctl status ssh` will show the service as still **active (running)** but with the reload marked as failed. This is intentional: sshd is designed to keep the existing process alive when a reload fails, so active SSH sessions are not dropped. The damage is in the config, not yet in the running process.
+   ```bash
+   systemctl status ssh
+   sshd -T
+   ```
 
-`sshd -T` runs the SSH daemon in test mode, validating the config without starting a daemon. You should see a single line such as `Badly formatted port number`.
+   `systemctl status ssh` shows the service still **active (running)** but with the reload marked as failed. `sshd` keeps the existing process alive when a reload fails so active connections are not dropped. `sshd -T` runs in test mode, validating the config without starting a daemon. You should see output like `Badly formatted port number`.
+</Steps>
 
 ### Attempt an In-Place Fix (and Give Up)
 
-```bash
-tail -10 /etc/ssh/sshd_config
-```
+<Steps>
+1. Look at the end of the SSH config:
 
-`tail -n` prints the last n lines of a file. You can see the `Port INVALID_VALUE` line at the end. In this simple case the culprit is obvious. In a real incident the bad line might be buried in a 200-line config file that was auto-generated by a deployment script, or the problem might be an interaction between two valid-looking settings. This is the decision point: keep debugging, or spend five seconds reverting to the confirmed-working state.
+   ```bash
+   tail -10 /etc/ssh/sshd_config
+   ```
+
+   You can see the `Port INVALID_VALUE` line at the end. In this simple case the culprit is obvious. In a real incident the bad line might be buried in a 200-line config that was auto-generated by a deployment script, or the problem might be an interaction between two valid-looking settings. This is the decision point: keep debugging, or spend five seconds reverting to the confirmed-working state.
+</Steps>
 
 ### Revert the Snapshot
 
@@ -288,13 +313,17 @@ Revert to `pre-change-1`:
 
 Start the VM and verify recovery:
 
-```bash
-systemctl status ssh
-sshd -T
-tail -5 /etc/ssh/sshd_config
-```
+<Steps>
+1. Confirm everything is clean:
 
-All three should be clean: SSH active, no config error, no `INVALID_VALUE` line.
+   ```bash
+   systemctl status ssh
+   sshd -T
+   tail -5 /etc/ssh/sshd_config
+   ```
+
+   All three should be clean: SSH active, no config error, no `INVALID_VALUE` line.
+</Steps>
 
 <Aside type="caution" title="Snapshots are not backups">
 Snapshots are not backups. The snapshot and the base disk share the same storage pool on the host. If the host machine's disk fails, both are lost simultaneously. Backups must reside on entirely separate storage.
@@ -410,17 +439,30 @@ Host-only creates a private virtual network that exists only between the host an
 Host-only gave you host-to-guest connectivity but broke internet access. What is present in NAT mode that host-only lacks? If you were building a two-VM lab where one VM acts as a database server and the other as a web server, and neither should be reachable from the internet, which mode would you use?
 </ActivityQuestion>
 
+---
+
 ## Wrap-Up
 
 Before moving on, let's have a little fun:
 
-```bash
-su -
-apt install cowsay fortune
-exit
-fortune | cowsay
-```
+<Steps>
+1. Install cowsay and fortune:
+
+   ```bash
+   su -
+   apt install cowsay fortune
+   exit
+   ```
+
+2. Run them together:
+
+   ```bash
+   fortune | cowsay
+   ```
+</Steps>
 
 ## Going Further
 
-I'd recommend epxloring the [Vagrant Quick Start Tutorial](https://developer.hashicorp.com/vagrant/tutorials/get-started) to see how Vagrant abstracts VM provisioning and management across different hypervisors. Vagrantfiles let you define your VM configuration in code, so you can version control it and share it with teammates. This is a common practice in development environments to ensure everyone has the same setup without manual steps. Vagrant is built by HashiCorp, the same company that makes Terraform, which will be explored later.
+- Work through the [Vagrant Quick Start](https://developer.hashicorp.com/vagrant/tutorials/get-started) to see how Vagrant defines VM configuration in code rather than through a GUI. Vagrantfiles are versionable and shareable, which solves the "works on my machine" problem for development environments.
+- Read [VirtualBox networking modes](https://www.virtualbox.org/manual/ch06.html) in the official manual for the full picture of NAT, Host-only, Bridged, and Internal networking.
+- Try creating a second VM and connecting the two using an Internal network adapter so they can communicate without touching the host or the internet.
