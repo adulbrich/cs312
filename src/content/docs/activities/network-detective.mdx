@@ -84,7 +84,8 @@ Before diagnosing anything else, establish that the machine has a physical link,
 
    You will see at least two interfaces: `lo` (loopback, always `127.0.0.1`) and one or more real interfaces (likely `enp0s3` or similar). Focus on the real interface.
 
-   Record:
+   Look at the output and identify:
+
    - **Interface name**
    - **IP address** (the number after `inet`, before the `/`)
    - **Prefix length** (the number after the `/`)
@@ -93,6 +94,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
 3. Compare the VM's address to your host machine's address. They are likely on different subnets because the hypervisor's default NAT networking creates its own virtual network for each VM.
 
    Host-side quick checks:
+
    - macOS: `ifconfig`
    - Linux: `ip addr show`
    - Windows PowerShell: `ipconfig`
@@ -100,6 +102,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
 4. Identify your subnet. Given a prefix length of `/24`, the network has 254 usable addresses. Given `/25`, it has 126. Given `/16`, it has 65,534.
 
    Which private range does your address fall in?
+   
    - `10.0.0.0/8`
    - `172.16.0.0/12`
    - `192.168.0.0/16`
@@ -206,6 +209,10 @@ Knowing your IP address tells you where you are. The routing table tells you whe
    Record:
    - **Default gateway address**
    - **Interface used for the default route**
+
+   <Aside type="note" title="Why is the gateway .2 and not .1?">
+   The hypervisor's NAT virtual network reserves `.1` for the host machine itself: from inside the VM, `10.0.2.1` reaches your laptop directly. That leaves `.2` as the first address available for the gateway, and `.3` for the built-in DNS server. The normal subnet rules still apply: `.0` is the network address and `.255` is the broadcast address, so neither can be assigned to a host. The range does start at `.1`, but `.1` is already spoken for.
+   </Aside>
 
    Optional host comparison:
    - macOS: `route -n get default`
@@ -544,21 +551,6 @@ DNS translates names to addresses. Understanding how your machine resolves names
    - `Verify return code: 0 (ok)`: this line at the end confirms the certificate validated successfully
 
    If the verify return code is anything other than `0 (ok)`, you have a TLS problem. The exact numeric code and wording can vary by OpenSSL version and options, but common causes are expired certificates, missing intermediates, and hostname mismatch. These are the same classes of errors `curl` reports as TLS failures, but `openssl s_client` shows you where validation failed.
-
-5. From your host machine, scan the SSH port on your Arch VM through the forwarding rule:
-
-   ```bash
-   nmap -sV -Pn -p T:2222 127.0.0.1
-
-   # On the VM itself, scanning its own port:
-   sudo nmap -sV -Pn -p T:22 127.0.0.1
-   ```
-
-   Note the output format. On EC2, the equivalent will be:
-
-   ```bash
-   nmap -sV -Pn -p T:22 <instance-public-ip>
-   ```
 </Steps>
 
 <ActivityQuestion>
