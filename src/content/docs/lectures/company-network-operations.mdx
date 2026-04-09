@@ -144,6 +144,37 @@ nslookup app.example.com
 nslookup app.example.com 10.0.1.2
 ```
 
+### DNS record types in depth
+
+The Networking Fundamentals lecture covers the record types you encounter most often for forward resolution: A, AAAA, CNAME, and MX. Several others matter operationally.
+
+**PTR records** provide reverse DNS: given an IP address, they return a hostname. Reverse lookups use a special zone in the format `<reversed-octets>.in-addr.arpa`. For example, the PTR record for `203.0.113.50` lives at `50.113.0.203.in-addr.arpa`. ISPs manage PTR records for the IP blocks they allocate; end organizations can only set PTR records if they own the IP block outright or request their ISP to set them. PTR records matter for two reasons: many mail servers reject email from IPs without a matching PTR record, and `traceroute` uses reverse DNS to display router hostnames alongside IP addresses.
+
+**SOA (Start of Authority) records** appear at the apex of every DNS zone. They specify the primary nameserver for the zone, an administrative contact email (written with a dot instead of `@`), and five timing parameters that control how secondary nameservers cache and expire zone data. You encounter SOA records when a PTR lookup returns NXDOMAIN: the SOA in the authority section of the response names the organization responsible for that IP block, which tells you whose abuse contact to reach and confirms the lookup reached the authoritative source.
+
+**TXT records** carry arbitrary text data and are widely used for domain verification and email authentication. SPF (Sender Policy Framework), DKIM (DomainKeys Identified Mail), and DMARC policies are all published as TXT records. Cloud providers and SaaS vendors also use TXT records to verify domain ownership: to prove you control a domain, you add a TXT record with a specific token value, and the provider queries DNS to confirm it.
+
+**CAA (Certification Authority Authorization) records** specify which CAs are authorized to issue certificates for a domain. A CAA record of `0 issue "letsencrypt.org"` means only Let's Encrypt may issue certificates for that domain; any other CA that receives a certificate request must reject it. CAA records are a defense against rogue certificate issuance even if an attacker compromises a CA: the CA checks the CAA record before issuing and refuses if the record does not authorize it. This pairs naturally with Certificate Transparency monitoring.
+
+```bash
+# Check all record types at once for a domain
+dig ANY example.com
+
+# Check CAA records
+dig CAA example.com
+
+# Full trace showing the resolution chain from root servers down
+dig +trace example.com
+```
+
+### TTL strategy
+
+Every DNS record has a TTL (Time To Live), the number of seconds resolvers may cache the answer before querying again. TTL is one of the most consequential settings in DNS configuration because it controls how quickly changes propagate worldwide.
+
+A record with `TTL 86400` (one day) can be cached by every resolver on the internet for up to 24 hours. If you change that A record, users whose resolvers cached the old answer will keep getting the old IP for up to a day. Before making any DNS change that needs to propagate quickly (switching servers, updating an A record to a new IP), reduce the TTL to 300 seconds (5 minutes) at least 24 hours in advance. Once the old TTL has expired everywhere, make the change. After it propagates, raise the TTL back to a longer value.
+
+Short TTLs increase your DNS query volume and add a small latency cost for every cache miss. Large sites like Google use short TTLs (60-300 seconds) on their A records so they can shift traffic between data centers within minutes. Smaller organizations typically use 3600 seconds (1 hour) for records that rarely change and 300 seconds for anything actively managed.
+
 ### Common DNS failures
 
 In our "website is down" scenario, DNS problems take several forms.
@@ -159,6 +190,8 @@ dig app.example.com @8.8.8.8
 ```
 
 The search domain is misconfigured. If `/etc/resolv.conf` has the wrong search domain, short hostnames resolve to the wrong fully qualified domain name, or fail entirely.
+
+The TTL is too long. A record was changed but resolvers are still returning the old cached answer. `dig` will show the remaining TTL in the answer section; if it is still counting down from a large number, you are looking at a caching problem, not a zone file problem.
 
 ### Internal DNS and split-horizon
 
@@ -579,28 +612,50 @@ The `upstream` block defines a pool of backends. `proxy_pass` forwards all reque
 
 ## TLS Certificates
 
-HTTPS requires a TLS certificate: a cryptographically signed document that proves the server owns the private key corresponding to the public key in the certificate, and that a trusted Certificate Authority (CA) has verified this. Without a valid certificate, browsers display security warnings and refuse to connect.
+HTTPS requires a TLS certificate: a cryptographically signed document that proves the server owns the private key corresponding to the public key in the certificate, and that a trusted Certificate Authority (CA) has verified this. Without a valid certificate, browsers display security warnings and refuse to connect. The Networking Fundamentals lecture introduces the conceptual model: the certificate chain, what a CA is, and how `openssl s_client` reads a handshake. This section covers the operational side: how certificates are obtained, renewed, and managed in practice.
 
-### How certificates work
+### Certificate types
 
-A certificate contains the server's public key, the domain name(s) it is valid for, a validity period, and the CA's digital signature. The browser already trusts a set of root CAs (pre-installed by the OS or browser vendor). When a browser connects to a server, it verifies that the certificate's signature chains up to one of those trusted roots and that the certificate is not expired or revoked.
+Not all certificates offer the same level of identity verification. Commercial CAs sell certificates at three levels of validation:
+
+**DV (Domain Validated)** certificates verify only that the requester controls the domain, typically by serving a challenge file over HTTP or adding a DNS record. Issuance is fully automated and takes seconds. Let's Encrypt issues only DV certificates. DV is appropriate for the vast majority of web services.
+
+**OV (Organization Validated)** certificates additionally verify the legal existence and identity of the organization through documentation review. The organization's name appears in the certificate's subject field. OV issuance takes hours to days and costs money. Banks and large enterprises sometimes use OV to provide additional assurance to users.
+
+**EV (Extended Validation)** certificates require the most thorough identity verification and historically triggered the green address bar in browsers. Most browsers have removed the visual distinction, significantly reducing the practical benefit of EV. EV certificates have largely fallen out of common use.
+
+### Certificate Transparency
+
+Since 2018, [Certificate Transparency (CT)](https://certificate.transparency.dev/) is required for all publicly trusted certificates. Every CA must log issued certificates in public, append-only CT logs. Browsers verify that a certificate appears in a CT log before trusting it; a certificate not in any log is rejected. The practical benefit is that it is now impossible to issue a certificate for your domain without the world knowing about it: if an attacker compromises a CA and issues a rogue certificate for `example.com`, the certificate will appear in the CT logs within seconds and can be detected by monitoring services. You can query CT logs directly to see every certificate ever issued for a domain.
 
 ### Let's Encrypt and automated certificate management
 
-Before 2016, obtaining a certificate required purchasing one from a commercial CA and manually renewing it every one to two years. Let's Encrypt changed this by providing free certificates via an automated protocol called ACME (Automated Certificate Management Environment). The dominant ACME client is **certbot**:
+Before 2016, obtaining a certificate required purchasing one from a commercial CA and manually renewing it every one to two years. [Let's Encrypt](https://letsencrypt.org/) changed this by providing free DV certificates via an automated protocol called [ACME (Automated Certificate Management Environment)](https://datatracker.ietf.org/doc/html/rfc8555). The dominant ACME client is **certbot**:
 
 ```bash
 # Install certbot on Ubuntu
-sudo apt install certbot python3-certbot-apache
+sudo apt install certbot python3-certbot-nginx
 
-# Obtain and install a certificate for a domain (Apache)
-sudo certbot --apache -d example.com -d www.example.com
+# Obtain and install a certificate for a domain (Nginx)
+sudo certbot --nginx -d example.com -d www.example.com
 
 # Certificates renew automatically via a systemd timer
 sudo systemctl status certbot.timer
 ```
 
-Certbot contacts Let's Encrypt, proves domain ownership (by temporarily serving a challenge file on port 80 or by adding a DNS TXT record), receives a certificate valid for 90 days, and installs it. A systemd timer runs `certbot renew` twice daily; certificates are renewed automatically when they have less than 30 days remaining.
+Certbot contacts Let's Encrypt, proves domain ownership either by temporarily serving a challenge file on port 80 (HTTP-01 challenge) or by adding a DNS TXT record (DNS-01 challenge), receives a certificate valid for 90 days, and installs it. A systemd timer runs `certbot renew` twice daily; certificates are renewed automatically when they have less than 30 days remaining. The 90-day lifetime is intentional: it forces automation and limits the window of exposure if a private key is compromised.
+
+### HSTS and OCSP Stapling
+
+Two mechanisms improve the security posture of a TLS-enabled site after the certificate is in place.
+
+**HSTS (HTTP Strict Transport Security)** instructs browsers to always connect to a domain over HTTPS, never HTTP, for a specified period. Once a browser has seen the `Strict-Transport-Security` header, it will refuse to make an unencrypted connection to that domain for the duration of the `max-age` directive, even if the user types `http://`. This eliminates the window during which a user's first unencrypted request could be intercepted and downgraded. A typical configuration in Nginx:
+
+```nginx
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+```
+
+**OCSP Stapling** solves the problem of certificate revocation. When a CA revokes a certificate (because the private key was compromised), clients need a way to find out. The traditional mechanism, OCSP (Online Certificate Status Protocol), requires the browser to query the CA's OCSP responder during every TLS handshake, adding latency and leaking browsing behavior to the CA. With OCSP stapling, the server periodically fetches a signed OCSP response from the CA and includes it in the TLS handshake. The client gets revocation status without an extra network round trip and without the CA learning which sites the user visits.
 
 ### Internal certificates
 
@@ -610,8 +665,23 @@ For internal services (the company intranet, internal APIs, database management 
 
 **Internal CA**: generate your own CA certificate, install it in the trust store of all company devices (typically via Active Directory Group Policy or an MDM system), and sign internal service certificates with it. Clients trust anything signed by your internal CA without warnings. This is the standard approach for companies that need HTTPS on internal services without per-device browser exceptions.
 
-<Aside type="caution">
-Never use a wildcard certificate (`*.company.com`) for all services. If the private key is compromised, every service using that certificate is vulnerable. Issue per-service certificates and automate renewal so the overhead of short-lived certificates is manageable.
+### Diagnosing TLS failures
+
+The most common operational failures, and how to identify each:
+
+**Expired certificate**: `openssl s_client -connect host:443` will show `Verify return code: 10 (certificate has expired)`. The `notAfter` field in the certificate tells you when it expired. Check whether the automated renewal job (certbot timer, ACME renewal cron) is actually running.
+
+**Missing intermediate CA**: The server sends its leaf certificate but not the intermediate. `openssl s_client` reports `Verify return code: 20 (unable to get local issuer certificate)`. On Nginx, ensure the certificate file contains the full chain (leaf + intermediates concatenated), not just the leaf.
+
+**Hostname mismatch**: The certificate's `subject` or `subjectAltName` fields do not include the hostname the client connected to. `openssl s_client` reports `Verify return code: 62 (hostname mismatch)`. This happens when a certificate is issued for `example.com` but the client connects to `www.example.com` (or vice versa), and the certificate does not include both names.
+
+```bash
+# Check what names a certificate covers
+openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
+```
+
+<Aside type="caution" title="Wildcard Certificates">
+A wildcard certificate (`*.company.com`) covers all immediate subdomains with a single certificate. This is operationally convenient but concentrates risk: if the private key is compromised, every subdomain is affected simultaneously. The standard recommendation is per-service certificates with automated renewal, which removes the operational overhead that makes wildcards tempting.
 </Aside>
 
 ## Network Storage

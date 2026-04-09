@@ -13,11 +13,11 @@ This activity puts into practice the concepts from the [Networking Fundamentals 
 The exercises work best from inside the Arch Linux VM you built in the previous activity, connected from your laptop using the NAT port-forwarding and SSH setup you configured there. Running commands over SSH replicates exactly what you will do on EC2.
 
 <Aside type="tip">
-Open two terminal windows: one connected to your Arch VM via SSH (`ssh -p 2222 archuser@127.0.0.1`), and one on your laptop. Running the same commands on both gives you a concrete comparison between "inside the VM" and "on the host machine."
+Open two terminal windows: one connected to your Arch VM via SSH (`ssh -p 2222 archuser@127.0.0.1`), and one on your laptop. Don't forget the `-i` flag if you have a custom key name. Running the same commands on both gives you a concrete comparison between "inside the VM" and "on the host machine."
 </Aside>
 
 <Aside type="note" title="The Network You Are Working In">
-There are at least two NAT translations between your VM's shell prompt and the public internet. VirtualBox's NAT adapter assigns the VM a private address (likely `10.0.2.15`) and translates its outbound traffic to your laptop's address. Your laptop is itself behind your home or campus router, which performs a second translation before packets reach the internet. This is a hierarchical topology: a point-to-point link from the VM to VirtualBox's virtual router, which connects to a star network of devices on your home network, which connects upstream to the ISP. Tracing the packet path through all of those hops is one of the things this activity is designed to show you.
+There are at least two NAT translations between your VM's shell prompt and the public internet. Your hypervisor's NAT adapter assigns the VM a private address (likely `10.0.2.15`) and translates its outbound traffic to your laptop's address. Your laptop is itself behind your home or campus router, which performs a second translation before packets reach the internet. This is a hierarchical topology: a point-to-point link from the VM to the hypervisor's virtual router, which connects to a star network of devices on your home network, which connects upstream to the ISP. Tracing the packet path through all of those hops is one of the things this activity is designed to show you.
 </Aside>
 
 ## What You Will Need
@@ -63,9 +63,9 @@ Before starting, verify required tools are installed where you will run commands
 
 ---
 
-## Layer 1–3 Identity
+## Layer 1-3: Link, Address, and Neighbors
 
-Before diagnosing anything else, establish that the machine has a physical link, an IP address, and a reachable gateway. These three facts cover the bottom three layers of the OSI model and are the foundation for every check that follows.
+Before diagnosing anything else, establish that the machine has a physical link, an IP address, and a populated ARP cache. These steps cover layer 1 (is the interface up?), layer 2 (can the machine resolve its gateway's MAC address?), and layer 3 addressing (what IP and subnet is this machine on?). Layer 3 reachability, meaning whether traffic can actually flow to another host, is tested in the next section using `ping` and the routing table.
 
 <Steps>
 1. Check whether the network interface has a link:
@@ -74,7 +74,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
    ip link show
    ```
 
-   Every interface has an administrative state and an operational state. In `ip link` output, confirm your main interface (likely `enp0s3` in VirtualBox) shows `state UP` for operational link. If it shows `state DOWN`, no higher-layer tools will work: the cable is disconnected, the virtual NIC is unconfigured, or the interface was manually brought down.
+   Every interface has an administrative state and an operational state. In `ip link` output, confirm your main interface (likely `enp0s3` or similar) shows `state UP` for operational link. If it shows `state DOWN`, no higher-layer tools will work: the cable is disconnected, the virtual NIC is unconfigured, or the interface was manually brought down.
 
 2. Show all network interfaces and their IP addresses:
 
@@ -82,7 +82,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
    ip addr show
    ```
 
-   You will see at least two interfaces: `lo` (loopback, always `127.0.0.1`) and one or more real interfaces (likely `enp0s3` or similar in VirtualBox). Focus on the real interface.
+   You will see at least two interfaces: `lo` (loopback, always `127.0.0.1`) and one or more real interfaces (likely `enp0s3` or similar). Focus on the real interface.
 
    Record:
    - **Interface name**
@@ -90,7 +90,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
    - **Prefix length** (the number after the `/`)
    - **Broadcast address** (the number after `brd`)
 
-3. Compare the VM's address to your host machine's address. They are likely on different subnets because VirtualBox's default NAT networking creates its own virtual network for each VM.
+3. Compare the VM's address to your host machine's address. They are likely on different subnets because the hypervisor's default NAT networking creates its own virtual network for each VM.
 
    Host-side quick checks:
    - macOS: `ifconfig`
@@ -110,7 +110,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
    ip neighbor show
    ```
 
-   This is the ARP cache. For every IP address the VM has communicated with on the local subnet, the cache stores the corresponding MAC address so that frames can be delivered correctly at layer 2. You should see at least one entry for the VirtualBox gateway.
+   This is the ARP cache. For every IP address the VM has communicated with on the local subnet, the cache stores the corresponding MAC address so that frames can be delivered correctly at layer 2. You should see at least one entry for the hypervisor gateway.
 
    A typical entry looks like:
 
@@ -120,21 +120,22 @@ Before diagnosing anything else, establish that the machine has a physical link,
 
    The `state` field tells you how fresh the mapping is:
    - `REACHABLE`: confirmed recently via ARP reply
-   - `STALE`: not confirmed recently but still usable; will be verified on next use
+   - `STALE`: not confirmed recently but still usable; the kernel will send a unicast probe to revalidate it on next use
+   - `DELAY`: a packet was sent to a stale entry and the kernel is waiting a short time (usually a few seconds) for a confirmation before sending a full ARP probe; this is a normal transient state between `STALE` and `REACHABLE`
    - `FAILED`: ARP request was sent but no reply came back; the host is unreachable at layer 2
 
    A `FAILED` entry for your default gateway is an important signal during troubleshooting: it means the layer-2 path is broken (wrong VLAN, bad cable, or gateway down) even if the IP configuration looks correct.
 </Steps>
 
 <ActivityQuestion>
-Your ARP table shows an entry for the VirtualBox gateway (`10.0.2.2`) but nothing for `8.8.8.8`. ARP is a broadcast protocol: a device sends "who has this IP?" to the entire local network and waits for a reply. Why does that mechanism mean you can never get an ARP entry for a public server like `8.8.8.8`?
+Your ARP table shows an entry for the hypervisor gateway (`10.0.2.2`) but nothing for `8.8.8.8`. ARP is a broadcast protocol: a device sends "who has this IP?" to the entire local network and waits for a reply. Why does that mechanism mean you can never get an ARP entry for a public server like `8.8.8.8`?
 </ActivityQuestion>
 
 ---
 
 ## DHCP: Where Your Address Came From
 
-You have an IP address because `systemd-networkd` requested one from VirtualBox's built-in DHCP server when the VM booted. DHCP hands out more than just an address; it also provides the default gateway and a DNS server. This section shows you how to see what DHCP actually provided versus what your system is configured to use.
+You have an IP address because `systemd-networkd` requested one from the hypervisor's built-in DHCP server when the VM booted. DHCP hands out more than just an address; it also provides the default gateway and a DNS server. This section shows you how to see what DHCP actually provided versus what your system is configured to use.
 
 <Steps>
 1. Check which network interfaces `systemd-networkd` is managing:
@@ -148,15 +149,13 @@ You have an IP address because `systemd-networkd` requested one from VirtualBox'
 2. Inspect the DHCP lease details for your interface:
 
    ```bash
-   networkctl status enp0s3
+   networkctl status enp0s3 # substitute your interface name if different
    ```
-
-   (Substitute your interface name from step 1 of the previous section if it differs.)
 
    In the output, find:
    - **Address**: the IP and prefix length assigned by DHCP
    - **Gateway**: the default gateway DHCP provided
-   - **DNS**: the DNS server address DHCP offered (likely `10.0.2.3`, VirtualBox's internal resolver)
+   - **DNS**: the DNS server address DHCP offered (likely `10.0.2.3`, the hypervisor's internal resolver)
 
 3. Now compare that DNS server to what your system actually uses for name resolution:
 
@@ -178,7 +177,7 @@ You have an IP address because `systemd-networkd` requested one from VirtualBox'
    cat /etc/systemd/network/20-wired.network
    ```
 
-   This is the file that tells `systemd-networkd` to use DHCP on this interface. The `ip addr` and `ip route` commands you have been running show the *current state* derived from this configuration -- the transient values that disappear on reboot. The `.network` file is the *persistent* source of truth that recreates that state at every boot.
+   This is the file that tells `systemd-networkd` to use DHCP on this interface. The `ip addr` and `ip route` commands you have been running show the *current state* derived from this configuration (the transient values that disappear on reboot). The `.network` file is the *persistent* source of truth that recreates that state at every boot.
 </Steps>
 
 <ActivityQuestion>
@@ -219,7 +218,7 @@ Knowing your IP address tells you where you are. The routing table tells you whe
    ping -c 4 <your-gateway-address>
    ```
 
-   A response confirms layer 1 through 3 are working between the VM and its gateway (VirtualBox's virtual router). No response suggests a networking problem in the VM configuration.
+   A response confirms layer 1 through 3 are working between the VM and its gateway (the hypervisor's virtual router). No response suggests a networking problem in the VM configuration.
 
 3. Can you reach the public internet by IP address, bypassing DNS?
 
@@ -244,27 +243,46 @@ Knowing your IP address tells you where you are. The routing table tells you whe
 
 ## Tracing the Path to the Internet
 
-`ping` tells you whether a host is reachable. `traceroute` shows the path packets take to get there.
+`ping` tells you whether a host is reachable. `traceroute` shows the path packets take to get there, by sending probes with progressively higher TTL values and collecting the ICMP "time exceeded" replies from each router along the way.
+
+Running `traceroute` from inside the VM is a useful way to understand how hypervisor NAT works and why it makes certain tools behave unexpectedly. The hypervisor's NAT adapter is implemented as a userspace network stack rather than real kernel-level NAT, and that distinction changes the behavior of traceroute in two different ways depending on which protocol it uses.
 
 <Steps>
-1. Trace the route to a public DNS server:
+1. Run the default UDP traceroute from inside the VM:
 
    ```bash
    traceroute 8.8.8.8
    ```
 
-   Each numbered line is a router (hop). The three time values are round-trip times in milliseconds for three probe packets.
+   You will see one real hop (the hypervisor gateway at `10.0.2.2`), then `* * *` for every subsequent hop until the trace stops at 30 hops. The hypervisor's NAT forwards UDP outbound, but when real internet routers send back ICMP "time exceeded" messages (the mechanism traceroute depends on), the hypervisor's userspace stack swallows them instead of relaying them to the VM. The VM never sees them.
+
+2. Try TCP traceroute:
+
+   ```bash
+   sudo traceroute -T -p 443 8.8.8.8
+   ```
+
+   You will see only one hop: the destination itself. TCP traceroute also fails to reveal the path, but for a different reason: the hypervisor does not just forward TCP connections through NAT, it acts as a **transparent TCP proxy**. It intercepts the SYN, establishes the real TCP connection to `8.8.8.8` on your behalf, and bridges the data. From the VM's perspective, the remote host answered directly with no intermediate routers, because slirp was already the remote end. There are no TTL-decrement hops to observe.
+
+3. Run traceroute from your **host machine** where it works correctly:
+
+   On your host terminal (not inside the VM):
+
+   ```bash
+   traceroute 8.8.8.8 # tracert on Windows
+   ```
+
+   Your host goes through real kernel-level NAT, which is transparent to traceroute. You should see the full path in 10 to 15 hops.
 
    Record:
    - How many hops until you reach `8.8.8.8`?
-   - Where does the address space transition from private (`10.x.x.x`, `172.x.x.x`, `192.168.x.x`) to public? At which hop?
-   - What do `* * *` entries mean?
+   - Where does the address space transition from private to public? At which hop?
 
-   When you see `* * *`, the router at that hop is not responding to traceroute probes, either by firewall policy or because it is a backbone router configured not to respond.
+   Now compare this to the two outputs you got from inside the VM. The same destination, three completely different results, all caused by where the network stack lives (inside the VM's view of the hypervisor proxy vs. the host's real kernel routing).
 
-   As long as the traceroute eventually reaches its destination, the `* * *` entries are not a problem.
+   Scattered `* * *` entries within an otherwise-complete trace are normal: some routers are configured not to respond to probes as a matter of policy. An unbroken run of `* * *` continuing to the end usually means traffic stopped there.
 
-2. Compare a nearby host to a distant one:
+4. Compare a nearby host to a distant one, from the host machine:
 
    ```bash
    traceroute oregonstate.edu
@@ -273,17 +291,29 @@ Knowing your IP address tells you where you are. The routing table tells you whe
 
    Does the path to Australia diverge from the path to Oregon State at some point? At which hop? What does that tell you about the structure of the internet?
 
-   <Aside type="note" title="Alternative to Traceroute">
-   A good alternative to `traceroute` is `mtr`, which continuously probes the path and gives you a live view of latency and packet loss at each hop. You can install it with `sudo pacman -S mtr` on Arch, `sudo apt install mtr` on Ubuntu, or `brew install mtr` on macOS. Run it with `sudo mtr -r <destination>`.
+   Note that you might never reach your destination in a reasonable amount of hops in these cases.
+
+   <Aside type="note" title="mtr: a better traceroute">
+   `mtr` continuously probes the path and gives you a live view of latency and packet loss at each hop. On your host: `brew install mtr` (macOS), `sudo apt install mtr` (Debian/Ubuntu), or `sudo pacman -S mtr` (Arch). Run it with `mtr 8.8.8.8`. It has the same hypervisor NAT limitations as `traceroute` when run inside the VM.
    </Aside>
 
-3. Find your own public IP address. Ask a public server to reflect it back:
+5. Find your own public IP address. Ask a public server to reflect it back, from inside the VM:
 
    ```bash
    curl -s https://ifconfig.me
    ```
 
-   Compare this address to the IP from `ip addr show`. They are different. This is NAT: VirtualBox translated your private VM address to the host's address, and your host's router translated that to your public address. Depending on your setup, there may be two or three separate NAT translations between this shell prompt and the public internet.
+   The comparison that reveals NAT is between the VM's **local** IP (the address from `ip addr show`, such as `10.0.2.15`) and the public IP that `ifconfig.me` reflects back. Those two addresses will be different, and that gap is NAT: one or more translators rewrote the source address as your packet traveled toward the internet.
+
+   Do not compare the VM's public IP to your host machine's public IP. Both share the same home or campus router, so they exit the internet through the same public address. Seeing the same public IP on both machines is expected and is not a sign that NAT is absent.
+
+   Note that `ifconfig.me` prefers IPv6 when available, and IPv6 addresses are globally routable without NAT, so the VM's local IPv6 address and its public address may be identical. To observe IPv4 NAT specifically, force IPv4:
+
+   ```bash
+   curl -s -4 https://ifconfig.me
+   ```
+
+   Compare that result to your local IPv4 address from `ip addr show`. They should differ, confirming the IPv4 NAT path through the hypervisor and your router.
 
 </Steps>
 
@@ -394,6 +424,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
    ```bash
    dig www.oregonstate.edu
+   dig oregonstate.edu
    ```
 
    Look at the ANSWER SECTION. If the response contains a `CNAME` record, the name is an alias pointing to another name, which is then resolved to an A record. For example:
@@ -413,15 +444,19 @@ DNS translates names to addresses. Understanding how your machine resolves names
    dig MX oregonstate.edu
    ```
 
-   The `MX` records show which servers accept email for this domain. The number before the hostname is the priority -- lower is preferred. If you have multiple MX records, the sender tries the lowest priority first and falls back if it is unreachable.
+   The `MX` records show which servers accept email for this domain. The number before the hostname is the priority; lower is preferred. If you have multiple MX records, the sender tries the lowest priority first and falls back if it is unreachable.
 
-6. Do a reverse lookup on your default gateway:
+6. Do a reverse lookup on your public IP address:
 
    ```bash
-   dig -x <your-gateway-address>
+   dig -x $(curl -s -4 https://ifconfig.me)
    ```
 
-   Does your gateway have a hostname? What does it tell you about your network provider?
+   This performs a PTR lookup on your actual public IPv4 address, the one your packets arrive from when they reach the internet. PTR records are only registered for public addresses; private addresses like your gateway (`10.0.2.2`) or local subnet address will return `NXDOMAIN` because they have no meaning outside the local network and nobody registers DNS for them.
+
+   You may see one of two outcomes. If a PTR record exists, it appears in the ANSWER section and the hostname usually reveals your ISP and sometimes your approximate location (for example, `c-73-250-58-101.hsd1.or.comcast.net`). On campus or cloud networks it often identifies the institution or provider directly.
+
+   More commonly for residential IPs, you will get `NXDOMAIN` with an SOA record in the AUTHORITY section instead of a PTR record in the ANSWER section. That SOA is still useful: it names the authoritative server for the reverse zone (the nameserver field) and the administrative contact (the email field, with the first `.` replaced by `@`). The ISP's name is usually visible in both. What it means operationally is that the zone for your IP block is delegated to your ISP, but they chose not to register a specific PTR for your individual residential IP. ISPs typically do register PTR records for their infrastructure and business-grade IPs, which is why traceroute hops sometimes resolve to hostnames and sometimes do not.
 
 7. Simulate broken DNS. Ask for a hostname that does not exist:
 
@@ -476,14 +511,25 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
    Slow DNS shows up in the first number. A slow or distant server shows up in Connect and Total. A TLS misconfiguration shows up in the TLS line.
 
-3. Test a server by IP address while preserving the hostname context:
+3. See what happens when you bypass DNS entirely and connect to the IP directly:
 
    ```bash
-   ip=$(dig +short oregonstate.edu A | head -n 1)
-   curl -I --resolve oregonstate.edu:443:$ip https://oregonstate.edu
+   curl -I https://$(dig +short oregonstate.edu A | head -n 1)
    ```
 
-   This sends the request to an explicit IP (bypassing normal DNS lookup during the request) while still using the hostname for TLS and Host header handling.
+   This will fail with a TLS error. The certificate was issued for `oregonstate.edu`, not for a bare IP address, so the hostname validation fails. To bypass the validation check:
+
+   ```bash
+   curl -kI https://$(dig +short oregonstate.edu A | head -n 1)
+   ```
+
+   The `-k` flag disables certificate verification. The server responds, but you are no longer verifying the identity of who you are talking to. `--resolve` solves this properly: it routes the request to a specific IP while still sending the correct `Host` header and validating TLS against the real hostname:
+
+   ```bash
+   curl -I --resolve oregonstate.edu:443:$(dig +short oregonstate.edu A | head -n 1) https://oregonstate.edu
+   ```
+
+   This time the TLS handshake succeeds because `curl` is using `oregonstate.edu` as the hostname for certificate validation, even though it is connecting to the IP directly. You get all the security checks without going through DNS. This matters when you need to test a new server before pointing DNS at it, or when you suspect DNS is returning a wrong IP and want to verify a specific backend directly.
 
 4. Inspect the TLS handshake directly with `openssl s_client`:
 
@@ -523,30 +569,20 @@ A user reports "I can reach `8.8.8.8` but I cannot open any website." Based on w
 
 ## Network Summary
 
-You have used six different tools to investigate this machine from layer 2 through layer 7. Produce a clean terminal snapshot that captures your findings in one place.
+You have used the full diagnostic toolkit from layer 1 through layer 7. Produce a clean terminal snapshot that captures your machine's identity and services in one place:
 
-<Steps>
-1. Print your machine's identity and address information:
+```bash
+printf "Hostname: %s\nLocal IP: %s\nGateway:  %s\nPublic IP: %s\nDNS:      %s\n\n" \
+  "$(cat /etc/hostname)" \
+  "$(ip -4 addr show scope global | awk '/inet /{print $2}' | head -1)" \
+  "$(ip route show default | awk '{print $3}')" \
+  "$(curl -s -4 https://ifconfig.me)" \
+  "$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)"
+echo "Listening TCP services:"
+sudo ss -tlnp
+```
 
-   ```bash
-   printf "Hostname: %s\nLocal IP: %s\nGateway:  %s\nPublic IP: %s\nDNS:      %s\n" \
-     "$(hostname)" \
-     "$(ip -4 addr show scope global | awk '/inet /{print $2}' | head -1)" \
-     "$(ip route show default | awk '{print $3}')" \
-     "$(curl -s https://ifconfig.me)" \
-     "$(awk '/^nameserver/{print $2; exit}' /etc/resolv.conf)"
-   ```
-
-   Your hostname is the personal identifier in this output: it is the name you set during the Arch Linux install and it appears in your terminal prompt as well. With default VirtualBox NAT, you will typically see your local address in the `10.0.2.x` range, a different public IP (confirming NAT is working), and the DNS resolver you configured manually.
-
-2. List all TCP services currently listening:
-
-   ```bash
-   sudo ss -tlnp
-   ```
-
-   At minimum you should see SSH on port 22. Together, the hostname, the local and public IP pair, and the listening port for SSH are a complete, verifiable picture of what this machine is and how it is reachable from the network.
-</Steps>
+Your hostname is the personal identifier here: it is the name you set during the Arch Linux install and it appears in your shell prompt. You should see your local address (likely `10.0.2.x` with hypervisor NAT), a different public IPv4 address confirming NAT is working, your manually configured DNS resolver, and at minimum SSH on port 22 in the services table.
 
 ## Going Further
 

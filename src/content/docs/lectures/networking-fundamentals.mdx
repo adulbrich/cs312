@@ -1,5 +1,5 @@
 ---
-title: Networking Fundamentals (LAN/WAN)
+title: Networking Fundamentals
 description: "A practical tour of networking: OSI and TCP/IP models, IP addressing and subnetting, DNS, DHCP, NAT, routing, firewalls, ports, and the diagnostic tools every sysadmin needs."
 sidebar:
   order: 4
@@ -120,7 +120,7 @@ Modern enterprise networks most commonly use this hierarchical tree topology. Th
 
 ## IP Addressing and Subnetting
 
-Every device on an IP network needs a unique address. An **IPv4 address** is a 32-bit number written as four octets separated by dots, such as `192.168.1.10`. Alongside the address, a **subnet mask** defines which portion of the address identifies the network and which portion identifies individual hosts. The mask `255.255.255.0` means the first 24 bits are the network portion and the last 8 bits are for hosts, allowing up to 254 usable addresses (the first address is the network identifier and the last is the broadcast address).
+Every device on an IP network needs a unique address. An **IPv4 address** is a 32-bit number written as four octets separated by dots, such as `192.168.1.10`. Alongside the address, a **subnet mask** defines which portion of the address identifies the network and which portion identifies individual hosts. The mask `255.255.255.0` means the first 24 bits are the network portion and the last 8 bits are for hosts, allowing up to 254 usable addresses (the first address is the network identifier and the last is the broadcast address). You will occasionally see the same mask written in hexadecimal: `0xffffff00`. Each pair of hex digits represents one octet (`ff` = 255, `00` = 0), so `0xffffff00` is exactly `255.255.255.0`. This notation appears in some BSD-derived tools (including macOS's `ifconfig` and `netstat -rn`) and in low-level network code; it conveys the same information as the dotted-decimal form, just in a format closer to how the CPU actually stores the mask.
 
 **CIDR (Classless Inter-Domain Routing) notation** expresses the same idea more compactly: `192.168.1.0/24` means the first 24 bits are the network prefix. You will encounter CIDR notation everywhere, from AWS VPC definitions to Linux `ip addr` output.
 
@@ -164,12 +164,12 @@ ip addr show
 The interface name varies by distribution and hardware. On bare-metal servers you will often see `enp3s0` (using [Predictable Network Interface Names](https://www.freedesktop.org/software/systemd/man/systemd.net-naming-scheme.html)), on older systems or virtual machines you may see `eth0`, and cloud instances often use `ens3` or similar. The `ip addr show` command with no arguments lists all interfaces, which is the safest starting point. The output will include lines like `inet 10.0.1.10/25 brd 10.0.1.127 scope global enp3s0`, showing the address, prefix length, and broadcast address for that interface.
 
 <Aside type="note" title="IPv6 in Brief">
-IPv6 uses 128-bit addresses written in hexadecimal groups called hextets (8 groups of 16 bits each), for example `0123:4567:89ab:cdef:0123:4567:89ab:cdef`. The `/64` prefix is conventional for subnets. With 2¹²⁸ possible addresses, IPv6 was designed to solve IPv4 address exhaustion. While IPv6 adoption continues to grow, most internal networks and cloud VPCs still rely on IPv4 with NAT for internet access. The subnetting and routing concepts you learn here apply to both protocols.
+IPv6 uses 128-bit addresses written in hexadecimal groups called 16-bit groups (sometimes informally referred to as hextets: 8 groups of 16 bits each), for example `0123:4567:89ab:cdef:0123:4567:89ab:cdef`. The `/64` prefix is conventional for subnets. With 2¹²⁸ possible addresses, IPv6 was designed to solve IPv4 address exhaustion. While IPv6 adoption continues to grow, most internal networks and cloud VPCs still rely on IPv4 with NAT for internet access. The subnetting and routing concepts you learn here apply to both protocols.
 </Aside>
 
-## Core Network Services: DNS, DHCP, and NAT
+## Core Network Services
 
-Three services make a network usable in practice. Without them, every user would need to manually configure their IP address, memorize server addresses by number, and have no way to reach the public internet from a private network.
+Four services make a network usable in practice. Without them, every user would need to manually configure their IP address, memorize server addresses by number, have no way to reach the public internet from a private network, and have no way to verify that the server they are talking to is actually who it claims to be.
 
 ### DHCP (Dynamic Host Configuration Protocol)
 
@@ -206,7 +206,9 @@ sudo dhclient enp3s0
 
 **DNS** translates human-readable names like `wiki.example.com` into IP addresses like `93.184.216.34`. Without DNS, users would need to type IP addresses into their browsers and every configuration file would break whenever a server moved to a new address. DNS is hierarchical: a local DNS server knows about internal names and forwards everything else to an upstream resolver (such as Google's `8.8.8.8` or Cloudflare's `1.1.1.1`), which in turn queries the global DNS infrastructure.
 
-The most common record types are **A records** (mapping a name to an IPv4 address), **AAAA records** (mapping to IPv6), **CNAME records** (aliases pointing one name to another), and **MX records** (mail routing). When a DNS lookup fails, the symptom is usually "the internet is down" even though the network is perfectly functional; the user simply cannot resolve names to addresses.
+The most common record types are **A records** (mapping a name to an IPv4 address), **AAAA records** (mapping to IPv6), **CNAME records** (aliases pointing one name to another), and **MX records** (mail routing). Two others appear less often but are important to recognize. **PTR records** are the reverse of A records: given an IP address, they return a hostname. Reverse DNS lookups use PTR records and are published by whoever owns the IP block, typically the ISP. You will see them (or their absence) when troubleshooting email deliverability or tracing where an IP address belongs. **SOA (Start of Authority) records** mark the beginning of a DNS zone and contain administrative metadata: the primary nameserver, a contact email, and parameters controlling how long secondary nameservers cache zone data. When a reverse DNS lookup returns `NXDOMAIN`, the SOA record in the authority section still reveals which organization controls that IP block. When a DNS lookup fails, the symptom is usually "the internet is down" even though the network is perfectly functional; the user simply cannot resolve names to addresses.
+
+**DNS operates over two different protocols.** DNS queries and regular lookups use UDP port 53 because the small request and response packets do not need TCP's reliability guarantees. Zone transfers (called AXFR transfers) use TCP port 53 to ensure large data transfers are reliable. A zone transfer replicates all records from an authoritative nameserver to a secondary nameserver, ensuring that multiple nameservers hold identical copies of the zone data. This is how DNS is made redundant: when the primary nameserver goes down, secondary nameservers can still answer queries for that domain. In practice, DNS queries over UDP are by far more common; TCP is used only for zone transfers between nameservers and for unusually large responses that would exceed UDP's 512-byte limit.
 
 You can query DNS from the command line:
 
@@ -253,6 +255,29 @@ Peer-to-peer and real-time applications (VoIP, video conferencing, online gaming
 - **STUN (Session Traversal Utilities for NAT)**: A client queries a public STUN server to discover its public IP address and the type of NAT it is behind, then uses that information to negotiate direct connections.
 - **TURN (Traversal Using Relays around NAT)**: A fallback when direct connection fails; a public relay server forwards traffic between the two peers.
 - **ICE (Interactive Connectivity Establishment)**: A framework (used by WebRTC, Zoom, etc.) that systematically tries direct, STUN, and TURN paths to find the best available route.
+
+### TLS (Transport Layer Security)
+
+DNS tells you where to connect. NAT gets you there. But neither answers a more fundamental question: how do you know the server you just connected to is actually the server you intended to reach, and not an attacker who intercepted your traffic? This is the problem **TLS (Transport Layer Security)** solves.
+
+TLS operates at layers 5 and 6 of the OSI model. It does two things simultaneously: it encrypts the connection so that anyone observing the network sees only ciphertext, and it authenticates the server's identity using a **certificate**. A certificate is a signed document containing the server's public key, the domain name(s) it is valid for, a validity window, and a digital signature from a **Certificate Authority (CA)**. The CA is a trusted third party whose job is to verify that the entity requesting a certificate actually controls the domain before signing it. Root CA certificates are pre-installed in every operating system and browser, forming the foundation of what is called the [public key infrastructure (PKI)](https://en.wikipedia.org/wiki/Public_key_infrastructure).
+
+When a client connects to `https://example.com`, the TLS handshake runs before any application data is sent. The server presents its certificate, the client verifies the signature chain up to a trusted root CA, checks that the certificate covers `example.com`, and confirms the certificate has not expired. If any check fails, the connection is aborted. If all checks pass, the two sides execute a key exchange algorithm (typically Diffie-Hellman or ECDH) using the server's public key to establish a shared secret, which becomes the symmetric encryption key for the session. All subsequent traffic is encrypted with that key.
+
+Certificates are organized in a **chain of trust**. A server's leaf certificate is signed by an intermediate CA, which is signed by a root CA. Browsers and operating systems only trust root CAs directly; intermediate CAs derive their authority from the root. A common failure mode is a server that presents its own certificate but omits the intermediate CA certificate from the chain. The client cannot verify the chain and rejects the connection, even though the leaf certificate is perfectly valid.
+
+```bash
+# Inspect a TLS handshake and the full certificate chain
+openssl s_client -connect example.com:443
+
+# The output includes:
+#   Certificate chain (leaf + intermediates)
+#   subject: the hostname the certificate was issued for
+#   notBefore / notAfter: validity window
+#   Verify return code: 0 (ok)  <- this line at the end confirms the chain validated
+```
+
+A non-zero verify return code identifies the specific failure: `10` means the certificate has expired, `20` means a certificate in the chain could not be found (missing intermediate), `62` means the hostname does not match. The Network Configuration and Troubleshooting lecture covers TLS in operational depth: how to obtain and renew certificates automatically with Let's Encrypt, how to set up an internal CA for private services, how to configure TLS termination in a reverse proxy, and what to do when certificates expire in production.
 
 ## Routing Basics
 
@@ -494,7 +519,7 @@ One important caveat: many networks and cloud providers block ICMP at their fire
 
 ### traceroute: Finding Where Packets Stop
 
-`traceroute` reveals the path packets take to a destination by exploiting the IP TTL (Time To Live) field. It sends a series of packets with progressively increasing TTLs: first TTL=1 (the first router decrements it to zero, drops the packet, and sends back an ICMP "time exceeded" message), then TTL=2 (reaches the second hop), and so on. The round-trip times from each ICMP response let you see both the path and the latency at each hop.
+`traceroute` reveals the path packets take to a destination by exploiting the IP TTL (Time To Live) field. It works by sending a series of probes with progressively increasing TTLs: the first probe is sent with TTL=1, causing the first router to decrement it to zero, drop the packet, and send back an ICMP "time exceeded" message (revealing the first hop). The second probe is sent with TTL=2, so the first router forwards it and the second router drops it and sends an ICMP reply (revealing the second hop). This pattern continues until the probe reaches the destination. The round-trip times from each ICMP response let you see both the path and the latency at each hop.
 
 ```bash
 # Trace the route to a public server (sends UDP probes by default on Linux)
@@ -562,6 +587,7 @@ The `-I` flag fetches only headers, which is useful for a quick check without do
 
 ```bash
 # Connect to a host and inspect the TLS handshake and certificate
+# Note: this command opens an interactive session; exit with Ctrl+C or by typing 'quit'
 openssl s_client -connect example.com:443
 
 # Show only the certificate (no session noise)
