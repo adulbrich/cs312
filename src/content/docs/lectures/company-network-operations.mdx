@@ -2,17 +2,16 @@
 title: Building and Operating a Company Network
 description: "Design and operate a real company network: hierarchical topology, VLANs, DNS, DHCP, email, TLS certificates, reverse proxies, VPNs, multi-location connectivity, and systematic troubleshooting."
 sidebar:
-  order: 9
+  order: 12
 draft: true
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
 
-Running a company network requires two complementary skills: designing and building it correctly, then diagnosing it when something breaks. This lecture covers both.
+Running a company network is never just one thing. You are simultaneously a network designer, a systems architect, a security enforcer, and a first responder. When a developer reports that the application is unreachable, you need to know whether to check the VLAN configuration, the firewall rules, the DNS records, or the TLS certificate. And you need to know how to distinguish between those quickly, without guessing.
 
-The scenario running through this lecture is a small company with twenty employees, servers in a closet, a handful of remote workers, a cloud presence, and a public website. You will learn how to design the logical structure of that network (VLANs, DHCP, DNS, routing), configure the services that make it usable (firewalls, reverse proxies, TLS certificates, email, VPNs), and connect multiple locations together. Along the way, the same scenario grounds every topic in a concrete troubleshooting problem.
-
-The Monday-morning alert: "The website is down." Users cannot reach the company's internal web application. The application server is running, the database is healthy, and nothing changed over the weekend. Somewhere between the users and the server, something is broken. A sysadmin who built the network knows exactly where to look. This lecture develops that knowledge.
+When a developer reports that an application is unreachable, the failure could live anywhere in a stack that spans physical cables, VLAN assignments, routing tables, firewall rules, DNS records, TLS certificates, and application code. A sysadmin who built and understands the network does not guess; they work through the stack methodically until the failure reveals itself. This lecture builds that capability by combining network design with operational troubleshooting: you cannot diagnose a VLAN problem without knowing what VLANs are supposed to do, and you cannot trust a routing table entry without knowing what created it.
 
 ## A systematic troubleshooting methodology
 
@@ -22,11 +21,11 @@ When faced with a connectivity problem, resist the urge to start changing things
 
 **Divide-and-conquer.** If you have a clue about where the problem might be, test at that layer first. Can you ping the gateway? If yes, layers 1 through 3 are probably fine; focus on DNS, firewalls, or the application. If no, move downward. This approach is faster when experience gives you a good starting point.
 
-<Aside type="tip">
+<Aside type="tip" title="Narrowing the Search Space">
 A helpful rule of thumb: if *nothing* on the network works, suspect layers 1 through 3. If only *one service* is broken, suspect layers 4 through 7 (DNS, firewall rules, application configuration).
 </Aside>
 
-In our scenario, the first thing to check is whether the problem is universal or isolated. Can you reach the server from your own workstation? Can the server reach the internet? These initial tests narrow the scope dramatically.
+When narrowing down a connectivity failure, the first question is whether the problem is universal or isolated. Can you reach the server from your own workstation? Can the server reach the internet? These initial tests narrow the scope dramatically.
 
 ## Hierarchical network design
 
@@ -50,14 +49,13 @@ Every Ethernet frame on a VLAN-aware network can carry an 802.1Q tag, a small he
 
 **Trunk ports** connect switches to each other or to routers. A trunk carries traffic for multiple VLANs simultaneously, preserving the 802.1Q tag (a 4-byte addition to each Ethernet frame containing the VLAN ID) so the receiving switch knows which VLAN each frame belongs to. Tagged frames are used to communicate between devices that are aware of VLAN segmentation. This is the only way to carry multiple VLANs on a single physical cable.
 
-A common source of trouble in our scenario: someone moved a patch cable to a different switch port, and that port is configured for the wrong VLAN. The server's IP address is correct, but it is now in a broadcast domain that cannot reach the gateway. You can verify VLAN membership from the switch CLI or, on the server side, by checking whether ARP resolution works for the gateway.
+A common source of VLAN-related trouble: a patch cable moved to a different switch port that is configured for the wrong VLAN. The server's IP address is correct, but it is now in a broadcast domain that cannot reach the gateway. You can verify VLAN membership from the switch CLI or, on the server side, by checking whether ARP resolution works for the gateway.
 
 ```bash
-# Check whether the server can resolve the gateway's MAC address
 ip neighbor show
-# If the gateway entry is missing or marked FAILED, the server
-# likely cannot reach it at layer 2 (wrong VLAN, bad cable, etc.)
 ```
+
+If the gateway entry is missing or marked `FAILED`, the server cannot reach it at layer 2, which points to a VLAN mismatch, a bad cable, or a misconfigured switch port before you ever touch IP configuration.
 
 To route traffic between VLANs, you need a layer-3 device (a router or a layer-3 switch) configured with an interface or sub-interface in each VLAN. Without inter-VLAN routing, hosts on different VLANs simply cannot communicate, regardless of their IP configuration.
 
@@ -79,20 +77,17 @@ When two nearby access points transmit on the same channel (or overlapping chann
 - **5 GHz**: 24 non-overlapping 20 MHz channels, substantially reducing co-channel interference in dense deployments.
 - **6 GHz** (Wi-Fi 6E / 802.11ax): Up to 59 non-overlapping 20 MHz channels, with room for 29 non-overlapping 40 MHz channels, 14 non-overlapping 80 MHz channels, or 7 non-overlapping 160 MHz channels. The 6 GHz band is well suited to high-bandwidth applications such as HD video streaming and virtual reality, and is preferred in new dense deployments.
 
-<Aside type="caution">
+<Aside type="caution" title="2.4 GHz Interference Sources">
 Microwave ovens, Bluetooth devices, and cordless phones all operate near 2.4 GHz. If users report intermittent Wi-Fi problems in a break room or kitchen, interference from appliances is a likely culprit. Prefer 5 GHz or 6 GHz in those environments.
 </Aside>
 
 ### WAP placement considerations
 
-When deploying wireless access points in a building:
+When deploying wireless access points in a building, start with a site survey: understanding the physical layout, wall materials (concrete and metal attenuate signals significantly), and expected user density determines both how many APs are needed and where to place them. A dense lecture hall and an empty corridor require very different coverage plans.
 
-- **Survey the site**: Understand the physical layout, wall materials (concrete and metal attenuate signals significantly), and expected user density before placing APs.
-- **Use non-overlapping channels**: Separate adjacent APs onto different channels to avoid co-channel interference.
-- **Use the same SSID and credentials** across all APs: Clients will roam automatically to the nearest AP without the user noticing.
-- **Disable low data rates**: Some APs advertise low data rates (e.g., 1 or 2 Mbps) for backwards compatibility. Devices far from an AP may lock onto it at these low rates rather than roaming to a closer AP. Disabling the lowest data rates encourages clients to roam to a stronger signal.
-- **Account for user density**: A lecture hall needs more APs than an empty corridor. Many modern APs include automatic power and channel adjustment to adapt to congestion.
-- **Segment traffic by VLAN**: Use separate SSIDs mapped to separate VLANs for different user groups (staff, students, guests) to enforce network policies without running separate physical infrastructure.
+Every AP in the same area should transmit on a different non-overlapping channel. Adjacent APs on the same channel compete for airtime and degrade each other's throughput. Configure all APs with the same SSID and credentials so clients roam automatically to the strongest signal without user intervention. Also disable the lowest data rates (1 and 2 Mbps) that APs advertise for backwards compatibility: a device that latches onto a distant AP at 1 Mbps rather than roaming to a nearby AP at full speed is a common complaint that this single setting fixes. Modern enterprise APs include automatic power and channel adjustment to adapt to congestion and interference, reducing the need for manual tuning after initial deployment.
+
+For user segmentation, map different SSIDs to different VLANs. Staff, students, and guests can share the same physical AP infrastructure while their traffic is separated at the switch, giving each group independent firewall policies and network access controls without additional hardware.
 
 ### Enterprise wireless security
 
@@ -106,18 +101,7 @@ DNS is the most common reason users report that "the internet is down." The netw
 
 ### How the resolver works
 
-When a Linux server needs to resolve a hostname, it consults `/etc/resolv.conf` (or, on modern systems, `systemd-resolved`) to find the IP address of its configured DNS server. It then sends a query to that server. If the server cannot answer authoritatively, it recurses through the DNS hierarchy.
-
-```bash
-# View the current resolver configuration
-cat /etc/resolv.conf
-# Typical output:
-# nameserver 10.0.1.2
-# nameserver 10.0.1.3
-# search example.com
-```
-
-The `search` directive appends a domain suffix to short hostnames. If you type `ping app01`, the resolver tries `app01.example.com` before querying for `app01` alone.
+When a Linux server needs to resolve a hostname, it consults `/etc/resolv.conf` (or, on modern systems, `systemd-resolved`) to find the configured DNS server. On a workstation that receives DHCP, the DHCP client writes this file automatically. On a server with a static address, it must be configured explicitly. The resolver sends the query to that server; if the server cannot answer authoritatively, it recurses through the DNS hierarchy. A `search` directive in `/etc/resolv.conf` appends a domain suffix to short hostnames: if you type `ping app01`, the resolver tries `app01.example.com` before querying bare `app01`.
 
 ### Diagnostic tools
 
@@ -148,9 +132,7 @@ nslookup app.example.com 10.0.1.2
 
 The Networking Fundamentals lecture covers the record types you encounter most often for forward resolution: A, AAAA, CNAME, and MX. Several others matter operationally.
 
-**PTR records** provide reverse DNS: given an IP address, they return a hostname. Reverse lookups use a special zone in the format `<reversed-octets>.in-addr.arpa`. For example, the PTR record for `203.0.113.50` lives at `50.113.0.203.in-addr.arpa`. ISPs manage PTR records for the IP blocks they allocate; end organizations can only set PTR records if they own the IP block outright or request their ISP to set them. PTR records matter for two reasons: many mail servers reject email from IPs without a matching PTR record, and `traceroute` uses reverse DNS to display router hostnames alongside IP addresses.
-
-**SOA (Start of Authority) records** appear at the apex of every DNS zone. They specify the primary nameserver for the zone, an administrative contact email (written with a dot instead of `@`), and five timing parameters that control how secondary nameservers cache and expire zone data. You encounter SOA records when a PTR lookup returns NXDOMAIN: the SOA in the authority section of the response names the organization responsible for that IP block, which tells you whose abuse contact to reach and confirms the lookup reached the authoritative source.
+**PTR records** and **SOA records** are introduced in the Networking Fundamentals lecture. Their operational consequences are worth expanding here. PTR records have two practical stakes: mail servers use forward-confirmed reverse DNS to validate sender identity (a sending IP with no PTR record or a mismatched one is a strong spam signal), and `traceroute` uses reverse lookups to annotate hop IPs with hostnames. If a mail delivery fails with a "reverse lookup failed" rejection, the first check is whether your sending IP has a PTR record registered with your ISP. When a PTR lookup returns NXDOMAIN, the SOA record in the authority section identifies which organization controls that IP block: the `MNAME` field names the primary nameserver and `RNAME` encodes the abuse contact email, which is what you need when reporting abuse or requesting a PTR record be created.
 
 **TXT records** carry arbitrary text data and are widely used for domain verification and email authentication. SPF (Sender Policy Framework), DKIM (DomainKeys Identified Mail), and DMARC policies are all published as TXT records. Cloud providers and SaaS vendors also use TXT records to verify domain ownership: to prove you control a domain, you add a TXT record with a specific token value, and the provider queries DNS to confirm it.
 
@@ -177,7 +159,7 @@ Short TTLs increase your DNS query volume and add a small latency cost for every
 
 ### Common DNS failures
 
-In our "website is down" scenario, DNS problems take several forms.
+DNS failures are rarely obvious because the symptom is always the same: "I can't reach the server." Identifying which part of the DNS resolution chain is at fault requires checking each link. The failures take several forms.
 
 The resolver is unreachable. If the DNS server's IP address is wrong in `/etc/resolv.conf`, or if the DNS server itself is down, all queries time out. Test by pinging the nameserver IP directly.
 
@@ -220,14 +202,7 @@ DHCP (Dynamic Host Configuration Protocol) automates IP address assignment. With
 
 ### The lease process
 
-A DHCP transaction follows a four-step exchange, sometimes called DORA.
-
-<Steps>
-1. **Discover.** The client broadcasts a DHCPDISCOVER message on the local network, asking for an address.
-2. **Offer.** One or more DHCP servers respond with a DHCPOFFER, proposing an IP address and configuration parameters.
-3. **Request.** The client selects an offer and broadcasts a DHCPREQUEST, telling all servers which offer it accepted.
-4. **Acknowledge.** The chosen server sends a DHCPACK, confirming the lease. The client configures its interface.
-</Steps>
+A DHCP transaction follows four steps, sometimes called DORA. First, the client broadcasts a **Discover** message; since it has no IP address yet, the source is `0.0.0.0` and the destination is the broadcast address `255.255.255.255`. One or more DHCP servers reply with an **Offer**, proposing an IP address, subnet mask, default gateway, DNS server addresses, and a lease duration. The client then broadcasts a **Request**, naming the server whose offer it accepted (implicitly declining the others). Finally, the chosen server confirms with an **Acknowledge**, and the client configures its interface with the offered parameters.
 
 Leases have a duration. When half the lease time has elapsed, the client attempts to renew. If renewal fails and the lease expires, the client must start the DORA process again and may receive a different address.
 
@@ -235,7 +210,7 @@ Leases have a duration. When half the lease time has elapsed, the client attempt
 
 Servers, network printers, and infrastructure devices should use static allocation: either a manually configured IP address or a DHCP reservation that always assigns the same address based on the device's MAC address. Workstations and mobile devices typically use dynamic allocation from a pool.
 
-<Aside type="note">
+<Aside type="note" title="DHCP Reservations">
 DHCP reservations give you the convenience of DHCP (centralized configuration) with the predictability of static addressing. Use them for any device that other systems need to reach by IP address.
 </Aside>
 
@@ -255,11 +230,11 @@ sudo dhclient eth0
 sudo networkctl renew eth0
 ```
 
-In our scenario, if the server recently lost power and came back up, it may have received a different IP address from the DHCP pool. Any DNS records or firewall rules pointing to the old address would now be wrong. This is exactly why servers should use static allocation or reservations.
+If a server recently lost power and came back up without a reservation, it may have received a different IP address from the dynamic pool. Any DNS records or firewall rules pointing to the old address would now be wrong. This is exactly why servers should use static allocation or DHCP reservations rather than drawing from the general pool.
 
 ## Email Infrastructure
 
-Email is rarely set up from scratch today -- most organizations use hosted services like Google Workspace or Microsoft 365. But understanding how email flows through DNS and SMTP is necessary for any sysadmin, because misconfigured email records affect deliverability for the entire domain and debugging delivery failures is a surprisingly common task.
+Email is rarely set up from scratch today; most organizations use hosted services like Google Workspace or Microsoft 365. But understanding how email flows through DNS and SMTP is necessary for any sysadmin, because misconfigured email records affect deliverability for the entire domain and debugging delivery failures is a surprisingly common task.
 
 ### How email routing works
 
@@ -292,7 +267,7 @@ dig TXT example.com | grep spf
 
 **DMARC (Domain-based Message Authentication, Reporting and Conformance)** ties SPF and DKIM together with a policy (`p=none` for monitoring only, `p=quarantine`, or `p=reject`) and instructs receiving servers where to send aggregate reports. A `p=reject` policy effectively blocks forged email from your domain.
 
-<Aside type="tip">
+<Aside type="tip" title="Configure Email Authentication Before Sending">
 When setting up email for a new domain, configure SPF, DKIM, and DMARC before sending any bulk email. Major providers (Gmail, Microsoft) increasingly reject or silently drop mail from domains that lack these records.
 </Aside>
 
@@ -302,31 +277,27 @@ Running a mail server requires a static IP with proper reverse DNS, maintaining 
 
 ## Routing and gateway issues
 
-Once a host has a valid IP address, it needs to know where to send traffic. The routing table maps destination networks to next-hop gateways.
+As covered in the Networking Fundamentals lecture, every host sends non-local traffic to a default gateway and the routing table maps destinations to next hops. The diagnostic starting point is always `ip route show`. A missing `default` route means the host can communicate on its local subnet but not beyond it; a default route pointing to the wrong gateway means traffic leaves but arrives at the wrong place or not at all.
 
 ```bash
-# Display the routing table
 ip route show
-# Typical output:
-# default via 10.0.1.1 dev eth0
-# 10.0.1.0/24 dev eth0 proto kernel scope link src 10.0.1.50
 ```
 
-The `default` route is the gateway of last resort. Traffic destined for any network not explicitly listed goes to this gateway. If the default route is missing or points to the wrong address, the host can communicate on its local subnet but nothing beyond it.
+Once you confirm the routing table looks correct on the originating host, the question becomes whether packets are actually traversing the expected path through the network.
 
 ### Diagnosing routing problems
 
-The `traceroute` command (or `tracepath` on some Linux distributions) reveals the path packets take through the network. Each line of output represents a router hop.
+`traceroute` reveals the path packets take hop by hop. The Networking Fundamentals lecture explains the TTL-decrementing mechanism that generates each hop's reply. What matters operationally is reading that output in the context of a network you know. If you built a hierarchical network with a documented topology, a `* * *` at hop 3 is not just "blocked ICMP"; it points to a specific router you can log into and inspect directly. Check its interface states, routing table, and whether it has a route to the destination subnet.
 
 ```bash
-# Trace the path to a remote host
+# Default UDP probe (blocked by many firewalls)
 traceroute app.example.com
 
-# Use TCP instead of UDP (helpful when ICMP is blocked)
+# TCP probe on port 443 (traverses most firewalls that permit HTTPS)
 sudo traceroute -T -p 443 app.example.com
 ```
 
-If the trace stops at a particular hop (shown as `* * *`), the problem is at or near that router. It could be a misconfigured route, an interface that is down, or a firewall blocking the traffic.
+When a trace reaches the destination over TCP but not over UDP, the difference is firewall policy rather than a routing failure. When a TCP trace also stops, the routing problem is at or in front of that hop. Comparing both results narrows whether you are looking at a routing issue or an access control issue.
 
 ### Asymmetric routing
 
@@ -353,7 +324,7 @@ sudo iptables -L INPUT -n | grep 80
 sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
 ```
 
-<Aside type="caution">
+<Aside type="caution" title="iptables Rules Are Not Persistent">
 Changes made with `iptables` commands are not persistent by default. They disappear on reboot. Use `iptables-save` and `iptables-restore` (or your distribution's firewall management tool) to persist rules.
 </Aside>
 
@@ -428,9 +399,9 @@ Each line of tcpdump output represents a single packet. A typical TCP exchange l
 
 The flags tell you what is happening. `[S]` is a SYN (connection initiation). `[S.]` is a SYN-ACK (the server's response). `[.]` is a plain ACK. `[P.]` means data is being pushed. `[F.]` is a FIN (connection teardown). `[R]` is a RST (connection reset).
 
-### Using tcpdump in our scenario
+### Reading a tcpdump result
 
-Returning to our "website is down" scenario, suppose the server is running, DNS resolves correctly, and the routing table looks fine. A packet capture on the server reveals the answer.
+Suppose the server process is running, DNS resolves correctly, and the routing table is correct. Nothing in the higher-level tools explains why the application is unreachable. A packet capture on the server narrows it further.
 
 ```bash
 sudo tcpdump -i eth0 port 80 -n
@@ -438,27 +409,17 @@ sudo tcpdump -i eth0 port 80 -n
 
 If you see incoming SYN packets but no SYN-ACK responses, the server is receiving the requests but not responding. This could be a local firewall rule dropping the traffic before it reaches the application. If you see no packets at all, the traffic is being dropped upstream, and you need to capture at the next hop.
 
-<Aside type="tip">
+<Aside type="tip" title="Always Filter on Production Servers">
 When capturing on a busy server, always use filters to limit the output. Capturing all traffic on a production server can generate enormous amounts of data and may itself cause performance problems.
 </Aside>
 
-## Address Resolution Protocol (ARP)
+## ARP Security
 
-IP addresses are layer-3 addresses used to route packets between networks. But within a single broadcast domain (a subnet), devices communicate at layer 2 using MAC addresses. **ARP** bridges the gap: it maps an IP address to the MAC address of a device on the local network.
+The Networking Fundamentals lecture covers how ARP maps IP addresses to MAC addresses within a broadcast domain and how `ip neighbor show` reveals those mappings, including the `FAILED` state that indicates a layer-2 problem such as a VLAN mismatch or bad cable. In a company network, ARP has an additional security dimension that becomes relevant at the access layer.
 
-When a host needs to send a packet to `10.0.1.50` and does not already know that host's MAC address, it broadcasts an ARP request ("who has 10.0.1.50?"). The device with that IP replies with its MAC address. The requesting host stores this mapping in its ARP cache for a short time to avoid repeating the process for every packet.
+**ARP spoofing** (also called ARP poisoning) exploits the fact that ARP has no authentication. Any host on a broadcast domain can send a gratuitous ARP reply claiming any IP address, including the default gateway's. A malicious host that does this causes other devices on the segment to update their ARP caches and send traffic intended for the gateway to the attacker instead. The result is a man-in-the-middle position or a denial of service, and neither is visible at the IP layer.
 
-```bash
-# Show the local ARP/neighbor cache
-ip neighbor show
-
-# A healthy entry looks like:
-# 10.0.1.1 dev eth0 lladdr aa:bb:cc:dd:ee:ff REACHABLE
-# A failed entry indicates layer-2 problems (wrong VLAN, bad cable):
-# 10.0.1.1 dev eth0  FAILED
-```
-
-**ARP spoofing** (also called ARP poisoning) is a common attack in which a malicious host sends fake ARP replies, associating its own MAC address with a legitimate IP address. This can be used to intercept traffic (man-in-the-middle) or disrupt connectivity. Managed switches mitigate this with Dynamic ARP Inspection (DAI), which validates ARP packets against a trusted binding table.
+Managed switches mitigate this with **Dynamic ARP Inspection (DAI)**. The switch builds a trusted binding table from DHCP snooping (recording which IP addresses were leased to which MAC addresses on which ports) and validates every ARP reply against it. A reply claiming that `10.0.1.1` belongs to a MAC address not in the binding table is dropped. Servers with statically configured addresses must have manual bindings added to the DAI table, or their own ARP packets will be dropped as untrusted. DAI is a standard hardening step on access layer switches in environments where unauthorized devices could plug into switch ports.
 
 ## Network Routing Protocols
 
@@ -479,7 +440,7 @@ For most enterprise sysadmin work, OSPF is the interior routing protocol you are
 
 On Linux, bonded interfaces are managed via the `bonding` kernel module or, more commonly on newer distributions, via `systemd-networkd` or NetworkManager. You will encounter LAG on server NICs connecting to switches, and on the uplinks between access and distribution switches.
 
-**Multi-homing** -- connecting an organization's network to two or more ISPs -- requires BGP to advertise the organization's IP block to both providers. If one ISP's link fails, BGP converges on the other within seconds. Large organizations own their own IP address block (allocated from ARIN, RIPE, or another regional registry) and carry that block in BGP rather than using the ISP's address space.
+**Multi-homing** (connecting an organization's network to two or more ISPs) requires BGP to advertise the organization's IP block to both providers. If one ISP's link fails, BGP converges on the other within seconds. Large organizations own their own IP address block (allocated from ARIN, RIPE, or another regional registry) and carry that block in BGP rather than using the ISP's address space.
 
 ## Virtual Private Networks (VPNs)
 
@@ -509,9 +470,13 @@ Three approaches are common at different scales:
 
 **SD-WAN (Software-Defined Wide Area Network)** is a newer approach that creates an overlay network across multiple underlay connections (broadband internet, LTE, MPLS). A centralized controller defines routing policy; the SD-WAN devices at each site intelligently select the best path per application. A video call might use the low-latency MPLS link while bulk backups use cheap broadband. SD-WAN has largely displaced pure MPLS for new deployments because it delivers similar reliability at lower cost.
 
-**Cloud connectivity**: when one of your "sites" is an AWS VPC or Azure VNet, you have two options. A **VPN Gateway** creates an IPsec tunnel from your office router to the cloud VPC -- inexpensive but limited bandwidth and latency. **AWS Direct Connect** or **Azure ExpressRoute** are dedicated private fiber connections from your office to the cloud provider's colocation facility -- higher cost, predictable latency, and no traffic on the public internet.
+<HistoricalNote title="From Frame Relay to MPLS to SD-WAN">
+Enterprise WAN connectivity has gone through two major technology transitions in thirty years. Through the 1990s, the dominant technology was Frame Relay: a packet-switched carrier service where customers paid for a Committed Information Rate and occasional bursts were allowed when spare capacity existed. Frame Relay was inexpensive relative to leased lines but offered no latency guarantees. ATM (Asynchronous Transfer Mode) competed for bandwidth-intensive applications, using fixed 53-byte cells and hardware-enforced quality of service. Both were displaced by MPLS in the early 2000s. MPLS let carriers accept IP packets at one site, label them with a short identifier, and switch them across the backbone using the label rather than performing a full IP route lookup at every hop. This provided ATM-like predictability over an IP infrastructure and at IP prices. MPLS became the standard enterprise WAN technology for roughly a decade. SD-WAN has been displacing it since the 2010s by achieving comparable reliability through intelligent traffic steering across multiple cheaper connections rather than a single expensive carrier service.
+</HistoricalNote>
 
-<Aside type="note">
+**Cloud connectivity**: when one of your "sites" is an AWS VPC or Azure VNet, you have two options. A **VPN Gateway** creates an IPsec tunnel from your office router to the cloud VPC, which is inexpensive but limited in bandwidth and latency. **AWS Direct Connect** or **Azure ExpressRoute** are dedicated private fiber connections from your office to the cloud provider's colocation facility: higher cost, but predictable latency and no traffic on the public internet.
+
+<Aside type="note" title="Cloud-First Network Design">
 In cloud-first environments, the "company network" increasingly means a hub VPC in AWS or Azure with VPN or Direct Connect back to any physical offices, rather than a traditional office-centric design. The same networking concepts apply; the hardware is just abstracted into APIs.
 </Aside>
 
@@ -527,7 +492,7 @@ Firewalls are categorized by where they sit in the network:
 - **Web Application Firewalls (WAFs)** are placed in front of web applications. They inspect HTTP traffic to detect and block attacks like SQL injection, cross-site scripting (XSS), and session hijacking.
 - **Endpoint firewalls** run on the host itself (e.g., `iptables`/`nftables` on Linux, Windows Defender Firewall). They protect the device regardless of which network it is on.
 
-<Aside type="note">
+<Aside type="note" title="Lateral Traffic and Firewall Blindspots">
 Firewalls only inspect traffic that passes through them. Traffic that stays entirely within an unmanaged switch (between two devices on the same switch port group) never hits a firewall unless endpoint firewalls are involved. This is a frequently overlooked gap in network designs.
 </Aside>
 
@@ -716,27 +681,26 @@ A NAS is a single device (or small cluster) that shares files over a standard TC
 | Cost and complexity | High | Low |
 | Use case | Databases, VM datastores | File shares, backups, home directories |
 
-## Putting it all together
+Network storage failures have distinctive signatures that differ from ordinary network failures. An NFS mount that succeeded during provisioning may go stale after a network partition: the server is reachable, the mount point exists, but read and write operations block indefinitely until the kernel times out. This differs from a refused connection because the hang occurs mid-operation, not at mount time. The NFS mount options `soft` and `hard` control this behavior: a `soft` mount returns an error after a timeout, while a `hard` mount retries forever (protecting data integrity but risking hung processes). SMB authentication failures look different again: the share is reachable but connections are refused with "access denied," typically because a Kerberos ticket has expired or the client's domain membership does not match the server's access control list. SAN failures are more abrupt: if a Fibre Channel HBA loses zoning or an iSCSI session drops, block devices disappear from the operating system and any filesystems on them go read-only to prevent corruption. The right diagnostic tool is not `ping` or `dig` but `multipath -ll` for multipath state or `iscsiadm -m session` for iSCSI sessions.
 
-Let us walk through our scenario one final time, applying the full troubleshooting methodology.
+## Takeaways
 
-<Steps>
-1. **Verify the report.** Try to reach the application yourself. Confirm the symptoms (timeout, connection refused, DNS error, wrong content).
-2. **Check the physical and data-link layers.** Is the server's network interface up? Is the link light on? Is it on the correct VLAN?
-3. **Check IP configuration.** Does the server have the right IP address? Is the default gateway correct? Can it ping the gateway?
-4. **Test DNS.** Does `dig app.example.com` return the correct IP? Does it match the server's actual address?
-5. **Test routing.** Can the server reach external hosts? Does `traceroute` from a client reach the server's subnet?
-6. **Check firewalls.** Is the port open in `iptables`/`nftables`? In cloud security groups? In any network firewalls between client and server?
-7. **Check the application.** Is the web server process running? Is it listening on the expected port and interface?
-8. **Capture packets.** If all of the above checks pass, use `tcpdump` to observe what is actually happening on the wire. The packets do not lie.
-</Steps>
+The design concepts and the troubleshooting concepts in this lecture are not separate subjects; they reinforce each other. A sysadmin who designed the VLAN layout knows immediately that a server moved to the wrong switch port will fail at layer 2, not layer 3, and reaches for `ip neighbor show` rather than `ping`. A sysadmin who understands split-horizon DNS knows that a name resolving correctly from outside the office does not mean it resolves correctly from inside. A sysadmin who has configured TLS termination on a reverse proxy knows to run `openssl s_client` against the backend, not just the frontend, when diagnosing certificate failures.
 
-Each step either identifies the problem or eliminates a layer from consideration. By the time you reach packet capture, you have narrowed the issue to a very specific part of the stack, and the capture will almost always reveal the root cause.
+A connectivity failure that once seemed opaque resolves into a stack of checkable layers: physical link state, VLAN assignment, IP addressing, DNS resolution, routing, firewall rules, and finally the application itself. Each layer either explains the problem or eliminates itself from consideration. The divide-and-conquer approach works because the layers are largely independent: a broken DHCP server has nothing to do with a misconfigured firewall rule, and a certificate expiry has nothing to do with a missing route. Every tool covered here, from `ip neighbor show` to `dig` to `openssl s_client` to `tcpdump`, targets a specific layer. The skill is knowing which layer to check first.
 
-Networking problems can feel overwhelming when you stare at a vague error message in a browser. But with a systematic approach, the right tools, and an understanding of how each layer works, you can diagnose virtually any connectivity issue. The key is discipline: start at the bottom, verify each layer, and let the evidence guide you.
+The network topics here connect forward to infrastructure automation: Terraform will provision VPCs and security groups using the same conceptual model applied here with `iptables` and DHCP reservations; Ansible will configure Nginx and firewall rules idempotently across fleets of servers. Both tools depend on the same understanding of what a security group is, what a subnet boundary means, and why a firewall rule that works on a single server needs to be encoded in configuration management rather than set by hand.
 
 ## Resources
 
-- <a href="https://www.youtube.com/@NetworkDirection" target="_blank" rel="noopener noreferrer">Network Direction, YouTube channel (highly recommended)</a>
-- <a href="https://www.youtube.com/watch?v=cNwEVYkx2Kk" target="_blank" rel="noopener noreferrer">Cabling Devices: Network Fundamentals Part 1 (YouTube)</a>
+- <a href="https://www.youtube.com/@NetworkDirection" target="_blank" rel="noopener noreferrer">Network Direction (YouTube Channel)</a>
 - <a href="https://www.youtube.com/watch?v=lwArmpjGHpM" target="_blank" rel="noopener noreferrer">How To Design Your Own Enterprise Network: Cisco CCNA (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=cNwEVYkx2Kk" target="_blank" rel="noopener noreferrer">Cabling Devices: Network Fundamentals Part 1 (YouTube)</a>
+- <a href="https://letsencrypt.org/how-it-works/" target="_blank" rel="noopener noreferrer">How It Works (Let's Encrypt, Official Documentation)</a>
+- <a href="https://certificate.transparency.dev/" target="_blank" rel="noopener noreferrer">Certificate Transparency (Google, Official Site)</a>
+- <a href="https://www.wireguard.com/" target="_blank" rel="noopener noreferrer">WireGuard: Fast, Modern, Secure VPN Tunnel (Official Site)</a>
+- <a href="https://nginx.org/en/docs/http/ngx_http_proxy_module.html" target="_blank" rel="noopener noreferrer">ngx_http_proxy_module (Nginx Official Documentation)</a>
+- <a href="https://www.cloudflare.com/learning/network-layer/what-is-ospf/" target="_blank" rel="noopener noreferrer">What Is OSPF? (Cloudflare, Article)</a>
+- <a href="https://www.cloudflare.com/learning/network-layer/what-is-bgp/" target="_blank" rel="noopener noreferrer">What Is BGP? Border Gateway Protocol Explained (Cloudflare, Article)</a>
+- <a href="https://www.youtube.com/watch?v=GR2GB6Qknlw" target="_blank" rel="noopener noreferrer">VLANs Explained (NetworkChuck, YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=J7QQe5JnZFg" target="_blank" rel="noopener noreferrer">Packet Traveling: How Packets Move Through a Network (YouTube)</a>

@@ -45,63 +45,63 @@ Linux Server Planning prepares you for the hands-on WordPress deployment this we
 | | |
 |---|---|
 | **Lecture 5** | Containerization with Docker |
-| **Lecture 6** | Cloud Computing and VM Deployment |
+| **Lecture 6** | Cloud Networking, Storage, and Identity |
 | **Lab 3** | [Containerizing a Web Application (Docker Compose)](/labs/containerizing-a-web-application/) |
 
-Docker builds directly on the VM foundation from Week 1: containers share a kernel instead of virtualizing hardware. Cloud Computing is introduced Thursday to cover S3, ECR, IAM roles, and VPC design one full week before you use ECR and S3 in Lab 4.
+Docker builds directly on the VM foundation from Week 1: containers share a kernel instead of virtualizing hardware. Cloud Networking, Storage, and Identity is introduced Thursday to cover VPC design, IAM roles, S3, and ECR one full week before you use ECR and S3 in Lab 4.
 
-## Week 4: Security and Scripting
+## Week 4: Infrastructure as Code and Scripting
 
 | | |
 |---|---|
-| **Lecture 7** | System Security and Hardening |
+| **Lecture 7** | Infrastructure as Code with Terraform |
 | **Lecture 8** | Shell Scripting and Automation Basics |
 | **Lab 4** | [Image Registry, Backups, and Version Switching (ECR + S3)](/labs/image-registry-and-version-switching/) |
 | **Assignment 2** | **Sunday: [Ops 2: Containerized Minecraft Server](/assignments/minecraft-2-containerized-server/)** |
 
-Security hardening covers IAM policies and access controls that apply directly to the ECR and S3 work in this week's lab. Scripting supports the backup and versioning workflows here and the automation-heavy weeks ahead.
+Terraform is introduced Tuesday so you have the full week to internalize IaC concepts before the Lab 5 hands-on stack. Scripting supports the backup and versioning workflows in this week's lab and the automation-heavy weeks immediately ahead.
 
-## Week 5: Network Troubleshooting and Infrastructure as Code
+## Week 5: Configuration Management and CI/CD
 
 | | |
 |---|---|
-| **Lecture 9** | Building and Operating a Company Network |
-| **Lecture 10** | Infrastructure as Code with Terraform |
+| **Lecture 9** | Configuration Management with Ansible |
+| **Lecture 10** | CI/CD Pipelines and GitHub Actions |
 | **Lab 5** | [Your First Infrastructure Stack (Terraform)](/labs/first-infrastructure-stack/) |
 
-Network troubleshooting deepens your ability to debug VPC and connectivity issues you will encounter as your infrastructure grows. Terraform is introduced Thursday, giving you the concepts immediately before the hands-on lab.
+Both lectures directly prepare you for Lab 6 the following week, giving you a full week to absorb Ansible and GitHub Actions before building the automated pipeline. The Terraform infrastructure from Lab 5 is exactly what Ansible and CI/CD will configure and deploy to in Lab 6.
 
-## Week 6: Configuration Management and CI/CD
+## Week 6: Security, Networking, and Automation
 
 | | |
 |---|---|
-| **Lecture 11** | Configuration Management with Ansible |
-| **Lecture 12** | CI/CD Pipelines and GitHub Actions |
+| **Lecture 11** | System Security and Hardening |
+| **Lecture 12** | Building and Operating a Company Network |
 | **Lab 6** | [Automated Configuration and Deployment (Ansible + GitHub Actions)](/labs/automated-configuration-and-deployment/) |
 | **Assignment 3** | **Sunday: [Ops 3: Infrastructure Automation](/assignments/minecraft-3-infrastructure-automation/)** |
 
-Both lectures directly support this week's lab. Ansible covers idempotent configuration; CI/CD covers the automated build-test-deploy pipeline you will build with GitHub Actions.
+Five weeks of hands-on cloud infrastructure experience make the security hardening and network design concepts land with real operational weight. Both lectures deepen your ability to reason about the infrastructure you are now automating with Ansible and GitHub Actions in this week's lab.
 
-## Week 7: Container Orchestration and Logging
+## Week 7: Container Orchestration and Monitoring
 
 | | |
 |---|---|
 | **Lecture 13** | Container Orchestration with Kubernetes |
-| **Lecture 14** | Log Management and Analysis |
+| **Lecture 14** | Monitoring and Performance Management |
 | **Lab 7** | [First Container Orchestration Deployment (k3s)](/labs/first-container-orchestration-deployment/) |
 
-Kubernetes introduces the orchestration concepts directly before the k3s lab. Log Management is paired here because you will need log analysis skills immediately when debugging pod deployments — `kubectl logs`, container crash output, and event streams are the first tools you reach for when something fails in a cluster.
+Kubernetes introduces orchestration concepts directly before the k3s lab. Monitoring is moved here, one full week before Lab 8's health probe and failure drill work, so the metrics and alerting concepts are solidly in place before you need to apply them.
 
-## Week 8: Incident Response and Monitoring
+## Week 8: Incident Response and Log Management
 
 | | |
 |---|---|
 | **Lecture 15** | Incident Response and Disaster Recovery |
-| **Lecture 16** | Monitoring and Performance Management |
+| **Lecture 16** | Log Management and Analysis |
 | **Lab 8** | [Cluster Operations: Health Probes, Rollouts, and Failure Drills (Kubernetes)](/labs/cluster-operations/) |
 | **Assignment 4** | **Sunday: [Ops 4: Container Orchestration](/assignments/minecraft-4-container-orchestration/)** |
 
-Incident Response is moved here because Lab 8's failure drills — bad images, OOM kills, rollbacks — are the exact scenarios the lecture prepares you for. RTO/RPO concepts now have direct hands-on context. Monitoring covers health probes, resource metrics, and alerting patterns that this week's lab configures and that next week's observability workshop builds on.
+Lab 8's failure drills (bad images, OOM kills, rollbacks) are the exact scenarios the Incident Response lecture prepares you for. Log Management pairs naturally here: when a pod crashes or a rollout fails, logs are the first diagnostic tool you reach for.
 
 ## Week 9: Postmortems and Server Breadth
 
@@ -111,7 +111,7 @@ Incident Response is moved here because Lab 8's failure drills — bad images, O
 | **Lecture 18** | Windows Server Administration and Active Directory |
 | **Lab 9** | [Observability Workshop: Metrics and Dashboards (Prometheus + Grafana)](/labs/observability-workshop/) |
 
-The observability lab builds on the monitoring concepts from Week 8. Postmortems is paired here — one week before Assignment 5's postmortem requirement — so the blameless review framework and communication templates are fresh when you sit down to write. Windows Server broadens your perspective: the same administration principles apply outside Linux.
+The observability lab builds on the monitoring concepts from Week 7. Postmortems is paired here, one week before Assignment 5's postmortem requirement, so the blameless review framework and communication templates are fresh when you sit down to write. Windows Server broadens your perspective: the same administration principles apply outside Linux.
 
 ## Week 10: Architecture and Wrap-Up
 
