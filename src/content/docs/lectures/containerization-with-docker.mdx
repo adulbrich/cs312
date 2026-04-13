@@ -1,6 +1,6 @@
 ---
 title: Containerization with Docker
-description: "From bare metal to containers: how Linux namespaces and cgroups power container isolation, how Docker images are built and layered, how volumes and Compose manage state and multi-service applications, and how Podman and the OCI standard define the broader container ecosystem."
+description: "From bare metal to containers: how Linux namespaces and cgroups power container isolation, how Docker images are built and layered, how volumes and Compose manage state and multi-service applications, how container replacement makes version upgrades clean, how Podman and the OCI standard define the broader ecosystem, and how FreeBSD jails, Windows containers, and WebAssembly sandboxes approach the same isolation problem differently."
 sidebar:
   order: 5
 draft: true
@@ -67,7 +67,7 @@ The PID namespace is equally important: the first process started inside a conta
 
 **[LXC](https://linuxcontainers.org/lxc/introduction/) (Linux Containers):** Combining cgroups and namespaces, LXC appeared around 2008 as a way to run a full "virtual operating system" without a hypervisor. An LXC container might run Ubuntu inside even though the host runs Debian, while sharing the same host kernel. This makes LXC very resource-efficient, but because the kernel is shared, a kernel vulnerability could potentially be exploited across container boundaries.
 
-**Docker's paradigm shift:** Earlier containerization approaches like LXC virtualized an entire OS environment. Docker's insight was to discard the OS portion entirely and virtualize only the single application you want to run. A Docker container is not "a small Ubuntu"; it is your application process, packaged with the user-space libraries it needs. Docker originally used LXC internally, but now uses **libcontainer** (part of the `runc` project), a purpose-built library that directly uses cgroups and namespaces.
+**[Docker](https://www.docker.com/)'s paradigm shift:** Earlier containerization approaches like LXC virtualized an entire OS environment. Docker's insight was to discard the OS portion entirely and virtualize only the single application you want to run. A Docker container is not "a small Ubuntu"; it is your application process, packaged with the user-space libraries it needs. Docker originally used LXC internally, but now uses **libcontainer** (part of the `runc` project), a purpose-built library that directly uses cgroups and namespaces.
 
 <Aside type="note" title="Containers Are Not Lightweight VMs">
 A common misconception is that containers are "small VMs." They are not. A VM virtualizes hardware and runs a complete guest kernel. A container is a regular process (or group of processes) on the host, isolated through kernel namespaces and constrained through cgroups. The host kernel is shared, which is why you cannot run a Windows container on a Linux host without a VM intermediary. The tradeoff is clear: containers offer speed and density at the cost of weaker isolation, while VMs offer stronger isolation at the cost of resource overhead.
@@ -454,6 +454,36 @@ Tags are mutable pointers. `latest` is a convention, not a guarantee of recency;
 When pushing to a public repository, every layer is publicly accessible. Never bake secrets, passwords, or private keys into an image layer, even in an intermediate layer that was later overwritten. All layers in the build history are accessible to anyone who pulls the image. Use multi-stage builds and runtime secrets injection instead.
 </Aside>
 
+### Replacing Running Containers
+
+The reason tagging and registries matter operationally is that they make version upgrades clean. Because the container is an ephemeral runtime instance and the image is the immutable artifact, upgrading means pulling a new image and recreating the container, not modifying a running process in place. The old container's filesystem is discarded; any data that matters is in a volume and survives untouched.
+
+With Docker Compose, this workflow is straightforward:
+
+```bash
+# Pull all updated images declared in compose.yml
+docker compose pull
+
+# Recreate containers that are using outdated images
+docker compose up -d
+```
+
+Compose detects which services have a newer image than what is currently running and recreates only those containers. Services whose image has not changed are left alone. The named volumes attached to each service are unaffected by the container recreation.
+
+The same principle applies to rollbacks. Because each image version is a separate, immutable artifact, rolling back to an older version means pulling the previous tag and recreating the container. There is no in-place state to unwind because the state never lived in the container:
+
+```bash
+# Roll back to a specific prior version
+docker compose pull myusername/my-app:1.2.3
+docker compose up -d
+```
+
+This clean separation between application code (in the image) and application data (in the volume) is one of the core operational benefits of the container model. It is also why pinning to a specific version tag like `1.2.3` rather than `latest` matters in production: you always know exactly which image is running and can recreate it precisely or roll back to it by name.
+
+<Aside type="tip" title="Verify Before Replacing">
+Before running `docker compose up -d` in production, it is worth confirming which images will change. `docker compose pull` tells you which images were updated, and you can inspect the new image with `docker image inspect` or run it in a staging environment before promoting. The replacement itself is fast, but a broken image costs downtime.
+</Aside>
+
 ## The Container Ecosystem
 
 Docker popularized containers, but it is not the only tool in the ecosystem. Understanding the standards that govern container interoperability helps you reason about alternatives.
@@ -566,20 +596,40 @@ Docker marks the container as `healthy`, `unhealthy`, or `starting` based on the
 
 Never put passwords, API keys, or certificates in a Dockerfile or in files that get copied into the image. Anyone who pulls the image can extract them from any layer. Inject secrets at runtime through environment variables, Docker secrets (in Swarm mode), or external secret managers (HashiCorp Vault, AWS Secrets Manager). Even environment variables are visible via `docker inspect`, so for highly sensitive values, mount a secrets file from a volume or use a dedicated secrets management tool.
 
+## Beyond Linux: Container Alternatives
+
+Everything described in this lecture, namespaces, cgroups, runc, Docker, Podman, assumes a Linux kernel. That is not incidental. Namespaces and cgroups are Linux kernel features; they do not exist on macOS or Windows kernels. This is why Docker Desktop on macOS runs a lightweight Linux VM under the hood, and why Podman on macOS does the same. When you run `docker run` on a Mac, your container is not running on macOS directly; it is running on a Linux kernel inside a VM that Docker manages transparently. The tools hide this, but understanding it explains why you cannot run a Linux container on a Windows host without virtualization, and why image architectures must match the host's CPU architecture.
+
+The Linux-specific design of the mainstream container stack does not mean containerization as a concept is unique to Linux. Different operating systems and environments have developed their own isolation mechanisms, each reflecting the design priorities of their platform.
+
+### FreeBSD Jails
+
+[FreeBSD jails](https://docs.freebsd.org/en/books/handbook/jails/) predate Docker by over a decade. Introduced in FreeBSD 4.0 in 2000, a jail creates an isolated environment with its own filesystem subtree, hostname, and IP address, similar in concept to what Linux namespaces provide. Processes inside a jail cannot see or affect processes outside it, and even `root` inside the jail has limited capabilities on the host. FreeBSD jails were a major influence on Linux container design, and the problem they solved (isolating multiple services on a shared server) is exactly the problem Docker was built to solve. The key difference is platform: jails run on FreeBSD only and use BSD kernel primitives rather than Linux cgroups and namespaces. They are still in active use in production FreeBSD environments.
+
+### Windows Containers
+
+Microsoft added native container support in Windows Server 2016. [Windows containers](https://learn.microsoft.com/en-us/virtualization/windowscontainers/about/) use Windows-specific kernel features, analogous to Linux namespaces and cgroups, to isolate Windows processes. They can run Windows executables, Windows services, and Windows-native applications. They are not Linux containers; you cannot run a Linux image in a Windows container or vice versa. Windows containers come in two isolation modes: process isolation (sharing the Windows host kernel, similar to Linux containers) and Hyper-V isolation (each container gets its own lightweight VM kernel, similar to a VM but with a container-like interface). The Hyper-V mode exists partly because Windows kernel isolation has historically been considered less mature than Linux's, so the stronger VM boundary is an option for higher-security workloads.
+
+### WebAssembly Sandboxes
+
+[WebAssembly (WASM)](https://webassembly.org/) started as a browser technology for running compiled code at near-native speed in a safe sandbox. In recent years, efforts like [WASI](https://wasi.dev/) (WebAssembly System Interface) have extended it to server-side environments, and tools like [wasmtime](https://wasmtime.dev/) and [WasmEdge](https://wasmedge.org/) can run WASM modules as server workloads. The isolation model is fundamentally different from Linux containers: instead of OS-level process isolation using kernel features, WASM provides language-level sandboxing enforced by the runtime. A WASM module cannot access memory or system calls outside what the host explicitly grants, regardless of what operating system or kernel is running. The practical appeal is extreme portability: the same WASM binary can run on Linux, macOS, Windows, and even embedded devices, without recompilation or a VM. The tradeoff is that WASM has a different execution model and limited language support, and the server-side ecosystem is still maturing compared to OCI containers. Some container orchestrators, including Kubernetes, have experimental support for running WASM workloads alongside traditional containers.
+
+The common thread across all of these approaches is the same problem: how do you run multiple isolated workloads on shared infrastructure without them interfering with each other? FreeBSD jails solved it with BSD kernel primitives. Linux solved it with namespaces and cgroups. Windows solved it with its own kernel objects and optionally Hyper-V. WASM solves it at the language runtime level, independent of the OS entirely. Docker's dominance reflects that Linux became the default server platform, not that the container concept itself is Linux-specific.
+
 ## Takeaways
 
 Consider what deploying a Python web application with a PostgreSQL database looks like using everything in this lecture. You write a Dockerfile starting from `python:3.12-slim`, copy `requirements.txt` first, run `pip install`, then copy the rest of the source code. That ordering is deliberate: it keeps the install layer cached across code changes, so rebuilds are fast. You add a `HEALTHCHECK` instruction so the container does not report healthy until the application is actually serving requests, and you switch to a non-root `appuser` before the `CMD` so the runtime process has minimal privileges.
 
 In `compose.yml` you declare two services: `web` and `database`. Compose creates a user-defined bridge network for the project and attaches both services to it, so `web` can connect to `database` by hostname without any manual network configuration. The `database` service uses a named volume for its data files so they survive container replacement. The `web` service declares `depends_on` with `condition: service_healthy` to wait for the database before starting. You bring everything up with `docker compose up --build -d` and follow startup with `docker compose logs -f`.
 
-When it is time to deploy, you tag the image with a specific version and push it to GHCR. On the target server, `docker compose pull` fetches the new image, and `docker compose up -d` replaces the running container while leaving the volume intact.
+When it is time to deploy, you tag the image with a specific version like `1.3.0` and push it to GHCR. On the target server, `docker compose pull` fetches the new image, and `docker compose up -d` replaces the running container while leaving the named volume intact. The data never lived in the container, so the replacement is clean. Rolling back means pulling the previous tag and doing the same thing in reverse.
 
-The container model introduces a clean separation of concerns: the image is the immutable artifact, the container is the ephemeral runtime instance, volumes hold the state that outlives any individual instance, and registries distribute images wherever they need to run. What containers do not replace is the need to understand the underlying systems. A containerized application still depends on networking, storage, and security. Containers change where you manage those concerns, from the host configuration to the container definition, but they do not make those concerns disappear.
+The container model introduces a clean separation of concerns: the image is the immutable artifact, the container is the ephemeral runtime instance, volumes hold the state that outlives any individual instance, and registries distribute images wherever they need to run. That separation is also what makes version upgrades and rollbacks straightforward: you are not modifying a running system; you are swapping one image for another while the data stays put.
+
+What containers do not replace is the need to understand the underlying systems. All of this works because Linux provides namespaces and cgroups. On macOS or Windows, a Linux VM sits between you and those kernel features, even if the tools hide it. Other platforms solve the same isolation problem differently: FreeBSD with jails, Windows with its own kernel primitives, and WebAssembly by stepping outside the OS model entirely. Docker's dominance reflects Linux's dominance on servers, not the universality of the specific mechanism.
 
 ## Resources
 
 - <a href="https://www.youtube.com/watch?v=pg19Z8LL06w" target="_blank" rel="noopener noreferrer">Docker Crash Course for Absolute Beginners (TechWorld with Nana) (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=3c-iBn73dDE" target="_blank" rel="noopener noreferrer">Docker Tutorial for Beginners: Full Course (TechWorld with Nana) (YouTube)</a>
-- <a href="https://docs.docker.com/" target="_blank" rel="noopener noreferrer">Docker Documentation</a>
-- <a href="https://podman.io/docs" target="_blank" rel="noopener noreferrer">Podman Documentation</a>
-- <a href="https://opencontainers.org/" target="_blank" rel="noopener noreferrer">Open Container Initiative</a>
+- <a href="https://hacks.mozilla.org/2019/03/standardizing-wasi-a-webassembly-system-interface/" target="_blank" rel="noopener noreferrer">Standardizing WASI: A WebAssembly System Interface (Mozilla Hacks)</a>

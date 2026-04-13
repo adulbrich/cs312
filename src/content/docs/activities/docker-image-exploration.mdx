@@ -544,7 +544,33 @@ Compose wires multiple containers together with automatic networking, shared con
    curl http://localhost:8081      # nothing mapped here for echo; fails
    ```
 
-6. Stop the stack and observe what persists:
+6. Simulate upgrading the web service. Open `compose.yml` and change the `web` image from `nginx:alpine` to `nginx:latest`. Then pull the updated image and recreate the container:
+
+   ```bash
+   docker compose pull
+   docker compose up -d
+   ```
+
+   `docker compose pull` fetches `nginx:latest` and reports which images changed. `docker compose up -d` recreates only the containers whose image changed. The `echo` service is unchanged and left running.
+
+   Verify the stack is still working:
+
+   ```bash
+   curl http://localhost:8080
+   docker compose ps
+   ```
+
+   The HTML you put in `html/` is still served. The bind mount was never inside the old container; it survived the replacement unchanged.
+
+7. Check which nginx version is actually running now:
+
+   ```bash
+   docker compose exec web nginx -v
+   ```
+
+   Compare it to what `nginx:alpine` would report. The container was replaced; the content was not.
+
+8. Stop the stack and observe what persists:
 
    ```bash
    docker compose down
@@ -552,7 +578,7 @@ Compose wires multiple containers together with automatic networking, shared con
    ls html/            # bind-mounted host directory is unchanged
    ```
 
-7. Clean up:
+9. Clean up:
 
    ```bash
    cd .. && rm -rf mystack
@@ -561,6 +587,10 @@ Compose wires multiple containers together with automatic networking, shared con
 
 <ActivityQuestion>
 Compose created a network automatically and attached both services to it. Compare this to what you did manually in Part 6 (creating a network and running containers with `--network`). What does Compose automate, and what would you have had to do by hand without it?
+</ActivityQuestion>
+
+<ActivityQuestion>
+When you ran `docker compose up -d` after pulling `nginx:latest`, Compose recreated the `web` container but left `echo` running. What tells Compose which containers need to be replaced? If your application had written files inside the container's own filesystem (not in a volume or bind mount), would those files have survived the replacement?
 </ActivityQuestion>
 
 <ActivityQuestion>
