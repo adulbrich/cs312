@@ -1,141 +1,469 @@
 ---
-title: "Reading a Terraform Plan"
-description: "Initialize a provided Terraform configuration, run terraform plan, and answer questions about what it would create without applying it."
+title: "Provisioning Infrastructure with Terraform"
+description: "Write a three-file Terraform configuration, run the full init-validate-plan-apply-destroy lifecycle against your AWS Academy account, and inspect how state tracks everything Terraform creates."
 sidebar:
   order: 7
 draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-`terraform plan` is the most important command in Terraform's workflow — it is your chance to verify what will happen before anything is created or destroyed. This activity builds the habit of reading plans carefully.
+This activity puts into practice the concepts from the [Infrastructure as Code with Terraform](/lectures/infrastructure-as-code/) lecture. You will write a complete Terraform configuration from scratch, run every command in the core workflow against your real AWS Academy account, and observe how Terraform tracks live infrastructure in its state file. By the end, you will have provisioned and destroyed an EC2 instance entirely through code, and you will have read the state Terraform writes at every step.
 
-**Prerequisite:** Terraform installed on your laptop (see Lab 5) and AWS credentials configured for your Academy account.
+## What You Will Need
 
-## The Configuration
+- Terraform 1.6 or newer installed on your laptop ([download](https://developer.hashicorp.com/terraform/install))
+- AWS CLI configured with your Academy credentials (`aws configure` run, or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN` environment variables exported)
+- A text editor
+- Your ONID
 
-Create a directory `~/tf-activity` and write the following three files:
+---
 
-**`main.tf`**
-```hcl
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
+## Part 1: Set Up the Project
 
-provider "aws" {
-  region = "us-east-1"
-}
-
-data "aws_vpc" "default" {
-  default = true
-}
-
-resource "aws_security_group" "web" {
-  name        = "activity-web-sg"
-  description = "Activity security group"
-  vpc_id      = data.aws_vpc.default.id
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "aws_instance" "web" {
-  ami           = var.ami_id
-  instance_type = var.instance_type
-
-  vpc_security_group_ids = [aws_security_group.web.id]
-
-  tags = {
-    Name  = "activity-web"
-    Owner = var.owner_name
-  }
-}
-```
-
-**`variables.tf`**
-```hcl
-variable "ami_id" {
-  description = "Ubuntu 24.04 AMI in us-east-1"
-  type        = string
-  default     = "ami-0a0e5d9c7acc336f1"
-}
-
-variable "instance_type" {
-  type    = string
-  default = "t3.micro"
-}
-
-variable "owner_name" {
-  description = "Your name, to appear in the instance tag"
-  type        = string
-}
-```
-
-**`outputs.tf`**
-```hcl
-output "instance_id" {
-  value = aws_instance.web.id
-}
-
-output "security_group_id" {
-  value = aws_security_group.web.id
-}
-```
-
-## Steps
+The configuration is split across three files following the standard Terraform project layout: `main.tf` for resources, `variables.tf` for input variable declarations, and `outputs.tf` for values to expose after apply.
 
 <Steps>
 
-1. **Initialize:**
+1. **Create the project directory:**
+
    ```bash
-   cd ~/tf-activity
+   mkdir ~/tf-activity && cd ~/tf-activity
+   ```
+
+2. **Write `main.tf`:**
+
+   ```hcl
+   terraform {
+     required_version = ">= 1.6"
+     required_providers {
+       aws = {
+         source  = "hashicorp/aws"
+         version = "~> 5.0"
+       }
+     }
+   }
+
+   provider "aws" {
+     region = "us-east-1"
+   }
+
+   data "aws_vpc" "default" {
+     default = true
+   }
+
+   data "aws_ami" "ubuntu" {
+     most_recent = true
+     owners      = ["099720109477"]
+
+     filter {
+       name   = "name"
+       values = ["ubuntu/images/hvm-ssd/ubuntu-*-24.04-amd64-server-*"]
+     }
+   }
+
+   locals {
+     common_tags = {
+       ManagedBy = "terraform"
+       Owner     = var.onid
+     }
+   }
+
+   resource "aws_security_group" "web" {
+     name        = "tf-activity-${var.onid}"
+     description = "Terraform activity security group"
+     vpc_id      = data.aws_vpc.default.id
+
+     ingress {
+       description = "HTTP"
+       from_port   = 80
+       to_port     = 80
+       protocol    = "tcp"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     egress {
+       from_port   = 0
+       to_port     = 0
+       protocol    = "-1"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     tags = local.common_tags
+   }
+
+   resource "aws_instance" "web" {
+     ami                    = data.aws_ami.ubuntu.id
+     instance_type          = var.instance_type
+     vpc_security_group_ids = [aws_security_group.web.id]
+
+     tags = merge(local.common_tags, {
+       Name = "tf-activity-${var.onid}"
+     })
+   }
+   ```
+
+3. **Write `variables.tf`:**
+
+   ```hcl
+   variable "onid" {
+     description = "Your ONID (e.g., smithj)"
+     type        = string
+   }
+
+   variable "instance_type" {
+     description = "EC2 instance size"
+     type        = string
+     default     = "t3.micro"
+   }
+   ```
+
+4. **Write `outputs.tf`:**
+
+   ```hcl
+   output "instance_id" {
+     description = "EC2 instance ID"
+     value       = aws_instance.web.id
+   }
+
+   output "public_ip" {
+     description = "Public IP address"
+     value       = aws_instance.web.public_ip
+   }
+
+   output "security_group_id" {
+     description = "Security group ID"
+     value       = aws_security_group.web.id
+   }
+
+   output "ami_id" {
+     description = "AMI resolved by the data source"
+     value       = data.aws_ami.ubuntu.id
+   }
+   ```
+
+5. **Create `terraform.tfvars`** with your ONID:
+
+   ```hcl
+   onid = "smithj"
+   ```
+
+   Replace `smithj` with your actual ONID. Terraform loads this file automatically, so you will not need to pass your ONID on the command line for every command.
+
+6. **Initialize the working directory:**
+
+   ```bash
    terraform init
    ```
 
-2. **Run the plan, setting your name as the owner:**
-   ```bash
-   terraform plan -var="owner_name=YOUR_NAME"
-   ```
-   Replace `YOUR_NAME` with your actual name. This will appear in the plan output and in the EC2 tag if applied.
+   Terraform downloads the AWS provider plugin and writes a `.terraform.lock.hcl` file recording the exact version selected. The last line reads:
 
-3. **Take a screenshot** of the plan output showing the full list of resources and the `+` symbols.
+   ```
+   Terraform has been successfully initialized!
+   ```
+
+   A `.terraform/` directory also appears. It contains the downloaded provider binary. You do not need to open it.
+
+7. **Validate the configuration:**
+
+   ```bash
+   terraform validate
+   ```
+
+   This checks for syntax errors and internal consistency without contacting AWS. You should see:
+
+   ```
+   Success! The configuration is valid.
+   ```
+
+8. **Format the files:**
+
+   ```bash
+   terraform fmt
+   ```
+
+   If your files are already aligned correctly, `fmt` produces no output. If it adjusted indentation, it prints the filename it changed. Either result is correct.
 
 </Steps>
 
-<Aside type="caution">
-Do not run `terraform apply`. This activity ends at `plan`.
+<Aside type="note" title="The Lock File">
+`.terraform.lock.hcl` records the exact provider version Terraform selected. Commit it to version control so every collaborator installs the same version. Never edit it by hand.
 </Aside>
 
-## Questions
+---
 
-Answer based on the plan output you see:
+## Part 2: Reading the Plan
 
-1. How many resources does the plan say it will create? List each resource type.
-2. What is the value of the `Owner` tag that would be applied to the instance?
-3. The security group allows port 80 from `0.0.0.0/0`. What does that mean, and is SSH (port 22) accessible?
-4. Change `instance_type` default to `t3.small` in `variables.tf`. Run `plan` again. Does the change show as "update in-place" or "destroy and recreate"? Why?
-5. The `data "aws_vpc" "default"` block does not create anything. What does it do, and how is it used by `aws_security_group.web`?
+Before creating any real infrastructure, run `terraform plan` to see exactly what Terraform intends to do. Nothing changes in AWS at this stage.
 
-## Deliverable
+<Steps>
 
-Submit a PDF to Canvas containing:
-- A screenshot of `terraform plan` output showing the resources listed, with your name visible in the `Owner` tag value
-- Answers to the five questions
+1. **Run the plan:**
 
-Your **full name and student ID** must appear in the PDF header.
+   ```bash
+   terraform plan
+   ```
+
+   Terraform starts by reading the data sources, then lists the resources it would create. The output looks something like this (abbreviated):
+
+   ```
+   data.aws_ami.ubuntu: Reading...
+   data.aws_vpc.default: Reading...
+   data.aws_ami.ubuntu: Read complete after 1s [id=ami-0abcdef1234567890]
+   data.aws_vpc.default: Read complete after 1s [id=vpc-0123456789abcdef0]
+
+   Terraform will perform the following actions:
+
+     # aws_security_group.web will be created
+     + resource "aws_security_group" "web" {
+         + name   = "tf-activity-smithj"
+         + tags   = {
+             + "ManagedBy" = "terraform"
+             + "Owner"     = "smithj"
+           }
+         + vpc_id = "vpc-0123456789abcdef0"
+         ...
+       }
+
+     # aws_instance.web will be created
+     + resource "aws_instance" "web" {
+         + ami           = "ami-0abcdef1234567890"
+         + instance_type = "t3.micro"
+         + tags          = {
+             + "ManagedBy" = "terraform"
+             + "Name"      = "tf-activity-smithj"
+             + "Owner"     = "smithj"
+           }
+         ...
+       }
+
+   Plan: 2 to add, 0 to change, 0 to destroy.
+   ```
+
+   The two data sources appear at the top without a `+` symbol because data sources are read-only: Terraform fetched their values from AWS, but will not create or modify anything to get them.
+
+2. **Find your ONID in the plan.** Both the security group and the instance show an `Owner` tag containing your ONID. Trace how it got there: `terraform.tfvars` sets `onid`, the `locals` block builds `common_tags` with that value, and each resource uses `local.common_tags`.
+
+3. **Find the AMI ID.** The `ami` attribute of `aws_instance.web` shows the actual AMI ID the data source resolved at plan time. Record it. This same ID will appear in the state file after apply.
+
+4. **Notice the creation order.** `aws_security_group.web` is listed before `aws_instance.web`. The instance block references `aws_security_group.web.id` in its `vpc_security_group_ids` argument, which creates an implicit dependency. Terraform's dependency graph enforces the correct ordering automatically.
+
+</Steps>
+
+<ActivityQuestion>
+The plan lists `aws_security_group.web` before `aws_instance.web`. What specific line in `main.tf` creates this dependency, and what would happen at the AWS API level if Terraform tried to launch the instance before the security group existed?
+</ActivityQuestion>
+
+---
+
+## Part 3: Apply the Configuration
+
+Apply the plan to create the two resources in your AWS account.
+
+<Steps>
+
+1. **Apply:**
+
+   ```bash
+   terraform apply
+   ```
+
+   Terraform shows the plan one more time and prompts for confirmation:
+
+   ```
+   Do you want to perform these actions?
+     Terraform will perform the actions described above.
+     Only 'yes' will be accepted to approve.
+
+     Enter a value:
+   ```
+
+2. **Type `yes` and press Enter.** The security group creates in a few seconds; the instance takes 20-30 seconds:
+
+   ```
+   aws_security_group.web: Creating...
+   aws_security_group.web: Creation complete after 2s [id=sg-0abc123def456789]
+   aws_instance.web: Creating...
+   aws_instance.web: Still creating... [10s elapsed]
+   aws_instance.web: Creation complete after 24s [id=i-0abc123def456789]
+
+   Apply complete! Resources: 2 added, 0 changed, 0 destroyed.
+   ```
+
+   Notice the creation order in the log: security group first, instance second. This is the dependency graph executing.
+
+3. **Review the outputs:**
+
+   ```bash
+   terraform output
+   ```
+
+   You will see the four values declared in `outputs.tf`, now resolved to real resource IDs:
+
+   ```
+   ami_id            = "ami-0abcdef1234567890"
+   instance_id       = "i-0abc123def456789"
+   public_ip         = "54.123.45.67"
+   security_group_id = "sg-0abc123def456789"
+   ```
+
+   The `ami_id` output confirms which AMI the data source resolved.
+
+</Steps>
+
+<Aside type="caution" title="Do Not Close This Terminal">
+You now have two real AWS resources running. You will destroy them at the end of Part 5. Keep this terminal open and stay in the `~/tf-activity` directory until the destroy step is complete.
+</Aside>
+
+---
+
+## Part 4: Changes In-Place vs. Forced Replacement
+
+With the infrastructure running, Terraform can now show you two fundamentally different kinds of change. Some modifications update a resource where it stands; others require destroying and recreating it.
+
+<Steps>
+
+1. **Open `terraform.tfvars`** and add an instance_type override:
+
+   ```hcl
+   onid          = "smithj"
+   instance_type = "t3.small"
+   ```
+
+2. **Run the plan:**
+
+   ```bash
+   terraform plan
+   ```
+
+   Look for the `~` symbol on `aws_instance.web`. The summary reads:
+
+   ```
+   Plan: 0 to add, 1 to change, 0 to destroy.
+   ```
+
+   The `~` means Terraform will update the resource in-place: the existing instance is resized without being replaced. AWS supports live instance type changes.
+
+3. **Now add `user_data` to the `aws_instance.web` block in `main.tf`.** Replace the entire `aws_instance.web` block with this version:
+
+   ```hcl
+   resource "aws_instance" "web" {
+     ami                    = data.aws_ami.ubuntu.id
+     instance_type          = var.instance_type
+     vpc_security_group_ids = [aws_security_group.web.id]
+
+     user_data = <<-EOF
+       #!/bin/bash
+       echo "hello from ${var.onid}" > /tmp/hello.txt
+     EOF
+
+     tags = merge(local.common_tags, {
+       Name = "tf-activity-${var.onid}"
+     })
+   }
+   ```
+
+4. **Run the plan again:**
+
+   ```bash
+   terraform plan
+   ```
+
+   This time the instance shows `-/+` instead of `~`. Look for `# forces replacement` next to the `user_data` line. The summary reads:
+
+   ```
+   Plan: 1 to add, 0 to change, 1 to destroy.
+   ```
+
+   AWS does not support modifying `user_data` on a running instance. Terraform must terminate the existing one and launch a new one.
+
+5. **Revert the `user_data` change.** Remove the `user_data` block from `main.tf`, restoring the instance block to its original form. Leave `instance_type = "t3.small"` in `terraform.tfvars`.
+
+</Steps>
+
+<ActivityQuestion>
+Changing `instance_type` shows `~` (update in-place), but adding `user_data` shows `-/+` (destroy and recreate). Both are modifications to the same running instance. In a production environment serving live traffic, what are the consequences of a forced replacement? What strategies would you use to perform a forced replacement without causing downtime?
+</ActivityQuestion>
+
+---
+
+## Part 5: Inspect State and Clean Up
+
+Terraform's state file is the authoritative record of everything it created. These commands let you query that record directly without opening the AWS console.
+
+<Steps>
+
+1. **Apply the pending `t3.small` change:**
+
+   ```bash
+   terraform apply
+   ```
+
+   Type `yes`. The plan shows only the instance type change (`~`). The security group is untouched.
+
+2. **List all resources in state:**
+
+   ```bash
+   terraform state list
+   ```
+
+   Output:
+
+   ```
+   aws_instance.web
+   aws_security_group.web
+   ```
+
+3. **Inspect the full state of the instance:**
+
+   ```bash
+   terraform state show aws_instance.web
+   ```
+
+   This prints every attribute Terraform tracks for the instance. Find your ONID in the `Owner` tag and confirm `instance_type = "t3.small"`. The relevant section looks like this:
+
+   ```
+   # aws_instance.web:
+   resource "aws_instance" "web" {
+       ami           = "ami-0abcdef1234567890"
+       id            = "i-0abc123def456789"
+       instance_type = "t3.small"
+       public_ip     = "54.123.45.67"
+
+       tags = {
+           "ManagedBy" = "terraform"
+           "Name"      = "tf-activity-smithj"
+           "Owner"     = "smithj"
+       }
+       ...
+   }
+   ```
+
+4. **Destroy all resources:**
+
+   ```bash
+   terraform destroy
+   ```
+
+   Type `yes` when prompted. Watch the teardown order: the instance is removed first, then the security group. This is the reverse of creation order, and it is enforced by the same dependency graph that determined creation order.
+
+5. **Confirm the state is now empty:**
+
+   ```bash
+   terraform state list
+   ```
+
+   No output. The `terraform.tfstate` file still exists on disk, but it records no managed resources.
+
+</Steps>
+
+---
+
+## Going Further
+
+- **Try `terraform import`:** Create a security group manually in the AWS console. Then bring it under Terraform management with `terraform import aws_security_group.imported <sg-id>`. Run `terraform state show aws_security_group.imported` to see what Terraform learned about it, then write matching HCL and run `terraform plan` to verify there is no diff.
+- **Add remote state:** Configure an S3 backend with a DynamoDB lock table (see the lecture notes for the snippet). After running `terraform init -reconfigure`, verify that `terraform.tfstate` is no longer written locally.
+- **Explore OpenTofu:** [OpenTofu](https://opentofu.org/) is an open-source fork of Terraform with identical CLI syntax. Install it and run the same workflow. The commands, configuration language, and state format are interchangeable.
+- **Estimate costs before applying:** Install [Infracost](https://www.infracost.io/) and run `infracost breakdown --path .` against this configuration. This is what cost estimation looks like integrated into a CI pipeline.
+- **Scan for misconfigurations:** Run [Checkov](https://www.checkov.io/) (`pip install checkov && checkov -d .`) against the configuration. It will flag that the security group allows HTTP from `0.0.0.0/0`. Read the finding, understand the risk, and explore how to address it.

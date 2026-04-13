@@ -124,7 +124,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
 Terraform configurations are written in HashiCorp Configuration Language (HCL). You will create three files: `main.tf` (resources), `variables.tf` (inputs), and `outputs.tf` (values to display after apply).
 
-The stack you are about to define provisions two EC2 instances and two security groups. This is intentional: the next lab (Lab 6) introduces Ansible, a tool that configures servers remotely over SSH. Ansible requires one machine to act as the **control node** (where you run Ansible commands) and one or more **managed nodes** (the servers being configured). Provisioning both now means you will have a working environment ready when you get to Lab 6, and you will see how a realistic multi-server stack is expressed in Terraform.
+The stack you are about to define provisions two EC2 instances and two security groups: a control node and a managed node. The next lab builds directly on this two-node infrastructure, so you are provisioning both now. This is also a more realistic Terraform configuration than a single instance: two resources with different security rules that reference each other.
 
 <Steps>
 
@@ -222,7 +222,7 @@ The stack you are about to define provisions two EC2 instances and two security 
      }
    }
 
-   # Control node: you SSH here from your laptop; Ansible runs from here
+   # Control node: you SSH into this instance from your laptop
    resource "aws_instance" "control" {
      ami                    = var.ami_id
      instance_type          = var.instance_type
@@ -235,7 +235,7 @@ The stack you are about to define provisions two EC2 instances and two security 
      }
    }
 
-   # Managed node: Ansible configures this instance; WordPress runs here
+   # Managed node: the server that will run the application
    resource "aws_instance" "managed" {
      ami                    = var.ami_id
      instance_type          = var.instance_type
