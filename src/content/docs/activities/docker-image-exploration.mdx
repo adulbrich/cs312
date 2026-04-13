@@ -214,14 +214,22 @@ A container's writable layer disappears when the container is removed. This sect
 
    Confirm the file is there.
 
-2. Stop and remove the container completely:
+2. Inspect what changed in the container's writable layer:
+
+   ```bash
+   docker diff ephemeral
+   ```
+
+   `docker diff` prefixes each path with a status: `A` means added, `C` means changed, and `D` means deleted. In this example you should see `A /tmp/testfile.txt`; you may also see `C` entries for files nginx touched while running. `D` is not used in this step, but you would see it if a file or directory from the container filesystem had been removed.
+
+3. Stop and remove the container completely:
 
    ```bash
    docker stop ephemeral
    docker rm ephemeral
    ```
 
-3. Start a fresh container from the same image:
+4. Start a fresh container from the same image:
 
    ```bash
    docker run -d --name ephemeral2 nginx:alpine
@@ -230,17 +238,12 @@ A container's writable layer disappears when the container is removed. This sect
 
    The file is gone.
 
-4. Now modify nginx's web content in the same way:
+5. Clean up the second container:
 
    ```bash
-   docker exec ephemeral2 sh -c 'echo "<h1>Modified</h1>" > /usr/share/nginx/html/index.html'
    docker stop ephemeral2
    docker rm ephemeral2
-   docker run -d --name ephemeral3 nginx:alpine
-   docker exec ephemeral3 cat /usr/share/nginx/html/index.html
    ```
-
-   The original content is back.
 </Steps>
 
 <ActivityQuestion>

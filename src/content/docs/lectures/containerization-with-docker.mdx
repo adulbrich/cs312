@@ -145,6 +145,8 @@ docker history nginx:alpine
 
 This shows each layer's size, the instruction that created it, and when it was built. In many application images, one of the largest layers is the dependency installation step, though the base image or copied build artifacts can also dominate.
 
+Some rows show a size of `0B`. This usually means the history entry changed image metadata but did not add or remove filesystem content. Instructions such as `CMD`, `ENTRYPOINT`, `ENV`, `EXPOSE`, `LABEL`, `USER`, and `WORKDIR` often appear this way. They still matter operationally because they change container startup behavior and defaults, even when no bytes are added to the layer filesystem.
+
 ## Dockerfiles: Building Images
 
 A **Dockerfile** is a text file containing instructions that Docker executes in sequence to build an image. Each instruction produces a layer, and the final stack of layers becomes the image.
@@ -194,6 +196,8 @@ ENTRYPOINT ["/app"]
 ```
 
 The final image contains only the binary, produced from an empty `scratch` base. There are no shell, no package manager, no Go toolchain in the deployed image. The attack surface is minimal and the image size might be 10 MB where the build stage weighed 1 GB.
+
+This image uses `ENTRYPOINT` rather than `CMD`. The difference matters here. `CMD` sets a default command that is replaced entirely if you pass anything after the image name at runtime: `docker run myimage bash` would swap out the whole command for `bash`. `ENTRYPOINT` sets a fixed executable that always runs; anything passed at runtime becomes arguments to it rather than a replacement. The two are often paired: `ENTRYPOINT` names the executable and `CMD` provides its default arguments, which can be overridden without replacing the binary. In a `scratch` image there is no shell to invoke anyway, so the distinction is mostly academic here. The deeper reason to prefer `ENTRYPOINT` for a production binary is intent: it signals that the image exists to run that one thing and is not meant to be repurposed as a general-purpose environment.
 
 Multi-stage builds are useful for any language that produces distributable artifacts: Go, Rust, Java (producing a JAR or native image), and C/C++. They can also be used to separate test execution from the production image.
 
@@ -343,6 +347,19 @@ docker volume rm db-data
 ```
 
 The key distinction between the two mechanisms: bind mounts express "share this specific host path with the container," while volumes express "give this container persistent storage that Docker manages." For production databases, volumes are preferred because they are not tied to a specific host path and Docker can manage backups, migration, and cleanup.
+
+<Aside type="note" title="Other Common Uses for Each Mechanism">
+**Bind mounts** appear in several patterns beyond development and config injection:
+
+- **Log collection:** bind-mount a log directory to the host so an external agent (Filebeat, Promtail) can read and forward logs without `docker exec`. This is more reliable than writing logs inside the container's writable layer, which disappears on container replacement.
+- **Unix socket injection:** mounting `/var/run/docker.sock` into a container gives it direct access to the Docker daemon. Tools like Traefik and Portainer use this to manage containers from inside a container. Be aware that any container with access to the Docker socket can create new containers, mount host paths, and escalate to full host root.
+- **TLS certificates and secrets:** injecting certificate files or credential material from the host at runtime keeps them out of image layers entirely.
+
+**Volumes** have capabilities beyond simple single-container persistence:
+
+- **Multi-container sharing:** a named volume can be attached to multiple containers simultaneously, which is useful for sidecar patterns where a logging agent or metrics exporter runs alongside the application and reads from a shared directory.
+- **Volume drivers:** the volume abstraction is pluggable. Drivers exist for NFS, AWS EBS, GCS, and other remote storage backends, so a volume can follow a container across hosts in an orchestrated environment rather than being tied to local disk.
+</Aside>
 
 ## Docker Compose: Multi-Container Applications
 
