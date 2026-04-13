@@ -23,11 +23,15 @@ You need a container runtime installed on your laptop before starting.
 
 <Tabs syncKey="os">
 <TabItem label="macOS">
-Two options:
+On macOS, Docker Engine runs inside a Linux VM managed transparently by the tool you choose. All of the following expose the same `docker` CLI and are compatible with this activity.
 
-**Docker Desktop** (standard): Download and install from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). After installation, start Docker Desktop from your Applications folder and wait for the whale icon in the menu bar to show "Docker Desktop is running."
+**Docker Desktop**: Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). After installation, start Docker Desktop from your Applications folder and wait for the whale icon in the menu bar to show "Docker Desktop is running."
 
-**OrbStack** (lightweight alternative): Download from [orbstack.dev](https://orbstack.dev/). OrbStack is a macOS-native container runtime that uses less memory and starts faster than Docker Desktop. It is fully compatible with the Docker CLI: all `docker` commands work without modification.
+**OrbStack** (lightweight alternative): Download from [orbstack.dev](https://orbstack.dev/). OrbStack runs a lightweight Linux VM with lower memory overhead and faster startup than Docker Desktop. All `docker` commands work without modification.
+
+**Podman Desktop**: Download from [podman-desktop.io](https://podman-desktop.io/). Provides a Podman-based environment; most `docker` commands work with `podman` substituted.
+
+**Rancher Desktop**: Download from [rancherdesktop.io](https://rancherdesktop.io/). Free and open-source; bundles either `containerd` or `dockerd` as the container engine, selectable at install time.
 
 Verify your installation:
 
@@ -37,6 +41,8 @@ docker run --rm hello-world
 ```
 </TabItem>
 <TabItem label="Linux">
+On Linux, Docker Engine and Podman run natively against the host kernel with no VM required.
+
 **Docker Engine**: Follow the official installation guide for your distribution at [docs.docker.com/engine/install/](https://docs.docker.com/engine/install/). After installing, add your user to the `docker` group so you can run commands without `sudo`:
 
 ```bash
@@ -59,6 +65,8 @@ sudo pacman -S podman
 
 Podman runs rootless by default: no daemon, no `sudo` required.
 
+**Rancher Desktop**: Download from [rancherdesktop.io](https://rancherdesktop.io/). Provides a GUI and bundles either `containerd` or `dockerd`; useful if you also want a local Kubernetes cluster.
+
 Verify:
 
 ```bash
@@ -67,16 +75,20 @@ docker run --rm hello-world
 ```
 </TabItem>
 <TabItem label="Windows">
-**Docker Desktop with WSL2**: Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). Docker Desktop requires WSL2 to be enabled. During installation, Docker Desktop will offer to enable WSL2 if it is not already configured.
+On Windows, Linux containers require a WSL2-backed Linux VM. All of the following use WSL2.
 
-After installation, open a WSL2 terminal (e.g., Ubuntu from the Start menu) and run:
+**Docker Desktop**: Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). Docker Desktop will offer to enable WSL2 during installation if it is not already configured. After installation, open a WSL2 terminal (e.g., Ubuntu from the Start menu) and verify:
 
 ```bash
 docker version
 docker run --rm hello-world
 ```
 
-**Podman Desktop** (alternative): Download from [podman-desktop.io](https://podman-desktop.io/). Podman Desktop provides a Podman environment on Windows using a WSL2-backed Linux VM. All `docker` commands work with `podman` substituted.
+**Docker Engine in WSL2 without Docker Desktop**: Install a WSL2 Linux distribution (e.g., Ubuntu from the Microsoft Store), then follow the [Docker Engine Linux install guide](https://docs.docker.com/engine/install/) inside that distro. This gives you a full Docker Engine without the Docker Desktop application.
+
+**Podman Desktop**: Download from [podman-desktop.io](https://podman-desktop.io/). Provides a Podman environment using a WSL2-backed VM. All `docker` commands work with `podman` substituted.
+
+**Rancher Desktop**: Download from [rancherdesktop.io](https://rancherdesktop.io/). Free and open-source; uses WSL2 and bundles either `containerd` or `dockerd`.
 </TabItem>
 </Tabs>
 
@@ -86,7 +98,7 @@ All commands in this activity also work on a Linux EC2 instance with Docker Engi
 
 ---
 
-## Part 1: Pulling and Inspecting Images
+## Pulling and Inspecting Images
 
 Before running anything, let us look at what an image actually is.
 
@@ -94,7 +106,7 @@ Before running anything, let us look at what an image actually is.
 1. Check which cgroup version your container runtime is using:
 
    ```bash
-   docker info | grep -Ei 'Cgroup (Driver|Version)'
+   docker info | grep -Ei 'Cgroup'
    ```
 
    Most modern Linux distributions and recent Docker Desktop setups report cgroup v2. If you are using Podman, `podman info` also reports the cgroup version in its host information.
@@ -145,7 +157,7 @@ Before running anything, let us look at what an image actually is.
 
 ---
 
-## Part 2: Inside the Container: Namespace Isolation
+## Inside the Container: Namespace Isolation
 
 A running container is an isolated process with its own view of the system. This section makes that isolation visible.
 
@@ -178,7 +190,7 @@ A running container is an isolated process with its own view of the system. This
    cat /etc/os-release
    ```
 
-   Record each result.
+   `ps aux` lists running processes: `a` includes processes from all users, `u` shows the user-oriented format with CPU and memory columns, and `x` includes processes not attached to a terminal. Inside the container you should see only a handful of nginx processes. Record each result.
 
 3. Exit the container and run the same commands on your host machine:
 
@@ -186,11 +198,11 @@ A running container is an isolated process with its own view of the system. This
    exit
    hostname
    whoami
-   ps aux | wc -l
+   ps aux
    cat /etc/os-release
    ```
 
-   Compare the two sets of results.
+   The host `ps aux` output will be considerably longer than what you saw inside the container. Every daemon, shell session, and background service on your machine is visible here; inside the container you saw only the processes that belong to it.
 </Steps>
 
 <ActivityQuestion>
@@ -199,7 +211,74 @@ Inside the container, `whoami` returned `root`. On your host, you are probably r
 
 ---
 
-## Part 3: Ephemeral Storage: What Containers Don't Keep
+## Container Lifecycle and Configuration
+
+Now that you have seen what isolation looks like from inside, look at container management from the outside: checking logs, monitoring resource usage, stopping and restarting without discarding, and passing configuration in at runtime.
+
+<Steps>
+1. The `sandbox` container from the previous section is still running. Generate an HTTP request inside it to produce a log entry, then view the logs from the host:
+
+   ```bash
+   docker exec sandbox wget -qO- http://localhost > /dev/null
+   docker logs sandbox
+   ```
+
+   `docker logs` shows everything the container has written to stdout and stderr since it started. For nginx, that is the access log. Follow logs in real time with `-f`; press Ctrl+C to stop:
+
+   ```bash
+   docker logs -f sandbox
+   ```
+
+2. Check resource usage across all running containers:
+
+   ```bash
+   docker stats --no-stream
+   ```
+
+   `--no-stream` prints one snapshot and exits instead of staying in interactive mode. You will see CPU percentage, memory usage, and network I/O for each container.
+
+3. Stop the container and observe its status:
+
+   ```bash
+   docker stop sandbox
+   docker ps
+   docker ps -a
+   ```
+
+   `docker ps` shows only running containers; `sandbox` is gone from that list. `docker ps -a` shows all containers including stopped ones; `sandbox` appears with status `Exited`. The container is paused, not erased.
+
+4. Restart it:
+
+   ```bash
+   docker start sandbox
+   docker ps
+   ```
+
+   The same container is running again. Its writable layer was preserved through the stop and start.
+
+5. Pass configuration into a one-off container at runtime. `-e` sets an environment variable inside the container; `--rm` removes the container automatically when it exits:
+
+   ```bash
+   docker run --rm -e GREETING="hello from the host" alpine sh -c 'echo $GREETING'
+   ```
+
+   You should see `hello from the host` printed. `--rm` is useful for short-lived commands that produce output and do not need to persist.
+
+6. Clean up:
+
+   ```bash
+   docker stop sandbox
+   docker rm sandbox
+   ```
+</Steps>
+
+<ActivityQuestion>
+You used `docker stop` then `docker start` to pause and resume `sandbox`. You have also used `docker rm` throughout this activity. What is the difference between a stopped container and a removed one? If you wrote a file into `sandbox`'s writable layer before stopping it, would that file survive `docker stop` + `docker start`? Would it survive `docker rm` + `docker run`?
+</ActivityQuestion>
+
+---
+
+## Ephemeral Storage: What Containers Don't Keep
 
 A container's writable layer disappears when the container is removed. This section makes that concrete.
 
@@ -252,7 +331,7 @@ An engineer proposes writing application logs to `/var/log/app/` inside the cont
 
 ---
 
-## Part 4: Persistent Storage with Volumes
+## Persistent Storage with Volumes
 
 Volumes live outside the container's writable layer and survive container replacement.
 
@@ -306,7 +385,7 @@ Compare named volumes to bind mounts (`-v /host/path:/container/path`). Describe
 
 ---
 
-## Part 5: Building an Image and Observing Layer Caching
+## Building an Image and Observing Layer Caching
 
 This section shows how Docker's layer cache behaves in practice: both when it helps and when it gets invalidated.
 
@@ -327,16 +406,19 @@ This section shows how Docker's layer cache behaves in practice: both when it he
 
    ```dockerfile
    FROM nginx:alpine
+   RUN echo "server_tokens off;" > /etc/nginx/conf.d/security.conf
    COPY index.html /usr/share/nginx/html/index.html
    ```
 
-2. Build the image and note the output carefully:
+   `server_tokens off` is a real nginx security setting: it removes the server version number from response headers.
+
+2. Build the image:
 
    ```bash
    docker build -t mysite:v1 .
    ```
 
-   Each step that runs shows `RUN` or `COPY` output. Note which steps say `CACHED`.
+   This is the first build, so nothing is cached. You will see each step execute from scratch. Note the layer IDs in the output.
 
 3. Build again without changing anything:
 
@@ -352,7 +434,7 @@ This section shows how Docker's layer cache behaves in practice: both when it he
    docker build -t mysite:v2 .
    ```
 
-   Observe which steps are cached and which re-run.
+   The `RUN` step says `CACHED`. Only the `COPY` step re-runs, because that is the first step whose inputs changed.
 
 5. Now change the `FROM` line in the Dockerfile to `FROM nginx:latest` and rebuild:
 
@@ -360,12 +442,12 @@ This section shows how Docker's layer cache behaves in practice: both when it he
    docker build -t mysite:v3 .
    ```
 
-   Observe what happens to the cache.
+   `FROM` now resolves to a different base image. Both the `RUN` step and the `COPY` step must re-run: every cached layer was built on top of the previous base image, so none of them can be reused.
 
 6. Run the resulting image and verify it serves your content:
 
    ```bash
-   docker run -d -p 8080:80 --name mysite mysite:v2
+   docker run -d -p 8080:80 --name mysite mysite:v3
    curl http://localhost:8080
    docker stop mysite && docker rm mysite
    ```
@@ -374,7 +456,7 @@ This section shows how Docker's layer cache behaves in practice: both when it he
 </Steps>
 
 <ActivityQuestion>
-In step 5, changing the `FROM` line invalidated the cache for every subsequent step. Explain why. What does this mean for how you should manage base image versions in a production Dockerfile?
+In step 5, changing the `FROM` line caused both the `RUN` and `COPY` steps to re-run, even though neither instruction had changed. Explain why switching the base image invalidated every cached layer above it. What does this mean for how you should manage base image versions in a production Dockerfile?
 </ActivityQuestion>
 
 <ActivityQuestion>
@@ -388,7 +470,7 @@ Pattern B is recommended. Based on what you observed about layer caching, explai
 
 ---
 
-## Part 6: Port Mapping and Container Networking
+## Port Mapping and Container Networking
 
 Containers have their own network namespace. Port mapping is how services inside that namespace become reachable from outside.
 
@@ -400,7 +482,7 @@ Containers have their own network namespace. Port mapping is how services inside
    curl http://localhost:8080
    ```
 
-   You made an HTTP request to your host on port 8080. It was forwarded to the container on port 80.
+   `curl` makes an HTTP request from the command line and prints the response body. You made a request to your host on port 8080; Docker forwarded it to the container on port 80.
 
 2. Inspect the container's network configuration:
 
@@ -441,7 +523,7 @@ Containers have their own network namespace. Port mapping is how services inside
    docker exec server2 wget -qO- http://server1
    ```
 
-   Container DNS resolves `server1` to `server1`'s IP within `mynet`.
+   `wget` downloads a URL from the command line. `-q` suppresses progress output; `-O-` writes the response to standard output instead of saving it to a file. Container DNS resolves `server1` to its IP within `mynet`.
 
 6. Confirm that containers on different networks cannot reach each other:
 
@@ -471,15 +553,17 @@ In step 6, `server2` could not reach `webserver` by name even though both are ru
 
 ---
 
-## Part 7: A Multi-Service Stack with Compose
+## A Multi-Service Stack with Compose
 
-Compose wires multiple containers together with automatic networking, shared configuration, and volume management.
+Compose wires multiple containers together with automatic networking and a single declarative file. This section uses nginx as a web frontend and Redis as an internal cache, a common real-world pairing. Redis is a fast in-memory data store that should never be exposed directly to the network; only the application that uses it should be able to reach it.
 
 <Steps>
 1. Create a working directory and write a `compose.yml`:
 
    ```bash
    mkdir mystack && cd mystack
+   mkdir html
+   echo "<h1>Compose stack</h1>" > html/index.html
    ```
 
    `compose.yml`:
@@ -493,21 +577,13 @@ Compose wires multiple containers together with automatic networking, shared con
        volumes:
          - ./html:/usr/share/nginx/html:ro
        depends_on:
-         - echo
+         - cache
 
-     echo:
-       image: mendhak/http-https-echo:latest
-       # not exposed to the host; only reachable from within the Compose network
-
-   volumes: {}
+     cache:
+       image: redis:alpine
    ```
 
-   Create a `html/` directory with an `index.html`:
-
-   ```bash
-   mkdir html
-   echo "<h1>Compose stack</h1>" > html/index.html
-   ```
+   Two things to notice: the `:ro` suffix on the bind mount makes it read-only inside the container, so nginx can read your files but cannot modify them. The `depends_on` entry tells Compose to start `cache` before `web`.
 
 2. Start the stack:
 
@@ -515,122 +591,127 @@ Compose wires multiple containers together with automatic networking, shared con
    docker compose up -d
    ```
 
-   Docker pulls any missing images, creates a shared network, and starts both services.
-
-3. Explore the running stack:
+   Watch the output: Compose starts `cache` first, then `web`, respecting the `depends_on` order. Confirm this in the startup logs:
 
    ```bash
-   docker compose ps
    docker compose logs
    ```
 
-   Check the network Compose created:
+3. Inspect what is running:
 
    ```bash
-   docker network ls
-   # You should see a network named something like mystack_default
-   docker network inspect mystack_default
+   docker compose ps
    ```
 
-4. Verify that the `web` container can reach the `echo` service by name:
+   Look at the `PORTS` column. `web` shows `0.0.0.0:8080->80/tcp`; `cache` shows nothing. That absence tells you `cache` is not reachable from outside the Compose network.
+
+4. Reach the web service from your host:
 
    ```bash
-   docker exec mystack-web-1 wget -qO- http://echo:8080
+   curl http://localhost:8080
    ```
 
-   The hostname `echo` resolves to the echo container's IP within the Compose network.
-
-5. Verify that `echo` is not exposed to your host:
+5. Verify the cache service is running. `redis-cli` is the Redis command-line client, included in the `redis:alpine` image:
 
    ```bash
-   curl http://localhost:8080      # reaches web (nginx); succeeds
-   curl http://localhost:8081      # nothing mapped here for echo; fails
+   docker compose exec cache redis-cli ping
    ```
 
-6. Simulate upgrading the web service. Open `compose.yml` and change the `web` image from `nginx:alpine` to `nginx:latest`. Then pull the updated image and recreate the container:
+   Redis responds with `PONG`. Now store and retrieve a value to confirm it is working:
+
+   ```bash
+   docker compose exec cache redis-cli set greeting "hello from cache"
+   docker compose exec cache redis-cli get greeting
+   ```
+
+6. Confirm that the `web` container can resolve the `cache` hostname via Compose's embedded DNS:
+
+   ```bash
+   docker compose exec web nslookup cache
+   ```
+
+   You should see the IP address assigned to the `cache` container within the Compose network. Containers on the same Compose network reach each other by service name; the host cannot.
+
+7. Upgrade the web service. Open `compose.yml` and change the `web` image from `nginx:alpine` to `nginx:latest`, then pull and recreate:
 
    ```bash
    docker compose pull
    docker compose up -d
    ```
 
-   `docker compose pull` fetches `nginx:latest` and reports which images changed. `docker compose up -d` recreates only the containers whose image changed. The `echo` service is unchanged and left running.
+   Read the output carefully. You will see something like:
 
-   Verify the stack is still working:
-
-   ```bash
-   curl http://localhost:8080
-   docker compose ps
+   ```
+   ✔ Container mystack-cache-1  Running
+   ✔ Container mystack-web-1    Started
    ```
 
-   The HTML you put in `html/` is still served. The bind mount was never inside the old container; it survived the replacement unchanged.
+   `Running` means the container was already up and was left alone. `Started` means it was stopped, replaced with a new container from the updated image, and started again. Compose determines which containers to recreate by comparing the running container's image digest against what was just pulled.
 
-7. Check which nginx version is actually running now:
+8. Verify the web content is still served:
 
-   ```bash
-   docker compose exec web nginx -v
-   ```
+    ```bash
+    curl http://localhost:8080
+    ```
 
-   Compare it to what `nginx:alpine` would report. The container was replaced; the content was not.
+    The HTML is unchanged. It lives in `html/` on your host; replacing the web container had no effect on it.
 
-8. Stop the stack and observe what persists:
+9. Stop the stack and confirm what persists:
 
-   ```bash
-   docker compose down
-   docker compose ps   # containers are gone
-   ls html/            # bind-mounted host directory is unchanged
-   ```
+    ```bash
+    docker compose down
+    docker compose ps   # containers are gone
+    ls html/            # bind-mounted host directory is unchanged
+    ```
 
-9. Clean up:
+10. Clean up:
 
-   ```bash
-   cd .. && rm -rf mystack
-   ```
+    ```bash
+    cd .. && rm -rf mystack
+    ```
 </Steps>
 
 <ActivityQuestion>
-Compose created a network automatically and attached both services to it. Compare this to what you did manually in Part 6 (creating a network and running containers with `--network`). What does Compose automate, and what would you have had to do by hand without it?
+Compose created a network automatically and attached both services to it. Compare this to what you did manually in the Port Mapping and Container Networking section (creating a network and running containers with `--network`). What exactly did Compose handle that you would have had to do by hand?
 </ActivityQuestion>
 
 <ActivityQuestion>
-When you ran `docker compose up -d` after pulling `nginx:latest`, Compose recreated the `web` container but left `echo` running. What tells Compose which containers need to be replaced? If your application had written files inside the container's own filesystem (not in a volume or bind mount), would those files have survived the replacement?
-</ActivityQuestion>
-
-<ActivityQuestion>
-The `echo` service in this stack is intentionally not exposed to the host with a `ports:` mapping; it is only reachable from within the Compose network. Describe a real-world service (database, cache, internal API) that should be configured this way, and explain the security reasoning.
+After the upgrade, Compose replaced the `web` container but left `cache` running. The HTML in `html/` was unaffected. Trace where each piece lives: the nginx binary and its configuration are in the image layer; the HTML is in a bind mount on the host; the Redis data is in the cache container's own writable filesystem. What happens to the Redis data if the cache container is removed and recreated? How would you fix that?
 </ActivityQuestion>
 
 ---
 
 ## Your Image
 
-You have explored existing images, observed isolation, built a simple image, and run a Compose stack. Now build a small image that carries your identity.
+You have explored existing images, observed isolation, built a layered image, and run a Compose stack. Now build an image that carries your identity and applies the best practices from the lecture: a non-root user and a realistic server process.
 
 <Steps>
-1. Create a working directory and a personalized HTML file:
+1. Create a working directory and an HTML file with your ONID:
 
    ```bash
    mkdir myapp && cd myapp
-   ```
-
-   Create `index.html` with your ONID in it:
-
-   ```html
-   <h1>Built by: YOUR_ONID</h1>
+   echo "<h1>Built by: YOUR_ONID</h1>" > index.html
    ```
 
 2. Create a `Dockerfile`:
 
    ```dockerfile
-   FROM nginx:alpine
-   COPY index.html /usr/share/nginx/html/index.html
+   FROM python:3.12-slim
+   RUN useradd --create-home appuser
+   WORKDIR /home/appuser/app
+   COPY index.html .
+   USER appuser
+   EXPOSE 8080
+   CMD ["python3", "-m", "http.server", "8080"]
    ```
 
-3. Build the image and run it:
+   `python3 -m http.server 8080` is Python's built-in static file server. It serves any files in the working directory over HTTP on port 8080. Because it does not need to bind a privileged port, it can run as a non-root user.
+
+3. Build and run the image:
 
    ```bash
    docker build -t myapp:v1 .
-   docker run -d -p 9090:80 --name myapp myapp:v1
+   docker run -d -p 9090:8080 --name myapp myapp:v1
    ```
 
 4. Confirm your content is served:
@@ -641,15 +722,32 @@ You have explored existing images, observed isolation, built a simple image, and
 
    You should see your ONID in the response.
 
-5. Inspect the image layers:
+5. Verify the container process is running as a non-root user:
+
+   ```bash
+   docker exec myapp whoami
+   ```
+
+   You should see `appuser`, not `root`.
+
+6. Tag the image in the format a registry expects. Replace `YOURONID` with your actual ONID:
+
+   ```bash
+   docker tag myapp:v1 YOURONID/myapp:v1
+   docker images myapp
+   ```
+
+   Both tags point to the same image ID. The `username/repository:tag` format is what Docker Hub expects; a private registry would use `registry.example.com/repository:tag`. No account or login is needed to tag locally.
+
+7. Inspect the image layers:
 
    ```bash
    docker history myapp:v1
    ```
 
-   Notice the two layers: the base `nginx:alpine` layer inherited from the parent image, and your `COPY` layer on top.
+   You will see several base layers from `python:3.12-slim`, then your own layers on top: the `RUN useradd`, `WORKDIR`, `COPY`, `USER`, and `CMD` entries.
 
-6. Clean up:
+8. Clean up:
 
    ```bash
    docker stop myapp
@@ -660,8 +758,13 @@ You have explored existing images, observed isolation, built a simple image, and
 
 ## Going Further
 
-- <a href="https://docs.docker.com/compose/" target="_blank" rel="noopener noreferrer">Docker Compose Documentation</a>
-- <a href="https://docs.docker.com/build/building/multi-stage/" target="_blank" rel="noopener noreferrer">Multi-Stage Builds (Docker Documentation)</a>
-- <a href="https://docs.docker.com/engine/security/" target="_blank" rel="noopener noreferrer">Docker Security Documentation</a>
-- <a href="https://github.com/hadolint/hadolint" target="_blank" rel="noopener noreferrer">hadolint: a Dockerfile linter that catches common mistakes</a>
-- <a href="https://www.youtube.com/watch?v=pg19Z8LL06w" target="_blank" rel="noopener noreferrer">Docker Crash Course for Absolute Beginners (TechWorld with Nana) (YouTube)</a>
+You have worked through the core mechanics of containers from scratch. The natural next step is to build something real.
+
+The Docker documentation's <a href="https://docs.docker.com/get-started/" target="_blank" rel="noopener noreferrer">Getting Started guide</a> is the most direct continuation of this activity. It walks you through containerizing a complete application, adding a database with Compose, and pushing the finished image to Docker Hub. Plan about an hour for it.
+
+If you would rather start from your own code, pick a project in a language you already know and write a Dockerfile for it from scratch. Start with a single-stage build that runs correctly, then improve it step by step: add a multi-stage build to strip the build toolchain from the final image, shrink the base image, add a non-root `USER`, and add a `HEALTHCHECK`. Run `docker images` after each change and watch what happens to the size. The gap between a first-draft image and an optimized one is often an order of magnitude.
+
+Two tools worth knowing once you are writing real Dockerfiles:
+
+- <a href="https://github.com/hadolint/hadolint" target="_blank" rel="noopener noreferrer">hadolint</a> is a Dockerfile linter that catches common mistakes and anti-patterns, from wrong `COPY` ordering to unintentional package cache bloat. Run it against any Dockerfile you write.
+- <a href="https://github.com/wagoodman/dive" target="_blank" rel="noopener noreferrer">dive</a> lets you explore an image layer by layer in the terminal and shows exactly which files each instruction added, removed, or changed. It is the fastest way to understand why an image is larger than you expect.
