@@ -3,7 +3,6 @@ title: "Container Exploration"
 description: "Pull images, investigate namespace isolation, observe ephemeral storage, persist data with volumes, build a layered image, explore container networking, and run a multi-service Compose stack."
 sidebar:
   order: 5
-draft: true
 ---
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -690,7 +689,7 @@ You have explored existing images, observed isolation, built a layered image, an
 
    ```bash
    mkdir myapp && cd myapp
-   echo "<h1>Built by: YOUR_ONID</h1>" > index.html
+   echo "<h1>Built by: ONID@oregonstate.edu</h1>" > index.html
    ```
 
 2. Create a `Dockerfile`:
@@ -760,7 +759,7 @@ You have explored existing images, observed isolation, built a layered image, an
 
 You have worked through the core mechanics of containers from scratch. The natural next step is to build something real.
 
-The Docker documentation's <a href="https://docs.docker.com/get-started/" target="_blank" rel="noopener noreferrer">Getting Started guide</a> is the most direct continuation of this activity. It walks you through containerizing a complete application, adding a database with Compose, and pushing the finished image to Docker Hub. Plan about an hour for it.
+The Docker documentation's <a href="https://docs.docker.com/get-started/workshop/" target="_blank" rel="noopener noreferrer">Workshop guide</a> is the most direct continuation of this activity. It walks you through containerizing a complete application, adding a database with Compose, and pushing the finished image to Docker Hub. Plan about an hour for it.
 
 If you would rather start from your own code, pick a project in a language you already know and write a Dockerfile for it from scratch. Start with a single-stage build that runs correctly, then improve it step by step: add a multi-stage build to strip the build toolchain from the final image, shrink the base image, add a non-root `USER`, and add a `HEALTHCHECK`. Run `docker images` after each change and watch what happens to the size. The gap between a first-draft image and an optimized one is often an order of magnitude.
 
