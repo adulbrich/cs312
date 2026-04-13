@@ -1,0 +1,217 @@
+---
+title: YAML
+description: What YAML is, how to read and write it, where it appears in this course, and how it compares to JSON and other configuration formats.
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+YAML appears throughout this course: in Docker Compose files, GitHub Actions workflows, Ansible playbooks, and Kubernetes manifests. Each of those tools uses YAML for the same reason: it is a human-readable way to describe structured data. Understanding the syntax once means you can read and write any of them.
+
+## What YAML Is
+
+YAML (YAML Ain't Markup Language) is a data serialization format. Its purpose is to represent structured data in a way that is easy for people to read and write and easy for programs to parse.
+
+The core idea is simple: a YAML file is a hierarchy of **keys and values**, where indentation defines structure. There are no curly braces, no angle brackets, and no required quoting. A minimal Compose file and a full Kubernetes Deployment use the same rules.
+
+<Aside type="caution" title="Tabs are not allowed">
+YAML uses spaces for indentation. Tabs are a syntax error. Most editors handle this automatically, but if you paste YAML from an unfamiliar source and it fails to parse, a hidden tab character is often the cause. Use an editor that visually distinguishes spaces from tabs, or configure your editor to convert tabs to spaces.
+</Aside>
+
+## Basic Syntax
+
+### Mappings (Key-Value Pairs)
+
+A mapping is a set of key-value pairs separated by a colon and a space:
+
+```yaml
+name: nginx
+port: 8080
+enabled: true
+timeout: null
+```
+
+Keys are unquoted strings. Values can be strings, numbers, booleans (`true`/`false`), or null. The colon must be followed by a space; `port:8080` without a space is a syntax error in most parsers.
+
+### Lists
+
+A list uses a dash and a space before each item:
+
+```yaml
+ports:
+  - "8080:80"
+  - "8443:443"
+
+depends_on:
+  - database
+  - cache
+```
+
+Lists can also be written inline with square brackets: `ports: ["8080:80", "8443:443"]`. The block form (one item per line) is more readable for more than two or three items.
+
+### Nested Structures
+
+Indentation creates nesting. Consistent indentation within a block is required; two spaces per level is the convention:
+
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: info
+```
+
+Here `services` is a mapping with one key (`web`), which maps to another mapping with three keys (`image`, `ports`, `environment`). `ports` is a list; `environment` is a mapping.
+
+### Strings
+
+Plain strings do not need quotes:
+
+```yaml
+message: hello from the container
+```
+
+Use quotes when the string contains characters that YAML would otherwise misinterpret: colons, hash signs, leading dashes, or values that look like other types:
+
+```yaml
+version: "3.8"          # without quotes, some parsers read this as a float
+greeting: "yes"         # without quotes, older parsers read this as boolean true
+label: "key: value"     # unquoted, the colon would break parsing
+comment: "# not a comment"
+```
+
+Both single and double quotes work. Double quotes support escape sequences (`\n`, `\t`, `\"`)  Single quotes do not; a literal single quote inside single-quoted text is written as two consecutive single quotes (`''`).
+
+### Multi-Line Strings
+
+Two special characters control how multi-line strings are handled.
+
+The literal block scalar (`|`) preserves line breaks:
+
+```yaml
+script: |
+  #!/bin/bash
+  echo "starting..."
+  systemctl restart nginx
+```
+
+Each line in the block becomes a line in the string, including the newline at the end. This is the form you will see in GitHub Actions `run:` steps and Ansible `shell:` tasks.
+
+The folded block scalar (`>`) folds line breaks into spaces, turning the block into a single paragraph:
+
+```yaml
+description: >
+  This is a long description that
+  spans multiple lines but will be
+  joined into one.
+```
+
+### Comments
+
+A `#` starts a comment to the end of the line:
+
+```yaml
+# This is a standalone comment
+image: nginx:alpine  # inline comment
+```
+
+Comments are one of the places YAML has a clear advantage over JSON, which does not support them at all.
+
+### Anchors and Aliases
+
+YAML lets you define a value once and reuse it with anchors (`&name`) and aliases (`*name`). You will occasionally see this in GitHub Actions workflows to avoid repeating long environment blocks:
+
+```yaml
+common-env: &common
+  APP_ENV: production
+  LOG_LEVEL: info
+
+service-a:
+  environment:
+    <<: *common
+    PORT: "8080"
+
+service-b:
+  environment:
+    <<: *common
+    PORT: "9090"
+```
+
+`<<:` is the merge key: it inlines all keys from the referenced anchor. You do not need to write these yourself in this course, but you will encounter them in example configurations online.
+
+---
+
+## Common Pitfalls
+
+**The Norway problem.** In YAML 1.1, the values `yes`, `no`, `on`, `off`, `true`, and `false` are all parsed as booleans. Country codes like `NO` (Norway), `OFF` (Offaly), and version-like strings can be silently coerced. YAML 1.2 restricts booleans to `true` and `false`, but many tools in this course (Docker Compose, Ansible) still use 1.1-compatible parsers. The safe habit is to quote any string value that could be ambiguous:
+
+```yaml
+# Risky: older parsers may read "no" as false
+restart: no
+
+# Safe
+restart: "no"
+```
+
+**Version numbers as floats.** `1.10` is a float in YAML. When a Compose file says `version: 3.8`, an unquoted value is parsed as the float 3.8. Most tools handle this gracefully, but quote version strings to be explicit: `version: "3.8"`.
+
+**Indentation consistency.** All items at the same level must be indented by exactly the same number of spaces. Mixing two-space and four-space indentation within the same file, or accidentally over-indenting a single key, causes parse errors or silently moves a key to the wrong level of the hierarchy.
+
+**Duplicate keys.** YAML technically allows duplicate keys in a mapping; the behavior is undefined and parser-dependent. Some parsers take the last value, some take the first, some error. In practice: never repeat a key in the same block.
+
+---
+
+## Where YAML Appears in This Course
+
+Every major tool introduced after Week 2 uses YAML for its configuration. The table below shows which files you will write and what each one describes.
+
+| Tool | File(s) | What it describes | First use |
+|---|---|---|---|
+| Docker Compose | `compose.yml` | Services, networks, volumes, port mappings | Week 3 |
+| GitHub Actions | `.github/workflows/*.yml` | CI/CD pipelines: triggers, jobs, steps | Week 5 |
+| Ansible | `site.yml`, `playbook.yml`, `group_vars/*.yml`, `host_vars/*.yml` | Desired server state, variables, roles | Week 5 |
+| Kubernetes | `deployment.yaml`, `service.yaml`, `configmap.yaml`, `secret.yaml` | Cluster workloads, networking, config, secrets | Week 7 |
+
+The YAML you write for Docker Compose is the most forgiving: a small number of keys, flat structure, few gotchas. Kubernetes manifests are the most verbose: every resource has a fixed `apiVersion`, `kind`, `metadata`, and `spec` structure that must be exact.
+
+---
+
+## YAML vs. Other Formats
+
+YAML is not the only way to serialize configuration data. Understanding its tradeoffs helps you choose the right format when you have a choice, and helps you understand why tools made the choices they did.
+
+### JSON
+
+[JSON](https://www.json.org/) (JavaScript Object Notation) and YAML are closely related. YAML 1.2 is actually a superset of JSON: any valid JSON file is valid YAML. The practical differences are:
+
+- JSON requires quotes around all keys and string values; YAML does not.
+- JSON uses braces and brackets for structure; YAML uses indentation.
+- JSON has no comment syntax; YAML uses `#`.
+- JSON is more explicit and less ambiguous; YAML's flexibility (the Norway problem, implicit type coercion) introduces edge cases.
+- JSON is the default format for APIs and most machine-to-machine communication. YAML is preferred when humans write and read the file frequently.
+
+GitHub Actions, Ansible, and Kubernetes all have JSON equivalents of their YAML formats. You will almost never use them, because the verbosity makes large files painful to maintain.
+
+### TOML
+
+[TOML](https://toml.io/) (Tom's Obvious Minimal Language) is common in Rust, Python, and Go project configuration (`Cargo.toml`, `pyproject.toml`). It is simpler than YAML for flat key-value data and strongly typed (no implicit coercions), but its nested table syntax becomes awkward for deeply hierarchical data like Kubernetes manifests. You will not write TOML in this course, but you will encounter it in project configuration files.
+
+### INI and `.env` Files
+
+INI files (`[section]` headers with `key = value` pairs) are the oldest format in common use: systemd unit files and many legacy Linux daemons use them. `.env` files (bare `KEY=VALUE` with no sections) are used by Docker Compose and shell scripts for environment variable injection. Both formats are simpler than YAML but have no support for nesting or lists.
+
+### HCL
+
+HCL (HashiCorp Configuration Language) is Terraform's format. It looks superficially similar to JSON but is designed specifically for infrastructure configuration: it supports comments, expressions, function calls, and references between resources. Terraform chose HCL over YAML specifically to give operators a language expressive enough for conditional logic and interpolation without requiring a full programming language. The Infrastructure as Code lecture covers HCL in detail.
+
+---
+
+## Resources
+
+- <a href="https://yaml.org/spec/1.2.2/" target="_blank" rel="noopener noreferrer">YAML 1.2 Specification (yaml.org)</a>
+- <a href="https://learnxinyminutes.com/yaml/" target="_blank" rel="noopener noreferrer">Learn YAML in Y Minutes (learnxinyminutes.com)</a>
+- <a href="https://www.youtube.com/watch?v=1uFVr15xDGg" target="_blank" rel="noopener noreferrer">YAML Tutorial: Everything You Need to Know (TechWorld with Nana) (YouTube)</a>
+- <a href="https://yaml-multiline.info/" target="_blank" rel="noopener noreferrer">YAML Multiline String Reference (yaml-multiline.info)</a>
+- <a href="https://onlineyamltools.com/convert-yaml-to-json" target="_blank" rel="noopener noreferrer">YAML to JSON Converter (onlineyamltools.com)</a>
