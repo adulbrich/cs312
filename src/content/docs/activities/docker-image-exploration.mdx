@@ -91,14 +91,22 @@ All commands in this activity also work on a Linux EC2 instance with Docker Engi
 Before running anything, let us look at what an image actually is.
 
 <Steps>
-1. Pull two variants of the nginx image:
+1. Check which cgroup version your container runtime is using:
+
+   ```bash
+   docker info | grep -Ei 'Cgroup (Driver|Version)'
+   ```
+
+   Most modern Linux distributions and recent Docker Desktop setups report cgroup v2. If you are using Podman, `podman info` also reports the cgroup version in its host information.
+
+2. Pull two variants of the nginx image:
 
    ```bash
    docker pull nginx:alpine
    docker pull nginx:latest
    ```
 
-2. Compare their sizes:
+3. Compare their sizes:
 
    ```bash
    docker images nginx
@@ -106,7 +114,7 @@ Before running anything, let us look at what an image actually is.
 
    Record the size of each. The `alpine` variant should be considerably smaller.
 
-3. Inspect the layers of the alpine image:
+4. Inspect the layers of the alpine image:
 
    ```bash
    docker history nginx:alpine
@@ -119,7 +127,7 @@ Before running anything, let us look at what an image actually is.
    - Which layer is the largest, and what instruction created it?
    - Why are some layers listed with size `0B`?
 
-4. Examine the image's metadata:
+5. Examine the image's metadata:
 
    ```bash
    docker inspect nginx:alpine

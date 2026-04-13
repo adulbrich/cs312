@@ -39,12 +39,14 @@ The ideas behind containers were developed incrementally over decades.
 
 **chroot (1979):** Unix introduced the `chroot` system call, which changes the apparent root directory for a process and its children. This creates a "chroot jail" that hides portions of the filesystem. However, it only restricts filesystem access; it does not limit CPU, RAM, or network resources. Root users can escape it, so it is not a security mechanism on its own.
 
-**cgroups (2006/2008):** "Control Groups" were developed by Google engineers and merged into the Linux kernel in 2008. cgroups allow the OS to limit, account for, and control the resource usage of a collection of processes:
+**[cgroups](https://en.wikipedia.org/wiki/Cgroups) (2006/2008):** "Control Groups" were developed by Google engineers and merged into the Linux kernel in 2008. cgroups allow the OS to limit, account for, and control the resource usage of a collection of processes:
 
 - **Resource limiting:** cap RAM, CPU, and I/O usage for a process group.
 - **Prioritization:** give certain process groups higher priority for disk access.
 - **Accounting:** track how much CPU and memory a group has consumed.
 - **Control:** freeze, kill, or checkpoint a process group.
+
+As containers became mainstream, Linux introduced [**cgroups v2**](https://www.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html) (broadly available in major distributions around 2016) as a unified hierarchy that replaces the multiple independent controller trees used by v1. The practical differences are simpler delegation rules, more consistent resource semantics across controllers, and better behavior under nested/containerized workloads. Modern Docker, containerd, and runc can run on either version, but newer Linux distributions increasingly default to v2.
 
 **Namespaces (2002-present):** Linux namespaces wrap a global resource so that processes within the namespace see their own isolated instance of it. There are currently eight namespace types in the Linux kernel:
 
@@ -63,17 +65,13 @@ The network namespace deserves special attention: each container gets its own li
 
 The PID namespace is equally important: the first process started inside a container becomes PID 1 within that namespace, even though the host kernel assigns it a different PID on the host. Other processes inside the same container receive their own namespace-local PIDs. Processes in the container cannot enumerate or signal processes outside their namespace. From inside, the system appears to have only the processes that belong to the container.
 
-**LXC (Linux Containers):** Combining cgroups and namespaces, LXC appeared around 2008 as a way to run a full "virtual operating system" without a hypervisor. An LXC container might run Ubuntu inside even though the host runs Debian, while sharing the same host kernel. This makes LXC very resource-efficient, but because the kernel is shared, a kernel vulnerability could potentially be exploited across container boundaries.
+**[LXC](https://linuxcontainers.org/lxc/introduction/) (Linux Containers):** Combining cgroups and namespaces, LXC appeared around 2008 as a way to run a full "virtual operating system" without a hypervisor. An LXC container might run Ubuntu inside even though the host runs Debian, while sharing the same host kernel. This makes LXC very resource-efficient, but because the kernel is shared, a kernel vulnerability could potentially be exploited across container boundaries.
 
 **Docker's paradigm shift:** Earlier containerization approaches like LXC virtualized an entire OS environment. Docker's insight was to discard the OS portion entirely and virtualize only the single application you want to run. A Docker container is not "a small Ubuntu"; it is your application process, packaged with the user-space libraries it needs. Docker originally used LXC internally, but now uses **libcontainer** (part of the `runc` project), a purpose-built library that directly uses cgroups and namespaces.
 
 <Aside type="note" title="Containers Are Not Lightweight VMs">
 A common misconception is that containers are "small VMs." They are not. A VM virtualizes hardware and runs a complete guest kernel. A container is a regular process (or group of processes) on the host, isolated through kernel namespaces and constrained through cgroups. The host kernel is shared, which is why you cannot run a Windows container on a Linux host without a VM intermediary. The tradeoff is clear: containers offer speed and density at the cost of weaker isolation, while VMs offer stronger isolation at the cost of resource overhead.
 </Aside>
-
-<HistoricalNote title="Docker's Five-Minute Lightning Talk (PyCon 2013)">
-Docker originated as a side project at dotCloud, a French-American platform-as-a-service startup. Solomon Hykes, dotCloud's founder, almost did not bother presenting it: he gave a five-minute lightning talk at PyCon Santa Clara in March 2013, half-expecting it to go unnoticed. The audience immediately understood why packaging an application together with its dependencies solved a real problem, and the GitHub repository hit 1,000 stars within 24 hours. Docker was open-sourced a few weeks later. dotCloud pivoted its entire business to Docker, renamed the company Docker Inc., and raised $15 million in Series B funding within months. The technology that would reshape how software is deployed globally began as an internal tool at a small company that nearly kept it to themselves.
-</HistoricalNote>
 
 ## Docker Architecture
 
@@ -109,14 +107,16 @@ flowchart TB
 
 ## Images and Layers
 
-A Docker image is not a single monolithic file. It is a stack of read-only layers, each representing a set of filesystem changes. This layered design uses a **union filesystem** to present all the layers as a single coherent directory tree to a running container.
+A Docker image is not a single monolithic file. It is a stack of [read-only layers](https://docs.docker.com/get-started/docker-concepts/building-images/understanding-image-layers/), each representing a set of filesystem changes. This layered design uses a **union filesystem** to present all the layers as a single coherent directory tree to a running container.
 
-Consider an image for a web application built in sequence: start from a base runtime image, copy in the dependency manifest, install the dependencies, then copy in the application source code. Each instruction produces a new layer:
+As a simplified learning model, consider an image for a web application built in sequence: start from a base runtime image, copy in the dependency manifest, install the dependencies, then copy in the application source code. In this example, each filesystem-changing step produces a new layer:
 
 1. **Base layer**: the runtime and its OS dependencies
 2. **Manifest layer**: the dependency file added to the filesystem
 3. **Install layer**: the result of running the package installer
 4. **Application layer**: the application source code
+
+This does not mean every Docker image has exactly four layers or these exact boundaries. Real images often have more layers, sometimes fewer, and may include metadata-only history entries.
 
 The power of this design is **layer caching**. If you rebuild the image and only the application code has changed, Docker reuses the cached base, manifest, and install layers and only rebuilds the application layer. This makes rebuilds fast. It also means that if ten images on the same host all use the same base image, that layer is stored only once on disk.
 
@@ -204,6 +204,8 @@ With an image available, `docker run` creates a container from it and starts the
 ```bash
 docker run -d -p 8080:80 --name webserver nginx:alpine
 ```
+
+*This command starts a container from the `nginx:alpine` image, names it `webserver`, and runs it in the background. `nginx` is the web server software, and `alpine` means the image uses Alpine Linux, a small distribution chosen to keep image size low. The `-p 8080:80` mapping publishes container port 80 (where nginx listens inside the container) on host port 8080, so you can reach it at `http://localhost:8080`.*
 
 The most commonly used flags:
 
@@ -355,7 +357,7 @@ services:
     ports:
       - "8080:80"
     environment:
-      - DATABASE_URL=postgres://app:secret@database:5432/appdb
+      - DATABASE_URL=${DATABASE_URL}
     depends_on:
       database:
         condition: service_healthy
@@ -364,9 +366,9 @@ services:
   database:
     image: postgres:16-alpine
     environment:
-      - POSTGRES_DB=appdb
-      - POSTGRES_USER=app
-      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U app -d appdb"]
       interval: 10s
@@ -379,13 +381,15 @@ volumes:
   db-data:
 ```
 
+With this pattern, Compose reads values from shell environment variables or from a local `.env` file in the same directory as `compose.yml`. For example, `.env` can define `DATABASE_URL`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` without hardcoding them in the Compose file.
+
 Several things to notice:
 
 **Services** are the containers you want to run. Each service can either `build` from a local Dockerfile (as `web` does here) or pull a pre-built `image` from a registry (as `database` does).
 
 **Networking is automatic.** Compose creates a user-defined bridge network for the application and attaches all services to it. The `web` service can connect to the database at the hostname `database` on port 5432 without manual network configuration. The connection string `postgres://app:secret@database:5432/appdb` works because `database` resolves to the database container's IP address within the shared network.
 
-**Environment variables** are the standard mechanism for injecting configuration. Values that differ between environments (development, staging, production) such as database URLs, API keys, and feature flags are passed in at runtime, not baked into the image.
+**Environment variables** are the standard mechanism for injecting configuration. Values that differ between environments (development, staging, production) such as database URLs, API keys, and feature flags are passed in at runtime, not baked into the image. Keep secrets out of version control by using `.env` files that are git-ignored, Docker secrets, or an external secrets manager.
 
 **Volumes** declared at the top level (the `volumes:` key) are **named volumes** that Docker creates and manages. In the example, `db-data:` declares a named volume. When a service references it with `- db-data:/var/lib/postgresql/data`, that volume is mounted into the container at that path. Named volumes persist across `docker compose down` and `docker compose up` cycles unless you explicitly pass `--volumes` to the down command. If instead you wanted a **bind mount** (host directory), you would write `- ./local-path:/var/lib/postgresql/data`, using a relative or absolute path instead of a volume name.
 
@@ -450,13 +454,13 @@ Tags are mutable pointers. `latest` is a convention, not a guarantee of recency;
 When pushing to a public repository, every layer is publicly accessible. Never bake secrets, passwords, or private keys into an image layer, even in an intermediate layer that was later overwritten. All layers in the build history are accessible to anyone who pulls the image. Use multi-stage builds and runtime secrets injection instead.
 </Aside>
 
-## Container Runtimes: Docker, Podman, and OCI
+## The Container Ecosystem
 
 Docker popularized containers, but it is not the only tool in the ecosystem. Understanding the standards that govern container interoperability helps you reason about alternatives.
 
 ### The Open Container Initiative (OCI)
 
-The **Open Container Initiative (OCI)**, formed in 2015 by Docker, Red Hat, Google, and others, defines two standards:
+The [**Open Container Initiative (OCI)**](https://opencontainers.org/), formed in 2015 by Docker, Red Hat, Google, and others, defines two standards:
 
 - **OCI Image Specification**: how container images are formatted and stored (layers, manifests, configuration).
 - **OCI Runtime Specification**: the interface a container runtime must implement to create and manage containers.
@@ -467,7 +471,7 @@ Because Docker images conform to the OCI image specification, any OCI-compatible
 
 ### Podman
 
-**Podman** is an OCI-compatible container engine developed by Red Hat. It is the default container tool on RHEL 8+, Fedora, and AlmaLinux, and is available on all major Linux distributions and macOS.
+[**Podman**](https://podman.io/) is an OCI-compatible container engine developed by Red Hat. It is the default container tool on RHEL 8+, Fedora, and AlmaLinux, and is available on all major Linux distributions and macOS.
 
 Podman differs from Docker in two important ways:
 
@@ -479,9 +483,13 @@ Podman's CLI is deliberately compatible with Docker's. Most `docker` commands wo
 
 ### OrbStack
 
-On macOS, and in many Windows setups that run Linux containers, containers require a Linux VM because container isolation depends on Linux kernel features. Docker Desktop and Podman Desktop manage this VM transparently. **OrbStack** began as a macOS-focused alternative to Docker Desktop and is still primarily associated with macOS, but it is no longer strictly macOS-only. It runs a lightweight Linux VM with faster startup time, lower memory overhead, and better filesystem performance than Docker Desktop on supported platforms. OrbStack is fully compatible with the Docker CLI and Docker socket, so all `docker` commands work without modification.
+On macOS, and in many Windows setups that run Linux containers, containers require a Linux VM because container isolation depends on Linux kernel features. Docker Desktop and Podman Desktop manage this VM transparently. [**OrbStack**](https://orbstack.dev/) is a macOS-only alternative to Docker Desktop. It runs a lightweight Linux VM with fast startup time, low memory overhead, and strong filesystem performance, and it is fully compatible with the Docker CLI and Docker socket, so all `docker` commands work without modification.
 
-The practical implication: because the OCI standard defines both image format and runtime interface, the concepts in this lecture -- images, layers, Dockerfiles, volumes, Compose -- apply regardless of whether you use Docker, Podman, or OrbStack. The image format, Dockerfile syntax, and Compose file format are all standardized or widely compatible across the ecosystem.
+### Rancher Desktop
+
+[**Rancher Desktop**](https://rancherdesktop.io/) is a free, open-source Docker Desktop alternative available on macOS, Windows, and Linux. It runs a Linux VM (using Lima on macOS and Linux, WSL2 on Windows) and supports either `containerd` or `dockerd` as the container engine, selectable at install time. It also bundles an optional lightweight Kubernetes cluster (`k3s`), making it a common choice for developers who need both a local Docker workflow and a local Kubernetes environment without running a separate tool. Like OrbStack, it is compatible with the Docker CLI and Docker socket.
+
+The practical implication: because the OCI standard defines both image format and runtime interface, the concepts in this lecture (images, layers, Dockerfiles, volumes, Compose) apply regardless of whether you use Docker, Podman, OrbStack, or Rancher Desktop. The image format, Dockerfile syntax, and Compose file format are all standardized or widely compatible across the ecosystem.
 
 ## Container Orchestration
 
