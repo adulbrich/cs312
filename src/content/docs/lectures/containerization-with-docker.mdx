@@ -148,7 +148,7 @@ Some rows show a size of `0B`. This usually means the history entry changed imag
 
 ## Dockerfiles: Building Images
 
-A **Dockerfile** is a text file containing instructions that Docker executes in sequence to build an image. Each instruction produces a layer, and the final stack of layers becomes the image.
+A **Dockerfile** is a text file containing instructions that Docker executes in sequence to build an image. Instructions that change the filesystem typically produce layers, while some instructions only change image metadata or history. The final stack of filesystem layers, together with that metadata, becomes the image.
 
 A typical web application Dockerfile follows a predictable structure:
 
@@ -271,7 +271,7 @@ Every container gets its own network namespace, but Docker also needs to make co
 
 ### Bridge Networks
 
-The default network mode is **bridge**. On a typical Linux Docker installation, Docker creates a virtual bridge interface on the host (usually `docker0`) and assigns each container a private IP address within that bridge's subnet, often `172.17.0.0/16` unless the daemon or host networking has been customized. On Docker Desktop for macOS or Windows, the bridge exists inside the Linux VM Docker manages, so the exact private subnet may differ. Containers can reach the internet through NAT. However, a container on the default bridge network is not directly reachable from the host network without explicit port publishing.
+The default network mode is **bridge**. On a typical Linux Docker installation, Docker creates a virtual bridge interface on the host (usually `docker0`) and assigns each container a private IP address within that bridge's subnet, often `172.17.0.0/16` unless the daemon or host networking has been customized. On Docker Desktop for macOS or Windows, the bridge exists inside the Linux VM Docker manages, so the exact private subnet may differ. Containers can reach the internet through NAT. On Linux, the host itself can usually reach a container's private bridge IP directly, but machines outside the host cannot. Port publishing is what makes a container service reachable through a host port such as `localhost:8080` or from other systems on the network.
 
 **Port publishing** (`-p host:container`) maps a port on the host to a port inside the container. Docker configures a NAT rule forwarding traffic arriving at the host port to the container's private IP on the container port. The container process only knows it is listening on, say, port 80; the host port is a translation that exists outside the container's view. This is why two containers can both "listen on port 80" without conflicting: they each have a unique private IP, and only the host-side ports (which must be unique) are exposed externally.
 
@@ -345,7 +345,7 @@ docker volume inspect db-data
 docker volume rm db-data
 ```
 
-The key distinction between the two mechanisms: bind mounts express "share this specific host path with the container," while volumes express "give this container persistent storage that Docker manages." For production databases, volumes are preferred because they are not tied to a specific host path and Docker can manage backups, migration, and cleanup.
+The key distinction between the two mechanisms: bind mounts express "share this specific host path with the container," while volumes express "give this container persistent storage that Docker manages." For production databases, volumes are preferred because they are not tied to a specific host path, integrate cleanly with Docker tooling, and are generally easier to back up or migrate than bind mounts. The backup and migration still require explicit tooling or operational process; Docker does not do them automatically for you.
 
 <Aside type="note" title="Other Common Uses for Each Mechanism">
 **Bind mounts** appear in several patterns beyond development and config injection:
@@ -357,7 +357,7 @@ The key distinction between the two mechanisms: bind mounts express "share this 
 **Volumes** have capabilities beyond simple single-container persistence:
 
 - **Multi-container sharing:** a named volume can be attached to multiple containers simultaneously, which is useful for sidecar patterns where a logging agent or metrics exporter runs alongside the application and reads from a shared directory.
-- **Volume drivers:** the volume abstraction is pluggable. Drivers exist for NFS, AWS EBS, GCS, and other remote storage backends, so a volume can follow a container across hosts in an orchestrated environment rather than being tied to local disk.
+- **Volume drivers:** the volume abstraction is pluggable. Drivers exist for NFS, AWS EBS, GCS, and other remote storage backends. By default, a named volume lives on one Docker host. With the right shared-storage driver or orchestration platform, the same logical volume can be presented across hosts instead of being tied to local disk.
 </Aside>
 
 ## Docker Compose: Multi-Container Applications
@@ -386,7 +386,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d appdb"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -403,7 +403,7 @@ Several things to notice:
 
 **Services** are the containers you want to run. Each service can either `build` from a local Dockerfile (as `web` does here) or pull a pre-built `image` from a registry (as `database` does).
 
-**Networking is automatic.** Compose creates a user-defined bridge network for the application and attaches all services to it. The `web` service can connect to the database at the hostname `database` on port 5432 without manual network configuration. The connection string `postgres://app:secret@database:5432/appdb` works because `database` resolves to the database container's IP address within the shared network.
+**Networking is automatic.** Compose creates a user-defined bridge network for the application and attaches all services to it. The `web` service can connect to the database at the hostname `database` on port 5432 without manual network configuration. A connection string such as <code>postgres://$&#123;POSTGRES_USER&#125;:$&#123;POSTGRES_PASSWORD&#125;@database:5432/$&#123;POSTGRES_DB&#125;</code> works because `database` resolves to the database container's IP address within the shared network.
 
 **Environment variables** are the standard mechanism for injecting configuration. Values that differ between environments (development, staging, production) such as database URLs, API keys, and feature flags are passed in at runtime, not baked into the image. Keep secrets out of version control by using `.env` files that are git-ignored, Docker secrets, or an external secrets manager.
 
@@ -489,8 +489,8 @@ Compose detects which services have a newer image than what is currently running
 The same principle applies to rollbacks. Because each image version is a separate, immutable artifact, rolling back to an older version means pulling the previous tag and recreating the container. There is no in-place state to unwind because the state never lived in the container:
 
 ```bash
-# Roll back to a specific prior version
-docker compose pull myusername/my-app:1.2.3
+# Roll back after changing the service's image tag to 1.2.3 in compose.yml
+docker compose pull web
 docker compose up -d
 ```
 
@@ -525,7 +525,7 @@ Podman differs from Docker in two important ways:
 
 **Rootless by default.** Containers run as your own user identity on the host rather than requiring root privileges or a root-owned daemon. If an attacker were to escape the container's namespace isolation, they would land as an unprivileged user, not as root.
 
-Podman's CLI is deliberately compatible with Docker's. Most `docker` commands work identically with `podman` substituted, and users who have transitioned often run `alias docker=podman` without changing any existing scripts. Podman reads OCI images, so it can pull and run images from Docker Hub, GHCR, or any other OCI registry. For Compose-style workflows, `podman compose` (or the separate `podman-compose` package) handles the same `compose.yml` syntax.
+Podman's CLI is deliberately compatible with Docker's. Many common `docker` commands work with `podman` substituted, and some users who have transitioned even run `alias docker=podman` for day-to-day work. The compatibility is high, but it is not perfect across every flag, workflow, or ecosystem integration. Podman reads OCI images, so it can pull and run images from Docker Hub, GHCR, or any other OCI registry. For Compose-style workflows, `podman compose` typically invokes an external Compose provider such as `docker-compose` or `podman-compose` while pointing it at the local Podman socket.
 
 ### OrbStack
 
@@ -624,7 +624,7 @@ The Linux-specific design of the mainstream container stack does not mean contai
 
 ### Windows Containers
 
-Microsoft added native container support in Windows Server 2016. [Windows containers](https://learn.microsoft.com/en-us/virtualization/windowscontainers/about/) use Windows-specific kernel features, analogous to Linux namespaces and cgroups, to isolate Windows processes. They can run Windows executables, Windows services, and Windows-native applications. They are not Linux containers; you cannot run a Linux image in a Windows container or vice versa. Windows containers come in two isolation modes: process isolation (sharing the Windows host kernel, similar to Linux containers) and Hyper-V isolation (each container gets its own lightweight VM kernel, similar to a VM but with a container-like interface). The Hyper-V mode exists partly because Windows kernel isolation has historically been considered less mature than Linux's, so the stronger VM boundary is an option for higher-security workloads.
+Microsoft added native container support in Windows Server 2016. [Windows containers](https://learn.microsoft.com/en-us/virtualization/windowscontainers/about/) use Windows-specific kernel features, analogous to Linux namespaces and cgroups, to isolate Windows processes. They can run Windows executables, Windows services, and Windows-native applications. They are not Linux containers; you cannot run a Linux image in a Windows container or vice versa. Windows containers come in two isolation modes: process isolation (sharing the Windows host kernel, similar to Linux containers) and Hyper-V isolation (each container gets its own lightweight VM, similar to a VM but with a container-like interface). Hyper-V isolation exists to provide a stronger isolation boundary and broader compatibility between host and container versions.
 
 ### WebAssembly Sandboxes
 
