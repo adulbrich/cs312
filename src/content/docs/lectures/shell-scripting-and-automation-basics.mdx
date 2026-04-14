@@ -6,16 +6,16 @@ sidebar:
 draft: true
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Every system administrator eventually faces tasks that must be done repeatedly: rotating log files, copying backups to a remote server, provisioning user accounts. When you perform these by hand, three problems emerge. First, the work is tedious; Google's SRE team calls this kind of repetitive, automatable operational work *toil*. Second, manual work is inconsistent; you will eventually forget a step or mistype a path. Third, manual processes are not repeatable in any verifiable way.
 
-Shell scripts solve all three problems. A script encodes the exact sequence of commands, runs them the same way every time, and serves as living documentation. In this chapter we will build a backup script piece by piece, starting with a single `cp` command and ending with rotation and scheduling. Along the way, every major Bash scripting concept will earn its place by making that script better.
+Shell scripts solve all three problems. A script encodes the exact sequence of commands, runs them the same way every time, and serves as living documentation. This lecture covers the anatomy of a well-structured Bash script: how variables and quoting prevent subtle failures, how conditionals and loops let a script react to the state of the system, how functions organize reusable logic, and how a handful of safe-scripting defaults catch the majority of bugs at the point of failure. The lecture also covers scheduling with cron and systemd timers, regular expressions and the tools that use them, and the point at which Bash's strengths run out and a more capable tool should take over.
 
-## Your First Script
+## Script Structure and the Shebang
 
-A shell script is simply a text file containing commands that the shell can execute. Let's start with the simplest possible backup: copying a directory.
+A shell script is simply a text file containing commands that the shell can execute. The following script copies a web directory to a backup location:
 
 ```bash
 #!/usr/bin/env bash
@@ -24,25 +24,7 @@ cp -r /var/www/html /backups/html-backup
 
 The first line is the *shebang* (sometimes called a hashbang). It tells the operating system which interpreter should run the file. Using `#!/usr/bin/env bash` instead of `#!/bin/bash` is more portable, because `env` searches your `PATH` for `bash` rather than assuming a fixed location.
 
-<Steps>
-
-1. Save the file as `backup.sh`.
-
-2. Make it executable:
-
-   ```bash
-   chmod +x backup.sh
-   ```
-
-3. Run it:
-
-   ```bash
-   ./backup.sh
-   ```
-
-</Steps>
-
-Without the `chmod` step, the kernel will refuse to execute the file. You can also run a script explicitly with `bash backup.sh`, which bypasses the permission check, but making scripts executable is the conventional approach.
+Save the file as `backup.sh` and make it executable with `chmod +x backup.sh`. Without that permission, the kernel will refuse to execute the file directly. You can also invoke any script explicitly with `bash backup.sh`, which bypasses the permission check, but making scripts executable is the conventional approach: it communicates intent and allows the shebang line to select the right interpreter.
 
 <HistoricalNote title="bash Is a Pun, and the Shebang Has a Name (1979-1989)">
 The first widely-used Unix shell was written by Stephen Bourne at Bell Labs in 1979. When the GNU Project needed a free replacement in 1989, Brian Fox wrote the Bourne-Again Shell (bash) as a deliberate pun on Bourne's name. bash added command history, tab completion, job control, and arrays to the Bourne shell's feature set and became the default shell on most Linux distributions. The shebang line (`#!`) predates bash: it was added to the Unix kernel in 1980 so that scripts could declare their own interpreter rather than relying on the calling shell to guess. The name "shebang" is a contraction of "hash bang." macOS used bash as its default shell until Catalina (2019), when Apple switched to zsh, not for technical reasons but because bash 3.2 is the last version under the permissive GPLv2 license, and Apple preferred not to ship the newer GPLv3-licensed versions.
@@ -78,6 +60,22 @@ cp -r "$SOURCE" "$DEST"
 ```
 
 Now every run creates a uniquely named backup directory. The `$(...)` syntax is preferred over the older backtick syntax because it nests cleanly and is easier to read.
+
+**Script arguments** are passed to a script as positional parameters, using the same `$1`, `$2` syntax that functions use for their own arguments. The variable `$0` holds the script's name, `$#` holds the count of arguments, and `$@` expands to all arguments as separate words. Accepting arguments instead of hardcoding paths makes a script general-purpose and reusable:
+
+```bash
+#!/usr/bin/env bash
+if [[ "$#" -lt 2 ]]; then
+    echo "Usage: $(basename "$0") <source> <destination>" >&2
+    exit 1
+fi
+
+SOURCE="$1"
+DEST="$2"
+cp -r "$SOURCE" "$DEST"
+```
+
+Validating `$#` at the start of a script, before any work begins, is a good habit. The usage message makes the expected interface visible to anyone who runs the script incorrectly, and the early `exit 1` prevents confusing errors from being emitted later when a variable turns out to be empty.
 
 ## Conditionals
 
@@ -123,7 +121,7 @@ else
 fi
 ```
 
-<Aside type="caution">
+<Aside type="caution" title="Always Quote Variables in Tests">
 A common mistake is writing `if [ $VAR == "yes" ]` without quotes. If `$VAR` is empty, this expands to `if [ == "yes" ]`, which is a syntax error. Always quote your variables, or use `[[ ]]` which handles empty values safely.
 </Aside>
 
@@ -229,7 +227,7 @@ backup_dir "/etc/ssh"
 
 Several things are worth noting here. The `local` keyword restricts a variable's scope to the function; without it, variables are global by default, which leads to subtle bugs in larger scripts. Function arguments are accessed as `$1`, `$2`, and so on (similar to script arguments). The `return` statement sets the function's exit status: 0 for success, non-zero for failure. This is distinct from `exit`, which terminates the entire script.
 
-<Aside type="note">
+<Aside type="note" title="Returning Values from Bash Functions">
 Bash functions do not return values the way functions in Python or JavaScript do. The `return` statement sets an exit code (0-255). If you need to return a string, either `echo` it and capture with command substitution, or set a global variable.
 </Aside>
 
@@ -279,7 +277,7 @@ Production scripts should fail loudly rather than silently continuing after an e
 set -euo pipefail
 ```
 
-Let's break this down:
+Each option addresses a distinct failure mode:
 
 - **`set -e`** (errexit): the script exits immediately if any command returns a non-zero exit code. Without this, a failing `cp` would be silently ignored and the script would keep running.
 - **`set -u`** (nounset): the script exits if you reference an undefined variable. This catches typos like `$SORUCE` instead of `$SOURCE`.
@@ -305,7 +303,7 @@ echo "Backup archived successfully"
 
 The `trap ... EXIT` fires regardless of whether the script succeeds or fails, so the temporary directory is always cleaned up. This is the Bash equivalent of a `finally` block in other languages.
 
-Let's combine everything into a more complete backup script with logging and rotation:
+The following script brings all the concepts together: safe defaults, a logging function, per-directory backup with error counting, and rotation:
 
 ```bash
 #!/usr/bin/env bash
@@ -351,7 +349,7 @@ else
 fi
 ```
 
-This script ties together every concept from the chapter: safe defaults, functions with local variables, a loop over an array, conditionals, and structured logging.
+This script ties together every concept from this lecture: safe defaults, functions with local variables, a loop over an array, conditionals, and structured logging.
 
 ## Regular Expressions
 
@@ -441,7 +439,7 @@ grep -E "error|warning" app.log
 grep -c "404" access.log
 ```
 
-<Aside type="tip">
+<Aside type="tip" title="Prefer Extended Regular Expressions">
 Use `grep -E` (or `egrep`) for extended regular expressions, which allow `+`, `?`, `|`, and `{n}` without backslash escaping. Most modern shell scripting uses ERE syntax because it is more readable.
 </Aside>
 
@@ -514,7 +512,7 @@ A few practical tips for cron:
 - Redirect output to a log file (`>> /var/log/backup-cron.log 2>&1`) so you can diagnose failures.
 - Test your cron expression at a site like crontab.guru before deploying it.
 
-<Aside type="tip">
+<Aside type="tip" title="Cron Shortcut Syntax">
 The `@daily`, `@hourly`, and `@weekly` shortcuts are supported by most cron implementations and are easier to read than the five-field syntax.
 </Aside>
 
@@ -571,8 +569,23 @@ Bash is an excellent tool for automating tasks on a single machine, but it has l
 
 **You need testability.** Writing automated tests for Bash scripts is possible but awkward. Python, Go, and other languages have mature testing frameworks that make it straightforward to verify behavior and catch regressions.
 
-The practical rule is this: start with Bash for simple, single-machine automation. When the task outgrows Bash's strengths, move to the right tool for the job. That might be Ansible for multi-host configuration, Python for data processing, or Terraform for infrastructure provisioning. The scripting fundamentals you have learned in this chapter (variables, conditionals, loops, functions, exit codes) transfer directly to those tools, because they all build on the same Unix concepts.
+The practical rule is this: start with Bash for simple, single-machine automation. When the task outgrows Bash's strengths, move to the right tool for the job. That might be Ansible for multi-host configuration, Python for data processing, or Terraform for infrastructure provisioning. The scripting fundamentals covered in this lecture (variables, conditionals, loops, functions, exit codes) transfer directly to those tools, because they all build on the same Unix concepts.
 
-## Summary
+## Takeaways
 
-This chapter traced the path from a one-line `cp` command to a production-quality backup script with logging, rotation, and scheduling. Along the way, you learned the building blocks that underpin all shell automation: variables and quoting to handle data safely, conditionals to make decisions, loops to process collections, functions to organize logic, safe defaults to catch errors early, and `trap` to clean up after yourself. These patterns will serve you well whether you are writing a five-line helper script or deciding that it is time to reach for a more powerful tool.
+Shell scripting is the first automation tool a systems administrator reaches for, because it requires nothing beyond the shell already on the server. A production backup script illustrates how all the building blocks connect: variables and quoting to handle paths safely, conditionals to validate preconditions, loops to process arrays of directories, functions to keep repeated logic in one place, and `set -euo pipefail` to fail loudly rather than silently continuing after an error. A `trap EXIT` clause ensures temporary directories are cleaned up regardless of how the script exits, which is the Bash equivalent of a `finally` block. Scheduling the script with a systemd timer rather than cron adds persistence: if the machine is off at the scheduled time, the timer fires at the next boot rather than silently skipping the run.
+
+Regular expressions extend Bash's reach into text processing. The same pattern language that `grep` uses to filter log lines also drives `sed` substitutions and `find -regex` file selection. Understanding the difference between basic and extended RE syntax, and knowing which tools default to which, prevents the most common regex confusion in shell scripts.
+
+Bash is the right tool until it is not. The limit usually arrives at one of three thresholds: multiple hosts (use the Configuration Management with Ansible lecture's approach instead), structured data (Python handles JSON and YAML naturally), or a script long enough to require scrolling. The underlying primitives, processes, exit codes, environment variables, and standard streams, do not change when you switch tools. They are the vocabulary of Unix automation regardless of which language you are writing in.
+
+## Resources
+
+- <a href="https://www.gnu.org/software/bash/manual/bash.html" target="_blank" rel="noopener noreferrer">Bash Reference Manual (GNU Project) (Documentation)</a>
+- <a href="https://mywiki.wooledge.org/BashGuide" target="_blank" rel="noopener noreferrer">Bash Guide (Greg Wooledge) (Wiki)</a>
+- <a href="https://mywiki.wooledge.org/BashPitfalls" target="_blank" rel="noopener noreferrer">Bash Pitfalls (Greg Wooledge) (Wiki)</a>
+- <a href="https://www.shellcheck.net/" target="_blank" rel="noopener noreferrer">ShellCheck: Static Analysis Tool for Shell Scripts (shellcheck.net)</a>
+- <a href="https://linuxcommand.org/tlcl.php" target="_blank" rel="noopener noreferrer">The Linux Command Line (William Shotts) (Book, free online)</a>
+- <a href="https://www.grymoire.com/Unix/Sed.html" target="_blank" rel="noopener noreferrer">sed: An Introduction and Tutorial (Bruce Barnett) (Grymoire)</a>
+- <a href="https://www.grymoire.com/Unix/Regular.html" target="_blank" rel="noopener noreferrer">Regular Expressions: An Introduction (Bruce Barnett) (Grymoire)</a>
+- <a href="https://crontab.guru/" target="_blank" rel="noopener noreferrer">Crontab Guru: Cron Expression Editor and Tester (crontab.guru)</a>
