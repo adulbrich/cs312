@@ -76,7 +76,7 @@ docker run --rm hello-world
 <TabItem label="Windows">
 On Windows, Linux containers require a WSL2-backed Linux VM. All of the following use WSL2.
 
-**Docker Desktop**: Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). Docker Desktop will offer to enable WSL2 during installation if it is not already configured. After installation, open a WSL2 terminal (e.g., Ubuntu from the Start menu) and verify:
+**Docker Desktop**: Download from [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/). Docker Desktop will offer to enable WSL2 during installation if it is not already configured. After installation, open a PowerShell terminal and verify:
 
 ```bash
 docker version
@@ -221,6 +221,8 @@ Now that you have seen what isolation looks like from inside, look at container 
    docker exec sandbox wget -qO- http://localhost > /dev/null
    docker logs sandbox
    ```
+
+   `wget` downloads a URL from the command line. `-q` suppresses progress output; `-O-` writes the response to standard output instead of saving it to a file.
 
    `docker logs` shows everything the container has written to stdout and stderr since it started. For nginx, that is the access log. Follow logs in real time with `-f`; press Ctrl+C to stop:
 
@@ -522,7 +524,7 @@ Containers have their own network namespace. Port mapping is how services inside
    docker exec server2 wget -qO- http://server1
    ```
 
-   `wget` downloads a URL from the command line. `-q` suppresses progress output; `-O-` writes the response to standard output instead of saving it to a file. Container DNS resolves `server1` to its IP within `mynet`.
+   Container DNS resolves `server1` to its IP within `mynet`.
 
 6. Confirm that containers on different networks cannot reach each other:
 
