@@ -47,14 +47,14 @@ AWS organizes its global infrastructure into **regions**, each a geographic clus
 
 Why does this matter operationally? If you deploy an application in a single AZ and that facility loses power, your application goes down. Spreading resources across two or three AZs within the same region provides resilience against localized failures without the complexity of multi-region networking. Region selection also affects latency (choose a region geographically close to your users), regulatory compliance (some data must remain within certain jurisdictions), and cost (pricing varies by region).
 
-The **shared responsibility model** defines who secures what. AWS is responsible for the security *of* the cloud: the physical data centers, the hypervisor layer, the global network backbone, and the underlying infrastructure of managed services. You are responsible for security *in* the cloud: your operating system patches, application code, firewall rules, IAM policies, and data encryption choices.
+The **shared responsibility model** defines who secures what, but the boundary moves depending on the service model. AWS is responsible for the security *of* the cloud: the physical data centers, the hypervisor layer, the global network backbone, and the underlying infrastructure of managed services. You are responsible for security *in* the cloud: the way your resources are configured, the permissions you grant, and the way your applications and data are handled. On EC2 that includes operating system patches and host firewall rules. On more managed services such as Lambda or RDS, AWS takes over more of the underlying system maintenance while you still control access policy, network exposure, and application behavior.
 
 <Aside type="caution" title="A Common Misconception">
 "It's in the cloud, so AWS handles security" is dangerously wrong. The majority of cloud security incidents stem from customer misconfigurations, not AWS infrastructure failures. Misconfigured security groups, over-permissive IAM policies, and unencrypted S3 buckets are your responsibility, not Amazon's.
 </Aside>
 
 <HistoricalNote title="AWS Started as an Internal Headache (2002-2006)">
-AWS did not begin as a product. In the early 2000s, Amazon's engineering teams were struggling to build new features quickly because every new service had to provision its own infrastructure from scratch. In 2002, Andy Jassy (now Amazon's CEO) was tasked with solving the problem by building standardized infrastructure services, including storage, compute, and databases, that any internal team could consume via API. The platform worked well enough internally that someone noticed: if it was useful to Amazon's own engineers, it would be useful to developers everywhere. Amazon S3 launched publicly in March 2006; EC2 followed in August 2006. The initial EC2 offering included a single instance type, roughly equivalent to a 1.7 GHz Xeon with 1.75 GB RAM, at $0.10 per hour. Google and Microsoft did not launch comparable public cloud services until 2008 and 2010 respectively, giving AWS a first-mover advantage it has never fully relinquished.
+AWS did not begin as a product. In the early 2000s, Amazon's engineering teams were struggling to build new features quickly because every new service had to provision its own infrastructure from scratch. In 2002, Andy Jassy (now Amazon's CEO) was tasked with solving the problem by building standardized infrastructure services, including storage, compute, and databases, that any internal team could consume via API. The platform worked well enough internally that someone noticed: if it was useful to Amazon's own engineers, it would be useful to developers everywhere. Amazon S3 launched publicly in March 2006; EC2 followed in August 2006. The initial EC2 offering included a single instance type, roughly equivalent to a 1.7 GHz Xeon with 1.75 GB RAM, at $0.10 per hour. Google App Engine arrived in 2008 as a PaaS offering, and Microsoft Azure followed in 2010. Comparable large-scale public cloud competition emerged soon after, but AWS's 2006 head start in developer-facing infrastructure gave it a first-mover advantage it has never fully relinquished.
 </HistoricalNote>
 
 ## The EC2 Instance Model
@@ -69,13 +69,15 @@ The burstable `t3` family deserves special attention because it behaves differen
 
 ### Amazon Machine Images
 
-An **AMI** is a template containing an operating system, optional pre-installed software, and configuration used to launch an instance. AWS provides official AMIs for Amazon Linux, Ubuntu, Debian, Red Hat, and Windows Server. The community and AWS Marketplace offer specialized AMIs with additional software pre-configured.
+An **AMI** is a template containing an operating system, optional pre-installed software, and configuration used to launch an instance. AWS publishes official AMIs for Amazon Linux and Windows Server. Other operating systems are commonly published either by the vendor itself, such as Canonical for Ubuntu and Red Hat for RHEL, or by community projects and AWS Marketplace publishers. The community and AWS Marketplace also offer specialized AMIs with additional software pre-configured.
 
 AMIs serve the same purpose as virtual machine snapshots: they encode a known, repeatable starting point. Once you have configured a server the way you want, you can capture it as a custom AMI and use it to launch additional instances in an identical state. This is one of the simplest forms of infrastructure reproducibility available in AWS, and it directly motivates the Infrastructure as Code tools covered in a later lecture. The underlying goal is always the same: a known, reproducible starting point that can be launched consistently.
 
 ### Key Pairs and SSH Authentication
 
-EC2 uses **key pairs** for SSH authentication rather than passwords. When you create a key pair through AWS, you receive the private key file exactly once; AWS retains only the public key. At launch, the public key is injected into the instance's default user account via `authorized_keys`. This approach means there is no password to guess, phish, or brute-force: only possession of the private key file grants access.
+For Linux EC2 instances, **key pairs** are a common SSH access mechanism. When you create a key pair through AWS, you receive the private key file exactly once; AWS retains only the public key. At launch, the public key is typically injected into a default account such as `ec2-user` or `ubuntu` via `authorized_keys`. This avoids a fixed SSH password that could be guessed or reused.
+
+Key pairs are not the only access pattern you will encounter. [EC2 Instance Connect](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/connect-linux-inst-eic.html) can inject short-lived SSH keys on demand, and [AWS Systems Manager Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html) can provide shell access without opening inbound SSH at all. Windows instances use the key pair differently: the key is used to decrypt the initial Administrator password rather than to populate `authorized_keys`.
 
 <Aside type="caution" title="Protect Your Private Key">
 If you lose the private key file, you cannot retrieve it from AWS. Store it securely, set its permissions to `400` (read-only for the owner), and never commit it to a version control repository.
@@ -93,24 +95,35 @@ Production workloads should use a custom VPC designed for the workload's specifi
 
 ### VPCs and Subnets
 
-A VPC (Virtual Private Cloud) is a logically isolated network within your AWS account, defined by a [CIDR](https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) block such as `10.0.0.0/16`, which provides 65,536 addresses. Within the VPC you create **subnets**, each associated with a specific availability zone and carved from the VPC's address space.
+A VPC (Virtual Private Cloud) is a logically isolated network within your AWS account, defined by a [CIDR](https://en.wikipedia.org/wiki/Classless_Inter-Domain_Routing) block such as `10.0.0.0/16`, which provides 65,536 addresses. As covered in the Networking Fundamentals lecture, routing and address space are IP-layer concepts; AWS simply makes them explicit in software. Within the VPC you create **subnets**, each associated with a specific availability zone and carved from the VPC's address space.
 
-Subnets are classified as **public** or **private** based on their routing configuration. A public subnet has a route to an **internet gateway (IGW)**, allowing instances with public IP addresses to communicate directly with the internet. A private subnet has no such route; instances there can reach the internet only through a **NAT gateway** (Network Address Translation gateway) sitting in a public subnet, or not at all.
+Subnets are classified as **public** or **private** based on their routing configuration. A public subnet has a route to an **internet gateway (IGW)**, allowing resources with public IP addresses to communicate directly with the internet. A private subnet has no such route; instances there can reach the internet only through a **NAT gateway** (Network Address Translation gateway) sitting in a public subnet, or not at all.
 
-The value of private subnets is not performance; it is a hard security boundary. A database in a private subnet cannot receive inbound connections from the internet regardless of how the application is configured, regardless of bugs in the application code, and regardless of what credentials an attacker might obtain. The network layer enforces the isolation before any software-level control is evaluated. A web server belongs in a public subnet because it must accept connections from browsers. A database belongs in a private subnet because no browser should ever connect to it directly.
+The value of private subnets is not performance; it is a hard security boundary. A database in a private subnet cannot receive inbound connections from the internet regardless of how the application is configured, regardless of bugs in the application code, and regardless of what credentials an attacker might obtain. The network layer enforces the isolation before any software-level control is evaluated. The more subtle design question is where your application servers belong. For a quick experiment, a single web server can live in a public subnet and accept traffic directly. In production, the more common pattern is different: an internet-facing load balancer sits in public subnets, application instances sit in private subnets behind it, and the database stays private the entire time.
 
-```text
-VPC: 10.0.0.0/16
-+-- Public Subnet (10.0.1.0/24)  us-east-1a
-|   +-- Internet Gateway route
-|   +-- Web server instance
-+-- Public Subnet (10.0.2.0/24)  us-east-1b
-|   +-- (spare capacity for redundancy)
-+-- Private Subnet (10.0.10.0/24)  us-east-1a
-|   +-- NAT Gateway route (outbound-only)
-|   +-- Database instance
-+-- Private Subnet (10.0.11.0/24)  us-east-1b
-    +-- (spare capacity for redundancy)
+The diagram below shows the production pattern worth memorizing because it reappears in the Infrastructure as Code with Terraform lecture.
+
+```mermaid
+flowchart TB
+  Internet((Internet))
+  IGW[Internet Gateway]
+  ALB[Application Load Balancer\npublic subnets]
+  NATA[NAT Gateway A\npublic subnet us-east-1a]
+  NATB[NAT Gateway B\npublic subnet us-east-1b]
+  AppA[App Instance A\nprivate subnet us-east-1a]
+  AppB[App Instance B\nprivate subnet us-east-1b]
+  DB[(Database\nprivate subnet)]
+
+  Internet --> IGW
+  IGW --> ALB
+  ALB --> AppA
+  ALB --> AppB
+  AppA --> DB
+  AppB --> DB
+  AppA --> NATA
+  AppB --> NATB
+  NATA --> IGW
+  NATB --> IGW
 ```
 
 ### Security Groups
@@ -119,7 +132,7 @@ A **security group** acts as a stateful virtual firewall attached to an instance
 
 Security group rules can reference either IP address ranges or other security groups as sources. The second form is particularly powerful. Instead of hardcoding IP addresses, which change as instances are replaced, you attach a security group to your web tier and reference that security group as the permitted source in your database tier's inbound rules. Any instance carrying the web tier security group is permitted to reach the database; nothing else is. This creates a trust relationship between tiers that scales correctly as the fleet grows and does not break when instance IPs change.
 
-A typical two-tier application might use rules like these:
+A public entry point, such as an internet-facing load balancer or a simple single-host web server, might use rules like these:
 
 | Direction | Protocol | Port Range | Source/Destination | Purpose |
 |-----------|----------|------------|-------------------|---------|
@@ -155,7 +168,7 @@ The networking components above correspond directly to OSI layers. Thinking in l
 | Network Load Balancer | Layer 4 (Transport) | Distributes TCP/UDP connections without inspecting HTTP content |
 | Application Load Balancer | Layer 7 (Application) | Routes HTTP/HTTPS requests based on host headers, paths, and cookies |
 
-Every VPC, subnet, security group, route table, and internet gateway you might configure manually has a direct counterpart in Terraform's AWS provider. The Infrastructure as Code lecture covers how to declare these resources in configuration files so that the same network topology can be reproduced consistently across environments, reviewed in pull requests, and rebuilt from scratch in minutes. The concepts are identical; only the management method changes.
+Every VPC, subnet, security group, route table, internet gateway, and NAT gateway you might configure manually has a direct counterpart in Terraform's AWS provider. The next lecture, Infrastructure as Code with Terraform, takes the topology from this section and expresses it as code so the same network can be reproduced consistently across environments, reviewed in pull requests, and rebuilt from scratch in minutes. The concepts are identical; only the management method changes.
 
 ## Storage: EBS and S3
 
@@ -185,7 +198,7 @@ When a single server holds everything, access control is simple in the worst way
 
 ### Users, Groups, and Policies
 
-An **IAM user** usually represents a human identity interacting with AWS using long-term credentials, such as a password for console access and optional access keys for API access. For automated workloads and services, current best practice is to use **IAM roles** with temporary credentials instead of long-term keys. Best practice is also to avoid attaching permissions directly to individual users; instead, organize users into **groups** such as "developers" or "operations" and attach **policies** to the groups. A policy is a JSON document specifying allowed or denied actions on specific resources.
+Historically, an **IAM user** represented a human identity inside a single AWS account, with a console password and optional access keys. You will still see IAM users in older accounts and in small one-account environments. Current AWS best practice is different: human users usually sign in through an external identity provider or [AWS IAM Identity Center](https://docs.aws.amazon.com/singlesignon/latest/userguide/what-is.html) and then assume roles with temporary credentials. For workloads and automation, the guidance is stronger still: use **IAM roles** rather than long-term access keys. If you are using the classic IAM-user model, avoid attaching permissions directly to individual users; instead, organize them into **groups** such as "developers" or "operations" and attach **policies** to the groups. In IAM Identity Center, **permission sets** play a similar role across accounts. A policy is a JSON document specifying allowed or denied actions on specific resources.
 
 ```json
 {
@@ -193,14 +206,13 @@ An **IAM user** usually represents a human identity interacting with AWS using l
   "Statement": [
     {
       "Effect": "Allow",
-      "Action": [
-        "s3:GetObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::my-backup-bucket",
-        "arn:aws:s3:::my-backup-bucket/*"
-      ]
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::my-backup-bucket"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::my-backup-bucket/*"
     }
   ]
 }
@@ -212,13 +224,31 @@ This policy grants read-only access to a specific S3 bucket and nothing else. An
 
 The principle of least privilege, granting only the permissions needed for a task and no more, is easy to state and genuinely difficult to apply consistently. AWS provides managed policies like `AmazonS3FullAccess` and `AdministratorAccess` that are convenient to attach but routinely broader than needed. A deployment process that only needs to write objects to a specific S3 bucket does not need `s3:DeleteBucket` or `s3:PutBucketPolicy`, but both are included in `AmazonS3FullAccess`. The gap between "what this policy allows" and "what this role actually needs" is exactly what an attacker exploits when credentials are compromised.
 
-Over-permissive roles accumulate silently. A role gets an extra permission added to unblock a one-time task, and the permission is never removed. Months later, that role has accumulated access far beyond its original purpose. Regular IAM access reviews, and a habit of writing inline policies scoped to the specific resources and actions a workload actually requires, are the only reliable counterweight to this drift.
+Over-permissive roles accumulate silently. A role gets an extra permission added to unblock a one-time task, and the permission is never removed. Months later, that role has accumulated access far beyond its original purpose. Regular IAM access reviews, and a habit of writing narrowly scoped customer-managed or inline policies for the specific resources and actions a workload actually requires, are the only reliable counterweight to this drift.
 
 ### Roles and Instance Profiles
 
 **IAM roles** are designed to be *assumed* rather than permanently assigned. They provide temporary, automatically rotating credentials and are the correct mechanism for granting AWS API access to EC2 instances, Lambda functions, and other AWS services. Instead of storing access keys on an instance, which creates a static secret that could be stolen if the instance is compromised, you attach an **instance profile** containing a role. The instance can then make AWS API calls using credentials that rotate every few hours without any manual action.
 
 The mechanism behind this is the **EC2 instance metadata service** (IMDS), reachable from inside any instance at the link-local address `169.254.169.254`. When a role is attached via an instance profile, the metadata service exposes temporary credentials at a well-known path. The AWS SDKs and CLI can use these credentials automatically as part of their default provider chains when higher-priority configured sources are not present. This means application code can call S3, DynamoDB, or any other AWS service without a credential hardcoded in source code or committed to a repository.
+
+The sequence matters because there are several moving parts. Once you see them in order, the design becomes much less mysterious.
+
+```mermaid
+flowchart TB
+  Role[IAM role\npermissions policy]
+  Profile[Instance profile]
+  EC2[EC2 instance]
+  IMDS[IMDSv2\n169.254.169.254]
+  App[Application code\nAWS SDK or CLI]
+  AWS[AWS service\nS3, ECR, DynamoDB]
+
+  Role --> Profile --> EC2
+  EC2 --> IMDS
+  App --> IMDS
+  IMDS --> App
+  App --> AWS
+```
 
 ```bash
 # IMDSv2 example from inside an EC2 instance with an attached role:
@@ -240,7 +270,32 @@ Embedding AWS access keys in application code, configuration files, or environme
 
 IAM user and role policies are **identity-based**: they are attached to an identity and control what that identity can do. Some AWS services also support **resource-based policies**, which are attached to the resource itself and control who can access it.
 
-S3 bucket policies are the most common example. A bucket policy can restrict access to requests originating from a specific VPC, require that all uploads use server-side encryption, or grant read access to a specific IAM role in a different AWS account. Resource-based and identity-based policies are evaluated together: a request succeeds only if both permit it and neither explicitly denies it.
+S3 bucket policies are the most common example. A bucket policy can require that all uploads use server-side encryption, grant read access to a specific IAM role in a different AWS account, or restrict access to requests that arrive through a specific VPC endpoint. The evaluation rules are the part most people misremember. AWS first checks for explicit denies. If none apply, then same-account access is generally allowed if either the identity-based policy or the resource-based policy allows the request. Cross-account access is stricter: the caller's identity policy in Account A and the resource policy in Account B must both allow the request.
+
+The simplified decision flow below is the mental model most engineers need first:
+
+```mermaid
+flowchart TD
+  Request([API request])
+  Deny{Explicit deny in any\napplicable policy?}
+  Scope{Same account or\ncross-account?}
+  Either{Identity policy or\nresource policy allows?}
+  Both{Caller identity policy and\ntarget resource policy both allow?}
+  Allow([Request allowed])
+  Block([Request denied])
+
+  Request --> Deny
+  Deny -- Yes --> Block
+  Deny -- No --> Scope
+  Scope -- Same account --> Either
+  Scope -- Cross-account --> Both
+  Either -- Yes --> Allow
+  Either -- No --> Block
+  Both -- Yes --> Allow
+  Both -- No --> Block
+```
+
+This is still a simplified model. Permissions boundaries, session policies, and AWS Organizations service control policies can narrow permissions further, but the deny-first rule and the same-account versus cross-account distinction are the core ideas to retain.
 
 This distinction matters in several practical situations. Cross-account access, for example granting a partner organization read access to your S3 bucket, is commonly implemented with a bucket policy because the partner's IAM identities live outside your account's policy scope. Enforcing encryption requirements at the bucket level regardless of what caller policies say is also commonly enforced with resource-based policy controls.
 
@@ -248,7 +303,7 @@ As deployments grow more automated through CI/CD pipelines and container orchest
 
 ## Container Registries: ECR
 
-A container registry is a distribution system for Docker images. It stores versioned, immutable image layers and serves them to any host that authenticates and has permission to pull. Without a registry, deploying the same container image to multiple hosts means copying files manually or rebuilding from source on each machine; neither approach scales or supports rollbacks reliably.
+As covered in the Containerization with Docker lecture, an image becomes operationally useful only when you can distribute the exact same artifact to many hosts. A container registry is that distribution system. It stores versioned, immutable image layers and serves them to any host that authenticates and has permission to pull. Without a registry, deploying the same container image to multiple hosts means copying files manually or rebuilding from source on each machine; neither approach scales or supports rollbacks reliably.
 
 **ECR** (Amazon Elastic Container Registry) is AWS's managed registry, integrated directly with IAM for access control. ECR organizes images into **repositories**, each holding multiple tagged versions of a single image. Unlike Docker Hub (the public default registry), ECR is private by default: no image is accessible without an authenticated IAM identity that holds the appropriate permissions.
 
@@ -283,13 +338,13 @@ AWS offers a **free tier** for new accounts that has historically included 750 h
 
 ### Billing Alerts
 
-Setting billing alerts is one of the first operational tasks in any new AWS account. AWS CloudWatch can trigger an alarm when estimated charges exceed a threshold and send a notification via SNS (Simple Notification Service). A sensible starting point is a low threshold for a learning environment and a separate threshold for any account that runs production infrastructure. When an alarm fires, the correct response is to investigate what is consuming resources and take corrective action, not to raise the threshold and continue.
+Setting billing alerts is one of the first operational tasks in any new AWS account. AWS CloudWatch billing alarms and AWS Budgets can notify you when estimated charges exceed a threshold and send a notification via SNS (Simple Notification Service) or email. A sensible starting point is a low threshold for a learning environment and a separate threshold for any account that runs production infrastructure. When an alarm fires, the correct response is to investigate what is consuming resources and take corrective action, not to raise the threshold and continue.
 
 ### Right-Sizing and the Instance Lifecycle
 
 **Right-sizing** means matching instance types to actual workload requirements rather than guessing large. AWS Cost Explorer and Compute Optimizer analyze utilization history and recommend smaller or differently balanced instance types. A server running at 8% average CPU utilization over thirty days could likely downsize safely, halving the compute cost with no user-visible impact. The analysis is only as useful as the time invested in acting on its recommendations.
 
-The distinction between **stopping** and **terminating** an instance matters for both cost and data safety. Stopping an instance halts compute billing while preserving its EBS volumes; the instance can be restarted later with its storage intact. Terminating is permanent: the instance is deleted, and any EBS volumes marked delete-on-termination are destroyed. Development instances should be stopped when not in use. Production instances running continuously can benefit from Reserved Instance pricing, which offers significant discounts in exchange for a one- or three-year commitment.
+The distinction between **stopping** and **terminating** an instance matters for both cost and data safety. Stopping an instance halts compute billing while preserving its EBS volumes; the instance can be restarted later with its storage intact. Terminating is permanent: the instance is deleted, and any EBS volumes marked delete-on-termination are destroyed. Development instances should be stopped when not in use. Production instances running continuously can benefit from Savings Plans or Reserved Instances, both of which trade a one- or three-year commitment for lower rates. Savings Plans are usually the more flexible modern option; Reserved Instances are older and more specific to a particular capacity footprint.
 
 <Aside type="caution" title="Stopped Is Not Free">
 A stopped instance does not incur compute charges, but its attached EBS volumes, any Elastic IP addresses not associated with a running instance, and any snapshots continue to generate costs. Review all associated resources when cleaning up to avoid ongoing charges from forgotten storage.
@@ -299,9 +354,9 @@ A stopped instance does not incur compute charges, but its attached EBS volumes,
 
 The AWS services in this lecture form a system rather than a list of independent features. Consider a realistic deployment sequence that touches all of them. An engineering team builds a container image for a new version of their application. Their CI pipeline assumes an IAM role using short-lived credentials and authenticates to ECR. It pushes the new image with a version tag to a private repository, where image scanning immediately checks for known vulnerabilities. No credentials appear in any configuration file; the IAM role and temporary token handle authentication entirely.
 
-The deployment target is an EC2 instance in a private subnet of a custom VPC. The subnet has no route to an internet gateway, so inbound connections from the internet cannot reach it by any path. Its security group permits inbound traffic only from the load balancer's security group on port 8080, and outbound traffic to the database tier on port 5432. The database lives in a separate private subnet; its security group accepts connections only from the application tier's security group. Neither the application server nor the database is directly reachable from the internet, at the routing layer and at the firewall layer simultaneously.
+The deployment target is an application tier running in private subnets of a custom VPC. An internet-facing load balancer lives in public subnets and forwards traffic only to the application tier on port 8080. The application instances can reach outward through NAT gateways, or through VPC endpoints for specific AWS services, without becoming directly reachable from the internet. The database lives in a separate private subnet tier; its security group accepts connections only from the application tier's security group. Neither the application instances nor the database are directly reachable from the internet, at the routing layer and at the firewall layer simultaneously.
 
-At deployment time, the EC2 instance pulls the new image from ECR. No access keys are stored on the instance; the instance profile attached at launch provides an IAM role that grants ECR pull permissions and S3 read permissions for configuration. A nightly job writes a database dump to S3 with a lifecycle policy that archives it to Glacier after thirty days and deletes it after one year. Billing alerts watch for unexpected cost spikes at multiple thresholds.
+At deployment time, the application instances pull the new image from ECR. No access keys are stored on the instances; the instance profile attached at launch provides an IAM role that grants ECR pull permissions and S3 read permissions for configuration. A nightly job writes a database dump to S3 with a lifecycle policy that archives it to Glacier after thirty days and deletes it after one year. Billing alerts watch for unexpected cost spikes at multiple thresholds.
 
 This is not an advanced architecture; it is the baseline for any workload that should be taken seriously from a security and cost perspective. Every element, the VPC topology, the security group composition, the IAM role chain, the storage separation, represents a specific engineering decision with specific consequences when things go wrong. Understanding why each element exists is what makes it possible to debug, extend, and improve the system rather than just operate it. The Infrastructure as Code and configuration management lectures that follow will show how to declare and automate all of it, but those tools only make sense once the underlying architecture is clear.
 
@@ -309,6 +364,7 @@ This is not an advanced architecture; it is the baseline for any workload that s
 
 - <a href="https://aws.amazon.com/compliance/shared-responsibility-model/" target="_blank" rel="noopener noreferrer">AWS Shared Responsibility Model (AWS Documentation)</a>
 - <a href="https://docs.aws.amazon.com/vpc/latest/userguide/what-is-amazon-vpc.html" target="_blank" rel="noopener noreferrer">What is Amazon VPC? (AWS Documentation)</a>
+- <a href="https://docs.aws.amazon.com/vpc/latest/userguide/vpc-example-private-subnets-nat.html" target="_blank" rel="noopener noreferrer">Example: VPC with Servers in Private Subnets and NAT (AWS Documentation)</a>
 - <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html" target="_blank" rel="noopener noreferrer">IAM Security Best Practices (AWS Documentation)</a>
 - <a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html" target="_blank" rel="noopener noreferrer">IAM Roles for Amazon EC2 (AWS Documentation)</a>
 - <a href="https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html" target="_blank" rel="noopener noreferrer">What is Amazon ECR? (AWS Documentation)</a>
