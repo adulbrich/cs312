@@ -3,26 +3,22 @@ title: "AWS Infrastructure: Networks, Identity, and Storage"
 description: "Inspect the default VPC, build the routing and security scaffold for a two-tier design, attach an IAM role to EC2, validate private-tier access, upload files to S3 using instance credentials, and push a container image to ECR."
 sidebar:
   order: 6
-draft: true
 ---
-
-{/* TODO: proper AWS CLI introduction + installation + grab AWS CLI info from learner lab */}
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 This activity puts into practice the concepts from the [Cloud Networking, Storage, and Identity](/lectures/cloud-computing/) lecture. You will inspect the default VPC, build the routing and security scaffold for a two-tier design, attach an IAM role to a public EC2 probe host, validate access to a private-tier instance, upload files to S3 without touching a credential file, and push a container image to a private ECR registry. By the end, you will have the network and security pieces of a two-tier VPC in place, two instances playing the public and private roles, and a container image running on your public probe host with no credentials stored anywhere on disk.
 
-## What You Will Need
+<Aside type="note" title="How this topology differs from the lecture">
+The lecture describes a three-tier production pattern: a public load balancer tier, a private application tier, and a private data tier, with outbound-only internet access through a NAT gateway and no direct SSH into any instance. This activity simplifies that into two subnets and uses a direct SSH probe host in the public subnet. The route table and security group mechanics are identical to production; the difference is operational convenience for class, not a different architecture.
+</Aside>
 
-{/* TODO: fix this section as it is incorrect and most will be done in class - only the AWS CLI must be installed beforehand */}
+## What You Will Need
 
 - Your AWS Academy Learner Lab session started and the AWS Console open in your browser
 - The `.pem` key file from your previous lab work, accessible on your local machine
 - A terminal with `ssh` available (macOS and Linux have it built in; on Windows, use WSL or PowerShell)
-
-{/* TODO: should be in the first part in class + AWS CLI info */}
-Start the Learner Lab before class. The session takes about 30 seconds to initialize.
 
 ---
 
@@ -88,12 +84,12 @@ You will create a VPC with one public subnet and one private subnet in the same 
 
    Click **Create internet gateway**. On the confirmation page, click **Attach to a VPC** and select `cs312-vpc`.
 
-5. Navigate to **Route Tables**. When you created `cs312-vpc`, AWS automatically created a main route table for it. Find it: it is associated with `cs312-vpc` and has no custom name yet.
+5. Navigate to **Route Tables** and click **Create route table**.
 
-   - Select it and click **Edit routes**.
-   - Click **Add route**: destination `0.0.0.0/0`, target: your `cs312-igw`.
-   - Save the changes.
-   - Rename this route table `public-rt` by clicking the pencil icon in the Name column.
+   - **Name:** `public-rt`
+   - **VPC:** `cs312-vpc`
+
+   Click **Create route table**. With `public-rt` selected, open the **Routes** tab and click **Edit routes**. Click **Add route**: destination `0.0.0.0/0`, target: your `cs312-igw`. Save the changes.
 
 6. Create a second route table for the private subnet:
 
@@ -112,6 +108,10 @@ You will create a VPC with one public subnet and one private subnet in the same 
 <ActivityQuestion>
 `public-subnet` and `private-subnet` were created identically, from the same VPC, in the same availability zone, with the same defaults. The only difference is their route table. Explain specifically what the `0.0.0.0/0` route entry does, and why its absence from `private-rt` means instances in `private-subnet` cannot receive inbound connections from the internet even if those instances had public IP addresses.
 </ActivityQuestion>
+
+<Aside type="note" title="Network ACLs: a second, stateless layer">
+Every subnet in a VPC is automatically associated with a Network ACL (NACL). Navigate to **VPC > Network ACLs** and find the default NACL covering your new subnets. Unlike security groups, NACLs are stateless: an inbound allow rule does not automatically permit the return traffic. You must explicitly allow the ephemeral port range (1024-65535) outbound for reply packets to reach the client. Rules are evaluated in number order and the first match wins; the default NACL ends with a catch-all allow rule on both directions, which is why most deployments leave it untouched and do the real filtering at the security group layer.
+</Aside>
 
 ---
 
@@ -218,15 +218,22 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
    This boot-time script starts a tiny TCP listener on port 5432 so you can test the `db-sg` rule later without installing PostgreSQL.
 
-4. Wait for both instances to show **Running** and for both status checks to pass. This takes 2-3 minutes. Record the **Public IPv4 address** of `cs312-web` and the **Private IPv4 address** of `cs312-db-probe`.
+4. While the instances are starting, navigate to **EC2 > Instances**, select `cs312-web`, and open the **Storage** tab. Under **Block devices**, find the root volume entry (`/dev/sda1`).
 
-5. Open a terminal on your local machine and connect via SSH:
+   Note the **Volume ID**, **Volume size** (8 GiB), and **Delete on termination** (Yes). Click the Volume ID link to open it in EC2 > Volumes and note the **Type** (gp3) and **State** (in-use). This root volume was created automatically from the AMI's snapshot when you launched the instance and will be removed when you terminate the instance because Delete on termination is enabled.
+
+5. Wait for both instances to show **Running** and for both status checks to pass. This takes 2-3 minutes. Record the **Public IPv4 address** of `cs312-web` and the **Private IPv4 address** of `cs312-db-probe`.
+
+6. On your local machine, load your key into the SSH agent so agent forwarding works later, then connect to `cs312-web`:
 
    ```bash
-   ssh -i /path/to/your-key.pem ubuntu@<PUBLIC_IP>
+   ssh-add /path/to/your-key.pem
+   ssh -A -i /path/to/your-key.pem ubuntu@<WEB_PUBLIC_IP>
    ```
 
-6. From inside `cs312-web`, request an IMDSv2 token:
+   The `-A` flag forwards your local SSH agent to the session. This lets you use the same key for onward connections without copying the `.pem` file to `cs312-web`.
+
+7. From inside `cs312-web`, request an IMDSv2 token:
 
    ```bash
    TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
@@ -236,16 +243,16 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
    The token is long and not human-friendly. Its presence is what matters. You will reuse it in the next metadata queries.
 
-7. Query the metadata service root to see what categories are available:
+8. Query the metadata service root to see what categories are available:
 
    ```bash
    curl -H "X-aws-ec2-metadata-token: $TOKEN" \
      http://169.254.169.254/latest/meta-data/
    ```
 
-   You will see a list: `ami-id`, `hostname`, `iam/`, `instance-type`, `local-ipv4`, and others. The address `169.254.169.254` is a link-local address reserved for this purpose; it is not routable beyond the instance. If this command returns an error because `$TOKEN` is empty, revisit step 6 and check the command carefully; IMDSv2 is required on current EC2 launches.
+   You will see a list: `ami-id`, `hostname`, `iam/`, `instance-type`, `local-ipv4`, and others. The address `169.254.169.254` is a link-local address reserved for this purpose; it is not routable beyond the instance. If this command returns an error because `$TOKEN` is empty, revisit step 7 and check the command carefully; IMDSv2 is required on current EC2 launches.
 
-8. Query the IAM path to find the name of the attached role:
+9. Query the IAM path to find the name of the attached role:
 
    ```bash
    ROLE_NAME=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
@@ -255,31 +262,48 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
    This returns `LabRole`, the name of the role attached via the instance profile.
 
-9. Retrieve the actual credentials:
-
-   ```bash
-   curl -H "X-aws-ec2-metadata-token: $TOKEN" \
-     "http://169.254.169.254/latest/meta-data/iam/security-credentials/$ROLE_NAME"
-   ```
-
-   The JSON response contains `AccessKeyId`, `SecretAccessKey`, `Token`, and `Expiration`. Note the `Expiration` timestamp: these credentials rotate automatically a few hours before they expire.
-
-10. Install the AWS CLI and a TCP probe tool, then confirm the CLI uses the role without any configuration:
+10. Retrieve the actual credentials:
 
     ```bash
-    sudo apt update -q && sudo apt install -y awscli netcat-openbsd
+    curl -H "X-aws-ec2-metadata-token: $TOKEN" \
+      "http://169.254.169.254/latest/meta-data/iam/security-credentials/$ROLE_NAME"
+    ```
+
+    The JSON response contains `AccessKeyId`, `SecretAccessKey`, `Token`, and `Expiration`. Note the `Expiration` timestamp: these credentials rotate automatically a few hours before they expire.
+
+11. Install the AWS CLI v2 and a TCP probe tool, then confirm the CLI uses the role without any configuration:
+
+    ```bash
+    sudo apt update -q && sudo apt install -y unzip netcat-openbsd
+    curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+    unzip -q awscliv2.zip
+    sudo ./aws/install
     aws sts get-caller-identity
     ```
 
-    The response shows your account ID and the role ARN. The CLI found and used the credentials from the metadata service without a single `aws configure` prompt.
+    Ubuntu 24.04 does not ship `awscli` in its apt repositories, so you install it from the official AWS bundle instead. The response shows your account ID and the role ARN. The CLI found and used the credentials from the metadata service without a single `aws configure` prompt.
 
-11. Validate the security-group relationship you built earlier by probing the private instance on port 5432:
+12. Validate the security-group relationship you built earlier by probing the private instance on port 5432:
 
     ```bash
     nc -zv <DB_PRIVATE_IP> 5432
     ```
 
     Replace `<DB_PRIVATE_IP>` with the private IP you recorded for `cs312-db-probe`. You should see a message ending in `succeeded`. This proves two things at once: the VPC has a local route between the two subnets, and the `db-sg` rule that references `web-sg` is allowing the connection even though the target instance has no public IP.
+
+13. To SSH into the private instance, `db-sg` needs to permit it. In the AWS Console, open **EC2 > Security Groups**, select `db-sg`, and click **Edit inbound rules**. Add:
+
+    - **Type:** SSH (TCP 22), **Source:** `web-sg`
+
+    Save the rule.
+
+14. From inside `cs312-web`, SSH to the private instance using only its private IP:
+
+    ```bash
+    ssh ubuntu@<DB_PRIVATE_IP>
+    ```
+
+    Your agent-forwarded key handles authentication. You should land at a shell prompt on `cs312-db-probe`. Run `hostname` to confirm which instance you are on. Notice that this instance has no public IP: the only way in is through `cs312-web` within the VPC. Type `exit` to return to `cs312-web`.
 </Steps>
 
 <Aside type="caution" title="Do Not Run aws configure">
@@ -341,10 +365,53 @@ Your instance already has credentials from the metadata service. This section us
    - Add a transition action: move to **S3 Glacier Flexible Retrieval** after 30 days
 
    Do not save the rule: click **Cancel** after noting the available options.
+
+7. In the AWS Console, open your bucket's **Permissions** tab and click **Edit** under **Bucket policy**. Paste the policy below, replacing `YOUR_BUCKET_NAME` with the value of `$BUCKET`:
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "DenyUnencryptedUploads",
+         "Effect": "Deny",
+         "Principal": "*",
+         "Action": "s3:PutObject",
+         "Resource": "arn:aws:s3:::YOUR_BUCKET_NAME/*",
+         "Condition": {
+           "StringNotEquals": {
+             "s3:x-amz-server-side-encryption": "AES256"
+           }
+         }
+       }
+     ]
+   }
+   ```
+
+   Save the policy.
+
+8. Back in your SSH session, retry the upload without any encryption flag:
+
+   ```bash
+   aws s3 cp testfile.txt "s3://$BUCKET/denied-upload.txt"
+   ```
+
+   You should see: `An error occurred (AccessDenied) when calling the PutObject operation`. The explicit `Deny` in the bucket policy overrode the `Allow` from the IAM role. An explicit deny always wins in IAM policy evaluation, regardless of what any allow says.
+
+9. Retry the upload with server-side encryption specified:
+
+   ```bash
+   aws s3 cp testfile.txt "s3://$BUCKET/encrypted-upload.txt" \
+     --sse AES256
+   ```
+
+   This upload succeeds. The condition in the `Deny` statement is no longer met, so the deny does not apply and the role's allow takes effect.
+
+10. In the AWS Console, open your bucket's **Objects** tab. You should see `encrypted-upload.txt` listed but no `denied-upload.txt`. The denied upload never completed, so it left no object behind. The presence of one and the absence of the other is the confirmation that the policy worked.
 </Steps>
 
 <ActivityQuestion>
-The `aws s3 cp` commands in steps 2 and 4 succeeded with no credential configuration on this instance. Trace the path the credentials took: starting from the IAM role, through the metadata service, to the AWS CLI, to the S3 API request. Name each step. Then explain why this path means you can replace this instance with a new one and the new instance will have working credentials from the moment it starts. Finally, if you added a bucket policy that explicitly denied uploads without server-side encryption, would the role alone still be enough to upload the file? Why or why not?
+The `aws s3 cp` commands in steps 2 and 4 succeeded with no credential configuration on this instance. Trace the path the credentials took: starting from the IAM role, through the metadata service, to the AWS CLI, to the S3 API request. Name each step. Then explain why this path means you can replace this instance with a new one and the new instance will have working credentials from the moment it starts. Finally, in step 8 you saw the role's allow overridden by the bucket policy's deny. What does this tell you about which layer, identity-based or resource-based, has the final word when both apply to the same request?
 </ActivityQuestion>
 
 ---
@@ -356,11 +423,9 @@ You will create a private container registry, install Docker on the EC2 instance
 <Steps>
 1. In the AWS Console, navigate to **ECR > Repositories** and click **Create repository**.
 
-   - **Visibility:** Private
    - **Repository name:** `cs312-YOUR_ONID` (your actual ONID, lowercase)
-   - **Image scan settings:** enable **Scan on push**
 
-   Click **Create repository**. Copy the full **URI** shown for the repository (it looks like `<account-id>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID`).
+   Leave all other settings at defaults. ECR repositories are private by default. Click **Create repository**. Copy the full **URI** shown for the repository (it looks like `<account-id>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID`).
 
 2. Back in your EC2 SSH session, install Docker:
 
@@ -415,19 +480,32 @@ You will create a private container registry, install Docker on the EC2 instance
    docker build -t cs312-YOUR_ONID:v1 .
    ```
 
-7. Tag the image with the full ECR repository URI and push it:
+7. Tag the image with both a version tag and `latest`, then push both:
 
    ```bash
    docker tag cs312-YOUR_ONID:v1 \
      <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID:v1
+   docker tag cs312-YOUR_ONID:v1 \
+     <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID:latest
 
-   docker push \
-     <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID:v1
+   docker push <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID:v1
+   docker push <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID:latest
    ```
 
-8. In the AWS Console, refresh your ECR repository page. You should see the `v1` tag listed. Click the image digest to open it and check the **Scan results** tab. The scan runs automatically because you enabled it at creation.
+   Both tags point to the same image digest. `latest` is a convention for "the current version"; `v1` is a permanent, immutable reference you can roll back to.
 
-   If the findings page still says the scan is in progress, wait a minute and refresh. The image can appear in the repository before the scan results are ready.
+8. In the AWS Console, refresh your ECR repository page. You should see both `v1` and `latest` listed, sharing the same digest. Click either tag and open the **Scan results** tab.
+
+   If the registry has basic scanning enabled, findings will appear here within a minute or two of the push. Note any findings and their severity levels. If the tab shows no results, retrieve them from the CLI instead:
+
+   ```bash
+   aws ecr describe-image-scan-findings \
+     --repository-name cs312-YOUR_ONID \
+     --image-id imageTag=v1 \
+     --region us-east-1
+   ```
+
+   Look for the `findingSeverityCounts` field in the output. A `nginx:alpine` image typically shows informational or low findings from package metadata; note whether any appear as CRITICAL or HIGH.
 
 9. Pull the image back from ECR to confirm the full round-trip:
 
@@ -450,6 +528,8 @@ You will create a private container registry, install Docker on the EC2 instance
 
 <ActivityQuestion>
 Step 5 used `aws ecr get-login-password` to obtain a Docker registry token, even though the instance already had IAM credentials from the metadata service. Why did Docker need a separate token? What does the ECR token authorize that the IAM credentials alone do not, and how long is that token valid?
+
+If the scan results showed a CRITICAL severity finding in the `nginx:alpine` base image, what would your next steps be? Name at least two concrete actions: one for the image already in the registry and one for preventing the same finding from reaching production in the future.
 </ActivityQuestion>
 
 <Aside type="caution" title="Clean Up When You Are Done">
@@ -462,7 +542,5 @@ This activity leaves behind two EC2 instances, an S3 bucket, and an ECR reposito
 
 You now have the core scaffold in place. The next useful step is to push the activity a little closer to the lecture's production patterns and operational controls.
 
-- Add a NAT gateway to `cs312-vpc` so instances in `private-subnet` can make outbound requests (software updates, package downloads) without being directly reachable from the internet. The [NAT gateway documentation](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html) covers the steps. Notice the tradeoff from the lecture: NAT gateways are the standard managed path, but they also incur hourly and data-processing charges.
-- Save the lifecycle rule you configured in Part 5 and observe how it appears in the Management tab. Add a second action that permanently deletes objects after 365 days so the bucket reflects the storage-lifecycle pattern from the lecture.
-- From the EC2 instance, run `aws ecr describe-image-scan-findings --repository-name cs312-YOUR_ONID --image-id imageTag=v1` to retrieve the scan results as JSON. This turns the scan-on-push concept into raw findings you can inspect.
-- Add a bucket policy that explicitly denies uploads without server-side encryption, then repeat the upload test from Part 5. This lets you see a resource-based policy and an explicit deny interact with the role you attached to the instance.
+- Add a NAT gateway to `cs312-vpc` so instances in `private-subnet` can make outbound requests (software updates, package downloads) without being directly reachable from the internet. Follow the [NAT gateway documentation](https://docs.aws.amazon.com/vpc/latest/userguide/vpc-nat-gateway.html) for the exact steps. Notice the tradeoff from the lecture: NAT gateways are the standard managed path, but they also incur hourly and data-processing charges.
+- Save the lifecycle rule you configured in the S3 section and observe how it appears in the Management tab. Add a second action that permanently deletes objects after 365 days so the bucket reflects the storage-lifecycle pattern from the lecture.
