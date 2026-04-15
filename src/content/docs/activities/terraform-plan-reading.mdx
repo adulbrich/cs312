@@ -15,6 +15,7 @@ This activity puts into practice the concepts from the [Infrastructure as Code w
 
 - Terraform 1.6 or newer installed on your laptop ([download](https://developer.hashicorp.com/terraform/install))
 - Access to your AWS Academy Learner Lab
+- AWS CLI installed
 - A text editor
 - Your ONID
 
@@ -53,7 +54,7 @@ The first pass is intentionally small. You will refresh the temporary AWS Academ
 4. **Check that the fresh credentials work before Terraform touches anything:**
 
    ```bash
-   aws sts get-caller-identity
+   aws sts get-caller-identity --profile default
    ```
 
    You should see a JSON response containing your account ID and an ARN. If this command fails, Terraform will fail for the same reason.
