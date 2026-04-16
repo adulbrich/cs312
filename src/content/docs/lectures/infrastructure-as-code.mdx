@@ -3,7 +3,6 @@ title: Infrastructure as Code
 description: "How declarative IaC transforms infrastructure from a manual, error-prone process into a versioned, reproducible engineering practice: the philosophy, core abstractions, and operational patterns that apply across all tools in the ecosystem."
 sidebar:
   order: 7
-draft: true
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -87,7 +86,7 @@ The most important thing to understand about Terraform's workflow is that it is 
 
 `terraform plan` is the critical step. It reads the current state, queries the cloud provider for the actual state of managed resources, and produces a detailed execution plan showing exactly what Terraform intends to create, modify, or destroy. Nothing changes in your infrastructure at this stage. The plan output is a diff: resources marked `+` will be created, resources marked `~` will be modified in place, and resources marked `-/+` will be destroyed and recreated (which matters because recreation is not always safe for stateful resources like databases). Read the plan the way you read a code review. A surprise in the plan is a reason to stop and investigate, not to proceed.
 
-`terraform apply` executes the plan. When called with a saved plan file, it executes exactly that plan with no possibility of drift between review and execution. This distinction matters on teams: saving a plan to a file with `terraform plan -out=tfplan` and requiring approval before running `terraform apply tfplan` is the IaC equivalent of requiring a pull request review before merging code. The saved plan file is an integrity guarantee that what was reviewed is exactly what gets applied.
+`terraform apply` executes the plan. When called with a saved plan file, it applies the reviewed plan instead of recalculating a new one. If the underlying state changes before apply, Terraform will reject the saved plan as stale and force you to plan again. This distinction matters on teams: saving a plan to a file with `terraform plan -out=tfplan` and requiring approval before running `terraform apply tfplan` is the IaC equivalent of requiring a pull request review before merging code. The saved plan file guarantees that the apply step uses the reviewed plan or fails rather than silently applying a different one.
 
 `terraform destroy` removes all managed resources in the correct reverse dependency order. It respects the same dependency graph that governs creation, so a database is not dropped before the application servers that write to it are removed first.
 
@@ -105,21 +104,21 @@ By default, Terraform writes state to a file called `terraform.tfstate` in the p
 
 ### Remote State
 
-For any shared project you should store state in a **remote backend**. AWS S3 with DynamoDB locking is a common pattern: state lives in an S3 bucket (encrypted at rest), and a DynamoDB table (AWS's managed key-value store, used here for distributed locking) prevents concurrent modifications.
+For any shared project you should store state in a **remote backend**. On AWS, a current common pattern is an S3 backend with encryption enabled, S3 bucket versioning turned on for recovery, and native lockfiles enabled with `use_lockfile = true`. Older Terraform setups often paired S3 with DynamoDB for locking, but DynamoDB-based locking is now deprecated.
 
 ```hcl
 terraform {
   backend "s3" {
-    bucket         = "my-terraform-state"
-    key            = "cs312/web/terraform.tfstate"
-    region         = "us-west-2"
-    dynamodb_table = "terraform-locks"
-    encrypt        = true
+    bucket       = "my-terraform-state"
+    key          = "cs312/web/terraform.tfstate"
+    region       = "us-west-2"
+    use_lockfile = true
+    encrypt      = true
   }
 }
 ```
 
-If one engineer is running `apply`, another who tries to run `apply` at the same time receives a lock error rather than silently corrupting state. This is more than a technical safeguard: it forces infrastructure changes to be serialized, which is a sound practice even when only one engineer is actively making changes at a given moment.
+Bucket versioning is configured on the S3 bucket itself, not in the backend block, but it is worth treating as part of the same design because it gives you a recovery path if state is accidentally deleted or overwritten. If one engineer is running `apply`, another who tries to run `apply` at the same time receives a lock error rather than silently corrupting state. This is more than a technical safeguard: it forces infrastructure changes to be serialized, which is a sound practice even when only one engineer is actively making changes at a given moment.
 
 ### Splitting State by Domain
 
@@ -127,7 +126,7 @@ A single state file for all of your infrastructure becomes a liability as a proj
 
 Teams at scale split state by domain boundary: shared networking infrastructure in one state file, per-application stacks in their own, and per-environment splits on top of that. This reduces blast radius for *routine changes*: an application deployment cannot accidentally touch the VPC because the two are in separate plans. The networking state itself is still shared infrastructure, and a careless change to it can still break every resource that depends on it. Splitting does not eliminate that risk; it only keeps routine application changes from ever reaching it. Teams treat foundational state files as higher-ceremony to modify and apply stricter IAM access controls on who can run applies against them. Cross-state references are handled through remote state data sources, where one Terraform configuration reads the outputs of another without managing those resources directly.
 
-Some organizations carry this further by using separate AWS accounts per environment, giving each its own state file, its own permission boundaries, and a physical network isolation boundary enforced by AWS itself. This eliminates the risk of accidentally applying production changes from the wrong context, which is one of the most expensive Terraform mistakes teams make at scale.
+Some organizations carry this further by using separate AWS accounts per environment, giving each its own state file, its own permission boundaries, and a stronger administrative isolation boundary enforced by AWS itself. This does not eliminate the risk of targeting the wrong environment, but it reduces the blast radius and makes cross-environment access an explicit IAM and role-assumption decision rather than an accident inside one shared account. That is one reason separate accounts are a common pattern at scale.
 
 ### Drift Detection
 
@@ -145,7 +144,7 @@ Add `*.tfstate` and `*.tfstate.backup` to your `.gitignore` file. State files of
 
 ### Importing Existing Resources
 
-Most teams do not start a Terraform journey with a blank account. You may inherit an EC2 instance, a VPC, or a set of security groups created by hand months earlier. The [`terraform import`](https://developer.hashicorp.com/terraform/cli/import) command brings those resources under Terraform management without recreating them. It writes the resource's current state into the state file; from that point on, Terraform tracks and manages the resource. The key limitation is that `terraform import` does not generate the HCL configuration for you, only the state entry. You still have to write the matching resource block and iterate on `terraform plan` until it reports no changes. Both Terraform and [OpenTofu](https://opentofu.org/docs/cli/import/) now support a native `import` block that can generate a draft HCL configuration during planning, reducing the manual effort of writing the matching resource block from scratch. The generated output still requires review and cleanup before it should be committed.
+Most teams do not start a Terraform journey with a blank account. You may inherit an EC2 instance, a VPC, or a set of security groups created by hand months earlier. The [`terraform import`](https://developer.hashicorp.com/terraform/cli/import) command brings those resources under Terraform management without recreating them. It writes the resource's current state into the state file; from that point on, Terraform tracks and manages the resource. The key limitation is that `terraform import` does not generate the HCL configuration for you, only the state entry. You still have to write the matching resource block and iterate on `terraform plan` until it reports no changes. Modern Terraform also supports config-driven imports through an `import` block, and `terraform plan -generate-config-out=...` can generate draft HCL during planning. Current Terraform documentation still marks that generated configuration workflow as experimental, so the output should be treated as a starting point that requires careful review and cleanup before it is committed.
 
 ## Lifecycle Rules and Stateful Resources
 
@@ -162,13 +161,13 @@ resource "aws_db_instance" "primary" {
 }
 ```
 
-The second common rule is `ignore_changes`. It tells Terraform to stop tracking drift on specific attributes. If a database administrator tunes a parameter through the AWS console and you do not want Terraform to revert it on the next apply, you add that attribute to the `ignore_changes` list. This is a pragmatic escape hatch for resources that are partially managed outside Terraform without abandoning Terraform management entirely.
+The second common rule is `ignore_changes`. It tells Terraform to stop tracking drift on specific attributes. A common example is an Auto Scaling Group whose desired capacity is adjusted dynamically by scaling policies or temporarily by an operator during an incident. If you do not want Terraform to force that value back on the next apply, you add that attribute to the `ignore_changes` list. This is a pragmatic escape hatch for resources that are partially managed outside Terraform without abandoning Terraform management entirely.
 
 ```hcl
-resource "aws_db_instance" "primary" {
+resource "aws_autoscaling_group" "web" {
   # ... configuration ...
   lifecycle {
-    ignore_changes = [parameter_group_name]
+    ignore_changes = [desired_capacity]
   }
 }
 ```
@@ -270,7 +269,7 @@ Terraform is not the only tool in this space, and understanding the alternatives
 
 **[Pulumi](https://www.pulumi.com/)** takes a different approach to the language question. Instead of a domain-specific language like HCL, Pulumi lets you write infrastructure definitions in general-purpose programming languages: TypeScript, Python, Go, and C#. This lowers the barrier for developers already fluent in those languages and makes it possible to apply standard programming constructs, loops, conditionals, and libraries, to infrastructure code. The tradeoff is that the full generality of a programming language can make Pulumi configurations harder to audit statically, while HCL's limited expressiveness makes configurations more predictable and reviewable.
 
-**[AWS CloudFormation](https://aws.amazon.com/cloudformation/)** is AWS's native IaC service. It uses JSON or YAML templates and integrates tightly with the AWS ecosystem, including Service Control Policies and AWS Config. Being native means it has deep first-class support for new AWS services, often before Terraform's AWS provider adds them. The cost is cloud specificity: a CloudFormation template is useful only on AWS, which matters if you ever need to operate across providers.
+**[AWS CloudFormation](https://aws.amazon.com/cloudformation/)** is AWS's native IaC service. It uses JSON or YAML templates and integrates tightly with the AWS ecosystem through features such as change sets, StackSets, and drift detection. Being native means it has deep first-class support for new AWS services, often before Terraform's AWS provider adds them. The cost is cloud specificity: a CloudFormation template is useful only on AWS, which matters if you ever need to operate across providers.
 
 **[Azure Resource Manager (ARM)](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/overview) and [Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/overview)** are Microsoft's equivalents for Azure infrastructure. Bicep is a more readable domain-specific language that compiles down to ARM JSON, playing the same role HCL plays for Terraform.
 
@@ -294,7 +293,7 @@ One of IaC's most powerful benefits is the ability to express your entire infras
 
 ### Plan Review as a Safety Gate
 
-In a CI/CD (Continuous Integration/Continuous Deployment) pipeline, the standard pattern is to generate a saved plan automatically on every pull request, post the plan output as a comment, and require a human to review and approve before running `terraform apply`. This combines automated consistency checking with human judgment. The saved plan file guarantees that what was reviewed is exactly what gets applied, with no possibility of drift between the moment of review and the moment of execution.
+In a CI/CD (Continuous Integration/Continuous Deployment) pipeline, the standard pattern is to generate a saved plan automatically on every pull request, post the plan output as a comment, and require a human to review and approve before running `terraform apply`. This combines automated consistency checking with human judgment. The saved plan file ensures that the apply step uses the reviewed plan rather than computing a new one, and if the underlying state changes in the meantime Terraform requires a new plan instead of silently applying a stale one.
 
 ### Know Your Blast Radius Before Applying
 
