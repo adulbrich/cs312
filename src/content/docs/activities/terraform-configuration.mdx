@@ -1,0 +1,657 @@
+---
+title: "Terraform Configuration"
+description: "Start with a provider block and data sources, add an EC2 instance and security group, introduce outputs, variables, and lifecycle rules, import an existing VPC, then inspect state and destroy."
+sidebar:
+  order: 7
+draft: true
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
+
+This activity puts into practice the concepts from the [Infrastructure as Code](/lectures/infrastructure-as-code/) lecture. Starting from a single provider block, you will incrementally build a configuration: two data sources, a security group, an EC2 instance, outputs, and variables. You will then import a VPC that was created by hand in the previous activity, observe how Terraform surfaces drift, and suppress it with a lifecycle rule. By the end, you will have run every phase of the Terraform workflow: plan, apply, state inspection, import, and destroy.
+
+## What You Will Need
+
+- [Terraform 1.6 or newer installed on your laptop](https://developer.hashicorp.com/terraform/install)
+- [AWS CLI installed on your laptop](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+- Access to your AWS Academy Learner Lab
+- A text editor
+- The `cs312-vpc` from the [AWS Infrastructure activity](/activities/aws-console-tour/) is used in the import section (optional)
+
+---
+
+## Verify the AWS CLI and Configure Credentials
+
+Terraform's AWS provider reads credentials from the same sources as the AWS CLI: the `~/.aws/credentials` file and the `AWS_*` environment variables. The CLI also lets you verify credentials and run targeted queries, like looking up a VPC ID, without writing Terraform code.
+
+<Steps>
+
+1. **Verify the AWS CLI is installed:**
+
+   ```bash
+   aws --version
+   ```
+
+   You should see a version string like `aws-cli/2.x.x`. If the command is not found, install the CLI using the link in the prerequisites above, then reopen your terminal.
+
+2. **Start the AWS Academy Learner Lab** and wait for the status indicator to show as ready.
+
+3. **Open the CLI credentials block.** Click **AWS Details**, then **Show** next to the AWS CLI section. You will see three values: an access key ID, a secret access key, and a session token.
+
+4. **Store the credentials** using the method that suits your environment:
+
+   <Tabs syncKey="credentials">
+   <TabItem label="Credentials file">
+
+   ```bash
+   mkdir -p ~/.aws
+   vim ~/.aws/credentials
+   ```
+
+   Paste the current Learner Lab credentials under the `default` profile:
+
+   ```ini
+   [default]
+   aws_access_key_id=ASIA...
+   aws_secret_access_key=...
+   aws_session_token=...
+   ```
+
+   Terraform's AWS provider reads `~/.aws/credentials` automatically. You will overwrite these three lines at the start of every Learner Lab session.
+
+   </TabItem>
+   <TabItem label="Environment variables">
+
+   Copy each value from the AWS Details panel and export it in your terminal:
+
+   ```bash
+   export AWS_ACCESS_KEY_ID="ASIA..."
+   export AWS_SECRET_ACCESS_KEY="..."
+   export AWS_SESSION_TOKEN="..."
+   ```
+
+   Terraform (and the AWS CLI) check for these three environment variables before falling back to the credentials file. The exports are valid for the current shell session only; if you open a new terminal, you will need to run them again.
+
+   </TabItem>
+   </Tabs>
+
+6. **Verify the credentials work** before Terraform touches anything:
+
+   ```bash
+   aws sts get-caller-identity
+   ```
+
+   You should see a JSON response containing your account ID and an ARN. If this command fails, Terraform will fail for the same reason, so fix credential issues here before moving on.
+
+</Steps>
+
+---
+
+## Initialize the Project
+
+Before adding any resources, set up the working directory, introduce two data sources, and define your ONID as a variable so every resource name and tag is consistent from the start.
+
+<Steps>
+
+1. **Create a project directory:**
+
+   ```bash
+   mkdir ~/tf-activity && cd ~/tf-activity
+   ```
+
+2. **Write `main.tf`:**
+
+   ```hcl
+   terraform {
+     required_version = ">= 1.6"
+     required_providers {
+       aws = {
+         source  = "hashicorp/aws"
+         version = "~> 5.0"
+       }
+     }
+   }
+
+   provider "aws" {
+     region = "us-east-1"
+   }
+
+   data "aws_vpc" "default" {
+     default = true
+   }
+
+   data "aws_ami" "ubuntu" {
+     most_recent = true
+     owners      = ["099720109477"]
+
+     filter {
+       name   = "name"
+       values = ["ubuntu/images/hvm-ssd/ubuntu-*-24.04-amd64-server-*"]
+     }
+
+     filter {
+       name   = "architecture"
+       values = ["x86_64"]
+     }
+   }
+   ```
+
+   `owners = ["099720109477"]` limits results to images published by Canonical. Without it, a name filter alone could match images from other publishers.
+
+3. **Write `variables.tf`:**
+
+   ```hcl
+   variable "onid" {
+     description = "Your ONID, used to name and tag resources"
+     type        = string
+   }
+   ```
+
+4. **Write `terraform.tfvars`:**
+
+   ```hcl
+   onid = "smithj"
+   ```
+
+   Replace `smithj` with your actual ONID. Terraform loads this file automatically; any variable declared in `variables.tf` without a default must appear here or be supplied another way.
+
+5. **Initialize the working directory:**
+
+   ```bash
+   terraform init
+   ```
+
+   You will see Terraform download the AWS provider plugin. A `.terraform/` directory and a `.terraform.lock.hcl` lock file appear in your project directory.
+
+6. **Validate the configuration:**
+
+   ```bash
+   terraform validate
+   ```
+
+   Expected output:
+
+   ```text
+   Success! The configuration is valid.
+   ```
+
+7. **Read the first plan:**
+
+   ```bash
+   terraform plan
+   ```
+
+   The output shows zero resources to add, change, or destroy. The two data sources will be read at apply time, but they do not appear in the resource counts because Terraform will not create or modify anything in AWS to satisfy them.
+
+</Steps>
+
+---
+
+## Add an EC2 Instance
+
+With the data sources and variables in place, add the first managed resource. The `ami` argument references the data source output, and the tags reference `var.onid` so there is nothing to manually substitute.
+
+<Steps>
+
+1. **Add an `aws_instance` resource** below the data sources in `main.tf`:
+
+   ```hcl
+   resource "aws_instance" "web" {
+     ami           = data.aws_ami.ubuntu.id
+     instance_type = "t3.micro"
+
+     tags = {
+       Name  = "tf-activity-web-${var.onid}"
+       Owner = var.onid
+     }
+   }
+   ```
+
+2. **Read the plan:**
+
+   ```bash
+   terraform plan
+   ```
+
+   The plan now shows one resource to add: `aws_instance.web`. The data sources appear as reads in the header but are not counted in the additions.
+
+3. **Notice `(known after apply)`.** Scan the instance section of the plan output. Fields like `id`, `private_ip`, `public_ip`, and `availability_zone` all show `(known after apply)`. These are assigned by AWS when the instance actually launches. The `ami` field already shows the resolved ID because the data source queried it at plan time.
+
+</Steps>
+
+---
+
+## Add a Security Group
+
+An instance with no explicit security group uses the VPC default, which gives you no visibility or control. Adding a dedicated security group and referencing it from the instance also produces a visible dependency in the plan, illustrating how Terraform builds its execution order from attribute references.
+
+<Steps>
+
+1. **Add a security group** below the instance resource in `main.tf`:
+
+   ```hcl
+   resource "aws_security_group" "web" {
+     name        = "tf-activity-web-sg-${var.onid}"
+     description = "Activity web security group"
+     vpc_id      = data.aws_vpc.default.id
+
+     ingress {
+       description = "SSH"
+       from_port   = 22
+       to_port     = 22
+       protocol    = "tcp"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     ingress {
+       description = "HTTP"
+       from_port   = 80
+       to_port     = 80
+       protocol    = "tcp"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     egress {
+       from_port   = 0
+       to_port     = 0
+       protocol    = "-1"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     tags = {
+       Name  = "tf-activity-web-sg-${var.onid}"
+       Owner = var.onid
+     }
+   }
+   ```
+
+2. **Wire the security group to the instance** by adding this line inside `resource "aws_instance" "web"`:
+
+   ```hcl
+   vpc_security_group_ids = [aws_security_group.web.id]
+   ```
+
+3. **Read the plan:**
+
+   ```bash
+   terraform plan
+   ```
+
+   You should see two resources to add. Notice that `aws_security_group.web` appears before `aws_instance.web` in the output. Terraform inferred this order from the reference `aws_security_group.web.id` inside the instance block: that reference is the dependency declaration.
+
+4. **Find the `vpc_security_group_ids` line** in the instance section of the plan:
+
+   ```
+   + vpc_security_group_ids = [
+       + (known after apply),
+     ]
+   ```
+
+   The security group's ID is `known after apply` because the group does not exist yet. Terraform records the dependency and will create the security group first, then substitute the real ID when it creates the instance.
+
+</Steps>
+
+<ActivityQuestion>
+Which specific line in `main.tf` encodes the dependency between the instance and the security group? The lecture distinguishes implicit dependencies (inferred from attribute references) from explicit ones (declared with `depends_on`). Give a concrete example of a situation where an attribute reference cannot express the dependency and `depends_on` is required instead.
+</ActivityQuestion>
+
+---
+
+## Apply and Inspect Outputs
+
+The configuration now describes two resources. Before applying, add an outputs file so Terraform prints the values you will most likely need after provisioning.
+
+<Steps>
+
+1. **Create `outputs.tf`:**
+
+   ```hcl
+   output "instance_id" {
+     description = "EC2 instance ID"
+     value       = aws_instance.web.id
+   }
+
+   output "public_ip" {
+     description = "Public IP address"
+     value       = aws_instance.web.public_ip
+   }
+
+   output "security_group_id" {
+     description = "Security group ID"
+     value       = aws_security_group.web.id
+   }
+
+   output "ami_id" {
+     description = "AMI ID in use"
+     value       = aws_instance.web.ami
+   }
+   ```
+
+2. **Apply the configuration:**
+
+   ```bash
+   terraform apply
+   ```
+
+   Review the plan in the confirmation prompt before typing `yes`. You should see two resources to add.
+
+3. **Read the outputs:**
+
+   ```bash
+   terraform output
+   ```
+
+   You should see all four values resolved to real AWS IDs and an IP address.
+
+4. **Read one output by name:**
+
+   ```bash
+   terraform output public_ip
+   ```
+
+   This form is useful when a script or downstream tool needs exactly one value without parsing the full output block.
+
+5. **Open `terraform.tfstate`** in your text editor. It is a JSON file that records every managed resource and all of its current attributes. Find the `instance_type` field inside the instance entry. Note that state stores concrete values, not expressions: the `ami` field records the resolved AMI ID string, not a reference to the data source that produced it.
+
+</Steps>
+
+<ActivityQuestion>
+`public_ip` is a useful output. `ami_id` is less obviously so. What criterion separates a useful output from one that is merely available? Think about who consumes outputs: a team member running the configuration, a CI script that needs to SSH into the new instance, and another Terraform configuration that references this one through a remote state data source.
+</ActivityQuestion>
+
+<Aside type="caution" title="These Are Live Resources">
+Your security group and EC2 instance are now running in AWS. Leave this directory in place until you reach the destroy step at the end.
+</Aside>
+
+---
+
+## Introduce Locals and the Instance Type Variable
+
+The `onid` variable is already in use, but two things are still hardcoded: the instance size appears as a literal string, and the `Owner` tag is repeated in every resource block. This section extracts both into a variable and a locals block. The plan after the refactor demonstrates idempotency: configuration changes do not imply infrastructure changes.
+
+<Steps>
+
+1. **Add `instance_type` to `variables.tf`:**
+
+   ```hcl
+   variable "onid" {
+     description = "Your ONID, used to name and tag resources"
+     type        = string
+   }
+
+   variable "instance_type" {
+     description = "EC2 instance size"
+     type        = string
+     default     = "t3.micro"
+   }
+   ```
+
+2. **Add a `locals` block** to `main.tf`, below the AMI data source:
+
+   ```hcl
+   locals {
+     common_tags = {
+       Owner = var.onid
+     }
+   }
+   ```
+
+3. **Update both resource blocks** to use `var.instance_type` and `local.common_tags`:
+
+   ```hcl
+   resource "aws_security_group" "web" {
+     name        = "tf-activity-web-sg-${var.onid}"
+     description = "Activity web security group"
+     vpc_id      = data.aws_vpc.default.id
+
+     ingress {
+       description = "SSH"
+       from_port   = 22
+       to_port     = 22
+       protocol    = "tcp"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     ingress {
+       description = "HTTP"
+       from_port   = 80
+       to_port     = 80
+       protocol    = "tcp"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     egress {
+       from_port   = 0
+       to_port     = 0
+       protocol    = "-1"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     tags = merge(local.common_tags, {
+       Name = "tf-activity-web-sg-${var.onid}"
+     })
+   }
+
+   resource "aws_instance" "web" {
+     ami                    = data.aws_ami.ubuntu.id
+     instance_type          = var.instance_type
+     vpc_security_group_ids = [aws_security_group.web.id]
+
+     tags = merge(local.common_tags, {
+       Name = "tf-activity-web-${var.onid}"
+     })
+   }
+   ```
+
+4. **Format and validate:**
+
+   ```bash
+   terraform fmt
+   terraform validate
+   ```
+
+5. **Run the plan:**
+
+   ```bash
+   terraform plan
+   ```
+
+   The plan should report no infrastructure changes. The resource names and tag values are identical to what was applied; the configuration is now just expressing them differently.
+
+</Steps>
+
+<ActivityQuestion>
+You rewrote both resource blocks but Terraform reported no infrastructure changes. Why? The lecture describes this property as idempotency. How does idempotency make `terraform plan` safe to run at any time, including as an automated drift-detection health check that runs on a schedule?
+</ActivityQuestion>
+
+---
+
+## Import an Existing Resource
+
+The lecture describes a common real-world situation: inheriting infrastructure created by hand that must be brought under Terraform management. The `cs312-vpc` from the previous activity is exactly this scenario.
+
+<Steps>
+
+1. **Find the `cs312-vpc` ID:**
+
+   ```bash
+   aws ec2 describe-vpcs \
+     --filters "Name=tag:Name,Values=cs312-vpc" \
+     --query "Vpcs[0].VpcId" \
+     --output text
+   ```
+
+   Record the VPC ID (it looks like `vpc-XXXXXXXXXXXXXXXXX`).
+
+2. **Add a resource block** for the VPC at the bottom of `main.tf`:
+
+   ```hcl
+   resource "aws_vpc" "cs312" {
+     cidr_block = "10.0.0.0/16"
+
+     tags = {
+       Name = "cs312-vpc"
+     }
+   }
+   ```
+
+3. **Import the existing VPC into Terraform state:**
+
+   ```bash
+   terraform import aws_vpc.cs312 <VPC_ID>
+   ```
+
+   Replace `<VPC_ID>` with the value from step 1. You should see:
+
+   ```text
+   Import successful!
+   The resources that were imported are shown above. These resources are now in
+   your Terraform state and will henceforth be managed by Terraform.
+   ```
+
+4. **Run the plan:**
+
+   ```bash
+   terraform plan
+   ```
+
+   The plan will show one or more in-place changes to `aws_vpc.cs312`. These represent attributes that exist on the live VPC but are absent from the minimal HCL you wrote: `enable_dns_hostnames`, `enable_dns_support`, and `instance_tenancy` are common examples. This is the core challenge of import: Terraform wrote the state record, but you still have to write HCL that matches it.
+
+5. **Inspect the recorded state** to see the full attribute set:
+
+   ```bash
+   terraform state show aws_vpc.cs312
+   ```
+
+   Compare the output to the two attributes you wrote in step 2. Every attribute shown in state but absent from your HCL is a source of plan drift.
+
+6. **Suppress the unimportant drift** with a lifecycle rule. Add a `lifecycle` block inside `aws_vpc.cs312`:
+
+   ```hcl
+   resource "aws_vpc" "cs312" {
+     cidr_block = "10.0.0.0/16"
+
+     tags = {
+       Name = "cs312-vpc"
+     }
+
+     lifecycle {
+       ignore_changes = [
+         enable_dns_hostnames,
+         enable_dns_support,
+         instance_tenancy,
+         tags_all,
+       ]
+     }
+   }
+   ```
+
+   Run the plan again. The in-place changes for those attributes should no longer appear.
+
+7. **Remove the imported VPC from state** before proceeding to the destroy step:
+
+   ```bash
+   terraform state rm aws_vpc.cs312
+   ```
+
+   This removes `aws_vpc.cs312` from Terraform's tracking without touching the VPC in AWS. You are removing it from this configuration's management scope so that the final `terraform destroy` does not attempt to delete a VPC that still contains subnets and other resources from the previous activity.
+
+</Steps>
+
+<ActivityQuestion>
+Step 4 showed that importing a resource does not automatically produce correct HCL. The plan surfaced drift between the minimal block you wrote and the actual resource in AWS. The lecture mentions that Terraform's native `import` block (added in Terraform 1.5) can generate a draft HCL configuration during planning. What does this change about the import workflow, and what still requires human judgment even when the configuration is generated automatically?
+</ActivityQuestion>
+
+<Aside type="note" title="If you deleted cs312-vpc">
+If you removed `cs312-vpc` after the previous activity, skip this section. You can still observe the state-versus-HCL gap: run `terraform state show aws_security_group.web` and compare the output to what you wrote in `main.tf`. Every attribute in state but absent from your HCL is exactly what would need to be reconciled during an import.
+</Aside>
+
+---
+
+## Plan a Real Change, Inspect State, and Clean Up
+
+Terraform becomes most useful when the configuration and the live infrastructure diverge. In this final section you will trigger a real change, read the plan's diff symbols, compare the plan against state, and then destroy everything.
+
+<Steps>
+
+1. **Add an instance type override** to `terraform.tfvars`:
+
+   ```hcl
+   onid          = "smithj"
+   instance_type = "t3.small"
+   ```
+
+   Keep your real ONID. Only the second line is new.
+
+2. **Run the plan:**
+
+   ```bash
+   terraform plan
+   ```
+
+   Find `aws_instance.web` in the output. The `~` symbol means an in-place modification is planned. The `instance_type` line will show:
+
+   ```
+   ~ instance_type = "t3.micro" -> "t3.small"
+   ```
+
+3. **Compare the plan with the current state:**
+
+   ```bash
+   terraform state show aws_instance.web
+   ```
+
+   Find the `instance_type` field. It still shows `t3.micro` because you only planned the change; you have not applied it. State records what Terraform last applied, not what the configuration currently says.
+
+4. **List all managed resources:**
+
+   ```bash
+   terraform state list
+   ```
+
+   You should see `aws_instance.web` and `aws_security_group.web`.
+
+5. **Destroy everything:**
+
+   ```bash
+   terraform destroy
+   ```
+
+   Review the plan in the confirmation prompt before typing `yes`. Both resources should appear in the destroy list.
+
+6. **Confirm the state is empty:**
+
+   ```bash
+   terraform state list
+   ```
+
+   No output means no managed resources remain.
+
+7. **Verify in the AWS Console.** Navigate to **EC2 > Instances** and confirm the instance tagged with your ONID is no longer listed as running. Navigate to **EC2 > Security Groups** and confirm the corresponding group is gone.
+
+</Steps>
+
+<ActivityQuestion>
+After changing `instance_type` in `terraform.tfvars`, `terraform plan` showed `t3.small` but `terraform state show aws_instance.web` still showed `t3.micro`. The lecture describes Terraform's three distinct layers: the configuration files express desired state, the variable files supply input values, and the state file records what Terraform last applied. Which layer answers "what should exist?", which answers "what currently exists under Terraform's management?", and which answers "what specific values does this configuration use?" Why does keeping these layers distinct matter before running `apply` in a production environment?
+</ActivityQuestion>
+
+<Aside type="tip" title="Protecting Stateful Resources">
+The `prevent_destroy = true` lifecycle rule causes Terraform to error at plan time rather than generate a plan that destroys a resource. It is the right safeguard for stateful resources: the RDS instance holding production data, the VPC every subnet depends on. Add it to any resource where accidental destruction would be catastrophic:
+
+```hcl
+lifecycle {
+  prevent_destroy = true
+}
+```
+
+To destroy a protected resource intentionally, you must remove `prevent_destroy`, apply, and then destroy: a deliberate two-step that prevents accidents without permanently blocking teardowns.
+</Aside>
+
+---
+
+## Going Further
+
+You have run the complete Terraform loop: plan, apply, inspect, import, and destroy. The next step that matters in practice is removing state from your laptop.
+
+Configure a remote S3 backend so state survives beyond a single machine and supports team access with locking. Follow the [S3 backend documentation](https://developer.hashicorp.com/terraform/language/backend/s3) to set up an S3 bucket, then run `terraform init -migrate-state` to move your local state into the bucket. Notice that your plan output and resource list look identical before and after the migration; the backend configuration is invisible to the infrastructure itself. If you provisioned the S3 bucket by hand first, use `terraform import` to bring them under management before pointing the backend at them. This gives you a second import exercise with different resource types and another chance to practice the plan-until-clean workflow you used on `aws_vpc.cs312`.
