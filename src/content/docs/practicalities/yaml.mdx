@@ -11,17 +11,17 @@ YAML appears throughout this course: in Docker Compose files, GitHub Actions wor
 
 YAML (YAML Ain't Markup Language) is a data serialization format. Its purpose is to represent structured data in a way that is easy for people to read and write and easy for programs to parse.
 
-The core idea is simple: a YAML file is a hierarchy of **keys and values**, where indentation defines structure. There are no curly braces, no angle brackets, and no required quoting. A minimal Compose file and a full Kubernetes Deployment use the same rules.
+The core idea is simple: YAML is usually a hierarchy of **keys and values**, where indentation defines structure in the block style you will write most often. YAML also has a flow style that uses `{}` and `[]`, but Docker Compose, Ansible, and most Kubernetes examples in this course use the indentation-based form.
 
-<Aside type="caution" title="Tabs are not allowed">
-YAML uses spaces for indentation. Tabs are a syntax error. Most editors handle this automatically, but if you paste YAML from an unfamiliar source and it fails to parse, a hidden tab character is often the cause. Use an editor that visually distinguishes spaces from tabs, or configure your editor to convert tabs to spaces.
+<Aside type="caution" title="Tabs are not allowed for indentation">
+YAML uses spaces for indentation. Tabs used for indentation are a syntax error. Tabs can still appear as content inside quoted strings or block scalars, but they cannot be used to define structure. Most editors handle this automatically, but if you paste YAML from an unfamiliar source and it fails to parse, a hidden tab in the indentation is often the cause. Use an editor that visually distinguishes spaces from tabs, or configure your editor to convert tabs to spaces.
 </Aside>
 
 ## Basic Syntax
 
 ### Mappings (Key-Value Pairs)
 
-A mapping is a set of key-value pairs separated by a colon and a space:
+A mapping is a set of key-value pairs, usually written with a colon followed by a space:
 
 ```yaml
 name: nginx
@@ -30,7 +30,7 @@ enabled: true
 timeout: null
 ```
 
-Keys are unquoted strings. Values can be strings, numbers, booleans (`true`/`false`), or null. The colon must be followed by a space; `port:8080` without a space is a syntax error in most parsers.
+In this course, keys are almost always plain strings. Values can be strings, numbers, booleans (`true`/`false`), or null. In practice, write mappings as `key: value` with a space after the colon. Without that separating space, text like `port:8080` is usually parsed as a plain string rather than as a mapping entry.
 
 ### Lists
 
@@ -82,7 +82,7 @@ label: "key: value"     # unquoted, the colon would break parsing
 comment: "# not a comment"
 ```
 
-Both single and double quotes work. Double quotes support escape sequences (`\n`, `\t`, `\"`)  Single quotes do not; a literal single quote inside single-quoted text is written as two consecutive single quotes (`''`).
+Both single and double quotes work. Double quotes support escape sequences (`\n`, `\t`, `\"`). Single quotes do not; a literal single quote inside single-quoted text is written as two consecutive single quotes (`''`).
 
 ### Multi-Line Strings
 
@@ -121,60 +121,63 @@ Comments are one of the places YAML has a clear advantage over JSON, which does 
 
 ### Anchors and Aliases
 
-YAML lets you define a value once and reuse it with anchors (`&name`) and aliases (`*name`). You will occasionally see this in GitHub Actions workflows to avoid repeating long environment blocks:
+YAML lets you define a value once and reuse it with anchors (`&name`) and aliases (`*name`). You may see this in GitHub Actions workflows or in example configurations online when the same block needs to appear more than once:
 
 ```yaml
-common-env: &common
+common-env: &common_env
   APP_ENV: production
   LOG_LEVEL: info
 
 service-a:
-  environment:
-    <<: *common
-    PORT: "8080"
+  environment: *common_env
 
 service-b:
-  environment:
-    <<: *common
-    PORT: "9090"
+  environment: *common_env
 ```
 
-`<<:` is the merge key: it inlines all keys from the referenced anchor. You do not need to write these yourself in this course, but you will encounter them in example configurations online.
+A related feature called the **merge key** uses `<<:` to copy keys out of an anchored mapping. It is widely implemented as a YAML extension, but it is not part of YAML 1.2 and is not supported everywhere. GitHub Actions, for example, supports anchors and aliases but not merge keys. Treat `<<:` as tool-specific rather than universal YAML.
 
 ---
 
 ## Common Pitfalls
 
-**The Norway problem.** In YAML 1.1, the values `yes`, `no`, `on`, `off`, `true`, and `false` are all parsed as booleans. Country codes like `NO` (Norway), `OFF` (Offaly), and version-like strings can be silently coerced. YAML 1.2 restricts booleans to `true` and `false`, but many tools in this course (Docker Compose, Ansible) still use 1.1-compatible parsers. The safe habit is to quote any string value that could be ambiguous:
+**The Norway problem.** Older YAML 1.1-style resolvers treat values such as `yes`, `no`, `on`, `off`, `NO`, and `OFF` as booleans instead of strings. YAML 1.2 narrowed this behavior, but real tools do not all resolve plain scalars the same way, and older expectations are still common in the ecosystem. Ansible is a frequent source of these surprises, and Docker Compose documentation still recommends quoting ambiguous values. The safe habit is to quote any string value that could be mistaken for another type:
 
 ```yaml
-# Risky: older parsers may read "no" as false
+# Risky: older tooling may read "no" as false
 restart: no
 
 # Safe
 restart: "no"
 ```
 
-**Version numbers as floats.** `1.10` is a float in YAML. When a Compose file says `version: 3.8`, an unquoted value is parsed as the float 3.8. Most tools handle this gracefully, but quote version strings to be explicit: `version: "3.8"`.
+**Version numbers and numeric-looking strings.** Values such as `1.10` are numbers in YAML, not strings. If a tool expects a string, or if you want to preserve the formatting exactly, quote it:
+
+```yaml
+app_version: "1.10"
+release_label: "2024.04"
+```
+
+Older Compose examples often used `version: "3.8"`, but modern Compose typically omits the top-level `version` key entirely. The broader rule is simpler: whenever a value looks numeric but should behave like text, quote it.
 
 **Indentation consistency.** All items at the same level must be indented by exactly the same number of spaces. Mixing two-space and four-space indentation within the same file, or accidentally over-indenting a single key, causes parse errors or silently moves a key to the wrong level of the hierarchy.
 
-**Duplicate keys.** YAML technically allows duplicate keys in a mapping; the behavior is undefined and parser-dependent. Some parsers take the last value, some take the first, some error. In practice: never repeat a key in the same block.
+**Duplicate keys.** YAML mappings are supposed to have unique keys. If the same key appears twice, the document is invalid, but parsers differ in how they react: some error, some keep the first value, and some keep the last. In practice: never repeat a key in the same block.
 
 ---
 
 ## Where YAML Appears in This Course
 
-Every major tool introduced after Week 2 uses YAML for its configuration. The table below shows which files you will write and what each one describes.
+YAML shows up in several of the course's automation and orchestration tools. Not every later tool uses YAML. Terraform, for example, uses HCL. The table below shows where YAML appears and what those files describe.
 
-| Tool | File(s) | What it describes | First use |
+| Tool | File(s) | What it describes | Lecture intro |
 |---|---|---|---|
 | Docker Compose | `compose.yml` | Services, networks, volumes, port mappings | Week 3 |
 | GitHub Actions | `.github/workflows/*.yml` | CI/CD pipelines: triggers, jobs, steps | Week 5 |
 | Ansible | `site.yml`, `playbook.yml`, `group_vars/*.yml`, `host_vars/*.yml` | Desired server state, variables, roles | Week 5 |
 | Kubernetes | `deployment.yaml`, `service.yaml`, `configmap.yaml`, `secret.yaml` | Cluster workloads, networking, config, secrets | Week 7 |
 
-The YAML you write for Docker Compose is the most forgiving: a small number of keys, flat structure, few gotchas. Kubernetes manifests are the most verbose: every resource has a fixed `apiVersion`, `kind`, `metadata`, and `spec` structure that must be exact.
+The YAML you write for Docker Compose is usually the most forgiving: a small number of concepts, shallow nesting, and comparatively friendly error messages. Kubernetes manifests are the most verbose: every resource has fixed top-level fields such as `apiVersion`, `kind`, and `metadata`, and many resource types also have a substantial `spec` section. The exact required fields depend on the resource type.
 
 ---
 
@@ -186,8 +189,8 @@ YAML is not the only way to serialize configuration data. Understanding its trad
 
 [JSON](https://www.json.org/) (JavaScript Object Notation) and YAML are closely related. YAML 1.2 is actually a superset of JSON: any valid JSON file is valid YAML. The practical differences are:
 
-- JSON requires quotes around all keys and string values; YAML does not.
-- JSON uses braces and brackets for structure; YAML uses indentation.
+- JSON requires quotes around all keys and string values; YAML block style often does not.
+- JSON uses braces and brackets for structure; YAML block style usually uses indentation.
 - JSON has no comment syntax; YAML uses `#`.
 - JSON is more explicit and less ambiguous; YAML's flexibility (the Norway problem, implicit type coercion) introduces edge cases.
 - JSON is the default format for APIs and most machine-to-machine communication. YAML is preferred when humans write and read the file frequently.
