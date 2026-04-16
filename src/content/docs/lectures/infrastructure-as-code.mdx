@@ -1,29 +1,27 @@
 ---
-title: Infrastructure as Code with Terraform
-description: "Use Terraform to declare and provision infrastructure: providers, resources, variables, state management, and the plan/apply lifecycle."
+title: Infrastructure as Code
+description: "How declarative IaC transforms infrastructure from a manual, error-prone process into a versioned, reproducible engineering practice: the philosophy, core abstractions, and operational patterns that apply across all tools in the ecosystem."
 sidebar:
   order: 7
 draft: true
 ---
-
-{/* TODO: https://medium.com/atmosly/terraform-and-aws-at-scale-patterns-for-teams-managing-100-resources-685c51be6eb1 */}
 
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 Imagine you need to deploy a web server. You log into the AWS console, click through a dozen screens, choose an AMI (Amazon Machine Image, a pre-built OS snapshot used to launch instances), configure a security group, attach a key pair, and launch the instance. A week later a colleague needs an identical server in a different region. Can you reproduce exactly what you did? Probably not with perfect fidelity, and certainly not quickly.
 
-This scenario illustrates the core problem that Infrastructure as Code (IaC) solves. When infrastructure is provisioned by hand, three risks emerge: configuration drift (two servers that should be identical slowly diverge as engineers apply ad-hoc changes to one but not the other), lack of reproducibility (if a disaster strikes, you are relying on memory and wiki pages to rebuild from scratch), and lack of an audit trail (a manual change in a cloud console leaves no pull request, no diff, and no approval record). IaC addresses all three by expressing infrastructure in source files that live in version control. Changes go through code review, environments can be rebuilt from a single command, and drift is detected automatically. Terraform is one of the most widely adopted IaC tools, and the focus of this lecture.
+This scenario illustrates the core problem that Infrastructure as Code (IaC) solves. When infrastructure is provisioned by hand, three risks emerge: configuration drift (two servers that should be identical slowly diverge as engineers apply ad-hoc changes to one but not the other), lack of reproducibility (if a disaster strikes, you are relying on memory and wiki pages to rebuild from scratch), and lack of an audit trail (a manual change in a cloud console leaves no pull request, no diff, and no approval record). IaC addresses all three by expressing infrastructure in source files that live in version control. Changes go through code review, environments can be rebuilt from a single command, and drift is detected automatically. [Terraform](https://developer.hashicorp.com/terraform/docs) is one of the most widely adopted IaC tools and the focus of this lecture, but the concepts apply across the entire ecosystem.
 
 ## The Two Phases of Infrastructure Management
 
 It helps to think of infrastructure work in two distinct phases, each with different concerns.
 
-**Initial setup** is the provisioning phase: spinning up servers, configuring networks, creating load balancers, setting up databases. This is largely a one-time activity for a given environment.
+**Initial setup** is the provisioning phase: spinning up servers, configuring networks, creating load balancers, setting up databases. For a given environment, this is largely a one-time activity, though it may be repeated many times across dev, staging, and production.
 
-**Ongoing maintenance** is the operational phase: updating software versions, deploying new application releases, scaling resources up or down, changing network configuration, and recovering from failures.
+**Ongoing maintenance** is the operational phase: updating software versions, deploying new application releases, scaling resources up or down, changing network configuration, and recovering from failures. Maintenance is continuous and never fully stops.
 
-The same tools do not always serve both phases equally well. Terraform excels at provisioning and lifecycle management of infrastructure objects. Ansible is better suited for configuration management and application deployment onto already-running servers. CI/CD pipelines handle continuous deployment of application code. In practice, combining tools is common: Terraform provisions an EC2 instance, Ansible installs and configures the application, and GitHub Actions deploys updates automatically. The Configuration Management with Ansible and CI/CD Pipelines lectures cover those tools in depth; this lecture focuses on the provisioning foundation they build on.
+The same tools do not always serve both phases equally well, and recognizing why reveals a deeper philosophical split in how teams think about infrastructure. Provisioning tools like Terraform work best when infrastructure is treated as **immutable**: rather than patching a running server's configuration, you replace the resource with a correctly configured one. Configuration management tools like Ansible, by contrast, are designed for **mutable** infrastructure: they connect to running servers and bring them to a desired state incrementally, without replacement. In practice, combining tools is common. Terraform provisions an EC2 instance, [Ansible](https://www.ansible.com/) installs and configures the application, and GitHub Actions deploys updates automatically. The Configuration Management with Ansible and CI/CD Pipelines lectures cover those tools in depth; this lecture focuses on the provisioning foundation they build on.
 
 ## Declarative vs. Imperative Approaches
 
@@ -31,246 +29,83 @@ There are two broad philosophies for automating infrastructure. In an **imperati
 
 In a **declarative** approach, you describe *what* the desired state looks like: "there should be a VPC with one public subnet and one EC2 instance." The tool figures out how to make reality match the declaration.
 
-Terraform is declarative. You write configuration files that describe the end state of your infrastructure, and Terraform calculates the difference between that desired state and the current state, then applies only the necessary changes. This property is called **convergence**: you can run Terraform repeatedly and it will not recreate resources that already exist and already match the configuration.
+Terraform is declarative. You write configuration files describing the end state of your infrastructure, and Terraform calculates the difference between that desired state and the current state, then applies only the necessary changes. Two properties follow directly from this design.
+
+The first is **idempotency**: you can run Terraform against an already-correct environment and nothing changes. No resources are duplicated, no services are restarted unnecessarily, and no existing configuration is disrupted. This matters operationally because it means you can re-run Terraform safely at any time, including after a partial failure. A shell script is idempotent only if the author carefully writes every step to check before acting; a declarative tool provides idempotency structurally.
+
+The second is **convergence**: the tool drives reality toward the declaration regardless of what happened in between. If someone makes a manual change in the AWS console after Terraform's last run, the next plan will surface the discrepancy. This makes declarative IaC a natural drift-detection mechanism, not just a provisioning tool.
 
 <Aside type="tip" title="Declarative Safety">
 Declarative tools tend to be safer for teams because the configuration file always represents the intended state. You never have to wonder "which script was run last?"
 </Aside>
 
 <HistoricalNote title="Infrastructure as Code Before Terraform (1993-2014)">
-Configuration management has older roots than most practitioners realize. CFEngine, written by Mark Burgess in 1993, introduced desired-state convergence, the idea that you describe what a system should look like and the tool reconciles reality with the description, a full decade before Puppet or Chef. Puppet (2005) and Chef (2009) brought the approach to a wider audience but focused on configuring already-running servers. Terraform arrived in 2014, created by Mitchell Hashimoto at HashiCorp with a key insight: the same declarative model that worked for software configuration could be applied to provisioning the infrastructure itself. Terraform's provider model (treating any API as a source of manageable resources) is why a single tool can manage AWS instances, Cloudflare DNS records, GitHub repositories, and Kubernetes objects from the same configuration language.
+Configuration management has older roots than most practitioners realize. CFEngine, written by Mark Burgess in 1993, introduced desired-state convergence: the idea that you describe what a system should look like and the tool reconciles reality with the description, a full decade before Puppet or Chef. Puppet (2005) and Chef (2009) brought the approach to a wider audience but focused on configuring already-running servers. Terraform arrived in 2014, created by Mitchell Hashimoto at HashiCorp with a key insight: the same declarative model that worked for software configuration could be applied to provisioning the infrastructure itself. Terraform's provider model, treating any API as a source of manageable resources, is why a single tool can manage AWS instances, Cloudflare DNS records, GitHub repositories, and Kubernetes objects from the same configuration language.
 </HistoricalNote>
 
 ## Terraform Architecture
 
-Terraform's design is built around four key concepts.
+Terraform configurations are written in [HCL (HashiCorp Configuration Language)](https://github.com/hashicorp/hcl), a declarative syntax designed to be both human-readable and machine-parseable. The design is built around four key concepts: providers, resources, data sources, and state. Understanding what each one is and what problem it solves is more valuable than memorizing syntax, because the same conceptual model appears in nearly every other IaC tool, just under different names.
 
 ### Providers
 
-A **provider** is a plugin that teaches Terraform how to talk to a particular platform or service. The AWS provider knows how to create EC2 instances and S3 buckets (Simple Storage Service, AWS's object storage service); the Google Cloud provider knows how to create Compute Engine VMs and Cloud Storage buckets. Providers are distributed independently from Terraform itself through the [Terraform Registry](https://registry.terraform.io/).
+A **provider** is a plugin that teaches Terraform how to talk to a particular platform or service. The AWS provider knows how to create EC2 instances and S3 buckets; the Google Cloud provider knows how to create Compute Engine VMs and Cloud Storage buckets. Providers are distributed independently from Terraform itself through the [Terraform Registry](https://registry.terraform.io/). This separation means any community or organization can publish a provider for any API, which is why Terraform can manage Cloudflare records, GitHub teams, and Datadog monitors with the same tool and the same workflow as cloud servers.
 
 ### Resources
 
-A **resource** is a single piece of infrastructure managed by a provider: an EC2 instance, a security group, a DNS record, a database. Each resource has a type (like `aws_instance`) and a local name that you choose (like `web`). Together these form the resource address `aws_instance.web`.
+A **resource** is a single piece of infrastructure managed by a provider: an EC2 instance, a security group, a DNS record, a database. Resources are the core unit of Terraform's world. Each resource has a type that identifies what the provider can create (like `aws_instance`) and a local name you choose (like `web`), which together form its address: `aws_instance.web`. When you declare a resource in a configuration file, you are saying: this thing should exist, with these properties.
 
 ### Data Sources
 
-A **data source** lets you look up information that already exists outside of your Terraform configuration. For example, you might query AWS for the latest Ubuntu AMI rather than hard-coding an AMI ID that will go stale. Data sources are read-only; Terraform will never try to create or modify them.
+A **data source** lets you look up information that already exists outside of your Terraform configuration. Rather than hard-coding your 12-digit AWS account ID in IAM policies and resource ARNs (Amazon Resource Names, the unique identifiers for AWS resources), you can query AWS for the current account's identity at plan time. The same configuration then deploys correctly to your development account and your production account without modification. Data sources are read-only: Terraform will never try to create or modify them. They are the bridge between what you are managing and what already exists in the world.
 
 ### State
 
-Terraform keeps a record of every resource it manages in a **state file**. This file (by default, `terraform.tfstate` in your working directory) maps the resources in your configuration to real objects in the cloud. State is what allows Terraform to know that `aws_instance.web` corresponds to instance `i-0abc123def456` in your AWS account. State management is important enough to deserve its own section later in this lecture.
+Terraform keeps a record of every resource it manages in a **state file**. This file maps the resources in your configuration to real objects in the cloud: it knows that `aws_instance.web` corresponds to a specific running instance in your AWS account, along with all of its current attributes. State is what makes incremental changes possible. Without it, Terraform would have no way to distinguish between "this resource already exists and matches the configuration" and "this resource needs to be created," so it would attempt to create everything on every run.
 
-## HCL Syntax
+The state file is not just a performance optimization: it is the source of truth about what Terraform currently manages. This is why corrupted or lost state is a serious operational problem, and why protecting it is covered in detail later in this lecture.
 
-Terraform configurations are written in [HashiCorp Configuration Language (HCL)](https://github.com/hashicorp/hcl). HCL is designed to be both human-readable and machine-parseable. The primary building blocks are blocks, variables, outputs, and locals.
+### Configuring Resources: Variables, Outputs, and Locals
 
-### Blocks
+Three additional constructs let you write configurations that are readable and reusable across environments rather than littered with hard-coded values.
 
-Almost everything in HCL is a **block**. A block has a type, zero or more labels, and a body enclosed in curly braces:
+**Input variables** parameterize a configuration so the same code can be deployed with different values. A variable for `instance_type` might default to `t3.micro` in development but be set to `m5.large` in production. Variables make the difference between a configuration tied to one specific environment and one that expresses a pattern applicable to many. You can set variables through `.tfvars` files, environment variables prefixed with `TF_VAR_`, or command-line flags, which gives you a range of options from checked-in defaults to pipeline-injected secrets.
 
-```hcl
-resource "aws_instance" "web" {
-  ami           = "ami-0abcdef1234567890"
-  instance_type = "t3.micro"
-}
-```
+**Outputs** expose values from your configuration so that other tools or configurations can consume them. After Terraform provisions a web server, an output named `web_public_ip` makes that IP available without requiring anyone to look it up manually in the console. Outputs are also documentation: they communicate what a configuration produced.
 
-Here `resource` is the block type, `"aws_instance"` is the resource type label, and `"web"` is the local name label. Inside the body, `ami` and `instance_type` are **arguments**.
+**Locals** are named expressions that let you compute or consolidate values once and reference them throughout the configuration. A `common_tags` local, for example, lets you define a standard set of resource tags in one place. If the tagging convention changes, you update one block rather than every resource that uses it.
 
-### Variables
+Together, these three constructs give a configuration a clean interface: variables are its inputs, outputs are its results, and locals are its internal vocabulary.
 
-Input variables let you parameterize your configuration so that the same code can be reused across environments. You declare a variable in a `variable` block:
+## The Plan/Apply Cycle
 
-```hcl
-variable "instance_type" {
-  description = "EC2 instance size"
-  type        = string
-  default     = "t3.micro"
-}
-```
+The most important thing to understand about Terraform's workflow is that it is designed as a **checkpoint system**, not just a sequence of commands. Each phase exists for a reason, and skipping any phase trades safety for speed in ways that cause real incidents.
 
-You then reference it elsewhere as `var.instance_type`. Variables can be set through `.tfvars` files, environment variables, or command-line flags.
+`terraform init` downloads provider plugins and sets up the working directory. It records the exact provider versions in a lock file (`.terraform.lock.hcl`) so that every team member who runs the same configuration gets identical provider behavior. Committing the lock file to version control is how you prevent a provider update from silently changing behavior on one machine but not another.
 
-### Outputs
+`terraform validate` checks configuration syntax and internal consistency without contacting any remote API. It is fast and catches typos, missing required arguments, and references to undefined variables before any real work begins.
 
-Outputs expose values from your configuration so that other tools (or other Terraform configurations) can consume them:
+`terraform plan` is the critical step. It reads the current state, queries the cloud provider for the actual state of managed resources, and produces a detailed execution plan showing exactly what Terraform intends to create, modify, or destroy. Nothing changes in your infrastructure at this stage. The plan output is a diff: resources marked `+` will be created, resources marked `~` will be modified in place, and resources marked `-/+` will be destroyed and recreated (which matters because recreation is not always safe for stateful resources like databases). Read the plan the way you read a code review. A surprise in the plan is a reason to stop and investigate, not to proceed.
 
-```hcl
-output "web_public_ip" {
-  description = "Public IP of the web server"
-  value       = aws_instance.web.public_ip
-}
-```
+`terraform apply` executes the plan. When called with a saved plan file, it executes exactly that plan with no possibility of drift between review and execution. This distinction matters on teams: saving a plan to a file with `terraform plan -out=tfplan` and requiring approval before running `terraform apply tfplan` is the IaC equivalent of requiring a pull request review before merging code. The saved plan file is an integrity guarantee that what was reviewed is exactly what gets applied.
 
-After `terraform apply`, outputs are printed to the terminal and stored in state.
-
-### Locals
-
-Locals are named expressions that let you avoid repeating complex values:
-
-```hcl
-locals {
-  common_tags = {
-    Project     = "cs312"
-    Environment = "dev"
-  }
-}
-```
-
-You reference a local as `local.common_tags`. Unlike variables, locals are not settable by the user; they are internal to the configuration.
-
-## A Complete Configuration Example
-
-To see how providers, resources, data sources, variables, outputs, and locals fit together, consider the following configuration. It declares a web server on EC2, backed by a security group that permits SSH from a specified IP and HTTP from anywhere, using the latest Ubuntu 24.04 AMI resolved at plan time rather than a hard-coded ID.
-
-```hcl
-terraform {
-  required_version = ">= 1.6"
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = "~> 5.0"
-    }
-  }
-}
-
-provider "aws" {
-  region = var.region
-}
-
-variable "region" {
-  description = "AWS region to deploy into"
-  type        = string
-  default     = "us-west-2"
-}
-
-variable "instance_type" {
-  description = "EC2 instance size"
-  type        = string
-  default     = "t3.micro"
-}
-
-variable "ssh_cidr" {
-  description = "CIDR block allowed to SSH (e.g., your IP as x.x.x.x/32)"
-  type        = string
-}
-
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd/ubuntu-*-24.04-amd64-server-*"]
-  }
-}
-
-locals {
-  common_tags = {
-    Project   = "cs312"
-    ManagedBy = "terraform"
-  }
-}
-
-resource "aws_security_group" "web_sg" {
-  name        = "web-sg"
-  description = "Allow SSH and HTTP"
-
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.ssh_cidr]
-  }
-
-  ingress {
-    description = "HTTP"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_instance" "web" {
-  ami                    = data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
-  vpc_security_group_ids = [aws_security_group.web_sg.id]
-
-  tags = merge(local.common_tags, {
-    Name = "cs312-web"
-  })
-}
-
-output "web_public_ip" {
-  description = "Public IP of the web server"
-  value       = aws_instance.web.public_ip
-}
-```
-
-`ssh_cidr` has no default value, so Terraform will prompt for it at plan time or fail in a non-interactive environment unless it is supplied explicitly. This is deliberate: you should never open SSH to `0.0.0.0/0`. The `data "aws_ami"` block looks up the most recent Ubuntu 24.04 AMI owned by Canonical (AWS account `099720109477`), so the configuration never contains a hard-coded AMI ID that would go stale as new images are released.
-
-<Aside type="note" title="AMI IDs Are Region-Specific">
-AMI IDs differ across AWS regions. The data source lookup resolves the correct ID for whatever region the provider is configured to use, so this configuration deploys correctly regardless of region without any changes.
-</Aside>
-
-## The Core Workflow
-
-Terraform's primary workflow revolves around five commands that you will use on nearly every project.
-
-`terraform init` downloads provider plugins and initializes the working directory. Run it once when you create a new configuration and again whenever you add a new provider or change backend settings. After init, a `.terraform` directory appears containing the downloaded provider binaries, and Terraform writes a `.terraform.lock.hcl` file recording the exact provider versions resolved.
-
-`terraform validate` checks your configuration for syntax errors and internal consistency without contacting any remote API. It is fast and safe to run repeatedly; a good habit is to validate before every plan.
-
-`terraform plan` reads the current state, compares it to the configuration, and produces a detailed execution plan showing exactly what Terraform intends to create, modify, or destroy. Nothing changes in your infrastructure at this stage. Treat the plan output as a code diff: read it carefully before proceeding. You can save a plan to a file with `-out=tfplan` and pass that file directly to `apply`, ensuring that what was reviewed is exactly what gets executed.
-
-`terraform apply` executes the plan. When called without a saved plan file, Terraform displays the plan and asks for confirmation before making any changes. Once confirmed, it provisions resources and updates the state file. When called with a saved plan file (`terraform apply tfplan`), it skips the confirmation prompt because the plan has already been reviewed.
-
-`terraform destroy` removes all resources managed by the configuration. It respects the dependency graph and tears resources down in the correct reverse order, which matters when databases must be removed after the applications that write to them.
-
-A typical session looks like this:
-
-```bash
-terraform init
-terraform validate
-terraform plan -var 'ssh_cidr=203.0.113.50/32' -out=tfplan
-terraform apply tfplan
-```
-
-When you are done with a temporary environment:
-
-```bash
-terraform destroy -var 'ssh_cidr=203.0.113.50/32'
-```
-
-One additional command worth keeping in your toolkit is `terraform fmt`, which canonically reformats all `.tf` files in the current directory according to HashiCorp's style conventions. Running it before committing keeps diffs clean and eliminates style noise in code review.
+`terraform destroy` removes all managed resources in the correct reverse dependency order. It respects the same dependency graph that governs creation, so a database is not dropped before the application servers that write to it are removed first.
 
 <Aside type="caution" title="Plan Before You Apply">
 Always run `terraform plan` before `terraform apply` in any shared or production environment. Treat the plan output as a diff to review carefully, just as you would review a code change before merging.
 </Aside>
 
-## State Management
+## State as a Source of Truth
 
-State is one of the most important and most misunderstood aspects of Terraform. The state file records the mapping between your configuration and the real infrastructure, along with metadata such as resource dependencies and attribute values. Without state, Terraform would have no way to know that `aws_instance.web` in your configuration corresponds to a specific running instance in your AWS account.
+State is one of the most important and most misunderstood aspects of Terraform. Understanding it well changes how you think about every Terraform operation, not just the mechanics of where the file lives.
 
-### Local State
+### Local State and Its Limits
 
-By default, Terraform writes state to a file called `terraform.tfstate` in the project directory. This works fine for individual learning and experimentation, but it creates problems in a team setting. If two engineers run `terraform apply` at the same time from their own laptops, they can overwrite each other's state and corrupt the environment.
+By default, Terraform writes state to a file called `terraform.tfstate` in the project directory. This works for individual experimentation, but it creates problems in a team setting. If two engineers run `terraform apply` from their own laptops, they can overwrite each other's state and corrupt the environment. There is also no locking: nothing prevents two people from modifying the same state simultaneously.
 
 ### Remote State
 
-For any shared project you should store state in a **remote backend**. AWS S3 with DynamoDB (AWS's managed key-value database, used here for distributed locking) locking is one common pattern:
+For any shared project you should store state in a **remote backend**. AWS S3 with DynamoDB locking is a common pattern: state lives in an S3 bucket (encrypted at rest), and a DynamoDB table (AWS's managed key-value store, used here for distributed locking) prevents concurrent modifications.
 
 ```hcl
 terraform {
@@ -284,158 +119,91 @@ terraform {
 }
 ```
 
-With this configuration, state is stored in an S3 bucket (encrypted at rest) and a DynamoDB table provides locking. If one engineer is running `apply`, another engineer who tries to run `apply` at the same time will receive a lock error rather than silently corrupting state.
+If one engineer is running `apply`, another who tries to run `apply` at the same time receives a lock error rather than silently corrupting state. This is more than a technical safeguard: it forces infrastructure changes to be serialized, which is a sound practice even when only one engineer is actively making changes at a given moment.
+
+### Splitting State by Domain
+
+A single state file for all of your infrastructure becomes a liability as a project grows. Every plan queries every resource it manages; as that number climbs into the hundreds, plans slow down, applies fail more often due to cloud API rate limits (providers throttle the number of requests per second, and a plan refreshing hundreds of resources simultaneously can hit those limits), and the blast radius of any change grows. One apply can affect everything because one state file tracks everything.
+
+Teams at scale split state by domain boundary: shared networking infrastructure in one state file, per-application stacks in their own, and per-environment splits on top of that. This reduces blast radius for *routine changes*: an application deployment cannot accidentally touch the VPC because the two are in separate plans. The networking state itself is still shared infrastructure, and a careless change to it can still break every resource that depends on it. Splitting does not eliminate that risk; it only keeps routine application changes from ever reaching it. Teams treat foundational state files as higher-ceremony to modify and apply stricter IAM access controls on who can run applies against them. Cross-state references are handled through remote state data sources, where one Terraform configuration reads the outputs of another without managing those resources directly.
+
+Some organizations carry this further by using separate AWS accounts per environment, giving each its own state file, its own permission boundaries, and a physical network isolation boundary enforced by AWS itself. This eliminates the risk of accidentally applying production changes from the wrong context, which is one of the most expensive Terraform mistakes teams make at scale.
+
+### Drift Detection
+
+One of state's most valuable operational properties is drift detection. When a manual change is made directly in the AWS console after Terraform's last apply, the state file no longer matches reality. The next `terraform plan` will surface this: Terraform queries the live cloud resources and compares their actual attributes against the state file, then shows the discrepancy as a planned change. You can run `terraform plan` at any time as a health check, not just when you intend to make a change.
+
+In larger environments, automated drift detection is common practice: run `terraform plan` on a schedule and alert on non-empty output. Any environment that people also modify manually will drift; the question is only whether you discover it immediately or when something unexpectedly breaks.
 
 ### Sensitive Data in State
 
-State files contain the attribute values of every managed resource. If a resource has a password attribute, that password is stored in state in plain text. This is why you should always encrypt remote state at rest, restrict access to the state bucket, and never commit `terraform.tfstate` to version control.
+State files contain the attribute values of every managed resource. If a resource has a password attribute, that password appears in state in plain text. Always encrypt remote state at rest, restrict access to the state bucket, and never commit `terraform.tfstate` to version control.
 
 <Aside type="caution" title="Never Commit State Files">
-Add `*.tfstate` and `*.tfstate.backup` to your `.gitignore` file. State files often contain secrets and should never be committed to a repository.
+Add `*.tfstate` and `*.tfstate.backup` to your `.gitignore` file. State files often contain secrets and should never appear in a repository.
 </Aside>
 
 ### Importing Existing Resources
 
-Most teams do not start a Terraform journey with a blank account. You may inherit an EC2 instance, a VPC, or a set of security groups that someone created by hand months ago. The `terraform import` command lets you bring those resources under Terraform management without recreating them.
+Most teams do not start a Terraform journey with a blank account. You may inherit an EC2 instance, a VPC, or a set of security groups created by hand months earlier. The [`terraform import`](https://developer.hashicorp.com/terraform/cli/import) command brings those resources under Terraform management without recreating them. It writes the resource's current state into the state file; from that point on, Terraform tracks and manages the resource. The key limitation is that `terraform import` does not generate the HCL configuration for you, only the state entry. You still have to write the matching resource block and iterate on `terraform plan` until it reports no changes. Both Terraform and [OpenTofu](https://opentofu.org/docs/cli/import/) now support a native `import` block that can generate a draft HCL configuration during planning, reducing the manual effort of writing the matching resource block from scratch. The generated output still requires review and cleanup before it should be committed.
 
-The workflow has two steps. First, write an empty resource block in your configuration that matches the resource type:
+## Lifecycle Rules and Stateful Resources
+
+Resources differ in how risky they are to modify or destroy. A security group can be recreated with no lasting harm. An RDS database holds data: destroying it means losing that data unless a backup strategy is in place, and recreating it disrupts every service that writes to it. Terraform's [`lifecycle` block](https://developer.hashicorp.com/terraform/language/meta-arguments/lifecycle) lets you attach safety constraints to individual resources that reflect this reality.
+
+The most important rule is `prevent_destroy`. A resource marked `prevent_destroy = true` causes Terraform to error at plan time rather than produce a plan that would destroy it, even when the destruction would logically follow from a configuration change. It is the right safeguard for any resource that other infrastructure depends on: the VPC that every subnet lives in, the RDS instance that holds production data, the shared IAM role that a fleet of services assumes.
 
 ```hcl
-resource "aws_security_group" "legacy" {
-  # attributes will be populated after import
+resource "aws_db_instance" "primary" {
+  # ... configuration ...
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 ```
 
-Then import the existing resource by its cloud-provider ID:
-
-```bash
-terraform import aws_security_group.legacy sg-0abc123def456789
-```
-
-Terraform writes the resource's current state into the state file. Running `terraform plan` afterward will show a diff between the (empty) configuration block and the actual attributes. You then fill in the configuration to match the real resource until `terraform plan` reports no changes.
-
-The key limitation is that `terraform import` does not generate the HCL for you. It only updates the state file. You must write the matching configuration yourself. Tools like [terraformer](https://github.com/GoogleCloudPlatform/terraformer) and [opentofu's generate config experiment](https://opentofu.org/docs/language/import/) are beginning to address this gap, but the process still requires careful review.
-
-## Variables and Parameterization
-
-Variables make the same configuration reusable across environments. The range of ways to supply variable values is wider than the basics shown in the HCL syntax section.
-
-### Defaults and Required Variables
-
-A variable with a `default` block is optional; Terraform uses the default if no value is provided. A variable without a default is required; Terraform will prompt for it interactively or fail if running in a non-interactive context such as a CI pipeline.
-
-### Variable Files
-
-For repeatable deployments, you can create a file called `terraform.tfvars` (or any file ending in `.auto.tfvars`):
+The second common rule is `ignore_changes`. It tells Terraform to stop tracking drift on specific attributes. If a database administrator tunes a parameter through the AWS console and you do not want Terraform to revert it on the next apply, you add that attribute to the `ignore_changes` list. This is a pragmatic escape hatch for resources that are partially managed outside Terraform without abandoning Terraform management entirely.
 
 ```hcl
-region        = "us-west-2"
-instance_type = "t3.small"
-ssh_cidr      = "203.0.113.50/32"
-```
-
-Terraform loads `terraform.tfvars` automatically. You can also specify a file explicitly with `-var-file`:
-
-```bash
-terraform apply -var-file="production.tfvars"
-```
-
-This pattern is useful for managing multiple environments (dev, staging, production) from the same configuration with different variable files.
-
-### Variable Types
-
-Terraform supports several types beyond `string`: `number`, `bool`, `list(...)`, `map(...)`, and `object(...)`. For example, to allow multiple SSH CIDRs:
-
-```hcl
-variable "ssh_cidrs" {
-  description = "CIDR blocks allowed to SSH"
-  type        = list(string)
-  default     = []
+resource "aws_db_instance" "primary" {
+  # ... configuration ...
+  lifecycle {
+    ignore_changes = [parameter_group_name]
+  }
 }
 ```
 
-You would then use `var.ssh_cidrs` in the security group's `cidr_blocks` argument.
+The deeper principle these rules reflect is that Terraform manages infrastructure shape, not the data inside it. It can provision an RDS instance, resize its storage, and modify its engine version. It cannot run a schema migration, orchestrate a blue/green cutover, or verify that a change is safe given the data the instance currently holds. Those concerns belong to separate, specialized tooling: migration frameworks like [Flyway](https://flywaydb.org/) or [Alembic](https://alembic.sqlalchemy.org/en/latest/), deployment orchestration scripts, and deliberate runbooks for high-risk changes. Understanding this boundary prevents a class of incidents that happen when engineers treat a database change as just another `terraform apply`. When the plan output shows `-/+` for a stateful resource, that is a warning requiring investigation and a verified backup strategy, not a routine instruction to type `yes`.
 
-## Resource Dependencies
+## Resource Dependencies and Infrastructure Topology
 
-Terraform automatically infers dependencies between resources based on attribute references. When one resource's argument references an attribute of another resource, Terraform records that relationship and ensures the dependency is created first. This is called an **implicit dependency**.
+Terraform automatically infers dependencies between resources based on attribute references. When one resource's argument references an attribute of another, Terraform records that relationship and ensures the dependency is satisfied before the dependent resource is created or modified. This is called an **implicit dependency**, and it is the mechanism by which the shape of your configuration describes the topology of your infrastructure.
 
-Internally, Terraform builds a **directed acyclic graph (DAG)** of all resources before executing any changes. The DAG captures every dependency relationship, allowing Terraform to determine the correct creation order and to parallelize independent resources. You can observe this parallelism in `terraform apply` output: multiple resources that have no dependency on each other are provisioned simultaneously.
+Internally, Terraform builds a **directed acyclic graph (DAG)** of all resources before executing any changes. The DAG captures every dependency relationship, allowing Terraform to determine the correct creation order and to parallelize independent resources simultaneously. A security group that an instance depends on is created first; two security groups with no relationship between them are created at the same time.
 
-In the configuration shown earlier, `aws_instance.web` references `aws_security_group.web_sg.id`, so Terraform knows it must create the security group before the instance. This is the implicit dependency mechanism at work.
+The implicit dependency mechanism is also how multi-tier architectures are expressed. A database security group that permits connections only from the web security group does so by referencing the web security group's ID in its ingress rule. Terraform infers the full creation order from that reference: web security group first, then database security group (which depends on the web security group's ID), then the database instance. The network topology is encoded directly in the attribute references, not declared separately or maintained manually.
 
-Occasionally you need a dependency that is not visible in the configuration. For example, suppose you have an IAM (Identity and Access Management, AWS's system for controlling who can do what) role that must exist before an instance can assume it, but the instance references the role by name (a string) rather than by Terraform attribute. In this case you can declare an **explicit dependency**:
+Occasionally you need a dependency that is not visible in the attribute references. The most common case is when a resource uses a literal string that coincidentally refers to another managed resource. If an EC2 instance specifies `iam_instance_profile = "my-role-name"` as a plain string rather than `iam_instance_profile = aws_iam_role.web_role.name` as an attribute reference, Terraform sees a string with no connection to any other resource in the configuration and cannot infer the dependency. You declare it explicitly with `depends_on`:
 
 ```hcl
 resource "aws_instance" "web" {
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = var.instance_type
-
-  depends_on = [aws_iam_role.web_role]
+  # ... other arguments ...
+  iam_instance_profile = "my-role-name"  # plain string: no implicit dependency inferred
+  depends_on           = [aws_iam_role.web_role]
 }
 ```
 
-The `depends_on` argument tells Terraform to create or update `aws_iam_role.web_role` before touching `aws_instance.web`, even though there is no attribute reference linking them.
+The `depends_on` argument tells Terraform to create or update `aws_iam_role.web_role` before touching `aws_instance.web`, even though no attribute reference links them.
 
 <Aside type="tip" title="Prefer Implicit Dependencies">
-Prefer implicit dependencies through attribute references whenever possible. They are self-documenting: anyone reading the code can see why one resource depends on another. Use `depends_on` only as a last resort.
+Prefer implicit dependencies through attribute references whenever possible. They are self-documenting: anyone reading the configuration can see exactly why one resource depends on another. Use `depends_on` only when no attribute reference can express the relationship.
 </Aside>
-
-## Multi-Tier Configuration Patterns
-
-A common cloud infrastructure pattern is a multi-tier architecture: a web tier accessible from the internet, a database tier accessible only from the web tier. The following configuration adds a PostgreSQL database on RDS (Relational Database Service, AWS's managed database offering) alongside the earlier web server. The key detail is in the ingress rule: the database security group permits connections on port 5432 only from the web security group, not from the internet.
-
-```hcl
-variable "db_password" {
-  description = "Password for the database master user"
-  type        = string
-  sensitive   = true
-}
-
-resource "aws_security_group" "db_sg" {
-  name        = "db-sg"
-  description = "Allow PostgreSQL from web tier"
-
-  ingress {
-    description     = "PostgreSQL from web"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.web_sg.id]
-  }
-
-  tags = local.common_tags
-}
-
-resource "aws_db_instance" "database" {
-  identifier          = "cs312-db"
-  engine              = "postgres"
-  engine_version      = "16"
-  instance_class      = "db.t3.micro"
-  allocated_storage   = 20
-  db_name             = "appdb"
-  username            = "dbadmin"
-  password            = var.db_password
-  skip_final_snapshot = true
-
-  vpc_security_group_ids = [aws_security_group.db_sg.id]
-
-  tags = local.common_tags
-}
-
-output "db_endpoint" {
-  description = "RDS endpoint for the database"
-  value       = aws_db_instance.database.endpoint
-}
-```
-
-`db_password` is marked `sensitive = true`, which tells Terraform to redact its value from plan and apply output. You would supply it through a `.tfvars` file or the `TF_VAR_db_password` environment variable. Because `aws_security_group.db_sg` references `aws_security_group.web_sg.id`, Terraform infers the full creation order through the dependency graph: web security group, then database security group, then the RDS instance.
 
 ## Modules
 
-As configurations grow, repeating the same blocks across projects becomes tedious and error-prone. Terraform **modules** let you package a set of resources into a reusable unit.
+As configurations grow, repeating the same blocks across projects becomes tedious and error-prone. Terraform [**modules**](https://developer.hashicorp.com/terraform/language/modules/develop) let you package a set of resources into a reusable unit with a defined interface.
 
-A module is simply a directory containing `.tf` files. The directory you have been working in is the **root module**. You can create a child module by placing files in a subdirectory and calling it from the root:
+A module is simply a directory containing `.tf` files. The directory you are working in is the **root module**. You can create a child module by placing files in a subdirectory and calling it from the root:
 
 ```
 project/
@@ -447,7 +215,30 @@ project/
       outputs.tf
 ```
 
-The child module `modules/web_server/main.tf` might contain the security group and instance resources, parameterized with variables. The root module calls it like this:
+The child module declares its accepted inputs in `variables.tf` and exposes its results through `outputs.tf`, establishing the contract that any caller must satisfy:
+
+```hcl
+# modules/web_server/variables.tf
+variable "instance_type" {
+  description = "EC2 instance size"
+  type        = string
+}
+
+variable "ssh_cidr" {
+  description = "CIDR block allowed to SSH"
+  type        = string
+}
+```
+
+```hcl
+# modules/web_server/outputs.tf
+output "public_ip" {
+  description = "Public IP of the provisioned instance"
+  value       = aws_instance.web.public_ip
+}
+```
+
+The root module calls the child module by passing values for those variables and reading back the outputs:
 
 ```hcl
 module "web" {
@@ -461,95 +252,87 @@ output "web_ip" {
 }
 ```
 
-Modules enforce a clean interface: the child module declares which variables it accepts and which outputs it exposes. The root module passes values in and reads outputs back. This encapsulation makes it possible to share modules across teams or publish them to the Terraform Registry for the community to use.
+Modules enforce a clean interface: the child module declares which variables it accepts and which outputs it exposes. The root module passes values in and reads outputs back. This encapsulation makes it possible to share modules across teams or publish them to the Terraform Registry. A well-designed module is a reusable infrastructure component: you can call it multiple times with different variable values to create multiple independent instances of the same architecture.
+
+The failure mode to watch for is over-abstraction. A module that takes dozens of variables to control every possible configuration detail, or that nests other modules several layers deep, becomes harder to use than the raw resources it wraps. The plan output becomes opaque (it references `module.web.module.networking.module.subnet.aws_subnet.main` rather than a resource you recognize), failures are harder to trace, and callers cannot reason about what will actually be created. Prefer thin, composable modules that represent one coherent infrastructure concept. If a module is doing five different things, it is probably two or three modules.
+
+Once a module is shared across teams it should be treated like an API: changes to its variable interface require a version bump, backward compatibility matters, and unannounced breaking changes will break every caller. The Terraform Registry and Git tags both support module versioning. An unversioned shared module is an organizational coupling problem: a change that serves one team can silently break another team's infrastructure on their next init.
 
 <Aside type="tip" title="When to Extract a Module">
 A good rule of thumb: if you find yourself copying and pasting a block of resources across projects, it is time to extract a module. Start simple; a module with two or three resources is perfectly fine.
 </Aside>
 
-## Other Infrastructure Provisioning Tools
+## The IaC Ecosystem
 
-Terraform is not the only tool in this space. The ecosystem includes several alternatives worth knowing.
+Terraform is not the only tool in this space, and understanding the alternatives clarifies the tradeoffs in Terraform's own design choices.
 
-**OpenTofu** is a community-maintained, open-source fork of Terraform created after HashiCorp changed Terraform's license to the Business Source License in 2023. OpenTofu is a drop-in replacement with identical HCL syntax and is the choice for teams that require a fully open-source license. The two projects are diverging slowly; for most workloads they are interchangeable today.
+**[OpenTofu](https://opentofu.org/)** is a community-maintained, open-source fork of Terraform created after HashiCorp changed Terraform's license to the Business Source License in 2023. OpenTofu is a drop-in replacement with identical HCL syntax and is the choice for teams that require a fully open-source license. The two projects are diverging slowly; for most workloads they are interchangeable today.
 
-**Pulumi** lets you write infrastructure definitions in general-purpose programming languages (TypeScript, Python, Go, C#) rather than a domain-specific language like HCL. This lowers the barrier for developers already fluent in those languages and makes it easier to apply standard programming constructs like loops, conditionals, and libraries to infrastructure code.
+**[Pulumi](https://www.pulumi.com/)** takes a different approach to the language question. Instead of a domain-specific language like HCL, Pulumi lets you write infrastructure definitions in general-purpose programming languages: TypeScript, Python, Go, and C#. This lowers the barrier for developers already fluent in those languages and makes it possible to apply standard programming constructs, loops, conditionals, and libraries, to infrastructure code. The tradeoff is that the full generality of a programming language can make Pulumi configurations harder to audit statically, while HCL's limited expressiveness makes configurations more predictable and reviewable.
 
-**AWS CloudFormation** is AWS's native IaC service. It uses JSON or YAML templates and integrates tightly with the AWS ecosystem, but it is cloud-specific. If you are committed to AWS and want first-class integration with Service Control Policies and AWS Config, CloudFormation is worth understanding even if Terraform is your day-to-day tool.
+**[AWS CloudFormation](https://aws.amazon.com/cloudformation/)** is AWS's native IaC service. It uses JSON or YAML templates and integrates tightly with the AWS ecosystem, including Service Control Policies and AWS Config. Being native means it has deep first-class support for new AWS services, often before Terraform's AWS provider adds them. The cost is cloud specificity: a CloudFormation template is useful only on AWS, which matters if you ever need to operate across providers.
 
-**Azure Resource Manager (ARM) / Bicep** is Microsoft's equivalent for Azure infrastructure. Bicep is a more readable DSL that compiles down to ARM JSON, playing the same role that HCL plays for Terraform.
+**[Azure Resource Manager (ARM)](https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/overview) and [Bicep](https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/overview)** are Microsoft's equivalents for Azure infrastructure. Bicep is a more readable domain-specific language that compiles down to ARM JSON, playing the same role HCL plays for Terraform.
 
-**Ansible** is primarily a configuration management tool, but it can also provision infrastructure resources through its cloud modules. The overlap with Terraform is real, but the tools approach the problem differently: Ansible is procedural and agent-less; Terraform is declarative and state-driven. They complement each other more than they compete.
+**Ansible** is primarily a configuration management tool, but it can also provision infrastructure resources through its cloud modules. The overlap with Terraform is real, but the tools approach the problem differently: Ansible is procedural and agentless; Terraform is declarative and state-driven. As discussed in the Two Phases section, they complement each other more than they compete.
 
-<Aside type="tip" title="Tool Combinations">
-Many tools overlap in capability without being identical. Terraform plus Ansible is a common pairing: Terraform provisions infrastructure objects, Ansible configures the software running on them. Learning one tool deeply makes learning the others significantly easier, since the underlying concepts (desired state, idempotency, providers, inventory) recur across the whole ecosystem.
+<Aside type="tip" title="Learning Transfers Across Tools">
+Learning one declarative IaC tool deeply makes learning the others significantly easier. The underlying concepts (desired state, idempotency, providers, dependency graphs) recur across the whole ecosystem under different names.
 </Aside>
 
-## Best Practices
+## IaC as an Engineering Practice
 
-The following practices address the most common sources of pain when using Terraform in real projects.
+The tools themselves are only part of the story. How a team uses IaC matters as much as which tool they choose. The following principles apply across all declarative IaC tools, not just Terraform.
 
-### Pin Provider Versions
+### Infrastructure Lives in Version Control
 
-Always specify version constraints for your providers. The `~> 5.0` constraint means "any version in the 5.x range." Without version pinning, a provider update can introduce breaking changes that alter your infrastructure unexpectedly.
+Every configuration file, every variable file (excluding secrets), every module, and the provider lock file belong in a version-controlled repository. This is not optional: version control is what gives you the audit trail, the reproducibility, and the code review that justify IaC in the first place. An IaC configuration that lives on an engineer's laptop is not substantially better than clicking through a console.
 
-```hcl
-required_providers {
-  aws = {
-    source  = "hashicorp/aws"
-    version = "~> 5.0"
-  }
-}
-```
+### Environment Parity Through Parameterization
 
-After running `terraform init`, Terraform writes a `.terraform.lock.hcl` file that records the exact provider versions installed. Commit this lock file to version control so that every team member uses the same versions.
+One of IaC's most powerful benefits is the ability to express your entire infrastructure as a pattern and instantiate it multiple times with different variable values. A single Terraform configuration with separate variable files can create a development environment, a staging environment, and a production environment that are structurally identical but sized and configured differently. This is the IaC answer to "it worked in staging but broke in production": when both environments come from the same configuration, the surface area for divergence is limited to the variable values that differ intentionally.
 
-### Use Remote State from the Start
+### Plan Review as a Safety Gate
 
-Even for small projects, storing state remotely with locking prevents a class of painful bugs. Set up an S3 backend (or equivalent) before your first `apply` in any shared environment. Retrofitting remote state after infrastructure already exists is possible but more disruptive than starting correctly.
+In a CI/CD (Continuous Integration/Continuous Deployment) pipeline, the standard pattern is to generate a saved plan automatically on every pull request, post the plan output as a comment, and require a human to review and approve before running `terraform apply`. This combines automated consistency checking with human judgment. The saved plan file guarantees that what was reviewed is exactly what gets applied, with no possibility of drift between the moment of review and the moment of execution.
 
-### Treat Plans as Code Review
+### Know Your Blast Radius Before Applying
 
-In a CI/CD pipeline, generate a saved plan file with `terraform plan -out=tfplan` and require a human to review it before running `terraform apply tfplan`. This is analogous to requiring pull request reviews before merging code. The saved plan ensures that what was reviewed is exactly what gets applied, with no possibility of drift between review and execution.
+A single `terraform apply` can create, modify, or destroy dozens of resources at once. The plan is how you understand the scope of a change before committing to it. A plan showing ten resources marked for destruction is worth investigating even when you expected only one. On large configurations, a seemingly small refactor can touch far more resources than intended, and discovering that in the plan is the right time, not after the fact.
 
 ### Keep Secrets Out of Configuration
 
-Never hard-code passwords, API keys, or other secrets in `.tf` files. Use variables marked `sensitive = true`, inject values through environment variables (Terraform reads `TF_VAR_<name>` automatically), or integrate with a secrets manager such as AWS Secrets Manager or HashiCorp Vault.
+Never hard-code passwords, API keys, or other secrets in `.tf` files or in `.tfvars` files that will be committed to version control. Use variables marked `sensitive = true`, inject values through environment variables (Terraform reads `TF_VAR_<name>` automatically), or integrate with a secrets manager such as AWS Secrets Manager or HashiCorp Vault. Marking a variable `sensitive` tells Terraform to redact its value from plan and apply output, which prevents secrets from appearing in CI logs.
+
+### Apply Least Privilege to Infrastructure Automation
+
+Terraform's execution role should follow the **principle of least privilege** (granting only the permissions actually needed, and no more) just like any other system credential. A role with full administrator access on your AWS account is a high-impact credential: if it leaks, or if someone misconfigures a resource, the blast radius is unlimited. Scope the role to the resource types and regions the configuration actually manages. In practice, many teams start with broad permissions and tighten them incrementally as the configuration stabilizes. The important discipline is to treat the Terraform execution role as a sensitive credential that deserves the same review and rotation policy as any other privileged access, rather than as an infrastructure utility that can safely have unlimited permissions.
+
+### Enforce Guardrails with Policy as Code
+
+Human review catches many problems in a plan, but not all of them. At scale, teams use **policy as code** tools to enforce organizational rules automatically as part of the plan/apply pipeline. [HashiCorp Sentinel](https://www.hashicorp.com/sentinel) and the [Open Policy Agent (OPA)](https://www.openpolicyagent.org/) with tools like [Conftest](https://www.conftest.dev/) can enforce rules such as "no S3 bucket may have public access enabled," "all resources must carry cost-allocation tags," or "production applies may not run on weekends." These policies evaluate the plan before `apply` runs and block non-compliant changes automatically. Policy as code is the IaC equivalent of linting: not every constraint can be expressed in the type system of your configuration language, so some must be enforced by tooling applied consistently to every change.
+
+### Pin Provider Versions
+
+Always specify version constraints for your providers. Without version pinning, a provider update can introduce breaking changes that silently alter infrastructure behavior. The lock file records the exact provider versions installed; committing it to version control ensures every team member and every CI job uses the same versions.
 
 ### Estimate Costs Before Applying
 
-Tools like [Infracost](https://www.infracost.io/) can analyze a Terraform plan and estimate the monthly cost of the resources being created. Adding cost estimation to your review process prevents surprise bills, especially when resources like NAT Gateways, RDS instances with provisioned IOPS, or data transfer are added to a plan.
-
-### Organize with a Consistent Structure
-
-A typical Terraform project separates concerns across files:
-
-```
-main.tf          # provider config and primary resources
-variables.tf     # all input variable declarations
-outputs.tf       # all output declarations
-terraform.tfvars # default variable values (environment-specific)
-```
-
-This convention is not enforced by Terraform (it loads all `.tf` files in a directory), but it makes configurations easier to navigate and review.
+Tools like [Infracost](https://www.infracost.io/) can analyze a Terraform plan and estimate the monthly cost of the resources being created. Adding cost estimation to a review pipeline prevents surprise bills, especially when resources like NAT Gateways or RDS instances with provisioned IOPS appear in a plan for the first time.
 
 ## Takeaways
 
-Infrastructure as Code transforms infrastructure management from a manual, error-prone process into a disciplined engineering practice with the same review, versioning, and reproducibility expectations as application code. Terraform achieves this through a declarative model: you describe the desired end state, and Terraform calculates how to get there by comparing that description against a state file that tracks what currently exists in the cloud.
+Infrastructure as Code transforms infrastructure management from a manual, error-prone process into a disciplined engineering practice with the same review, versioning, and reproducibility expectations as application code. The declarative model is the core insight: you describe the desired end state, the tool calculates how to get there, and the properties of idempotency and convergence make the result safe to run repeatedly and reliably drift-detecting over time.
 
-The core workflow (init, validate, plan, apply) is a deliberate checkpoint system. Every change produces a readable plan before anything touches real infrastructure, and saving that plan to a file creates an exact contract between what was reviewed and what gets applied. State is the mechanism that makes incremental changes possible; protecting it means using remote backends with locking, encrypting at rest, and keeping it out of version control. Variables and modules make configurations reusable across environments and teams without duplicating code. The dependency graph handles ordering automatically, and the rare explicit dependency (`depends_on`) covers the cases where the graph cannot infer the relationship from attribute references alone.
+The plan/apply cycle is not just a workflow convenience; it is a risk-management mechanism. A plan is a contract between what you reviewed and what gets applied, and treating it with the same rigor as a code review prevents the class of infrastructure incidents that happen when a change affects more than the author expected. State is what makes incremental changes possible and what makes drift visible; protecting it through remote backends with locking, encryption at rest, and exclusion from version control is as important as writing correct configuration in the first place.
 
-Terraform does not stand alone in a real automation stack. It handles the provisioning layer: creating VPCs, security groups, EC2 instances, and databases. The configuration management and CI/CD layers then operate on the infrastructure Terraform provisioned. Understanding where each tool's responsibility begins and ends is the key to combining them without duplication or conflict. The Configuration Management with Ansible and CI/CD Pipelines lectures cover those layers in detail.
+Terraform does not stand alone in a real automation stack. It handles the provisioning layer: creating networks, compute, and storage. Configuration management and CI/CD then operate on the infrastructure Terraform provisioned. Understanding where each tool's responsibility begins and ends is the key to combining them without duplication or conflict. The Configuration Management with Ansible and CI/CD Pipelines lectures cover those layers in detail.
 
 ## Resources
 
-- <a href="https://developer.hashicorp.com/terraform/docs" target="_blank" rel="noopener noreferrer">Terraform Documentation (HashiCorp Developer)</a>
-- <a href="https://developer.hashicorp.com/terraform/tutorials" target="_blank" rel="noopener noreferrer">Terraform Tutorials (HashiCorp Developer)</a>
 - <a href="https://www.youtube.com/watch?v=l5k1ai_GBDE" target="_blank" rel="noopener noreferrer">Terraform Explained in 15 Minutes (TechWorld with Nana) (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=7xngnjfIlK4" target="_blank" rel="noopener noreferrer">Complete Terraform Course — Beginner to Advanced (DevOps Directive) (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=wgzgVm7Sqlk" target="_blank" rel="noopener noreferrer">Terraform State Explained (IBM Technology) (YouTube)</a>
 - <a href="https://developer.hashicorp.com/terraform/tutorials/automation/github-actions" target="_blank" rel="noopener noreferrer">Automate Terraform with GitHub Actions (HashiCorp Developer)</a>
-- <a href="https://opentofu.org/docs/" target="_blank" rel="noopener noreferrer">OpenTofu Documentation (OpenTofu)</a>
-- <a href="https://www.infracost.io/docs/" target="_blank" rel="noopener noreferrer">Infracost Documentation (Infracost)</a>
 - <a href="https://www.youtube.com/watch?v=WjckELpzLOU" target="_blank" rel="noopener noreferrer">Mitchell Hashimoto's New Way of Writing Code (The Pragmatic Engineer Podcast) (YouTube)</a>
 - <a href="https://www.oreilly.com/library/view/terraform-up-and/9781098116736/" target="_blank" rel="noopener noreferrer">Terraform: Up and Running, 3rd Edition (Yevgeniy Brikman) (Book)</a>
