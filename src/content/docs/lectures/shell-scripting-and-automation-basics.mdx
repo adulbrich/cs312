@@ -1,6 +1,6 @@
 ---
 title: Shell Scripting and Automation Basics
-description: "Learn Bash scripting patterns to automate routine admin tasks: variables, conditionals, loops, functions, safe defaults, and scheduling with cron."
+description: "Bash scripting for system automation: variables, environment, I/O and pipes, conditionals, loops, functions, safe defaults, regular expressions, and scheduling with cron and systemd timers."
 sidebar:
   order: 8
 draft: true
@@ -9,9 +9,9 @@ draft: true
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
-Every system administrator eventually faces tasks that must be done repeatedly: rotating log files, copying backups to a remote server, provisioning user accounts. When you perform these by hand, three problems emerge. First, the work is tedious; Google's SRE team calls this kind of repetitive, automatable operational work *toil*. Second, manual work is inconsistent; you will eventually forget a step or mistype a path. Third, manual processes are not repeatable in any verifiable way.
+Every system administrator eventually faces tasks that must be done repeatedly: rotating log files, copying backups to a remote server, provisioning user accounts. When you perform these by hand, three problems emerge. First, the work is tedious; Google's SRE team calls this kind of repetitive, automatable operational work [*toil*](https://sre.google/sre-book/eliminating-toil/). Second, manual work is inconsistent; you will eventually forget a step or mistype a path. Third, manual processes are not repeatable in any verifiable way.
 
-Shell scripts solve all three problems. A script encodes the exact sequence of commands, runs them the same way every time, and serves as living documentation. This lecture covers the anatomy of a well-structured Bash script: how variables and quoting prevent subtle failures, how conditionals and loops let a script react to the state of the system, how functions organize reusable logic, and how a handful of safe-scripting defaults catch the majority of bugs at the point of failure. The lecture also covers scheduling with cron and systemd timers, regular expressions and the tools that use them, and the point at which Bash's strengths run out and a more capable tool should take over.
+Shell scripts solve all three problems. A script encodes the exact sequence of commands, runs them the same way every time, and serves as living documentation. This lecture covers the anatomy of a well-structured Bash script: how variables and quoting prevent subtle failures, how the Unix I/O model enables composition through pipes and redirection, how conditionals and loops let a script react to the state of the system, how functions organize reusable logic, and how a handful of safe-scripting defaults catch the majority of bugs at the point of failure. The lecture also covers scheduling with cron and systemd timers, regular expressions and the tools that use them, and the point at which Bash's strengths run out and a more capable tool should take over.
 
 ## Script Structure and the Shebang
 
@@ -43,13 +43,7 @@ cp -r "$SOURCE" "$DEST"
 
 Notice the double quotes around `$SOURCE` and `$DEST`. Quoting is one of the most important habits in shell scripting. If a path ever contains a space (for example, `/var/www/my site`), an unquoted variable would split into two separate arguments and break the command. The rule of thumb is simple: always double-quote your variable expansions.
 
-**Single quotes vs. double quotes.** Double quotes allow variable expansion and command substitution; single quotes do not. Compare:
-
-```bash
-NAME="world"
-echo "Hello $NAME"   # prints: Hello world
-echo 'Hello $NAME'   # prints: Hello $NAME
-```
+**Single quotes vs. double quotes.** Double quotes allow variable expansion and command substitution; single quotes do not. With double quotes, `"Hello $NAME"` expands `$NAME` before printing. With single quotes, `'Hello $NAME'` prints the literal string `$NAME`.
 
 **Command substitution** lets you capture the output of a command into a variable. This is invaluable for timestamps, hostnames, and dynamic paths:
 
@@ -61,7 +55,7 @@ cp -r "$SOURCE" "$DEST"
 
 Now every run creates a uniquely named backup directory. The `$(...)` syntax is preferred over the older backtick syntax because it nests cleanly and is easier to read.
 
-**Script arguments** are passed to a script as positional parameters, using the same `$1`, `$2` syntax that functions use for their own arguments. The variable `$0` holds the script's name, `$#` holds the count of arguments, and `$@` expands to all arguments as separate words. Accepting arguments instead of hardcoding paths makes a script general-purpose and reusable:
+**Script arguments** are passed to a script as positional parameters. The variable `$0` holds the script's name, `$1` and `$2` hold the first and second arguments, `$#` holds the count of arguments, and `$@` expands to all arguments as separate words. Accepting arguments instead of hardcoding paths makes a script general-purpose and reusable:
 
 ```bash
 #!/usr/bin/env bash
@@ -76,6 +70,82 @@ cp -r "$SOURCE" "$DEST"
 ```
 
 Validating `$#` at the start of a script, before any work begins, is a good habit. The usage message makes the expected interface visible to anyone who runs the script incorrectly, and the early `exit 1` prevents confusing errors from being emitted later when a variable turns out to be empty.
+
+## Environment Variables
+
+Shell variables live only within the running script. When a script calls another program, that program gets a copy of the **environment**: a set of key-value pairs the operating system passes to every new process. Variables become part of the environment only when you mark them for export with the `export` keyword.
+
+```bash
+SCRIPT_NAME="backup"
+
+export BACKUP_ROOT="/backups"
+export AWS_REGION="us-west-2"
+```
+
+`SCRIPT_NAME` is a shell variable: other programs your script launches will not see it. `BACKUP_ROOT` and `AWS_REGION` are environment variables: any command invoked by the script inherits them. The distinction matters whenever your script calls a tool that reads its configuration from the environment, such as the `aws` CLI, `git`, or `rsync`.
+
+Your script also inherits the environment of whatever launched it. Variables set in your shell profile (`~/.bashrc`, `~/.bash_profile`) are available to scripts you run interactively, because your login shell exported them into its own environment and your script inherited a copy.
+
+**PATH and non-interactive contexts.** The `PATH` environment variable lists directories separated by colons; the shell searches them in order when you type a command without a full path. Your interactive shell has a rich `PATH` built from profile files. Cron, systemd services, and other non-interactive launchers set a minimal `PATH`, typically just `/usr/bin:/bin`. This is why a script that works perfectly in your terminal can fail under cron with "command not found": the command exists, but cron's `PATH` does not include its directory. The reliable fix is to use absolute paths everywhere in scripts intended for non-interactive use, or to set `PATH` explicitly at the top of the script.
+
+The `env` command prints every variable in the current environment. It is a useful diagnostic when a script behaves differently in two contexts: compare `env` output from an interactive shell and from a cron job to see what the job is missing.
+
+**Sourcing versus executing.** Running `./script.sh` spawns a subshell: a child process that inherits a copy of your environment, runs the script, and exits. Any variables the script sets or exports are discarded when it returns. Running `source script.sh` (or equivalently `. script.sh`) runs the script's commands directly in the current shell, so any `export` statements take effect in your working session. Environment setup scripts, the kind that set variables you want to persist after the script finishes, are always sourced rather than executed.
+
+## Input, Output, and Pipes
+
+Unix programs communicate through three standard streams: stdin (file descriptor 0), stdout (file descriptor 1), and stderr (file descriptor 2). By default, stdin reads from the keyboard and both stdout and stderr write to the terminal. The shell lets you redirect these streams to files or to each other, which is the foundation of Unix composability.
+
+The `|` operator connects one command's stdout directly to the next command's stdin, creating a pipeline. This lets you build text-processing chains from small, focused tools rather than writing one large program that does everything at once:
+
+```bash
+grep "Failed password" /var/log/auth.log | grep "$(date +%b %e)" | wc -l
+```
+
+Each command does one thing: `grep` filters lines, `wc -l` counts them. The shell arranges the plumbing, and neither command needs to know the other exists.
+
+**Redirection.** The `>` operator redirects stdout to a file, creating or overwriting it. The `>>` operator appends. To capture both normal output and error messages in the same log file, redirect stderr to wherever stdout is currently going with `2>&1`:
+
+```bash
+/usr/local/bin/backup.sh >> /var/log/backup.log 2>&1
+```
+
+**echo and printf.** For simple messages, `echo` is sufficient. For formatted output with column alignment or type control, `printf` gives more precise control:
+
+```bash
+printf "%-20s %s\n" "Directory" "Status"
+printf "%-20s %s\n" "/var/www/html" "OK"
+printf "%-20s %s\n" "/etc/nginx" "SKIPPED"
+```
+
+**Standard error.** Error messages should go to stderr, not stdout. This lets callers pipe normal output to another tool while still seeing errors on the terminal:
+
+```bash
+echo "Error: disk full" >&2
+```
+
+**Exit codes.** Every command sets an exit code when it finishes. By convention, 0 means success and any non-zero value means failure. You can test a command's success directly in an `if` statement without needing to inspect `$?` separately:
+
+```bash
+if ! cp -r /var/www/html /backups/html-latest; then
+    echo "Backup failed" >&2
+    exit 1
+fi
+```
+
+**Reading user input.** The `read` builtin captures a line from stdin interactively. The `-r` flag disables backslash interpretation, and `-p` displays a prompt before waiting for input:
+
+```bash
+read -rp "Enter backup destination: " DEST
+```
+
+**Process substitution.** An extension of the pipe idea, process substitution lets you use the output of a command as if it were a file. This is useful when a command expects file path arguments rather than piped input. The `<(...)` syntax creates a temporary named pipe and passes its path to the command, with both sides running concurrently:
+
+```bash
+diff <(ls /etc/nginx/conf.d) <(ls /etc/nginx/sites-enabled)
+```
+
+Process substitution is a Bash-specific feature and is not portable to POSIX `/bin/sh` scripts.
 
 ## Conditionals
 
@@ -96,7 +166,7 @@ else
 fi
 ```
 
-The `[[ ... ]]` construct is Bash's extended test command. It is preferred over the older `[ ... ]` (which is actually the `test` command) because it handles quoting more gracefully and supports pattern matching. Here are the file tests you will use most often:
+The `[[ ... ]]` construct is Bash's extended test command. It is preferred over the older `[ ... ]` (which is actually the `test` command) because it handles quoting more gracefully and supports pattern matching. The following file tests are the ones you will reach for most often:
 
 | Test         | Meaning                        |
 |--------------|--------------------------------|
@@ -147,7 +217,7 @@ done
 
 The `"${DIRS[@]}"` syntax expands the array so that each element is treated as a separate word, even if an element contains spaces. The `basename` command strips the leading path components, turning `/var/www/html` into just `html`.
 
-**While loops** are useful when you need to read input line by line. For example, reading a list of directories from a configuration file:
+**While loops** are useful when you need to read input line by line, such as processing a configuration file:
 
 ```bash
 while IFS= read -r dir; do
@@ -156,47 +226,20 @@ while IFS= read -r dir; do
 done < /etc/backup-dirs.conf
 ```
 
-The `IFS=` prevents leading and trailing whitespace from being trimmed, and `-r` prevents backslash interpretation. The `continue` statement skips blank lines and comments (lines starting with `#`).
+`IFS=` prevents leading and trailing whitespace from being trimmed, and `-r` prevents backslash interpretation. The `continue` statement skips blank lines and lines starting with `#`.
 
-**`while` with `test` and arithmetic.** The `test` command (or its `[ ]` shorthand) evaluates conditions and returns an exit code; `while` loops until the condition is false. Arithmetic on integers uses `expr` or the `(( ))` construct:
+**Arithmetic loops.** Bash's `(( ... ))` construct evaluates integer arithmetic and supports C-style operators. It returns exit code 0 when the arithmetic result is non-zero, and exit code 1 when the result is zero, making it a natural fit for loop conditions and counters:
 
 ```bash
-#!/bin/bash
+#!/usr/bin/env bash
 i=0
-while test $i -ne 5; do
+while (( i < 5 )); do
     printf "i = %d\n" "$i"
-    i=$(expr $i + 1)   # or: (( i++ ))
-done
-printf "Done, i = %d\n" "$i"
-```
-
-`test` can evaluate file existence, string equality, string length, numeric equality, and file permissions, among other things. The exit code `0` means the test is **true**; any non-zero value means **false**.
-
-**`select` for menus.** The `select` construct generates a numbered menu from a list and waits for the user to choose an option:
-
-```bash
-#!/bin/bash
-select choice in "Start service" "Stop service" "Quit"; do
-    case $choice in
-        "Start service") systemctl start nginx; break ;;
-        "Stop service")  systemctl stop nginx; break ;;
-        "Quit")          break ;;
-        *) echo "Invalid option" ;;
-    esac
+    (( i++ ))
 done
 ```
 
-**Process substitution.** Process substitution lets you use the output of a command as if it were a file. This is useful when a command expects file paths rather than piped input:
-
-```bash
-# Compare the contents of two directories without creating temp files
-diff <(ls dir1) <(ls dir2)
-
-# Feed multiple sorted inputs into a tool expecting files
-join <(sort file1.txt) <(sort file2.txt)
-```
-
-The `<(...)` syntax creates a temporary named pipe and passes its path to the command. Unlike a pipeline, both sides can run concurrently.
+The same construct handles all integer arithmetic: `(( count += 1 ))`, `(( total = a + b ))`, and so on. This is the preferred approach over the older `expr` command, which requires a command substitution and is significantly slower. The exit-code behavior of `(( ))` has one practical consequence covered in the Safe Scripting Defaults section.
 
 ## Functions
 
@@ -225,48 +268,11 @@ backup_dir "/etc/nginx"
 backup_dir "/etc/ssh"
 ```
 
-Several things are worth noting here. The `local` keyword restricts a variable's scope to the function; without it, variables are global by default, which leads to subtle bugs in larger scripts. Function arguments are accessed as `$1`, `$2`, and so on (similar to script arguments). The `return` statement sets the function's exit status: 0 for success, non-zero for failure. This is distinct from `exit`, which terminates the entire script.
+Several things are worth noting here. The `local` keyword restricts a variable's scope to the function; without it, variables are global by default, which leads to subtle bugs in larger scripts. Function arguments are accessed as `$1`, `$2`, and so on, using the same syntax as script arguments. The `return` statement sets the function's exit status: 0 for success, non-zero for failure. This is distinct from `exit`, which terminates the entire script.
 
 <Aside type="note" title="Returning Values from Bash Functions">
-Bash functions do not return values the way functions in Python or JavaScript do. The `return` statement sets an exit code (0-255). If you need to return a string, either `echo` it and capture with command substitution, or set a global variable.
+Bash functions do not return values the way functions in Python or JavaScript do. The `return` statement sets an exit code (0-255). If you need to return a string, either `echo` it and capture the output with command substitution, or set a global variable.
 </Aside>
-
-## Input and Output
-
-Good scripts communicate clearly. They report what they are doing, signal errors to the right place, and exit with meaningful status codes.
-
-**echo and printf.** For simple messages, `echo` is fine. For formatted output, `printf` gives you more control:
-
-```bash
-printf "%-20s %s\n" "Directory" "Status"
-printf "%-20s %s\n" "/var/www/html" "OK"
-printf "%-20s %s\n" "/etc/nginx" "SKIPPED"
-```
-
-This produces neatly aligned columns, which is useful for summary reports.
-
-**Standard error.** Error messages should go to stderr (file descriptor 2), not stdout. This lets callers redirect normal output to a file while still seeing errors on the terminal:
-
-```bash
-echo "Error: disk full" >&2
-```
-
-**Exit codes and `$?`.** Every command sets an exit code. By convention, 0 means success and any non-zero value indicates failure. The special variable `$?` holds the exit code of the last command. In practice, you can test a command's success directly with `if`:
-
-```bash
-if ! cp -r /var/www/html /backups/html-latest; then
-    echo "Backup failed" >&2
-    exit 1
-fi
-```
-
-**Reading user input.** The `read` builtin captures input interactively:
-
-```bash
-read -rp "Enter backup destination: " DEST
-```
-
-The `-r` flag prevents backslash escaping, and `-p` displays a prompt.
 
 ## Safe Scripting Defaults
 
@@ -277,13 +283,9 @@ Production scripts should fail loudly rather than silently continuing after an e
 set -euo pipefail
 ```
 
-Each option addresses a distinct failure mode:
+Each option addresses a distinct failure mode. `set -e` (errexit) causes the script to exit immediately if any command returns a non-zero exit code. Without it, a failing `cp` is silently ignored and the script keeps running. `set -u` (nounset) causes the script to exit if you reference an undefined variable, catching typos like `$SORUCE` instead of `$SOURCE`. `set -o pipefail` changes pipeline semantics: without it, `cmd1 | cmd2` succeeds as long as `cmd2` succeeds, even if `cmd1` fails; with `pipefail`, the pipeline fails if any command in the chain fails.
 
-- **`set -e`** (errexit): the script exits immediately if any command returns a non-zero exit code. Without this, a failing `cp` would be silently ignored and the script would keep running.
-- **`set -u`** (nounset): the script exits if you reference an undefined variable. This catches typos like `$SORUCE` instead of `$SOURCE`.
-- **`set -o pipefail`**: in a pipeline like `cmd1 | cmd2`, the pipeline's exit code is normally the exit code of the last command. With `pipefail`, the pipeline fails if *any* command in the chain fails.
-
-Together, these three options catch the vast majority of scripting bugs at the point of failure rather than letting them cascade.
+Together, these three options catch the vast majority of scripting bugs at the point of failure rather than letting them cascade into more confusing symptoms downstream.
 
 **Cleanup with `trap`.** Sometimes a script creates temporary files or acquires locks that must be released even if the script fails partway through. The `trap` builtin registers a command to run when the script receives a signal or exits:
 
@@ -294,7 +296,6 @@ set -euo pipefail
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-# Work with temporary files safely
 cp -r /var/www/html "$TMPDIR/html-staging"
 tar czf /backups/html-latest.tar.gz -C "$TMPDIR" html-staging
 
@@ -349,13 +350,19 @@ else
 fi
 ```
 
-This script ties together every concept from this lecture: safe defaults, functions with local variables, a loop over an array, conditionals, and structured logging.
+<Aside type="caution" title="set -e and Arithmetic Expressions">
+The `(( ... ))` construct returns exit code 1 when the arithmetic result is zero. With `set -e` active, `(( FAILURES++ ))` will abort the script when `FAILURES` is 0, because incrementing from zero evaluates to zero. The `|| true` in `backup_dir "$dir" || (( FAILURES++ )) || true` suppresses that exit by ensuring the overall expression always succeeds. An alternative that avoids this entirely is `FAILURES=$(( FAILURES + 1 ))`, which uses command substitution and does not carry the arithmetic exit code.
+</Aside>
 
 ## Regular Expressions
 
-Regular expressions (REs) are a concise language for describing patterns in text. They were invented by Stephen Kleene in the 1950s and are used by a wide range of Unix tools (`grep`, `sed`, `awk`, `vi`) as well as most scripting languages (Python, Perl, Ruby). Understanding regular expressions is essential for filtering logs, validating input, and extracting data in shell scripts.
+Regular expressions are a pattern language for text. A regular expression describes a set of strings: any line containing an IP address, any filename ending in `.log`, any timestamp in a particular format. The same core syntax is shared by `grep`, `sed`, `awk`, `vi`, and most general-purpose programming languages including Python, JavaScript, and Ruby. Learning regular expressions once pays dividends across every text-processing tool you will encounter.
+
+The most important distinction in practice is between **basic regular expressions (BRE)**, the default for `grep`, and **extended regular expressions (ERE)**, used by `grep -E`. BRE requires backslash-escaping for operators like `+`, `?`, `|`, and `{n,m}` to activate them as metacharacters; ERE treats them as metacharacters directly and requires no escaping. ERE syntax is more readable and is what most modern tools default to, so this lecture uses it throughout.
 
 ### Basic Operators
+
+The following operators form the core of any regular expression. In ERE syntax, none of them require backslash-escaping to activate:
 
 | Operator | Meaning |
 |---|---|
@@ -367,11 +374,11 @@ Regular expressions (REs) are a concise language for describing patterns in text
 | `$` | Anchors the match to the end of the line |
 | `\` | Escapes the next character so it is treated literally |
 
-Note: the `*` in a regular expression is different from the `*` wildcard in shell globbing. In a RE, `A*` means "zero or more `A` characters." In the shell, `*.log` means "any filename ending in `.log`."
+The `*` in a regular expression is different from the `*` wildcard in shell globbing. In a RE, `A*` means "zero or more `A` characters." In the shell, `*.log` means "any filename ending in `.log`." The two syntaxes look similar but describe entirely different operations.
 
 ### Character Classes
 
-Square brackets match any one character from a set:
+Square brackets match any one character from a set. The class can enumerate specific characters, negate them with `^`, or specify a range:
 
 | Pattern | Matches |
 |---|---|
@@ -382,7 +389,7 @@ Square brackets match any one character from a set:
 
 ### Anchoring and Exact Matching
 
-Without anchors, a RE matches anywhere in the string:
+Without anchors, a RE matches anywhere in the line. Anchors constrain where the match can occur:
 
 | Pattern | Behaviour |
 |---|---|
@@ -393,97 +400,71 @@ Without anchors, a RE matches anywhere in the string:
 
 ### Repetition with Curly Braces
 
-Curly braces specify an exact number of repetitions (must be escaped in basic RE syntax):
+Curly braces specify how many times the preceding element must appear. In ERE syntax, the braces do not need to be escaped:
 
-```
-\{3\}     exactly 3 times
-\{3,7\}   between 3 and 7 times (inclusive)
-\{3,\}    at least 3 times
-```
+| Pattern | Meaning |
+|---|---|
+| `{3}` | Exactly 3 times |
+| `{3,7}` | Between 3 and 7 times (inclusive) |
+| `{3,}` | At least 3 times |
 
 ### Grouping, Alternation, and Backreferences
 
-Parentheses capture a matched substring for later reuse:
+Parentheses serve two purposes in a regular expression: they group sub-expressions for repetition or alternation, and they capture the matched text for reuse as a backreference. The `|` operator matches either of two alternatives. In ERE syntax (`grep -E`), parentheses and `|` work directly; in BRE syntax (plain `grep`), they must be backslash-escaped:
 
 ```bash
-# Match lines where the same word appears twice in a row
-grep "\(dogs\)\1" file
-
-# Match lines containing either "cat" or "dog"
-grep "cat\|dog" file
-
-# Match "i like cat" or "i like dog"
-grep "i like \(cat\|dog\)" file
+grep -E "cat|dog" file
+grep -E "i like (cat|dog)" file
 ```
 
-The `\1`, `\2`, etc. constructs reference the text matched by the first, second, etc. captured group.
+A backreference (`\1`, `\2`, etc.) refers back to the text matched by the first or second captured group. In BRE syntax, this matches any line where the word "dogs" appears twice in a row:
+
+```bash
+grep "\(dogs\) \1" file
+```
 
 ### Using `grep` for Filtering
 
-`grep` is the primary tool for searching files and command output with regular expressions:
-
-```bash
-# Find all lines in a log containing ERROR
-grep "ERROR" /var/log/syslog
-
-# Recursive search with line numbers
-grep -rn "FINDME" ~/logs/
-
-# Invert match: lines that do NOT contain the pattern
-grep -v "DEBUG" app.log
-
-# Extended RE syntax (no backslash escaping needed for +, ?, |, {})
-grep -E "error|warning" app.log
-
-# Count matching lines
-grep -c "404" access.log
-```
-
-<Aside type="tip" title="Prefer Extended Regular Expressions">
-Use `grep -E` (or `egrep`) for extended regular expressions, which allow `+`, `?`, `|`, and `{n}` without backslash escaping. Most modern shell scripting uses ERE syntax because it is more readable.
-</Aside>
-
-### Practical Examples
-
-**Match an IPv4 address:**
+`grep` is the primary tool for searching files and command output with regular expressions. It is most often used to filter lines from logs, command output, or configuration files. `grep -E` activates ERE syntax, avoiding backslash-escaping for `|`, `+`, and `{n}`. `grep -i` performs case-insensitive matching. `grep -v` inverts the match, printing only lines that do not contain the pattern. `grep -rn` searches recursively through a directory and prints line numbers alongside matches. `grep -c` counts matching lines instead of printing them.
 
 ```bash
 grep -E "([0-9]{1,3}\.){3}[0-9]{1,3}" access.log
 ```
 
-**Match a timestamp in a log file (e.g., `2026-03-23 14:05:22`):**
+This ERE pattern matches lines containing an IPv4 address. The group `[0-9]{1,3}` matches one to three digits; `\.` matches a literal dot; `{3}` repeats the group three times for the first three octets; and the final `[0-9]{1,3}` matches the last octet.
 
-```bash
-grep -E "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}" syslog
-```
-
-**Using `find` with a regex to locate files:**
-
-```bash
-# Find all files whose name contains "fork"
-find ~ -regex ".*fork.*"
-
-# Find and delete files matching a pattern (use -i for interactive confirmation)
-find /tmp -name "*.tmp" -exec rm -i '{}' \;
-```
+<Aside type="tip" title="Prefer Extended Regular Expressions">
+Use `grep -E` (or `egrep`) for extended regular expressions. ERE allows `+`, `?`, `|`, and `{n}` without backslash escaping and is more readable than BRE in all but the simplest patterns.
+</Aside>
 
 ### `sed` for Stream Editing
 
-`sed` (stream editor) applies RE-based substitutions to text:
+`sed` (stream editor) applies RE-based substitutions to text one line at a time. Its core operation is the substitution command `s/pattern/replacement/`, with an optional `g` flag to replace all occurrences on a line rather than just the first:
 
 ```bash
-# Replace the first occurrence of "foo" with "bar" on each line
 sed 's/foo/bar/' input.txt
-
-# Replace all occurrences (g flag)
 sed 's/foo/bar/g' input.txt
-
-# Delete lines matching a pattern
-sed '/^#/d' config.txt   # removes comment lines
-
-# In-place edit of a file
+sed '/^#/d' config.txt
 sed -i 's/oldvalue/newvalue/g' config.txt
 ```
+
+The third command deletes all comment lines from a config file (lines starting with `#`). The `-i` flag edits the file in place. `sed` is the right tool for line-by-line text transformation; it is less suited to extracting structured data from tabular output, which is where `awk` fits better.
+
+### `awk` for Field Processing
+
+`awk` is a field-oriented text processor. Where `sed` applies substitutions to whole lines, `awk` treats each line as a sequence of whitespace-separated fields and lets you write programs that operate on individual fields. The fields in each line are accessible as `$1`, `$2`, `$3`, and so on, with `$0` representing the entire line.
+
+This makes `awk` the natural tool for tabular output: command output from `ps`, `df`, or `ls -l`, log files with fixed column positions, or any delimiter-separated data. The following examples cover the most common operational patterns:
+
+```bash
+df -h | awk 'NR > 1 {print $6, $5}'
+awk '$3 > 80 {print $1, $3}' cpu-log.txt
+awk '{sum += $5} END {print "Total:", sum, "bytes"}' sizes.txt
+```
+
+The first prints the mount point and usage percentage for every mounted filesystem, skipping the header row (`NR > 1` means "line number greater than 1"). The second prints the hostname and CPU percentage for any line where the third field exceeds 80. The third sums a column across all input lines and prints the result once, using the `END` block that runs after all input is consumed.
+
+The conceptual distinction between `sed` and `awk` is this: reach for `sed` when you need to find and replace text within lines, and reach for `awk` when you need to work with specific columns or aggregate values across rows. When an `awk` one-liner grows into multiple rules or requires custom functions, Python handles the same task more readably.
 
 ## Scheduling with Cron and Systemd Timers
 
@@ -491,37 +472,23 @@ A backup script is only useful if it runs on a schedule. Unix systems offer two 
 
 ### Cron
 
-Cron is the traditional job scheduler. Each user has a crontab (cron table) that lists commands and their schedules. Edit yours with:
-
-```bash
-crontab -e
-```
-
-The format is five fields followed by the command:
+Cron is the traditional job scheduler. Each user has a crontab (cron table) that lists commands and their schedules. Edit yours with `crontab -e`. The format is five fields followed by the command:
 
 ```
-# min  hour  day  month  weekday   command
-  0    2     *    *      *         /usr/local/bin/backup.sh
+0    2     *    *      *         /usr/local/bin/backup.sh
 ```
 
-This runs `backup.sh` every day at 2:00 AM. The five fields are minute (0-59), hour (0-23), day of month (1-31), month (1-12), and day of week (0-7, where both 0 and 7 mean Sunday).
+The five fields are minute (0-59), hour (0-23), day of month (1-31), month (1-12), and day of week (0-7, where both 0 and 7 mean Sunday). This entry runs `backup.sh` every day at 2:00 AM. The `@daily`, `@hourly`, and `@weekly` shortcuts are supported by most cron implementations and are easier to read than the five-field syntax.
 
-A few practical tips for cron:
-
-- Use absolute paths for everything; cron runs with a minimal `PATH`.
-- Redirect output to a log file (`>> /var/log/backup-cron.log 2>&1`) so you can diagnose failures.
-- Test your cron expression at a site like crontab.guru before deploying it.
-
-<Aside type="tip" title="Cron Shortcut Syntax">
-The `@daily`, `@hourly`, and `@weekly` shortcuts are supported by most cron implementations and are easier to read than the five-field syntax.
-</Aside>
+Cron runs with a minimal environment. The `PATH` it provides typically contains only `/usr/bin:/bin`, which means commands that work in your interactive shell may fail under cron with "command not found." Always use absolute paths for your script and every tool it calls. Redirect both stdout and stderr to a log file with `>> /var/log/backup-cron.log 2>&1` so that failures leave evidence you can diagnose later. Before deploying a cron schedule, verify it at [crontab.guru](https://crontab.guru/), which translates any five-field expression into plain English.
 
 ### Systemd Timers
 
-On modern Linux distributions, systemd timers offer a more powerful alternative to cron. A timer consists of two unit files: a `.service` file that defines what to run, and a `.timer` file that defines when to run it.
+On modern Linux distributions, systemd timers offer a more capable alternative to cron. A timer consists of two unit files: a `.service` file that defines what to run, and a `.timer` file that defines when to run it.
+
+Save the following as `/etc/systemd/system/backup.service`:
 
 ```ini
-# /etc/systemd/system/backup.service
 [Unit]
 Description=Daily backup of web and config directories
 
@@ -530,8 +497,9 @@ Type=oneshot
 ExecStart=/usr/local/bin/backup.sh
 ```
 
+Save the following as `/etc/systemd/system/backup.timer`:
+
 ```ini
-# /etc/systemd/system/backup.timer
 [Unit]
 Description=Run backup daily at 2 AM
 
@@ -543,41 +511,33 @@ Persistent=true
 WantedBy=timers.target
 ```
 
-Enable and start the timer:
+Enable and start the timer with `sudo systemctl enable --now backup.timer`, then check upcoming runs with `systemctl list-timers --all`.
 
-```bash
-sudo systemctl enable --now backup.timer
-```
-
-Check upcoming runs:
-
-```bash
-systemctl list-timers --all
-```
-
-Systemd timers have several advantages over cron. The `Persistent=true` option means that if the machine was off at the scheduled time, the job runs as soon as the machine boots. Timer output integrates with `journalctl`, making logs easy to query. Dependencies can be expressed between units, and resource limits (CPU, memory) can be applied to the service.
+Systemd timers have several advantages over cron. The `Persistent=true` option means that if the machine was off at the scheduled time, the job runs as soon as the machine boots, rather than silently skipping the run. Timer output integrates with `journalctl`, making logs easy to query alongside other systemd service output. Dependencies between units can be expressed explicitly, and resource limits such as CPU and memory quotas can be applied to the service through standard systemd unit directives.
 
 ## When to Stop Scripting and Use a Real Tool
 
-Bash is an excellent tool for automating tasks on a single machine, but it has limits. As your scripts grow in complexity, watch for these warning signs:
+Bash is an excellent tool for automating tasks on a single machine, but it has limits. As your scripts grow in complexity, watch for these warning signs.
 
 **You are managing multiple hosts.** A Bash script that SSHs into a dozen servers in a loop is brittle. Connection failures, partial runs, and inconsistent state are hard to handle. Configuration management tools like Ansible were designed for exactly this problem. Ansible is agentless (it uses SSH, just like your script), but it adds idempotence (the property that running a command multiple times produces the same result as running it once, with no unintended side effects), inventory management, and error handling that would take hundreds of lines of Bash to replicate.
 
-**You are parsing structured data.** Bash can manipulate strings, but parsing JSON, YAML, or XML in Bash is painful and error-prone. Python, with libraries like `json`, `pyyaml`, and `requests`, handles structured data naturally. If your script has more than one or two calls to `jq` or `awk`, consider rewriting it in Python.
+**You are parsing structured data.** Bash can manipulate strings, but parsing JSON, YAML, or XML in Bash is painful and error-prone. Python, with libraries like `json`, `pyyaml`, and `requests`, handles structured data naturally. `awk` is the right tool for tabular output; `jq` (a command-line JSON processor) handles API responses and configuration files in JSON format. If your script has more than one or two calls to either, consider whether the task belongs in Python.
 
 **Your script exceeds a few hundred lines.** Bash has no real module system, limited error handling, and no type safety. Once a script becomes long enough that you need to scroll to understand it, the maintenance cost exceeds the benefit of staying in Bash.
 
 **You need testability.** Writing automated tests for Bash scripts is possible but awkward. Python, Go, and other languages have mature testing frameworks that make it straightforward to verify behavior and catch regressions.
 
-The practical rule is this: start with Bash for simple, single-machine automation. When the task outgrows Bash's strengths, move to the right tool for the job. That might be Ansible for multi-host configuration, Python for data processing, or Terraform for infrastructure provisioning. The scripting fundamentals covered in this lecture (variables, conditionals, loops, functions, exit codes) transfer directly to those tools, because they all build on the same Unix concepts.
+The practical rule is this: start with Bash for simple, single-machine automation. When the task outgrows Bash's strengths, move to the right tool for the job. That might be Ansible for multi-host configuration, Python for data processing, or Terraform for infrastructure provisioning. The scripting fundamentals covered in this lecture transfer directly to those tools, because they all build on the same Unix concepts.
 
 ## Takeaways
 
-Shell scripting is the first automation tool a systems administrator reaches for, because it requires nothing beyond the shell already on the server. A production backup script illustrates how all the building blocks connect: variables and quoting to handle paths safely, conditionals to validate preconditions, loops to process arrays of directories, functions to keep repeated logic in one place, and `set -euo pipefail` to fail loudly rather than silently continuing after an error. A `trap EXIT` clause ensures temporary directories are cleaned up regardless of how the script exits, which is the Bash equivalent of a `finally` block. Scheduling the script with a systemd timer rather than cron adds persistence: if the machine is off at the scheduled time, the timer fires at the next boot rather than silently skipping the run.
+Shell scripting occupies a specific position in the automation landscape. The Infrastructure as Code lecture introduced the declarative alternative: describe the desired end state and let the tool figure out how to reach it. Shell scripts are the opposite approach, imperative and sequential, encoding exactly the steps to perform a task. That imperative approach is the right one for single-machine automation where the sequence matters and where you are not managing idempotency at scale. Bash requires nothing beyond the shell already on the server and produces output you can read and log.
 
-Regular expressions extend Bash's reach into text processing. The same pattern language that `grep` uses to filter log lines also drives `sed` substitutions and `find -regex` file selection. Understanding the difference between basic and extended RE syntax, and knowing which tools default to which, prevents the most common regex confusion in shell scripts.
+The building blocks of this lecture connect in a realistic backup script: variables and quoting prevent path-splitting bugs, the exported environment controls what child processes can see, conditionals validate preconditions before any work begins, loops process arrays of directories, functions isolate reusable logic, and `set -euo pipefail` fails loudly rather than silently continuing after an error. A `trap EXIT` clause ensures cleanup runs regardless of how the script exits. Scheduling the script with a systemd timer rather than cron adds persistence: if the machine is off at the scheduled time, the timer fires at the next boot rather than skipping the run.
 
-Bash is the right tool until it is not. The limit usually arrives at one of three thresholds: multiple hosts (use the Configuration Management with Ansible lecture's approach instead), structured data (Python handles JSON and YAML naturally), or a script long enough to require scrolling. The underlying primitives, processes, exit codes, environment variables, and standard streams, do not change when you switch tools. They are the vocabulary of Unix automation regardless of which language you are writing in.
+Regular expressions extend Bash's reach into text processing. The pattern language is the same across `grep`, `sed`, `awk`, and most programming languages; learning it once applies everywhere. The distinction to carry forward is what each tool is best at: `grep` filters lines, `sed` transforms lines with substitutions, and `awk` processes fields within lines and can aggregate values across rows.
+
+Bash is the right tool until it is not. The practical threshold arrives at one of three conditions: multiple hosts (the Configuration Management with Ansible lecture describes the right tool for fleet-scale automation), structured data (Python handles JSON and YAML naturally), or scripts long enough to require scrolling. The underlying primitives do not change when you switch tools. SSH, environment variables, exit codes, stdin, stdout, and stderr are the vocabulary of Unix automation regardless of whether you are writing Bash, Python, or an Ansible playbook. Ansible connects to managed nodes over SSH, reads configuration from environment variables, and determines task success or failure from exit codes. Every concept from this lecture transfers directly.
 
 ## Resources
 
@@ -587,5 +547,6 @@ Bash is the right tool until it is not. The limit usually arrives at one of thre
 - <a href="https://www.shellcheck.net/" target="_blank" rel="noopener noreferrer">ShellCheck: Static Analysis Tool for Shell Scripts (shellcheck.net)</a>
 - <a href="https://linuxcommand.org/tlcl.php" target="_blank" rel="noopener noreferrer">The Linux Command Line (William Shotts) (Book, free online)</a>
 - <a href="https://www.grymoire.com/Unix/Sed.html" target="_blank" rel="noopener noreferrer">sed: An Introduction and Tutorial (Bruce Barnett) (Grymoire)</a>
+- <a href="https://www.grymoire.com/Unix/Awk.html" target="_blank" rel="noopener noreferrer">awk: An Introduction and Tutorial (Bruce Barnett) (Grymoire)</a>
 - <a href="https://www.grymoire.com/Unix/Regular.html" target="_blank" rel="noopener noreferrer">Regular Expressions: An Introduction (Bruce Barnett) (Grymoire)</a>
 - <a href="https://crontab.guru/" target="_blank" rel="noopener noreferrer">Crontab Guru: Cron Expression Editor and Tester (crontab.guru)</a>

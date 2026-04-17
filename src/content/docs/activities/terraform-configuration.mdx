@@ -1,6 +1,6 @@
 ---
 title: "Terraform Configuration"
-description: "Start with a provider block and data sources, add an EC2 instance and security group, introduce outputs, variables, and lifecycle rules, import an existing VPC, then inspect state and destroy."
+description: "Start with a provider block and data sources, add an EC2 instance and security group, introduce outputs and variables, then import an existing VPC, inspect state, and destroy."
 sidebar:
   order: 7
 draft: true
@@ -9,13 +9,14 @@ draft: true
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts into practice the concepts from the [Infrastructure as Code](/lectures/infrastructure-as-code/) lecture. Starting from a single provider block, you will incrementally build a configuration: two data sources, a security group, an EC2 instance, outputs, and variables. You will then import a VPC that was created by hand in the previous activity, observe how Terraform surfaces drift, and suppress it with a lifecycle rule. By the end, you will have run every phase of the Terraform workflow: plan, apply, state inspection, import, and destroy.
+This activity puts into practice the concepts from the [Infrastructure as Code](/lectures/infrastructure-as-code/) lecture. Starting from a single provider block, you will incrementally build a configuration: two data sources, a security group, an EC2 instance, outputs, and variables. You will then import a VPC that was created by hand in the previous activity, compare the imported state to the HCL that manages it, and remove that VPC from this configuration before the final destroy. By the end, you will have run every phase of the Terraform workflow: plan, apply, state inspection, import, and destroy.
 
 ## What You Will Need
 
 - [Terraform 1.6 or newer installed on your laptop](https://developer.hashicorp.com/terraform/install)
 - [AWS CLI installed on your laptop](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
 - Access to your AWS Academy Learner Lab
+- The AWS-managed default VPC and its default subnets still present in `us-east-1` for the EC2 portion of the activity
 - A text editor
 - The `cs312-vpc` from the [AWS Infrastructure activity](/activities/aws-console-tour/) is used in the import section (optional)
 
@@ -76,7 +77,7 @@ Terraform's AWS provider reads credentials from the same sources as the AWS CLI:
    </TabItem>
    </Tabs>
 
-6. **Verify the credentials work** before Terraform touches anything:
+5. **Verify the credentials work** before Terraform touches anything:
 
    ```bash
    aws sts get-caller-identity
@@ -127,7 +128,7 @@ Before adding any resources, set up the working directory, introduce two data so
 
      filter {
        name   = "name"
-       values = ["ubuntu/images/hvm-ssd/ubuntu-*-24.04-amd64-server-*"]
+       values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
      }
 
      filter {
@@ -137,7 +138,7 @@ Before adding any resources, set up the working directory, introduce two data so
    }
    ```
 
-   `owners = ["099720109477"]` limits results to images published by Canonical. Without it, a name filter alone could match images from other publishers.
+   `owners = ["099720109477"]` limits results to images published by Canonical. Ubuntu 24.04 images now use the `hvm-ssd-gp3` naming family, so an older `hvm-ssd` filter will not match current releases.
 
 3. **Write `variables.tf`:**
 
@@ -151,10 +152,10 @@ Before adding any resources, set up the working directory, introduce two data so
 4. **Write `terraform.tfvars`:**
 
    ```hcl
-   onid = "smithj"
+   onid = "ulbrical"
    ```
 
-   Replace `smithj` with your actual ONID. Terraform loads this file automatically; any variable declared in `variables.tf` without a default must appear here or be supplied another way.
+   Replace `ulbrical` with your actual ONID. Terraform loads this file automatically; any variable declared in `variables.tf` without a default must appear here or be supplied another way.
 
 5. **Initialize the working directory:**
 
@@ -182,7 +183,7 @@ Before adding any resources, set up the working directory, introduce two data so
    terraform plan
    ```
 
-   The output shows zero resources to add, change, or destroy. The two data sources will be read at apply time, but they do not appear in the resource counts because Terraform will not create or modify anything in AWS to satisfy them.
+   The output shows zero resources to add, change, or destroy. Terraform may also show the two data sources being read during planning because all of their arguments are already known. They do not appear in the resource counts because data sources are read-only.
 
 </Steps>
 
@@ -347,10 +348,10 @@ The configuration now describes two resources. Before applying, add an outputs f
 4. **Read one output by name:**
 
    ```bash
-   terraform output public_ip
+   terraform output -raw public_ip
    ```
 
-   This form is useful when a script or downstream tool needs exactly one value without parsing the full output block.
+   The `-raw` flag prints just the value with no surrounding quotes or labels, which is the form a shell script or downstream tool usually wants.
 
 5. **Open `terraform.tfstate`** in your text editor. It is a JSON file that records every managed resource and all of its current attributes. Find the `instance_type` field inside the instance entry. Note that state stores concrete values, not expressions: the `ami` field records the resolved AMI ID string, not a reference to the data source that produced it.
 
@@ -469,7 +470,7 @@ You rewrote both resource blocks but Terraform reported no infrastructure change
 
 ## Import an Existing Resource
 
-The lecture describes a common real-world situation: inheriting infrastructure created by hand that must be brought under Terraform management. The `cs312-vpc` from the previous activity is exactly this scenario.
+The lecture describes a common real-world situation: inheriting infrastructure created by hand that must be brought under Terraform management. In this section you will import the `cs312-vpc` from the previous activity, inspect what Terraform recorded, and reconcile any meaningful differences between the real VPC and your HCL before removing that VPC from this configuration.
 
 <Steps>
 
@@ -516,7 +517,7 @@ The lecture describes a common real-world situation: inheriting infrastructure c
    terraform plan
    ```
 
-   The plan will show one or more in-place changes to `aws_vpc.cs312`. These represent attributes that exist on the live VPC but are absent from the minimal HCL you wrote: `enable_dns_hostnames`, `enable_dns_support`, and `instance_tenancy` are common examples. This is the core challenge of import: Terraform wrote the state record, but you still have to write HCL that matches it.
+   The plan may show one or more in-place changes to `aws_vpc.cs312` if the minimal HCL you wrote does not fully describe the live VPC. Common examples are configurable arguments such as `enable_dns_hostnames`, `enable_dns_support`, or `instance_tenancy`, but the exact diff depends on how your VPC was created. This is the core challenge of import: Terraform wrote a state record, but you still have to write HCL that matches the real object you intend to manage.
 
 5. **Inspect the recorded state** to see the full attribute set:
 
@@ -524,38 +525,19 @@ The lecture describes a common real-world situation: inheriting infrastructure c
    terraform state show aws_vpc.cs312
    ```
 
-   Compare the output to the two attributes you wrote in step 2. Every attribute shown in state but absent from your HCL is a source of plan drift.
+   Compare the output to the two attributes you wrote in step 2. Focus on configurable arguments. Values like `id`, `arn`, `default_route_table_id`, and `default_security_group_id` are computed outputs, not arguments you should copy into HCL.
 
-6. **Suppress the unimportant drift** with a lifecycle rule. Add a `lifecycle` block inside `aws_vpc.cs312`:
+6. **Reconcile the HCL instead of hiding the drift.** If step 4 showed a change to a real argument, add that current value explicitly to `aws_vpc.cs312` and rerun `terraform plan` until the plan is clean. For example, if `terraform state show` reports `enable_dns_support = true`, add that line to the resource block. `ignore_changes` is useful when some other process owns an attribute, but it is not the first tool to reach for when you are still trying to describe an imported resource accurately.
 
-   ```hcl
-   resource "aws_vpc" "cs312" {
-     cidr_block = "10.0.0.0/16"
-
-     tags = {
-       Name = "cs312-vpc"
-     }
-
-     lifecycle {
-       ignore_changes = [
-         enable_dns_hostnames,
-         enable_dns_support,
-         instance_tenancy,
-         tags_all,
-       ]
-     }
-   }
-   ```
-
-   Run the plan again. The in-place changes for those attributes should no longer appear.
-
-7. **Remove the imported VPC from state** before proceeding to the destroy step:
+7. **Remove the imported VPC from this configuration** before proceeding to the destroy step:
 
    ```bash
    terraform state rm aws_vpc.cs312
    ```
 
-   This removes `aws_vpc.cs312` from Terraform's tracking without touching the VPC in AWS. You are removing it from this configuration's management scope so that the final `terraform destroy` does not attempt to delete a VPC that still contains subnets and other resources from the previous activity.
+   Then delete the `aws_vpc.cs312` block from `main.tf`.
+
+   `terraform state rm` removes `aws_vpc.cs312` from Terraform's tracking without touching the VPC in AWS. Deleting the resource block removes it from the configuration as well, so the final `terraform destroy` does not try to recreate or delete a VPC that still contains the subnets and other resources from the previous activity.
 
 </Steps>
 
@@ -578,7 +560,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
 1. **Add an instance type override** to `terraform.tfvars`:
 
    ```hcl
-   onid          = "smithj"
+   onid          = "ulbrical"
    instance_type = "t3.small"
    ```
 
@@ -590,7 +572,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
    terraform plan
    ```
 
-   Find `aws_instance.web` in the output. The `~` symbol means an in-place modification is planned. The `instance_type` line will show:
+   Find `aws_instance.web` in the output. The `~` symbol means an in-place modification is planned. For `aws_instance`, changing `instance_type` triggers a stop/start rather than a replacement. The `instance_type` line will show:
 
    ```
    ~ instance_type = "t3.micro" -> "t3.small"
@@ -637,7 +619,7 @@ After changing `instance_type` in `terraform.tfvars`, `terraform plan` showed `t
 </ActivityQuestion>
 
 <Aside type="tip" title="Protecting Stateful Resources">
-The `prevent_destroy = true` lifecycle rule causes Terraform to error at plan time rather than generate a plan that destroys a resource. It is the right safeguard for stateful resources: the RDS instance holding production data, the VPC every subnet depends on. Add it to any resource where accidental destruction would be catastrophic:
+The `prevent_destroy = true` lifecycle rule causes Terraform to reject plans that would destroy a resource while that rule is still present in the configuration. It is the right safeguard for stateful resources: the RDS instance holding production data, the VPC every subnet depends on. Add it to any resource where accidental destruction would be catastrophic:
 
 ```hcl
 lifecycle {
@@ -645,7 +627,7 @@ lifecycle {
 }
 ```
 
-To destroy a protected resource intentionally, you must remove `prevent_destroy`, apply, and then destroy: a deliberate two-step that prevents accidents without permanently blocking teardowns.
+The safeguard only applies while the resource block remains in configuration. To destroy a protected resource intentionally, remove `prevent_destroy`, rerun `terraform plan`, and review the now-allowed destroy. Many teams still do this as a deliberate two-step change so the protection is removed in one review and the destroy happens in a later one.
 </Aside>
 
 ---
@@ -654,4 +636,4 @@ To destroy a protected resource intentionally, you must remove `prevent_destroy`
 
 You have run the complete Terraform loop: plan, apply, inspect, import, and destroy. The next step that matters in practice is removing state from your laptop.
 
-Configure a remote S3 backend so state survives beyond a single machine and supports team access with locking. Follow the [S3 backend documentation](https://developer.hashicorp.com/terraform/language/backend/s3) to set up an S3 bucket, then run `terraform init -migrate-state` to move your local state into the bucket. Notice that your plan output and resource list look identical before and after the migration; the backend configuration is invisible to the infrastructure itself. If you provisioned the S3 bucket by hand first, use `terraform import` to bring them under management before pointing the backend at them. This gives you a second import exercise with different resource types and another chance to practice the plan-until-clean workflow you used on `aws_vpc.cs312`.
+Configure a remote S3 backend so state survives beyond a single machine and supports team access. Enable bucket versioning and set `use_lockfile = true` so the backend can recover from mistakes and prevent concurrent writes. Follow the [S3 backend documentation](https://developer.hashicorp.com/terraform/language/backend/s3) to set up the bucket, add the backend block, and then run `terraform init -migrate-state` to move your local state into S3. Notice that your plan output and resource list look identical before and after the migration; the backend configuration is invisible to the infrastructure itself. In practice, teams usually manage the backend bucket in a separate bootstrap configuration. If you create that bucket by hand as a learning exercise, import it into that bootstrap configuration before relying on it for other Terraform states.
