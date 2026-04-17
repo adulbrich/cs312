@@ -3,7 +3,6 @@ title: "Terraform Configuration"
 description: "Start with a provider block and data sources, add an EC2 instance and security group, introduce outputs and variables, then import an existing VPC, inspect state, and destroy."
 sidebar:
   order: 7
-draft: true
 ---
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -109,13 +108,14 @@ Before adding any resources, set up the working directory, introduce two data so
      required_providers {
        aws = {
          source  = "hashicorp/aws"
-         version = "~> 5.0"
+         version = "6.41.0"
        }
      }
    }
 
    provider "aws" {
      region = "us-east-1"
+     # To use a named profile instead of default, add: profile = "profile-name"
    }
 
    data "aws_vpc" "default" {
@@ -138,6 +138,8 @@ Before adding any resources, set up the working directory, introduce two data so
    }
    ```
 
+   `main.tf` is the primary configuration file for this project. The `terraform {}` block pins the required Terraform version and lists provider dependencies. The `provider "aws" {}` block configures how the AWS provider connects to your account: which region to target and how to authenticate. See the [AWS provider documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs) for the full set of arguments. The two `data {}` blocks are data sources: unlike resource blocks, data sources read existing infrastructure rather than create it. They are read-only queries whose results you can reference anywhere in the configuration.
+
    `owners = ["099720109477"]` limits results to images published by Canonical. Ubuntu 24.04 images now use the `hvm-ssd-gp3` naming family, so an older `hvm-ssd` filter will not match current releases.
 
 3. **Write `variables.tf`:**
@@ -149,13 +151,15 @@ Before adding any resources, set up the working directory, introduce two data so
    }
    ```
 
+   `variables.tf` declares the input variables this configuration accepts: their names, types, descriptions, and optional default values. This file does not assign values; it only describes what inputs exist.
+
 4. **Write `terraform.tfvars`:**
 
    ```hcl
    onid = "ulbrical"
    ```
 
-   Replace `ulbrical` with your actual ONID. Terraform loads this file automatically; any variable declared in `variables.tf` without a default must appear here or be supplied another way.
+   `terraform.tfvars` is the values file: it assigns concrete values to the variables declared in `variables.tf`. Replace `ulbrical` with your actual ONID. Terraform loads this file automatically; any variable declared in `variables.tf` without a default must appear here or be supplied another way.
 
 5. **Initialize the working directory:**
 
@@ -398,6 +402,8 @@ The `onid` variable is already in use, but two things are still hardcoded: the i
    }
    ```
 
+   A `locals` block defines computed values that are derived from variables or expressions. Unlike input variables, locals cannot be set from the outside; they are internal to the configuration. You reference a local value as `local.<name>` (singular, no `s`). The `merge()` call in the next step combines `local.common_tags` with a per-resource map, so the `Owner` tag is written once instead of repeated in every resource block.
+
 3. **Update both resource blocks** to use `var.instance_type` and `local.common_tags`:
 
    ```hcl
@@ -452,6 +458,8 @@ The `onid` variable is already in use, but two things are still hardcoded: the i
    terraform validate
    ```
 
+   `terraform fmt` rewrites `.tf` files in place using the canonical HCL style: consistent indentation, aligned `=` signs within blocks, and normalized spacing. It is safe to run at any time; it never changes behavior, only whitespace. Run it before every commit so the output of `git diff` stays readable.
+
 5. **Run the plan:**
 
    ```bash
@@ -480,7 +488,8 @@ The lecture describes a common real-world situation: inheriting infrastructure c
    aws ec2 describe-vpcs \
      --filters "Name=tag:Name,Values=cs312-vpc" \
      --query "Vpcs[0].VpcId" \
-     --output text
+     --output text \
+     --region us-east-1
    ```
 
    Record the VPC ID (it looks like `vpc-XXXXXXXXXXXXXXXXX`).

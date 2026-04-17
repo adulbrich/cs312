@@ -155,7 +155,7 @@ Create `setup.sh` with a shebang, safe defaults, and argument validation. You wi
 5. Run it correctly with your actual ONID:
 
    ```bash
-   sudo ./setup.sh youronid
+   sudo ./setup.sh your-onid
    ```
 
    You will see the header line with your ONID and hostname, then the trap message as the script exits. Both lines appear even though the script succeeded: the trap fires on every exit, not just failures.
@@ -198,15 +198,15 @@ Before installing anything, the script should examine the system. Add a logging 
 3. Run the script to test the disk check:
 
    ```bash
-   sudo ./setup.sh youronid
+   sudo ./setup.sh your-onid
    ```
 
    You should see:
 
    ```
-   === Server Setup: youronid on ip-10-0-1-42 ===
+   === Server Setup: your-onid on ip-10-0-1-42 ===
    [10:15:03] Disk check passed: 22% used
-   [trap] Exiting. Log: /tmp/setup-youronid.log
+   [trap] Exiting. Log: /tmp/setup-your-onid.log
    ```
 
 4. Add an `is_installed` helper function below `log`:
@@ -272,7 +272,7 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 3. Run the script:
 
    ```bash
-   sudo ./setup.sh youronid
+   sudo ./setup.sh your-onid
    ```
 
    On the first run, nginx will be downloaded and installed. You should see:
@@ -287,7 +287,7 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 4. Run the script a second time:
 
    ```bash
-   sudo ./setup.sh youronid
+   sudo ./setup.sh your-onid
    ```
 
    Both packages now show `OK (already installed)`. The check before the install is what makes this safe to repeat.
@@ -364,7 +364,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
 5. Run the script:
 
    ```bash
-   sudo ./setup.sh youronid
+   sudo ./setup.sh your-onid
    ```
 
    You should see the nginx restart and verification lines:
@@ -434,7 +434,7 @@ The last piece is a health-check script that cron runs every minute, recording t
 4. Run the complete setup script:
 
    ```bash
-   sudo ./setup.sh youronid
+   sudo ./setup.sh your-onid
    ```
 
    You should see the health-check installation and scheduling lines, followed by `Setup complete` with no trap message.
@@ -474,7 +474,7 @@ Run the complete script one final time to confirm it is fully idempotent, then v
 1. Run the script again without changing anything:
 
    ```bash
-   sudo ./setup.sh youronid
+   sudo ./setup.sh your-onid
    ```
 
    Every package line should show `OK (already installed)`. The nginx config, page, and cron job are all already in place. Nothing should reinstall, redeploy, or restart.
@@ -494,7 +494,7 @@ Run the complete script one final time to confirm it is fully idempotent, then v
    You should see:
 
    ```html
-   <h1>Configured by youronid</h1>
+   <h1>Configured by your-onid</h1>
    <p>Host: ip-10-0-1-42</p>
    <p>Deployed: ...</p>
    ```
