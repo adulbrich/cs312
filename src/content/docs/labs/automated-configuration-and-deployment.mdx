@@ -13,6 +13,8 @@ import LabSubmissionNote from '/src/components/LabSubmissionNote.astro';
 - LO7: Create programs and demonstrate facility in programs and tools that automate system administration tasks.
 */}
 
+{/* Validated Time-to-Complete: ??? */}
+
 The second location's server is slightly different, and your manual setup notes do not quite work. The PHP version is wrong, the MariaDB socket is in a different path, and the Apache config that worked perfectly at Location 1 throws errors at Location 2. Also, Gerald's daughter has started updating the website directly in production. Last week she broke the homepage by pasting a recipe that contained an unclosed HTML tag. You need configuration management and a proper deployment pipeline.
 
 Terraform creates your infrastructure, but a freshly provisioned EC2 instance is an empty shell: no Docker, no application, no configuration. That is where **Ansible** comes in. Ansible is a configuration management tool that connects to remote servers over SSH and executes tasks to bring them to a desired state. Unlike shell scripts, Ansible playbooks are **idempotent**: you can run them ten times and the result is the same as running them once. In the second half of this lab, you will build a **CI/CD pipeline** using GitHub Actions that automatically builds, tests, and publishes Docker images whenever you push a new version tag.
@@ -31,6 +33,7 @@ Ansible uses an **agentless** architecture: you run Ansible on a **control node*
 
 Ansible's control node **must be Linux or macOS**: it cannot run natively on Windows. Rather than wrestling with WSL2 or Homebrew on every student's laptop, we will use an EC2 instance as the control node. This gives everyone an identical environment and mirrors a real-world pattern where a dedicated management server (sometimes called a *bastion host* or *jump box*) is used to administer infrastructure.
 
+{/* TODO: convert this to a mermaid diagram */}
 ```
 ┌──────────────┐         SSH          ┌──────────────┐
 │              │ ──────────────────▶  │              │
