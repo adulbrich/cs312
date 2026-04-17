@@ -1,582 +1,511 @@
 ---
-title: "Log Analyzer: A Shell Scripting Workshop"
-description: "Build a Bash log analysis script from scratch: variables, arguments, conditionals, grep with regular expressions, functions, loops, and safe defaults."
+title: "Automate Your Server Setup"
+description: "Write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and schedules a health check with cron: the same work the next activity automates with Ansible, done the imperative way first."
 sidebar:
   order: 8
 draft: true
 ---
 
-import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts into practice the concepts from the [Shell Scripting and Automation Basics](/lectures/shell-scripting-and-automation-basics/) lecture. You will build a log analysis script incrementally, adding one concept at a time until you have a complete, production-style tool. By the end, you will have a working script that accepts arguments, searches log files for error patterns using regular expressions, loops over multiple files, formats a report, and exits with meaningful status codes.
+This activity puts into practice the concepts from the [Shell Scripting and Automation Basics](/lectures/shell-scripting-and-automation-basics/) lecture. You will write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and schedules a health check with cron. By the end, you will have a server configured by a single script run, and you will understand exactly what Ansible automates declaratively in the next activity.
 
 ## What You Will Need
 
-You need a Bash shell and standard Unix tools (`grep`, `sed`, `find`, `date`). All of these are available on macOS and Linux with no installation required. Windows users will use Git Bash.
-
-<Tabs syncKey="os">
-<TabItem label="macOS">
-macOS ships with Bash at `/bin/bash` (version 3.2). Open Terminal from Applications and verify:
-
-```bash
-bash --version
-```
-
-You should see something like `GNU bash, version 3.2.57`. All commands in this activity are compatible with Bash 3.2.
-
-<Aside type="tip" title="Running bash from zsh">
-macOS defaults to zsh as the interactive shell since Catalina, but Bash is still installed. Your scripts use `#!/usr/bin/env bash` in the shebang, so they always run under Bash regardless of which shell you are typing in.
-</Aside>
-</TabItem>
-<TabItem label="Linux">
-Bash is already installed. Open a terminal and verify:
-
-```bash
-bash --version
-```
-
-If your system does not have `grep` or `sed`, install them with your package manager:
-
-```bash
-# Debian/Ubuntu
-sudo apt install -y grep sed
-
-# Arch Linux
-sudo pacman -S grep sed
-```
-</TabItem>
-<TabItem label="Windows">
-Install **Git for Windows** from [git-scm.com](https://git-scm.com/download/win) if you have not already. Git for Windows includes **Git Bash**, a Bash shell with all the Unix tools this activity requires.
-
-After installation, open **Git Bash** (not PowerShell and not Command Prompt) and verify:
-
-```bash
-bash --version
-grep --version
-```
-
-<Aside type="note" title="WSL2 is also supported">
-If you have WSL2 installed (Windows Subsystem for Linux), you can run all commands in this activity there instead of Git Bash. WSL2 gives you a full Linux environment and is worth setting up if you plan to do more command-line work. For this activity, Git Bash is simpler.
-</Aside>
-</TabItem>
-</Tabs>
+- Your EC2 instance from Lab 2, running Ubuntu, with SSH access
+- Your `cs312-key.pem` SSH private key in `~/.ssh/`
+- Your instance's public IP from the EC2 console
+- HTTP (port 80) open in the instance's security group (if you completed a previous activity that used port 80, this is already done)
 
 ---
 
-## Generate Test Data
+## Connect and Explore the Environment
 
-Before writing the script, you need log files to analyze. This section creates a working directory and three synthetic log files that look like a real web server, database, and system log.
+Your script will run on the EC2 instance, so start by connecting to it. Before writing any code, examine the shell environment your script will run in.
 
 <Steps>
-1. Create the working directory structure:
+1. SSH into your instance. Replace `<YOUR-EC2-PUBLIC-IP>` with the value from the EC2 console:
 
    ```bash
-   mkdir -p ~/scripts/logs
-   cd ~/scripts
+   ssh -i ~/.ssh/cs312-key.pem ubuntu@<YOUR-EC2-PUBLIC-IP>
    ```
 
-2. Create the web server log:
+   You will land at a prompt like `ubuntu@ip-10-0-1-42:~$`. Every step from here runs inside this SSH session unless noted otherwise.
+
+2. Print your interactive shell's PATH:
 
    ```bash
-   cat > logs/web.log << 'EOF'
-   2026-04-14 08:01:00 INFO  nginx: GET /index.html 200 1423
-   2026-04-14 08:01:01 ERROR nginx: upstream connect error (111: Connection refused)
-   2026-04-14 08:01:02 INFO  nginx: GET /about.html 200 988
-   2026-04-14 08:01:03 WARN  nginx: client closed connection prematurely
-   2026-04-14 08:01:04 ERROR nginx: no live upstreams while connecting to upstream
-   2026-04-14 08:01:05 INFO  nginx: GET /api/status 200 55
-   2026-04-14 08:01:06 INFO  nginx: GET /favicon.ico 200 318
-   2026-04-14 08:01:07 ERROR nginx: upstream timed out (110: Connection timed out)
-   EOF
+   echo $PATH
    ```
 
-3. Create the database log:
+   You will see something like:
+
+   ```
+   /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+   ```
+
+   This PATH is built from profile files (`/etc/profile`, `~/.bashrc`) when you log in. The shell searches these directories left to right each time you type a command name without a full path.
+
+3. Simulate the minimal environment that cron and other non-interactive launchers use:
 
    ```bash
-   cat > logs/db.log << 'EOF'
-   2026-04-14 08:00:58 INFO  mysql: Server started successfully
-   2026-04-14 08:01:00 INFO  mysql: Connection from 10.0.1.5
-   2026-04-14 08:01:02 ERROR mysql: Can't connect to MySQL server on '10.0.1.9' (111)
-   2026-04-14 08:01:03 INFO  mysql: Query OK, 0 rows affected
-   2026-04-14 08:01:09 WARN  mysql: Aborted connection 42 (read error)
-   2026-04-14 08:01:11 ERROR mysql: Disk is full writing '/var/lib/mysql/ib_logfile0'
-   2026-04-14 08:01:14 INFO  mysql: Query OK, 1 row affected
-   EOF
+   env -i PATH=/usr/bin:/bin bash -c 'echo $PATH'
    ```
 
-4. Create the system log:
+   The output is:
+
+   ```
+   /usr/bin:/bin
+   ```
+
+   `env -i` clears every environment variable, then sets `PATH` to cron's typical value before launching the inner bash. Notice what is gone: `/usr/local/bin`, `/usr/sbin`, and `/snap/bin`. Any command installed in those directories would fail under cron with "command not found," even though it works at your interactive prompt.
+
+4. Check where `curl` lives on this system:
 
    ```bash
-   cat > logs/system.log << 'EOF'
-   2026-04-14 07:59:00 INFO  systemd: Started Daily Backup.
-   2026-04-14 07:59:01 INFO  cron: (root) CMD (/usr/local/bin/backup.sh)
-   2026-04-14 08:00:00 INFO  sshd: Accepted publickey for deploy from 203.0.113.10
-   2026-04-14 08:00:45 WARN  sshd: Failed password for invalid user admin from 198.51.100.42
-   2026-04-14 08:01:00 WARN  sshd: Failed password for invalid user root from 198.51.100.42
-   2026-04-14 08:01:33 INFO  systemd: Stopped Daily Backup.
-   EOF
+   which curl
    ```
 
-5. Confirm the files are in place:
+   `curl` is at `/usr/bin/curl`, which is inside cron's minimal PATH. Keep this in mind for the health-check script you will write later.
+
+5. Observe the difference between exported and unexported variables:
 
    ```bash
-   ls -la logs/
+   export GREETING="hello"
+   INTERNAL="world"
+   bash -c 'echo "exported: $GREETING"'
+   bash -c 'echo "unexported: $INTERNAL"'
    ```
 
-   You should see three files: `web.log`, `db.log`, and `system.log`.
+   `GREETING` appears in the subshell because `export` marks it for the environment. `INTERNAL` disappears: the subshell received no value.
+
+6. Create your working directory:
+
+   ```bash
+   mkdir -p ~/cs312-scripts
+   cd ~/cs312-scripts
+   ```
 </Steps>
+
+<ActivityQuestion>
+You saw that cron's PATH is `/usr/bin:/bin`. After installing nginx in a later section, run `which nginx`. Is nginx in `/usr/bin` or `/usr/sbin`? Is `/usr/sbin` in cron's minimal PATH? What practical rule avoids this entire class of failure when writing scripts that cron will run?
+</ActivityQuestion>
 
 ---
 
 ## Your First Script
 
-Create the script file, add the shebang and safe defaults, and verify that the safety mechanisms actually work before building on top of them.
-
-The script you are building is called `logscan.sh`. You will add to it in each section.
+Create `setup.sh` with a shebang, safe defaults, and argument validation. You will add functionality to it in each section that follows.
 
 <Steps>
-1. Create the script file:
+1. Create the file and make it executable:
 
    ```bash
-   touch logscan.sh
-   chmod +x logscan.sh
+   touch setup.sh
+   chmod +x setup.sh
    ```
 
-   `chmod +x` sets the execute permission bit. Without it, the kernel refuses to run the file directly. You can always run a script with `bash logscan.sh` to bypass this, but setting the execute bit is the conventional approach.
-
-2. Open `logscan.sh` in any text editor and add the following:
+2. Open `setup.sh` in any editor and add the following:
 
    ```bash
    #!/usr/bin/env bash
    set -euo pipefail
 
-   echo "logscan starting"
-   echo "done"
+   if [[ "$EUID" -ne 0 ]]; then
+       printf "Run as root: sudo %s <your-onid>\n" "$(basename "$0")" >&2
+       exit 1
+   fi
+
+   if [[ "$#" -ne 1 ]]; then
+       printf "Usage: sudo %s <your-onid>\n" "$(basename "$0")" >&2
+       exit 1
+   fi
+
+   ONID="$1"
+   WEBROOT="/var/www/html"
+   NGINX_DEFAULT="/etc/nginx/sites-available/default"
+   LOG_FILE="/tmp/setup-${ONID}.log"
+
+   trap 'printf "[trap] Exiting. Log: %s\n" "$LOG_FILE"' EXIT
+
+   printf "=== Server Setup: %s on %s ===\n" "$ONID" "$(hostname)"
+   ```
+
+3. Run it without arguments to see the usage message:
+
+   ```bash
+   sudo ./setup.sh
+   ```
+
+   ```
+   Usage: sudo setup.sh <your-onid>
+   ```
+
+4. Run it without `sudo` to confirm the root check:
+
+   ```bash
+   ./setup.sh myonid
+   ```
+
+   ```
+   Run as root: sudo setup.sh <your-onid>
+   ```
+
+5. Run it correctly with your actual ONID:
+
+   ```bash
+   sudo ./setup.sh youronid
+   ```
+
+   You will see the header line with your ONID and hostname, then the trap message as the script exits. Both lines appear even though the script succeeded: the trap fires on every exit, not just failures.
+</Steps>
+
+<ActivityQuestion>
+The `trap ... EXIT` fires on every exit, including a clean one, so "Exiting. Log:" appears even when the script finishes normally. Two approaches fix this: checking `$?` inside the handler (it holds the exit code when the trap fires), or calling `trap - EXIT` at the very end of the script to clear the handler before the normal exit. Which approach would you use, and why?
+</ActivityQuestion>
+
+---
+
+## Check Preconditions
+
+Before installing anything, the script should examine the system. Add a logging function, a disk-space check using `awk`, and a package-status helper using `grep`.
+
+<Steps>
+1. Add a `log` function to `setup.sh`, right after the `trap` line:
+
+   ```bash
+   log() {
+       printf "[%s] %s\n" "$(date '+%H:%M:%S')" "$1" | tee -a "$LOG_FILE"
+   }
+   ```
+
+   `tee -a` writes each message to stdout (so you see it live) and appends it to `$LOG_FILE` for later inspection. Every status line from here on calls `log`.
+
+2. Add a disk check below the `log` function:
+
+   ```bash
+   DISK_PCT=$(df -h / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
+   if [[ "$DISK_PCT" -gt 80 ]]; then
+       log "WARNING: root filesystem at ${DISK_PCT}% capacity"
+   else
+       log "Disk check passed: ${DISK_PCT}% used"
+   fi
+   ```
+
+   The `awk` command processes `df -h /` as a table. `NR==2` skips the header row. `$5` is the "Use%" column. `gsub(/%/, "", $5)` removes the percent sign so Bash can compare the value as a number inside `[[ ]]`.
+
+3. Run the script to test the disk check:
+
+   ```bash
+   sudo ./setup.sh youronid
+   ```
+
+   You should see:
+
+   ```
+   === Server Setup: youronid on ip-10-0-1-42 ===
+   [10:15:03] Disk check passed: 22% used
+   [trap] Exiting. Log: /tmp/setup-youronid.log
+   ```
+
+4. Add an `is_installed` helper function below `log`:
+
+   ```bash
+   is_installed() {
+       dpkg -l "$1" 2>/dev/null | grep -q "^ii"
+   }
+   ```
+
+   `dpkg -l <package>` shows the package's status. Lines beginning with `ii` mean "installed and configured." `grep -q` returns exit code 0 on a match (package is installed) and exit code 1 otherwise. No output is produced either way: the exit code is the result.
+
+5. Test `is_installed` directly in the shell before relying on it in the script:
+
+   ```bash
+   is_installed() { dpkg -l "$1" 2>/dev/null | grep -q "^ii"; }
+   is_installed bash && echo "bash: installed" || echo "bash: not installed"
+   is_installed doesnotexist && echo "doesnotexist: installed" || echo "doesnotexist: not installed"
+   ```
+
+   You should see `bash: installed` and `doesnotexist: not installed`.
+</Steps>
+
+<ActivityQuestion>
+Both `grep -q "^ii"` and `grep "^ii" > /dev/null` suppress output, but they behave differently under the hood. `-q` tells `grep` to stop reading after the first match. Redirecting to `/dev/null` discards output but `grep` still reads the entire input. When might this difference matter in practice?
+</ActivityQuestion>
+
+---
+
+## Install Packages
+
+Add an `ensure_installed` function that checks before acting, then loop over a list of required packages. The script will reach the same final state whether it runs once or ten times.
+
+<Steps>
+1. Add `ensure_installed` to `setup.sh`, right below `is_installed`:
+
+   ```bash
+   ensure_installed() {
+       local pkg="$1"
+       if is_installed "$pkg"; then
+           log "OK (already installed): $pkg"
+       else
+           log "Installing: $pkg"
+           apt-get install -y "$pkg" >> "$LOG_FILE" 2>&1
+           log "Done: $pkg"
+       fi
+   }
+   ```
+
+   Apt output goes to the log file to keep the terminal readable. If `apt-get` fails, `set -e` stops the script immediately rather than letting it continue in a broken state.
+
+2. Add a package list and loop below the disk check block:
+
+   ```bash
+   PACKAGES=("nginx" "curl")
+
+   log "Checking required packages..."
+   for pkg in "${PACKAGES[@]}"; do
+       ensure_installed "$pkg"
+   done
    ```
 
 3. Run the script:
 
    ```bash
-   ./logscan.sh
+   sudo ./setup.sh youronid
+   ```
+
+   On the first run, nginx will be downloaded and installed. You should see:
+
+   ```
+   [10:17:01] Checking required packages...
+   [10:17:01] Installing: nginx
+   [10:17:05] Done: nginx
+   [10:17:05] OK (already installed): curl
+   ```
+
+4. Run the script a second time:
+
+   ```bash
+   sudo ./setup.sh youronid
+   ```
+
+   Both packages now show `OK (already installed)`. The check before the install is what makes this safe to repeat.
+</Steps>
+
+<ActivityQuestion>
+Your `ensure_installed` function achieves idempotence by calling `dpkg -l` to check the current state before acting. The Ansible `apt` module achieves the same result but differently. What is the fundamental difference in how each one decides whether to install? What would have to happen for `ensure_installed` to give a wrong answer?
+</ActivityQuestion>
+
+---
+
+## Configure nginx and Deploy Your Page
+
+With nginx installed, configure it and deploy a page that identifies the server. This section uses `sed` to modify the nginx configuration file and a heredoc to write the HTML.
+
+<Steps>
+1. Confirm that the default nginx configuration is valid before modifying it:
+
+   ```bash
+   nginx -t
+   ```
+
+   ```
+   nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+   nginx: configuration file /etc/nginx/nginx.conf test is successful
+   ```
+
+2. Add the configuration block to `setup.sh`, below the package loop:
+
+   ```bash
+   log "Configuring nginx..."
+   CURRENT_HOST="$(hostname)"
+   sed -i "s|server_name [^;]*;|server_name ${CURRENT_HOST};|" "$NGINX_DEFAULT"
+   ```
+
+   `sed -i` edits the file in place. The pattern `server_name [^;]*;` matches any `server_name` directive up to the semicolon, whether it contains the default `_` placeholder or a hostname from a previous run. The `|` delimiters replace the usual `/` to avoid any need to escape slashes in the hostname string.
+
+3. Add the index page right after the `sed` line:
+
+   ```bash
+   log "Deploying index.html..."
+   cat > "$WEBROOT/index.html" << EOF
+   <!DOCTYPE html>
+   <html>
+   <head><title>CS 312: ${CURRENT_HOST}</title></head>
+   <body>
+   <h1>Configured by ${ONID}</h1>
+   <p>Host: ${CURRENT_HOST}</p>
+   <p>Deployed: $(date)</p>
+   </body>
+   </html>
+   EOF
+   ```
+
+   The heredoc writes multiple lines in a single statement. Variables inside expand immediately when the script runs: `$ONID` comes from the argument you validated at the start, `$CURRENT_HOST` from the `$(hostname)` call above, and `$(date)` records the deployment time.
+
+4. Add the config test, restart, and verification right after the heredoc:
+
+   ```bash
+   nginx -t 2>>"$LOG_FILE"
+   systemctl restart nginx
+   log "nginx restarted"
+
+   if /usr/bin/curl -s http://localhost/ | grep -q "$ONID"; then
+       log "Verification passed: page contains ONID"
+   else
+       log "Verification FAILED: page does not contain ONID" >&2
+       exit 1
+   fi
+   ```
+
+   Notice `/usr/bin/curl` rather than `curl`. This follows the absolute-path discipline from Section 1: a habit that is also required in the cron context coming up next.
+
+5. Run the script:
+
+   ```bash
+   sudo ./setup.sh youronid
+   ```
+
+   You should see the nginx restart and verification lines:
+
+   ```
+   [10:20:01] Configuring nginx...
+   [10:20:01] Deploying index.html...
+   [10:20:02] nginx restarted
+   [10:20:02] Verification passed: page contains ONID
+   ```
+
+6. Confirm the page from inside the server:
+
+   ```bash
+   curl http://localhost/
+   ```
+
+   The response should be your HTML page with your ONID and the EC2 hostname.
+</Steps>
+
+---
+
+## Schedule a Health Check
+
+The last piece is a health-check script that cron runs every minute, recording the HTTP status code from nginx. This section also demonstrates how to install scripts and cron jobs as part of a server setup.
+
+<Steps>
+1. Add the health-check installation block to `setup.sh`, below the nginx verification:
+
+   ```bash
+   log "Installing health check..."
+   cat > /usr/local/bin/nginx-health.sh << 'HEALTHEOF'
+   #!/usr/bin/env bash
+   set -euo pipefail
+   STATUS=$(/usr/bin/curl -s -o /dev/null -w "%{http_code}" http://localhost/)
+   printf "[%s] nginx: %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$STATUS" >> /tmp/nginx-health.log
+   HEALTHEOF
+   chmod +x /usr/local/bin/nginx-health.sh
+   ```
+
+   The `<< 'HEALTHEOF'` uses a single-quoted delimiter: this prevents the outer script from expanding `$STATUS` and `$(...)` while writing the inner script. Those variables must expand when the health check *runs*, not when `setup.sh` installs it.
+
+   The health check uses `/usr/bin/curl` with an absolute path. Run `which curl` to confirm that is its actual location. Cron will run this script with `PATH=/usr/bin:/bin`. Using absolute paths removes any dependency on the calling environment.
+
+2. Add the cron job registration right after:
+
+   ```bash
+   log "Scheduling health check..."
+   cat > /etc/cron.d/nginx-health << 'CRONEOF'
+   * * * * * root /usr/local/bin/nginx-health.sh
+   CRONEOF
+   chmod 644 /etc/cron.d/nginx-health
+   log "Health check scheduled: every minute"
+   ```
+
+   `/etc/cron.d/` is the system-wide cron directory. Each line contains: `schedule user command`. The `root` field specifies which user runs the job. Overwriting this file with the same content is idempotent: the cron job does not duplicate.
+
+3. Add a final completion line at the very end of `setup.sh`:
+
+   ```bash
+   trap - EXIT
+   log "Setup complete"
+   ```
+
+   `trap - EXIT` clears the handler you registered at the start, so the "[trap] Exiting" message no longer fires. Since the script only reaches this line if everything above succeeded, clearing the trap here is the right answer to the question from Section 2.
+
+4. Run the complete setup script:
+
+   ```bash
+   sudo ./setup.sh youronid
+   ```
+
+   You should see the health-check installation and scheduling lines, followed by `Setup complete` with no trap message.
+
+5. Confirm the cron job is registered:
+
+   ```bash
+   cat /etc/cron.d/nginx-health
+   ```
+
+6. Wait about 60 seconds, then check the health log:
+
+   ```bash
+   cat /tmp/nginx-health.log
+   ```
+
+   You should see one or more lines like:
+
+   ```
+   [2026-04-17 10:25:01] nginx: 200
+   ```
+
+   Status `200` means nginx responded correctly.
+</Steps>
+
+<ActivityQuestion>
+Your cron job uses `* * * * *`, running every minute. If your EC2 instance is stopped overnight and restarted in the morning, every cron job that would have run while the instance was off simply does not run: cron has no memory of missed executions. The lecture describes a scheduling mechanism that fires missed runs at boot. What is it, and what specific configuration option enables the catch-up behavior?
+</ActivityQuestion>
+
+---
+
+## Your Configured Server
+
+Run the complete script one final time to confirm it is fully idempotent, then verify the result from your own machine.
+
+<Steps>
+1. Run the script again without changing anything:
+
+   ```bash
+   sudo ./setup.sh youronid
+   ```
+
+   Every package line should show `OK (already installed)`. The nginx config, page, and cron job are all already in place. Nothing should reinstall, redeploy, or restart.
+
+2. Exit the SSH session:
+
+   ```bash
+   exit
+   ```
+
+3. From your own machine, verify the page over the public internet:
+
+   ```bash
+   curl http://<YOUR-EC2-PUBLIC-IP>/
    ```
 
    You should see:
-   ```
-   logscan starting
-   done
-   ```
 
-4. See `set -e` in action by adding a bad command. Edit the script and insert a line between the two `echo` statements:
-
-   ```bash
-   #!/usr/bin/env bash
-   set -euo pipefail
-
-   echo "logscan starting"
-   ls /this/path/does/not/exist
-   echo "done"
+   ```html
+   <h1>Configured by youronid</h1>
+   <p>Host: ip-10-0-1-42</p>
+   <p>Deployed: ...</p>
    ```
 
-   Run it:
-
-   ```bash
-   ./logscan.sh
-   ```
-
-   You will see `logscan starting` and then the error from `ls`, but you will **not** see `done`. The script stopped at the failing command. Remove the bad `ls` line before continuing.
-</Steps>
-
-<ActivityQuestion>
-Without `set -e`, the script would have printed both lines even though a command failed in between. In a backup script that archives several directories one by one, why would silently continuing after a failure be dangerous? What category of problem does `set -e` belong to: does it prevent bugs, or does it make bugs visible?
-</ActivityQuestion>
-
----
-
-## Variables and Arguments
-
-Add argument handling and variables to the script. By the end of this section, the script will validate its input and refuse to run if it is wrong.
-
-<Steps>
-1. Replace the contents of `logscan.sh` with:
-
-   ```bash
-   #!/usr/bin/env bash
-   set -euo pipefail
-
-   if [[ "$#" -ne 1 ]]; then
-       printf "Usage: %s <log-directory>\n" "$(basename "$0")" >&2
-       exit 1
-   fi
-
-   LOG_DIR="$1"
-
-   if [[ ! -d "$LOG_DIR" ]]; then
-       printf "Error: '%s' is not a directory\n" "$LOG_DIR" >&2
-       exit 1
-   fi
-
-   TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-   REPORT_USER=$(whoami)
-   REPORT_HOST=$(hostname)
-
-   printf "=== Log Report: %s ===\n" "$REPORT_HOST"
-   printf "Generated: %s by %s\n" "$TIMESTAMP" "$REPORT_USER"
-   printf "Log directory: %s\n\n" "$LOG_DIR"
-   ```
-
-2. Run it without arguments to see the usage message:
-
-   ```bash
-   ./logscan.sh
-   ```
-
-   You should see:
-   ```
-   Usage: logscan.sh <log-directory>
-   ```
-
-3. Run it with a directory that does not exist:
-
-   ```bash
-   ./logscan.sh /nonexistent
-   ```
-
-   You should see:
-   ```
-   Error: '/nonexistent' is not a directory
-   ```
-
-4. Run it with the real log directory:
-
-   ```bash
-   ./logscan.sh logs
-   ```
-
-   You should see a header with your hostname, the current timestamp, and your username.
-</Steps>
-
-<ActivityQuestion>
-The usage message and error message are sent to stderr with `>&2`, but the report header goes to stdout. Why does this distinction matter? Describe a concrete scenario where mixing errors into stdout would break something downstream.
-</ActivityQuestion>
-
----
-
-## Searching with grep and Regular Expressions
-
-This section adds log searching to the script. You will search the log files using regular expressions, then add the search to the script itself.
-
-First, practice searching directly in the terminal before adding anything to the script.
-
-<Steps>
-1. Count how many ERROR lines are in each log file:
-
-   ```bash
-   grep -c "ERROR" logs/web.log
-   grep -c "ERROR" logs/db.log
-   grep -c "ERROR" logs/system.log
-   ```
-
-   `grep -c` counts matching lines rather than printing them.
-
-2. Search for any line containing either ERROR or WARN using extended regular expressions:
-
-   ```bash
-   grep -E "ERROR|WARN" logs/web.log
-   ```
-
-   The `|` operator is alternation: it matches lines containing either string. Without `-E`, you would need to escape it as `\|` in basic RE syntax.
-
-3. Search for lines where ERROR or WARN appears at a specific position using anchoring. The timestamp format in your logs is always `YYYY-MM-DD HH:MM:SS`, followed by a space, then the level. Anchor the level to position 20:
-
-   ```bash
-   grep -E "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} ERROR" logs/web.log
-   ```
-
-   Breaking this pattern down:
-   - `^` anchors the match to the beginning of the line
-   - `[0-9]{4}` matches exactly four digits
-   - `-` matches a literal hyphen
-   - `[0-9]{2}` matches exactly two digits
-   - The space and colon characters match literally
-
-4. Show only the lines that do **not** contain INFO:
-
-   ```bash
-   grep -v "INFO" logs/web.log
-   ```
-
-   `-v` inverts the match: every line that does **not** contain the pattern.
-
-5. Search recursively across all log files at once and show file names:
-
-   ```bash
-   grep -rn "ERROR" logs/
-   ```
-
-   `-r` recurses into subdirectories, `-n` prepends line numbers. When searching multiple files, `grep` prepends the filename to each matching line automatically.
-
-6. Find all lines mentioning an IP address using a regular expression:
-
-   ```bash
-   grep -E "([0-9]{1,3}\.){3}[0-9]{1,3}" logs/system.log
-   ```
-
-   `{1,3}` means "one to three occurrences." The `\.` escapes the dot so it matches a literal period rather than any character.
-</Steps>
-
-<ActivityQuestion>
-Your regex `([0-9]{1,3}\.){3}[0-9]{1,3}` matches IP addresses in the log, but it would also match strings like `999.999.999.999` which is not a valid IP address. Why is this acceptable in log searching, and in what situation would you need a stricter pattern?
-</ActivityQuestion>
-
----
-
-## Functions, Loops, and Formatted Output
-
-Now integrate the search into the script using a function and a loop. The function scans one file and returns counts; the loop calls it for every log file in the directory.
-
-<Steps>
-1. Add a `scan_file` function to your script. Place it after the header-printing lines:
-
-   ```bash
-   scan_file() {
-       local file="$1"
-       local name
-       name=$(basename "$file")
-       local errors
-       errors=$(grep -Ec "ERROR" "$file" 2>/dev/null || true)
-       local warnings
-       warnings=$(grep -Ec "WARN" "$file" 2>/dev/null || true)
-       printf "  %-30s  errors: %-4s  warnings: %s\n" "$name" "$errors" "$warnings"
-   }
-   ```
-
-   Three things to notice here. First, every variable is declared with `local`, which restricts its scope to the function. Without `local`, `name`, `errors`, and `warnings` would be global and could collide with variables in other functions or the main script body. Second, `grep -c` exits with status 1 when there are zero matches, which would cause the script to abort under `set -e`. The `|| true` appended after each `grep` call prevents that: if grep finds nothing and returns 1, `true` runs instead and returns 0, keeping the script alive. Third, `2>/dev/null` discards any error messages from `grep` itself (for example, if the file is unreadable).
-
-2. Add the loop below the function definition. This goes after the function but before the end of the script:
-
-   ```bash
-   TOTAL_ERRORS=0
-   TOTAL_WARNINGS=0
-   FILE_COUNT=0
-
-   for logfile in "$LOG_DIR"/*.log; do
-       [[ -f "$logfile" ]] || continue
-       scan_file "$logfile"
-       errors=$(grep -Ec "ERROR" "$logfile" 2>/dev/null || true)
-       warnings=$(grep -Ec "WARN" "$logfile" 2>/dev/null || true)
-       TOTAL_ERRORS=$(( TOTAL_ERRORS + errors ))
-       TOTAL_WARNINGS=$(( TOTAL_WARNINGS + warnings ))
-       (( FILE_COUNT++ )) || true
-   done
-   ```
-
-   The pattern `[[ -f "$logfile" ]] || continue` handles the edge case where the glob `*.log` matches nothing: if the directory contains no `.log` files, Bash expands the glob to the literal string `logs/*.log`, which is not a real file. The check skips it rather than failing.
-
-3. Add a summary block after the loop:
-
-   ```bash
-   printf "\nSummary: %d file(s)  |  %d error(s)  |  %d warning(s)\n" \
-       "$FILE_COUNT" "$TOTAL_ERRORS" "$TOTAL_WARNINGS"
-   ```
-
-4. Run the script now:
-
-   ```bash
-   ./logscan.sh logs
-   ```
-
-   You should see a formatted table with a line per log file and a summary at the bottom.
-
-5. Add a `sed` substitution to clean up error messages before displaying them. Append this block after the summary:
-
-   ```bash
-   if [[ "$TOTAL_ERRORS" -gt 0 ]]; then
-       printf "\nDistinct errors:\n"
-       grep -h "ERROR" "$LOG_DIR"/*.log 2>/dev/null \
-           | sed 's/^[0-9-]* [0-9:]* [A-Z]*  //' \
-           | sort -u
-   fi
-   ```
-
-   `grep -h` suppresses filename prefixes in the output. The `sed` substitution strips the leading timestamp and log level from each line, leaving only the service name and message. The pattern `^[0-9-]* [0-9:]* [A-Z]*  ` matches the timestamp, a space, the log level, and two trailing spaces at the start of each line. `sort -u` removes duplicate messages so each unique error appears once.
-
-6. Run the script again:
-
-   ```bash
-   ./logscan.sh logs
-   ```
-
-   The distinct error messages should now appear at the bottom, deduplicated and without timestamps.
-</Steps>
-
-<ActivityQuestion>
-Inside `scan_file`, the variables `name`, `errors`, and `warnings` are declared with `local`. What would happen if you removed `local` from all three and called `scan_file` inside a loop over many files? Write a specific example of a bug this would introduce.
-</ActivityQuestion>
-
----
-
-## Your Log Report
-
-Add the finishing touches: a clean exit code and a `trap` for cleanup. Then run the complete script and review the output.
-
-<Steps>
-1. Add an exit code at the very end of the script. If there were any errors in the logs, exit with status 1 so that callers (including cron) can detect a problem:
-
-   ```bash
-   if [[ "$TOTAL_ERRORS" -gt 0 ]]; then
-       exit 1
-   fi
-   ```
-
-2. Add a `trap` near the top of the script, right after `set -euo pipefail`. It will clean up a temporary file that you may add later without having to remember to delete it manually:
-
-   ```bash
-   TMPFILE=$(mktemp)
-   trap 'rm -f "$TMPFILE"' EXIT
-   ```
-
-   `mktemp` creates a uniquely named temporary file. `trap ... EXIT` fires the cleanup command whenever the script exits, whether it succeeds, fails, or is interrupted by Ctrl+C. This is the Bash equivalent of a `finally` block.
-
-   You are not actually using `$TMPFILE` yet, but the pattern is worth seeing in place: the trap is set up before any work begins, so there is no window where the temporary file could be left behind.
-
-3. Your complete `logscan.sh` should now look like this:
-
-   ```bash
-   #!/usr/bin/env bash
-   set -euo pipefail
-
-   TMPFILE=$(mktemp)
-   trap 'rm -f "$TMPFILE"' EXIT
-
-   if [[ "$#" -ne 1 ]]; then
-       printf "Usage: %s <log-directory>\n" "$(basename "$0")" >&2
-       exit 1
-   fi
-
-   LOG_DIR="$1"
-
-   if [[ ! -d "$LOG_DIR" ]]; then
-       printf "Error: '%s' is not a directory\n" "$LOG_DIR" >&2
-       exit 1
-   fi
-
-   TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
-   REPORT_USER=$(whoami)
-   REPORT_HOST=$(hostname)
-
-   printf "=== Log Report: %s ===\n" "$REPORT_HOST"
-   printf "Generated: %s by %s\n" "$TIMESTAMP" "$REPORT_USER"
-   printf "Log directory: %s\n\n" "$LOG_DIR"
-
-   scan_file() {
-       local file="$1"
-       local name
-       name=$(basename "$file")
-       local errors
-       errors=$(grep -Ec "ERROR" "$file" 2>/dev/null || true)
-       local warnings
-       warnings=$(grep -Ec "WARN" "$file" 2>/dev/null || true)
-       printf "  %-30s  errors: %-4s  warnings: %s\n" "$name" "$errors" "$warnings"
-   }
-
-   TOTAL_ERRORS=0
-   TOTAL_WARNINGS=0
-   FILE_COUNT=0
-
-   for logfile in "$LOG_DIR"/*.log; do
-       [[ -f "$logfile" ]] || continue
-       scan_file "$logfile"
-       errors=$(grep -Ec "ERROR" "$logfile" 2>/dev/null || true)
-       warnings=$(grep -Ec "WARN" "$logfile" 2>/dev/null || true)
-       TOTAL_ERRORS=$(( TOTAL_ERRORS + errors ))
-       TOTAL_WARNINGS=$(( TOTAL_WARNINGS + warnings ))
-       (( FILE_COUNT++ )) || true
-   done
-
-   printf "\nSummary: %d file(s)  |  %d error(s)  |  %d warning(s)\n" \
-       "$FILE_COUNT" "$TOTAL_ERRORS" "$TOTAL_WARNINGS"
-
-   if [[ "$TOTAL_ERRORS" -gt 0 ]]; then
-       printf "\nDistinct errors:\n"
-       grep -h "ERROR" "$LOG_DIR"/*.log 2>/dev/null \
-           | sed 's/^[0-9-]* [0-9:]* [A-Z]*  //' \
-           | sort -u
-   fi
-
-   if [[ "$TOTAL_ERRORS" -gt 0 ]]; then
-       exit 1
-   fi
-   ```
-
-4. Run the completed script:
-
-   ```bash
-   ./logscan.sh logs
-   ```
-
-   Your output should look similar to:
-
-   ```
-   === Log Report: your-hostname ===
-   Generated: 2026-04-14 10:30:00 by your-username
-   Log directory: logs
-
-     db.log                          errors: 2     warnings: 1
-     system.log                      errors: 0     warnings: 2
-     web.log                         errors: 3     warnings: 1
-
-   Summary: 3 file(s)  |  5 error(s)  |  4 warning(s)
-
-   Distinct errors:
-   mysql: Can't connect to MySQL server on '10.0.1.9' (111)
-   mysql: Disk is full writing '/var/lib/mysql/ib_logfile0'
-   nginx: no live upstreams while connecting to upstream
-   nginx: upstream connect error (111: Connection refused)
-   nginx: upstream timed out (110: Connection timed out)
-   ```
-
-   Your hostname and username appear in the second line. The distinct errors are alphabetically sorted because `sort -u` sorts as well as deduplicates.
-
-5. Check the exit code:
-
-   ```bash
-   echo "Exit code: $?"
-   ```
-
-   Because the logs contain errors, the exit code is `1`. Now create an empty directory with no errors and run against it to see exit code `0`:
-
-   ```bash
-   mkdir logs/empty
-   ./logscan.sh logs/empty
-   echo "Exit code: $?"
-   ```
+   Your ONID and the EC2 hostname are visible in the response.
 </Steps>
 
 ## Going Further
 
-Your script covers the core concepts from the lecture. Two natural directions to continue:
+Your script configures a server correctly and is safe to re-run. The natural next upgrade is replacing the cron job with a systemd timer, which handles missed runs automatically.
 
-**Schedule it with cron.** Add your script to the crontab with `crontab -e` and schedule it to run every morning:
+On your EC2 instance, create two unit files: `nginx-health.service` (a `Type=oneshot` service that calls `/usr/local/bin/nginx-health.sh`) and `nginx-health.timer` (a timer with `OnCalendar=minutely` and `Persistent=true`). Enable and start the timer with `sudo systemctl enable --now nginx-health.timer`. Remove the cron file first (`sudo rm /etc/cron.d/nginx-health`) to avoid running both. Verify the timer is active with `systemctl list-timers`. Then stop the instance, restart it, and confirm that `Persistent=true` caused the timer to fire at boot rather than waiting for the next scheduled minute.
 
-```
-0  7  *  *  *  /home/youruser/scripts/logscan.sh /var/log >> /tmp/logscan-report.txt 2>&1
-```
-
-This runs at 7:00 AM every day, appending both stdout and stderr to a report file. Run `crontab -l` to verify the entry was saved. On a Linux server (your EC2 instance or Arch VM), cron will be running and will fire the job at the scheduled time.
-
-**Add interactive mode with `select`.** The `select` built-in generates a numbered menu. Try extending the script to let the user choose which log file to analyze when no argument is provided:
-
-```bash
-if [[ "$#" -eq 0 ]]; then
-    echo "Select a log directory:"
-    select choice in logs/ /var/log/ "Enter path manually"; do
-        case $choice in
-            "Enter path manually") read -rp "Path: " LOG_DIR ; break ;;
-            *) LOG_DIR="$choice" ; break ;;
-        esac
-    done
-fi
-```
-
-**Lint your script with ShellCheck.** [ShellCheck](https://www.shellcheck.net/) is a static analysis tool that reads shell scripts and flags bugs, quoting mistakes, and portability issues. Paste your `logscan.sh` into the web interface and read what it reports. Almost every Bash script you write has at least one thing ShellCheck will flag.
+Once you work through the next activity, compare each section of `setup.sh` to the Ansible playbook task by task. The `ensure_installed` function maps to the `apt` task, the heredoc maps to the `copy` task, the `sed` call maps to a `lineinfile` task, and the `systemctl restart` maps to a handler. Seeing the correspondence concretely shows why Ansible's idempotence matters at scale: what your script does explicitly, Ansible's modules do automatically.
