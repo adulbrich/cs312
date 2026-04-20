@@ -1,0 +1,142 @@
+---
+title: Text Editors
+description: "Terminal-based text editors for editing files on remote servers: nano for quick edits, vim for everyday use, and an overview of neovim, emacs, and helix."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+On a remote server there is no graphical interface. Editing a config file, writing a script, or fixing a mistake all happen in the terminal. `vi` or `vim` is guaranteed to be present on virtually every Unix system ever shipped, which makes it the one editor worth knowing even if you prefer something else for daily work. The others covered here are worth knowing about so you can make an informed choice for your own machine.
+
+## nano
+
+nano is the easiest terminal editor to get started with. It shows its own keyboard shortcuts at the bottom of the screen, so you do not need to memorize anything to use it. The `^` symbol in the menu means Ctrl.
+
+```bash
+nano /path/to/file.txt
+```
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+O` | Save (write out) |
+| `Ctrl+X` | Exit |
+| `Ctrl+K` | Cut the current line |
+| `Ctrl+U` | Paste |
+| `Ctrl+W` | Search |
+| `Ctrl+G` | Help |
+
+nano's limitation is that it is not present on all server images (minimal containers and Alpine-based images often omit it) and it has no modal editing, macros, or scripting. For a quick config file edit it is fine; for anything more, vim is the better investment.
+
+## vim
+
+vim is a modal editor: the same keys do different things depending on which mode you are in. This is disorienting at first but becomes fast once it is internalized, because your hands never leave the home row to reach for a mouse or arrow keys.
+
+### Modes
+
+vim has four modes you will use regularly:
+
+| Mode | How to enter | Purpose |
+|------|-------------|---------|
+| Normal | `Esc` (always) | Navigation and commands. The mode vim starts in. |
+| Insert | `i` before cursor, `a` after, `o` new line below, `O` new line above | Typing text |
+| Visual | `v` (character), `V` (full line) | Selecting text to copy, delete, or indent |
+| Command | `:` | Running named commands (save, quit, search-replace) |
+
+### Getting In and Out
+
+| Key | Action |
+|-----|--------|
+| `:w` | Save |
+| `:q` | Quit (fails if there are unsaved changes) |
+| `:wq` | Save and quit |
+| `:q!` | Quit without saving |
+
+<Aside type="tip" title="Stuck in vim?">
+Press `Esc` a few times to make sure you are in Normal mode, then type `:q!` and press Enter. This exits without saving. You can always start over.
+</Aside>
+
+### Navigation
+
+These work in Normal mode. Reaching for arrow keys works too, but the home-row keys are faster once you build the habit.
+
+| Key | Action |
+|-----|--------|
+| `h` / `j` / `k` / `l` | Left / down / up / right |
+| `w` / `b` | Jump forward / backward one word |
+| `0` / `$` | Jump to start / end of the current line |
+| `gg` / `G` | Jump to the first / last line of the file |
+| `Ctrl+d` / `Ctrl+u` | Scroll half a page down / up |
+| `:42` | Jump to line 42 |
+
+### Editing
+
+| Key | Action |
+|-----|--------|
+| `x` | Delete the character under the cursor |
+| `dd` | Delete (cut) the current line |
+| `[count]dd` | Delete [count] lines, starting with the current one |
+| `yy` | Yank (copy) the current line |
+| `[count]yy` | Yank [count] lines, starting with the current one |
+| `p` | Paste below the current line |
+| `u` | Undo |
+| `Ctrl+r` | Redo |
+| `=` | Auto-indent the current line or selection |
+| `gg=G` | Auto-indent the whole file |
+
+In Visual mode, select text first with `v` or `V`, then press `d` to delete or `y` to yank the selection.
+
+### Search and Replace
+
+| Key / Command | Action |
+|---|---|
+| `/text` | Search forward for "text" |
+| `?text` | Search backward |
+| `n` / `N` | Jump to next / previous match |
+| `:%s/old/new/g` | Replace every occurrence of "old" with "new" in the file |
+| `:%s/old/new/gc` | Same, but ask for confirmation before each replacement |
+
+### Useful commands
+
+| Command | What it does |
+|---------|-------------|
+| `:set number` | Show line numbers |
+| `:set nonumber` | Hide line numbers |
+| `:e filename` | Open another file in the current window |
+| `:syntax on` | Enable syntax highlighting |
+
+A few lines in `~/.vimrc` can make vim significantly more livable without turning it into a full IDE. At minimum, `set number` and `syntax on` are worth adding.
+
+## Neovim
+
+[Neovim](https://neovim.io/) is a modernized fork of vim with a Lua-based plugin system, a built-in LSP (Language Server Protocol) client for code completion and diagnostics, and better defaults out of the box. Every vim keybinding and command works unchanged in Neovim. The reason to be aware of it: much of the current vim plugin ecosystem targets Neovim specifically, and many online configurations assume it. It is not the right tool for a quick SSH session on an unfamiliar server, but it is a strong choice if you want vim as your primary editor on your own machine.
+
+## Emacs
+
+[Emacs](https://www.gnu.org/software/emacs/) is built on a different philosophy from vim: rather than a text editor, it is a programmable environment (in Emacs Lisp) that happens to edit text. It uses chord shortcuts (`Ctrl+x Ctrl+s` to save, `Ctrl+x Ctrl+c` to quit) rather than modal editing, and it maintains a persistent session where buffers, terminal sessions, and file trees all coexist. It has a devoted following, particularly in Lisp and functional programming communities. It is not a practical starting point for a sysadmin learning terminal editors, but it is worth knowing what it is when you encounter it.
+
+## Helix
+
+[Helix](https://helix-editor.com/) is a modal editor like vim but with a selection-first model: you select text first, then act on it, rather than vim's action-then-motion order. It ships with tree-sitter syntax highlighting and LSP support built in, with no plugin installation or configuration needed. Because it works well out of the box without any dotfiles, it is a practical choice for a sysadmin who wants something more capable than nano on a fresh server where their vim config is not available.
+
+Helix is not installed by default on most systems, so you would need to install it yourself. Its key bindings are similar enough to vim that the concepts transfer, but different enough that the table below is worth consulting.
+
+| Key / Command | Mode | Action |
+|---|---|---|
+| `i` | Normal | Insert before selection |
+| `a` | Normal | Insert after selection |
+| `o` / `O` | Normal | Open new line below / above |
+| `Esc` | Insert / Select | Return to Normal mode |
+| `v` | Normal | Enter Select (visual) mode |
+| `x` | Normal | Select the current line (extend selection) |
+| `d` | Normal / Select | Delete selection |
+| `c` | Normal / Select | Change (delete selection and enter Insert mode) |
+| `y` | Normal / Select | Yank (copy) selection |
+| `p` | Normal | Paste after cursor |
+| `u` | Normal | Undo |
+| `h` / `j` / `k` / `l` | Normal | Left / down / up / right |
+| `w` / `b` | Normal | Next / previous word |
+| `gg` / `ge` | Normal | First / last line |
+| `/` | Normal | Search |
+| `n` / `N` | Normal | Next / previous match |
+| `:w` | Command | Save |
+| `:q` | Command | Quit |
+| `Space` | Normal | Open command palette and file picker |
