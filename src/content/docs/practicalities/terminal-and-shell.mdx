@@ -19,7 +19,7 @@ Common shells:
 - **bash** (Bourne Again Shell): the default on most Linux servers and older macOS versions.
 - **zsh** (Z Shell): the default on modern macOS. Nearly identical to bash for basic usage.
 
-When you open Terminal on macOS or a WSL window on Windows, you are running a shell inside a terminal. The **prompt** (something like `ubuntu@ip-172-31-0-5:~$`) tells you who you are, where you are, and that the shell is ready for input.
+When you open Terminal on macOS or a WSL window on Windows, you are running a shell inside a terminal. The **prompt** (something like `ubuntu@ip-172-31-0-5:~$` or `ulbrical %`) tells you who you are, where you are, and that the shell is ready for input. The final prompt character is a useful clue: `$` usually means a regular user, `#` usually means the root user, and `%` is common in zsh's default prompt for a regular user. Prompts are customizable, so you may see other formats.
 
 ## Navigating the Filesystem
 
@@ -56,45 +56,113 @@ Everything in Linux is a file or a directory. Paths use forward slashes (`/`). T
 
 ## Searching
 
-| Command | What it does | Example |
-|---------|-------------|---------|
-| `grep` | Search for a pattern in files | `grep "error" /var/log/syslog` |
-| `grep -r` | Search recursively in a directory | `grep -r "DB_HOST" /var/www/` |
-| `grep -i` | Case-insensitive search | `grep -i "warning" log.txt` |
-| `find` | Locate files by name or attributes | `find /etc -name "*.conf"` |
-| `which` | Show the path of a command | `which python3` |
+`grep` searches files or command output for lines matching a pattern. It is one of the most-used commands in system administration.
 
-## Pipes and Redirection
+| Flag | What it does | Example |
+|------|-------------|---------|
+| _(none)_ | Search for a literal string | `grep "error" /var/log/syslog` |
+| `-r` | Search recursively through a directory | `grep -r "DB_HOST" /var/www/` |
+| `-i` | Case-insensitive match | `grep -i "warning" log.txt` |
+| `-v` | Invert: show lines that do NOT match | `grep -v "^#" config.txt` |
+| `-n` | Show line numbers | `grep -n "failed" auth.log` |
+| `-c` | Count matching lines instead of printing them | `grep -c "error" syslog` |
+| `-E` | Extended regular expressions (enables `+`, `?`, `\|`, `{n}`) | `grep -E "error\|warn" syslog` |
+| `-rn` | Recursive with line numbers (common combination) | `grep -rn "TODO" /var/www/` |
 
-The shell's real power is combining small commands. The **pipe** (`|`) sends one command's output as input to another.
-
-```bash
-# Count how many lines contain "error" in the syslog
-grep "error" /var/log/syslog | wc -l
-
-# Show the 10 largest files in /var
-du -ah /var | sort -rh | head -10
-
-# Find which process is listening on port 80
-ss -tlnp | grep :80
-```
-
-**Redirection** sends output to a file instead of the screen:
+`find` locates files by name, type, or other attributes:
 
 ```bash
-echo "hello" > file.txt     # Write (overwrite) to file
-echo "world" >> file.txt    # Append to file
-command 2> errors.log        # Redirect errors only
-command > out.log 2>&1       # Redirect both stdout and stderr
+find /etc -name "*.conf"           # all .conf files under /etc
+find /var/log -name "*.log" -mtime -1   # log files modified in the last day
+find /tmp -type f -size +10M       # files larger than 10 MB in /tmp
 ```
+
+`which` tells you where the shell would find a command:
+
+```bash
+which python3       # /usr/bin/python3
+```
+
+## Pipes, Redirection, and Streams
+
+Every Unix program connects to three standard streams by default:
+
+- **stdin** (standard input, file descriptor 0): where the program reads input. By default, the keyboard.
+- **stdout** (standard output, file descriptor 1): where the program sends its normal output. By default, the terminal.
+- **stderr** (standard error, file descriptor 2): where the program sends error messages. Also the terminal by default, but kept separate from stdout so that errors do not corrupt piped output.
+
+The distinction between stdout and stderr matters when you redirect output to a file or pipe it to another program. Only stdout flows through a pipe by default. Error messages still appear on the terminal even when normal output is redirected elsewhere, which is usually what you want.
+
+### Pipes
+
+The pipe operator `|` connects one command's stdout directly to the next command's stdin. Each program does one thing; the shell arranges the plumbing:
+
+```bash
+grep "error" /var/log/syslog | wc -l       # count lines containing "error"
+du -ah /var | sort -rh | head -10          # 10 largest items in /var
+ps aux | grep nginx | grep -v grep         # find nginx processes
+```
+
+### Redirection
+
+Redirection sends a stream to a file instead of the terminal, or takes file content as input instead of the keyboard:
+
+```bash
+echo "hello" > file.txt          # write stdout to file (overwrites)
+echo "world" >> file.txt         # append stdout to file
+command 2> errors.log            # redirect stderr only to a file
+command > out.log 2>&1           # redirect both stdout and stderr to the same file
+command >> out.log 2>&1          # append both (the standard pattern for cron job logs)
+```
+
+`2>&1` means "send file descriptor 2 (stderr) to wherever file descriptor 1 (stdout) is currently going." Order matters: write `> file 2>&1`, not `2>&1 > file`. The second form redirects stderr to the terminal first and then moves stdout to the file, which is almost certainly not what you intend.
+
+### Producing Output
+
+`echo` prints a string followed by a newline. It is sufficient for simple messages:
+
+```bash
+echo "Backup complete"
+echo "Error: file not found" >&2    # send to stderr instead of stdout
+```
+
+`printf` gives precise control over formatting. It does not append a newline automatically, so you add `\n` explicitly:
+
+```bash
+printf "%-20s %s\n" "Directory" "Status"
+printf "%-20s %s\n" "/var/www/html" "OK"
+printf "%d files processed\n" 42
+```
+
+### Reading Input
+
+The `read` builtin captures a line from stdin and stores it in a variable. Use `-r` to disable backslash interpretation (almost always what you want), and `-p` to display a prompt:
+
+```bash
+read -rp "Enter the destination path: " DEST
+echo "You entered: $DEST"
+```
+
+Inside a script, `read` is commonly used in a `while` loop to process a file or command output line by line.
+
+### Process Substitution
+
+Process substitution (`<(command)`) makes the output of a command appear as a file path. It is useful when a command expects file arguments rather than piped input:
+
+```bash
+diff <(ls /etc/nginx/conf.d) <(ls /etc/nginx/sites-enabled)
+```
+
+Both `ls` commands run concurrently and `diff` compares their outputs as if they were two files. Process substitution is a Bash-specific feature; it is not available in plain POSIX `sh` scripts.
 
 ## File Permissions
 
-Every file has an owner, a group, and permissions for read (`r`), write (`w`), and execute (`x`).
+Every file has an owner, a group, and permissions for read (`r`), write (`w`), and execute (`x`). In `ls -l` output, the first character shows the file type.
 
 ```bash
 ls -l script.sh
 # -rwxr-xr-- 1 ubuntu www-data 512 Mar 15 script.sh
+# ^            file type (- = regular file, d = directory, l = symbolic link)
 #  ^^^         owner permissions (rwx)
 #     ^^^      group permissions (r-x)
 #        ^^^   others permissions (r--)
@@ -108,9 +176,9 @@ ls -l script.sh
 
 The numeric form (like `755`) encodes permissions as three digits: owner, group, others. Each digit is the sum of read (4), write (2), and execute (1). So `755` means `rwxr-xr-x`.
 
-## `sudo`
+## `sudo` and `su`
 
-`sudo` runs a command as the superuser (root). Most system administration tasks require it.
+`sudo` runs a single command as the superuser (root). Most system administration tasks require it.
 
 ```bash
 sudo apt update              # Update package lists
@@ -118,11 +186,21 @@ sudo systemctl restart nginx # Restart a service
 sudo vim /etc/hosts          # Edit a system file
 ```
 
-Use `sudo` only when necessary. Running everything as root is a security risk.
+Use `sudo` only when necessary. Running everything as root is a security risk because any mistake, or any compromised command, has unrestricted access to the system.
+
+`su` (substitute user) switches your entire session to another user rather than running a single command. `su -` (with a hyphen) switches to root and loads a full login environment, including root's PATH and profile:
+
+```bash
+su -              # become root (requires root's password)
+su - deploy       # become the "deploy" user
+exit              # return to your original user
+```
+
+On most modern Linux servers, `sudo` is preferred over `su -` because it leaves an audit trail of who ran what and does not require sharing the root password. `su` is more common in environments where sudo is not configured.
 
 ## Text Editors
 
-You will need to edit files on remote servers where there is no graphical interface. Two terminal editors are available on virtually every Linux system.
+You will often need to edit files on remote servers where there is no graphical interface. A vi-style editor is almost always present, and `nano` is also common, but not guaranteed on minimal images.
 
 ### nano (beginner-friendly)
 
@@ -159,8 +237,10 @@ vim has **modes**. You start in **Normal mode** (for navigation and commands). P
 | `:q!` | Normal | Quit without saving |
 | `dd` | Normal | Delete the current line |
 | `u` | Normal | Undo |
-| `/text` | Normal | Search for "text" |
-| `n` | Normal | Jump to next search match |
+| `/text` | Normal | Search forward for "text" |
+| `?text` | Normal | Search backward for "text" |
+| `n` | Normal | Jump to next match (in the search direction) |
+| `N` | Normal | Jump to previous match (opposite direction) |
 
 <Aside type="tip">
 If you get stuck in vim, press `Esc` a few times, then type `:q!` and press Enter. This will exit without saving. You can always start over.
@@ -176,19 +256,70 @@ Package managers install, update, and remove software. The package manager depen
 | Amazon Linux/RHEL | `dnf` / `yum` | `sudo dnf install nginx` |
 | macOS | `brew` | `brew install wget` |
 
-Always run `sudo apt update` (or equivalent) before installing packages to refresh the package list.
+On Debian and Ubuntu, run `sudo apt update` before installing packages to refresh the package list. Other package managers handle repository metadata differently.
 
 ## Environment Variables
 
-Environment variables store configuration that programs can read. They are written in `ALL_CAPS` by convention.
+Environment variables store configuration that programs and scripts can read. They are written in `ALL_CAPS` by convention. Every process has its own set of environment variables, inherited from the process that started it. When you open a terminal, your shell inherits variables set by the system and by your shell configuration files. When you run a command, that command inherits your shell's environment.
 
 ```bash
-echo $HOME         # Print your home directory
-echo $PATH         # Print the list of directories the shell searches for commands
-export MY_VAR=42   # Set a variable for the current session
+echo $HOME         # your home directory
+echo $USER         # your username
+echo $SHELL        # your current shell
+printenv           # print all environment variables
 ```
 
-Variables set with `export` last only until you close the terminal. To make them permanent, add the `export` line to your shell configuration file (`~/.bashrc` for bash, `~/.zshrc` for zsh).
+### Shell Variables vs. Environment Variables
+
+A plain assignment creates a shell variable, local to the current shell session:
+
+```bash
+MY_VAR="hello"
+echo $MY_VAR       # hello
+bash -c 'echo $MY_VAR'   # (empty — child process does not see it)
+```
+
+Adding `export` promotes it to an environment variable, which child processes inherit:
+
+```bash
+export MY_VAR="hello"
+bash -c 'echo $MY_VAR'   # hello
+```
+
+Scripts you run in the terminal, CLI tools, and programs launched from the shell all run as child processes. They see exported variables but not plain shell variables.
+
+### Persistence
+
+Variables set in a terminal session disappear when you close the terminal. To make them permanent, add the `export` line to your shell configuration file:
+
+- **bash**: `~/.bashrc` (interactive non-login shells, the common case on Linux servers) or `~/.bash_profile` (login shells).
+- **zsh**: `~/.zshrc`.
+
+After editing the file, reload it in your current session:
+
+```bash
+source ~/.bashrc   # bash
+source ~/.zshrc    # zsh
+```
+
+### PATH
+
+`PATH` is a colon-separated list of directories the shell searches when you type a command. The shell tries each directory in order and runs the first match:
+
+```bash
+echo $PATH
+# /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+
+which python3      # shows which python3 the shell would run
+```
+
+To add a directory to PATH for the current session:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Place the new directory before `$PATH` (at the start) to make it take priority over system-installed versions. Add the same line to `~/.bashrc` or `~/.zshrc` to make it permanent.
 
 ## SSH
 
@@ -217,8 +348,8 @@ When you encounter an unfamiliar command, these are the fastest ways to learn wh
 
 ```bash
 man ls              # Open the manual page for "ls" (press q to quit)
-ls --help           # Print a brief help summary
-tldr tar            # Community-maintained cheat sheets (install with "brew install tldr" or "sudo apt install tldr")
+type cd             # Ask the shell what "cd" is (builtin, alias, function, or executable)
+tldr tar            # Community-maintained cheat sheets
 ```
 
-Reading manual pages (`man`) is a core skill. The format is dense at first but becomes natural with practice.
+Reading manual pages (`man`) is a core skill. The format is dense at first but becomes natural with practice. Many commands also support `-h` or `--help`, but those flags are not standardized and can differ between Linux and macOS. If you want TLDR pages, install a client for your platform first. For example, Homebrew currently packages `tlrc` on macOS, while Linux distributions may package `tldr`, `tealdeer`, or another client.
