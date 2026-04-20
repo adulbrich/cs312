@@ -9,7 +9,7 @@ draft: true
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts into practice the concepts from the [Configuration Management with Ansible](/lectures/configuration-management/) lecture. In the scripting activity, you configured nginx on your EC2 instance by running a Bash script directly on the server: checking packages, writing files, and restarting services step by step. Here you will cover the same ground declaratively with Ansible, targeting the server from your control machine over SSH without logging in. By the end, you will have the same server state your script produced, reached through a playbook you can re-run safely and commit to version control.
+This activity puts into practice the concepts from the [Configuration Management with Ansible](/lectures/configuration-management/) lecture. In the scripting activity, you configured the core web-server pieces imperatively from inside the EC2 instance and also added a cron health check. Here you will reimplement the core nginx-and-page configuration declaratively with Ansible, targeting the server from your control machine over SSH without logging in. By the end, nginx will be installed, running, and serving your custom page through a playbook you can re-run safely and commit to version control.
 
 ## What You Will Need
 

@@ -1,6 +1,6 @@
 ---
 title: "Automate Your Server Setup"
-description: "Write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and schedules a health check with cron: the same work the next activity automates with Ansible, done the imperative way first."
+description: "Write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and adds a cron-based health check. In the next activity, you will reimplement the core web-server configuration declaratively with Ansible."
 sidebar:
   order: 8
 draft: true
@@ -9,7 +9,7 @@ draft: true
 import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts into practice the concepts from the [Shell Scripting and Automation Basics](/lectures/shell-scripting-and-automation-basics/) lecture. You will write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and schedules a health check with cron. By the end, you will have a server configured by a single script run, and you will understand exactly what Ansible automates declaratively in the next activity.
+This activity puts into practice the concepts from the [Shell Scripting and Automation Basics](/lectures/shell-scripting-and-automation-basics/) lecture. You will write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and adds a cron-based health check. By the end, you will have a working imperative setup script you can rerun safely and compare against the declarative Ansible workflow in the next activity.
 
 ## What You Will Need
 
@@ -159,10 +159,25 @@ Create `setup.sh` with a shebang, safe defaults, and argument validation. You wi
    ```
 
    You will see the header line with your ONID and hostname, then the trap message as the script exits. Both lines appear even though the script succeeded: the trap fires on every exit, not just failures.
+
+6. Still in the SSH session (not inside `setup.sh`), see what `set -u` actually prevents. Run these two commands:
+
+   ```bash
+   bash -c 'echo "no set -u:   [$TYPO_VAR]"'
+   bash -c 'set -u; echo "with set -u: [$TYPO_VAR]"'
+   ```
+
+   The first prints `no set -u:   []`, silently substituting an empty string. The second aborts immediately:
+
+   ```
+   bash: TYPO_VAR: unbound variable
+   ```
+
+   This is what `set -u` in `setup.sh` buys you: a typo in a variable name fails loudly at the point of the mistake rather than propagating an empty value to a later `cp`, `rm`, or `apt-get` call.
 </Steps>
 
 <ActivityQuestion>
-The `trap ... EXIT` fires on every exit, including a clean one, so "Exiting. Log:" appears even when the script finishes normally. Two approaches fix this: checking `$?` inside the handler (it holds the exit code when the trap fires), or calling `trap - EXIT` at the very end of the script to clear the handler before the normal exit. Which approach would you use, and why?
+The `trap ... EXIT` fires on every exit, including a clean one, so "Exiting. Log:" appears even when the script finishes normally. Two approaches fix this: checking `$?` inside the handler (it holds the exit code when the trap fires), or calling `trap - EXIT` at the very end of the script to clear the handler before the normal exit. Which approach would you use, and why? How does `set -u` (which you observed in step 6) differ from `trap` in what it protects against?
 </ActivityQuestion>
 
 ---
@@ -228,6 +243,14 @@ Before installing anything, the script should examine the system. Add a logging 
    ```
 
    You should see `bash: installed` and `doesnotexist: not installed`.
+
+6. Run `grep -E` directly against a package that is already installed so you can see the status codes the pattern is matching:
+
+   ```bash
+   dpkg -l bash | grep -E "^ii|^rc"
+   ```
+
+   You should see a line starting with `ii`, which means the package is installed and configured. If you later remove a package without purging its configuration files, its line would begin with `rc` instead. The `is_installed` function checks for `^ii` specifically because an `rc` package is not usable even though its name still appears in the dpkg database. The `^` anchor ensures you are matching the status column at the start of the line, not the string `ii` anywhere in the package name or description.
 </Steps>
 
 <ActivityQuestion>
@@ -238,7 +261,7 @@ Both `grep -q "^ii"` and `grep "^ii" > /dev/null` suppress output, but they beha
 
 ## Install Packages
 
-Add an `ensure_installed` function that checks before acting, then loop over a list of required packages. The script will reach the same final state whether it runs once or ten times.
+Add an `ensure_installed` function that checks before acting, then loop over a list of required packages. For package installation, the script will reach the same final state whether it runs once or ten times.
 
 <Steps>
 1. Add `ensure_installed` to `setup.sh`, right below `is_installed`:
@@ -261,6 +284,9 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 2. Add a package list and loop below the disk check block:
 
    ```bash
+   log "Refreshing apt package metadata..."
+   apt-get update >> "$LOG_FILE" 2>&1
+
    PACKAGES=("nginx" "curl")
 
    log "Checking required packages..."
@@ -268,6 +294,8 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
        ensure_installed "$pkg"
    done
    ```
+
+   Refreshing package metadata first makes the install step more reliable on a fresh or older image.
 
 3. Run the script:
 
@@ -278,10 +306,11 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
    On the first run, nginx will be downloaded and installed. You should see:
 
    ```
-   [10:17:01] Checking required packages...
-   [10:17:01] Installing: nginx
-   [10:17:05] Done: nginx
-   [10:17:05] OK (already installed): curl
+   [10:17:01] Refreshing apt package metadata...
+   [10:17:03] Checking required packages...
+   [10:17:03] Installing: nginx
+   [10:17:07] Done: nginx
+   [10:17:07] OK (already installed): curl
    ```
 
 4. Run the script a second time:
@@ -294,14 +323,14 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 </Steps>
 
 <ActivityQuestion>
-Your `ensure_installed` function achieves idempotence by calling `dpkg -l` to check the current state before acting. The Ansible `apt` module achieves the same result but differently. What is the fundamental difference in how each one decides whether to install? What would have to happen for `ensure_installed` to give a wrong answer?
+Your `ensure_installed` function makes package installation idempotent by calling `dpkg -l` to check the current state before acting. The Ansible `apt` module achieves the same result but differently. What is the fundamental difference in how each one decides whether to install? What would have to happen for `ensure_installed` to give a wrong answer?
 </ActivityQuestion>
 
 ---
 
 ## Configure nginx and Deploy Your Page
 
-With nginx installed, configure it and deploy a page that identifies the server. This section uses `sed` to modify the nginx configuration file and a heredoc to write the HTML.
+With nginx installed, configure it and deploy a page that identifies the server. This section uses `sed` to modify the nginx configuration file and a heredoc to write the HTML, and because the page includes a deployment timestamp and the restart is unconditional, rerunning it will update the page and restart nginx again.
 
 <Steps>
 1. Confirm that the default nginx configuration is valid before modifying it:
@@ -323,7 +352,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
    sed -i "s|server_name [^;]*;|server_name ${CURRENT_HOST};|" "$NGINX_DEFAULT"
    ```
 
-   `sed -i` edits the file in place. The pattern `server_name [^;]*;` matches any `server_name` directive up to the semicolon, whether it contains the default `_` placeholder or a hostname from a previous run. The `|` delimiters replace the usual `/` to avoid any need to escape slashes in the hostname string.
+   `sed -i` edits the file in place. The default delimiter for a `sed` substitution is `/`: `s/pattern/replacement/`. Using `|` here swaps that delimiter so you do not have to escape any slashes that might appear in a hostname or path. The pattern `[^;]*` is a negated character class: it matches any run of characters that are not a semicolon, stopping at the first `;`. Using `.*` instead would be greedy and could overshoot on a line like `server_name _ ; # default;`, matching past the intended semicolon and into the comment.
 
 3. Add the index page right after the `sed` line:
 
@@ -342,7 +371,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
    EOF
    ```
 
-   The heredoc writes multiple lines in a single statement. Variables inside expand immediately when the script runs: `$ONID` comes from the argument you validated at the start, `$CURRENT_HOST` from the `$(hostname)` call above, and `$(date)` records the deployment time.
+   The heredoc writes multiple lines in a single statement. Variables inside expand immediately when the script runs: `$ONID` comes from the argument you validated at the start, `$CURRENT_HOST` from the `$(hostname)` call above, and `$(date)` records the deployment time. Because the page includes `$(date)`, rerunning the script writes a fresh timestamp each time.
 
 4. Add the config test, restart, and verification right after the heredoc:
 
@@ -359,7 +388,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
    fi
    ```
 
-   Notice `/usr/bin/curl` rather than `curl`. This follows the absolute-path discipline from Section 1: a habit that is also required in the cron context coming up next.
+   Notice `/usr/bin/curl` rather than `curl`. This follows the absolute-path discipline from Section 1: a habit that is also required in the cron context coming up next. The unconditional `systemctl restart nginx` is similarly imperative: unlike an Ansible handler, it runs every time whether the configuration changed or not.
 
 5. Run the script:
 
@@ -385,11 +414,15 @@ With nginx installed, configure it and deploy a page that identifies the server.
    The response should be your HTML page with your ONID and the EC2 hostname.
 </Steps>
 
+<ActivityQuestion>
+The `sed` substitution uses `|` as a delimiter instead of the default `/`. What is the default delimiter, and when would you need to switch to something else? The pattern `[^;]*` uses a negated character class. What exactly does it match, and why would `.*` produce a wrong result on a line like `server_name _ ; # old config;`?
+</ActivityQuestion>
+
 ---
 
 ## Schedule a Health Check
 
-The last piece is a health-check script that cron runs every minute, recording the HTTP status code from nginx. This section also demonstrates how to install scripts and cron jobs as part of a server setup.
+The last piece is a health-check script that cron runs every minute, recording the HTTP status code from nginx. This goes one step beyond the paired Ansible activity so you can see one more example of what a single imperative setup script can bundle together.
 
 <Steps>
 1. Add the health-check installation block to `setup.sh`, below the nginx verification:
@@ -468,7 +501,7 @@ Your cron job uses `* * * * *`, running every minute. If your EC2 instance is st
 
 ## Your Configured Server
 
-Run the complete script one final time to confirm it is fully idempotent, then verify the result from your own machine.
+Run the complete script one final time and notice which parts detect state versus which parts simply run again, then verify the result from your own machine.
 
 <Steps>
 1. Run the script again without changing anything:
@@ -477,7 +510,7 @@ Run the complete script one final time to confirm it is fully idempotent, then v
    sudo ./setup.sh your-onid
    ```
 
-   Every package line should show `OK (already installed)`. The nginx config, page, and cron job are all already in place. Nothing should reinstall, redeploy, or restart.
+   Every package line should show `OK (already installed)`. The cron file and health-check script are rewritten with the same content, the page gets a new deployment timestamp, and nginx restarts again. That contrast is the point: some parts of this script check state first, while other parts are intentionally imperative.
 
 2. Exit the SSH session:
 
@@ -506,6 +539,6 @@ Run the complete script one final time to confirm it is fully idempotent, then v
 
 Your script configures a server correctly and is safe to re-run. The natural next upgrade is replacing the cron job with a systemd timer, which handles missed runs automatically.
 
-On your EC2 instance, create two unit files: `nginx-health.service` (a `Type=oneshot` service that calls `/usr/local/bin/nginx-health.sh`) and `nginx-health.timer` (a timer with `OnCalendar=minutely` and `Persistent=true`). Enable and start the timer with `sudo systemctl enable --now nginx-health.timer`. Remove the cron file first (`sudo rm /etc/cron.d/nginx-health`) to avoid running both. Verify the timer is active with `systemctl list-timers`. Then stop the instance, restart it, and confirm that `Persistent=true` caused the timer to fire at boot rather than waiting for the next scheduled minute.
+On your EC2 instance, remove the cron file first (`sudo rm /etc/cron.d/nginx-health`) so you do not run both schedulers at once. Then create two unit files: `nginx-health.service` (a `Type=oneshot` service that calls `/usr/local/bin/nginx-health.sh`) and `nginx-health.timer` (a timer with `OnCalendar=minutely` and `Persistent=true`). After writing them, run `sudo systemctl daemon-reload`, then enable and start the timer with `sudo systemctl enable --now nginx-health.timer`. Verify the timer is active with `systemctl list-timers`. Then stop the instance, restart it, and confirm that `Persistent=true` caused the timer to fire at boot rather than waiting for the next scheduled minute.
 
-Once you work through the next activity, compare each section of `setup.sh` to the Ansible playbook task by task. The `ensure_installed` function maps to the `apt` task, the heredoc maps to the `copy` task, the `sed` call maps to a `lineinfile` task, and the `systemctl restart` maps to a handler. Seeing the correspondence concretely shows why Ansible's idempotence matters at scale: what your script does explicitly, Ansible's modules do automatically.
+Once you work through the next activity, compare the shared web-server pieces of `setup.sh` to the Ansible playbook task by task. The `ensure_installed` function maps to the `apt` task, the heredoc maps to the `copy` task, the `sed` call maps to a `lineinfile` task, and the `systemctl restart` maps loosely to a handler. Seeing the correspondence concretely shows why Ansible's idempotence matters at scale: what your script does explicitly, Ansible's modules do automatically, and Ansible's handler runs only when a task actually changed.
