@@ -97,14 +97,21 @@ Your documentation must include:
 - Backup and restore runbook for S3.
 - Upgrade and rollback runbook with explicit checks.
 
+## Hints
+
+These pointers address the most common friction points so you can focus on the operational skills this assignment is really testing.
+
+- The [`itzg/minecraft-server`](https://docker-minecraft-server.readthedocs.io/en/latest/) image is the most widely used Minecraft Docker image and handles EULA acceptance, version selection, and MOTD via environment variables. Set your MOTD with `-e MOTD="Your Name - CS312"` (or the equivalent in your Compose file).
+- S3 backup and restore on AWS Academy: use `aws s3 cp` to upload and download. A tar archive of the world directory is a sufficient backup artifact.
+
 ## What You'll Submit
 
 1. **Operator Runbook (PDF)** containing all required documentation sections, the container deployment definition (`docker-compose.yml` or equivalent as a code block), and ECR repository URI with versioning policy and image provenance notes.
-2. **Narrated screen recording (max 3 minutes)**. Your server MOTD must include your name or student ID. Submit timestamps alongside the video (e.g., "Checkpoint 1: 0:00, Checkpoint 2: 0:38, ..."):
-   1. Show running container, `nmap` reachability on 25565/tcp and MOTD, and reboot auto-recovery.
-   2. Persistence proof: place a marker, restart/recreate the container, show marker survives.
-   3. Upgrade to a new ECR image version, then rollback to the previous version.
-   4. S3 backup upload and restore demonstration.
+2. **Narrated screen recording (max 3 minutes)**. Your server MOTD must include your name or student ID. **Submit timestamps alongside the video** (e.g., "Checkpoint 1: 0:00, Checkpoint 2: 0:38, ..."):
+   1. Show the running container (`docker ps` or equivalent), run `nmap -sV -Pn -p T:25565 <public-ip>` to confirm reachability and display your custom MOTD, then reboot the host and confirm the container returns automatically.
+   2. Place a marker file in the world directory (`touch world/PERSISTENCE_TEST`) and note the modification time of `level.dat`, stop and remove the container, recreate it from the same image, and show the marker file still exists with `level.dat` timestamp unchanged.
+   3. Upgrade to a newer pinned ECR image version and confirm the service is healthy (e.g., `nmap` or container status), then roll back to the prior known-good version and confirm it runs correctly.
+   4. Upload a world data backup artifact to S3, then restore from that backup to the live service and confirm the service is healthy after restore.
 
 ## Rubric
 
