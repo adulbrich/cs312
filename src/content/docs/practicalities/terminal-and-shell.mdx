@@ -7,6 +7,8 @@ import { Aside } from '@astrojs/starlight/components';
 
 If you have never used a terminal before, this page will get you oriented. If you have, use it as a quick reference. This is not a comprehensive guide; it covers enough to be productive in this course.
 
+Unless noted otherwise, path and log file examples below assume a Linux server rather than macOS.
+
 <Aside type="tip">
 For a deeper treatment of these topics, see MIT's [The Missing Semester of Your CS Education](https://missing.csail.mit.edu/).
 </Aside>
@@ -23,7 +25,7 @@ When you open Terminal on macOS or a WSL window on Windows, you are running a sh
 
 ## Navigating the Filesystem
 
-Everything in Linux is a file or a directory. Paths use forward slashes (`/`). The root of the filesystem is `/`.
+In Unix-like systems, most things you interact with are represented as files or directories. The filesystem also includes other file types, such as symbolic links, devices, and sockets. Paths use forward slashes (`/`). The root of the filesystem is `/`.
 
 | Command | What it does | Example |
 |---------|-------------|---------|
@@ -66,8 +68,14 @@ Everything in Linux is a file or a directory. Paths use forward slashes (`/`). T
 | `-v` | Invert: show lines that do NOT match | `grep -v "^#" config.txt` |
 | `-n` | Show line numbers | `grep -n "failed" auth.log` |
 | `-c` | Count matching lines instead of printing them | `grep -c "error" syslog` |
-| `-E` | Extended regular expressions (enables `+`, `?`, `\|`, `{n}`) | `grep -E "error\|warn" syslog` |
+| `-E` | Extended regular expressions (enables `+`, `?`, alternation, `{n}`) | `grep -E "errors?" syslog` |
 | `-rn` | Recursive with line numbers (common combination) | `grep -rn "TODO" /var/www/` |
+
+For alternation with extended regular expressions, use `|`:
+
+```bash
+grep -E "error|warn" syslog
+```
 
 `find` locates files by name, type, or other attributes:
 
@@ -136,12 +144,15 @@ printf "%d files processed\n" 42
 
 ### Reading Input
 
-The `read` builtin captures a line from stdin and stores it in a variable. Use `-r` to disable backslash interpretation (almost always what you want), and `-p` to display a prompt:
+The `read` builtin captures a line from stdin and stores it in a variable. Use `-r` to disable backslash interpretation (almost always what you want). Prompt flags differ between shells, so the most portable pattern is to print the prompt separately:
 
 ```bash
-read -rp "Enter the destination path: " DEST
+printf "Enter the destination path: "
+read -r DEST
 echo "You entered: $DEST"
 ```
+
+In bash, `read -rp "Enter the destination path: " DEST` combines those two steps.
 
 Inside a script, `read` is commonly used in a `while` loop to process a file or command output line by line.
 
@@ -153,7 +164,7 @@ Process substitution (`<(command)`) makes the output of a command appear as a fi
 diff <(ls /etc/nginx/conf.d) <(ls /etc/nginx/sites-enabled)
 ```
 
-Both `ls` commands run concurrently and `diff` compares their outputs as if they were two files. Process substitution is a Bash-specific feature; it is not available in plain POSIX `sh` scripts.
+Both `ls` commands run concurrently and `diff` compares their outputs as if they were two files. Process substitution is supported by shells such as bash, zsh, and ksh, but it is not available in plain POSIX `sh` scripts.
 
 ## File Permissions
 
@@ -195,6 +206,8 @@ su -              # become root (requires root's password)
 su - deploy       # become the "deploy" user
 exit              # return to your original user
 ```
+
+On Ubuntu and some other distributions, the root account is locked by default, so `su -` to root may fail unless a root password has been set.
 
 On most modern Linux servers, `sudo` is preferred over `su -` because it leaves an audit trail of who ran what and does not require sharing the root password. `su` is more common in environments where sudo is not configured.
 
@@ -289,7 +302,7 @@ scp file.txt ubuntu@54.123.45.67:/home/ubuntu/
 scp ubuntu@54.123.45.67:/var/log/syslog ./syslog-copy.txt
 ```
 
-If you get a "permission denied" error on your key file, fix its permissions:
+If SSH says your private key permissions are too open and refuses to use it, fix the permissions:
 
 ```bash
 chmod 400 ~/Downloads/cs312-key.pem
