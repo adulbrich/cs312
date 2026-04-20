@@ -90,7 +90,7 @@ export AWS_REGION="us-west-2"
 
 `SCRIPT_NAME` is a shell variable: other programs your script launches will not see it. `BACKUP_ROOT` and `AWS_REGION` are environment variables: any command invoked by the script inherits them. The distinction matters whenever your script calls a tool that reads configuration from the environment, such as the `aws` CLI, `git`, or `rsync`. Your script also inherits the environment of whatever launched it, which is why variables set in your shell profile are available in scripts you run interactively.
 
-**PATH in non-interactive contexts.** The `PATH` variable lists directories the shell searches when you type a command without a full path. Your interactive shell has a rich `PATH` built from profile files. Cron, systemd services, and other non-interactive launchers set a minimal `PATH`, typically just `/usr/bin:/bin`. This is why a script that works perfectly in your terminal can fail under cron with "command not found": the command exists on the system, but cron's `PATH` does not include its directory. The reliable fix is to use absolute paths everywhere in scripts intended for non-interactive use, or to set `PATH` explicitly at the top of the script. The `env` command prints the full current environment, which makes it a useful diagnostic when a script behaves differently across contexts: run `env` in both an interactive shell and a cron job to see what is missing.
+**PATH in non-interactive contexts.** The `PATH` variable lists directories the shell searches when you type a command without a full path. Your interactive shell has a rich `PATH` built from profile files. Cron often sets a minimal `PATH`, typically just `/usr/bin:/bin`. systemd services also run with a controlled environment that often differs from your interactive shell, though the exact `PATH` depends on the unit and the distribution. This is why a script that works perfectly in your terminal can fail under cron or systemd with "command not found": the command exists on the system, but the service environment does not include its directory. The reliable fix is to use absolute paths everywhere in scripts intended for non-interactive use, or to set `PATH` explicitly at the top of the script. The `env` command prints the full current environment, which makes it a useful diagnostic when a script behaves differently across contexts: run `env` in both an interactive shell and a cron job to see what is missing.
 
 **Sourcing versus executing.** Running `./script.sh` spawns a child process that inherits a copy of your environment, executes the script, and exits. Any variables the script sets or exports are discarded with that process when it returns. Running `source script.sh` (or equivalently `. script.sh`) runs the script's commands directly in the current shell, so any `export` statements take effect in your working session. Environment setup scripts, the kind that configure your shell for a project or a deployment, are always sourced rather than executed for exactly this reason.
 
@@ -212,7 +212,7 @@ The same construct handles all integer arithmetic: `(( count += 1 ))`, `(( total
 
 ## Functions
 
-As a script grows, the same pattern tends to recur: validate that something exists, perform an operation on it, log the outcome. Without functions, that pattern gets copied and pasted wherever it is needed, and a bug fix or improvement has to be applied everywhere the copy appears. Functions solve this by naming a block of logic so it can be called like any other command. They accept arguments, communicate success or failure through an exit code, and operate in their own local scope so internal variables do not accidentally overwrite variables in the calling script. A well-factored Bash script reads much like a program in any other language: a main block that drives the logic, and named functions that handle the reusable parts.
+As a script grows, the same pattern tends to recur: validate that something exists, perform an operation on it, log the outcome. Without functions, that pattern gets copied and pasted wherever it is needed, and a bug fix or improvement has to be applied everywhere the copy appears. Functions solve this by naming a block of logic so it can be called like any other command. They accept arguments, communicate success or failure through an exit code, and can use local variables so internal names do not accidentally overwrite global state. A Bash function does not run in a separate process, so it shares the shell's working directory and most shell state with the caller. A well-factored Bash script reads much like a program in any other language: a main block that drives the logic, and named functions that handle the reusable parts.
 
 ```bash
 #!/usr/bin/env bash
@@ -252,7 +252,7 @@ By default, Bash does not stop when a command fails. If a `cp` returns a non-zer
 set -euo pipefail
 ```
 
-Each option addresses a distinct failure mode. `set -e` (errexit) causes the script to exit immediately if any command returns a non-zero exit code. Without it, a failing `cp` is silently ignored and the script keeps running. `set -u` (nounset) causes the script to exit if you reference an undefined variable, catching typos like `$SORUCE` instead of `$SOURCE`. `set -o pipefail` changes pipeline semantics: without it, `cmd1 | cmd2` succeeds as long as `cmd2` succeeds, even if `cmd1` fails; with `pipefail`, the pipeline fails if any command in the chain fails.
+Each option addresses a distinct failure mode. `set -e` (errexit) causes the script to exit on an unhandled non-zero status. Bash has important exceptions here: commands used in `if`, `while`, `until`, `&&`, `||`, and `!` contexts are being tested rather than treated as fatal. Without `set -e`, a failing `cp` is silently ignored and the script keeps running. `set -u` (nounset) causes the script to exit if you reference an undefined variable, catching typos like `$SORUCE` instead of `$SOURCE`. `set -o pipefail` changes pipeline semantics: without it, `cmd1 | cmd2` succeeds as long as `cmd2` succeeds, even if `cmd1` fails; with `pipefail`, the pipeline fails if any command in the chain fails.
 
 Together, these three options catch the vast majority of scripting bugs at the point of failure rather than letting them cascade into more confusing symptoms downstream. [ShellCheck](https://www.shellcheck.net/) is a static analysis tool that complements these runtime options by catching quoting errors, undefined variable references, and other common mistakes before the script runs at all; running it on any script before deploying is a reliable way to surface the class of bugs that `set -euo pipefail` cannot detect.
 
@@ -299,7 +299,7 @@ backup_dir() {
 }
 
 rotate_old() {
-    find "$BACKUP_ROOT" -maxdepth 1 -type d -mtime +"$KEEP_DAYS" -exec rm -rf {} +
+    find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime +"$KEEP_DAYS" -exec rm -rf {} +
 }
 
 log "=== Backup run starting ==="
@@ -307,7 +307,9 @@ DIRS=("/var/www/html" "/etc/nginx" "/etc/ssh")
 FAILURES=0
 
 for dir in "${DIRS[@]}"; do
-    backup_dir "$dir" || (( FAILURES++ )) || true
+    if ! backup_dir "$dir"; then
+        FAILURES=$(( FAILURES + 1 ))
+    fi
 done
 
 rotate_old
@@ -320,14 +322,14 @@ fi
 ```
 
 <Aside type="caution" title="set -e and Arithmetic Expressions">
-The `(( ... ))` construct returns exit code 1 when the arithmetic result is zero. With `set -e` active, `(( FAILURES++ ))` will abort the script when `FAILURES` is 0, because incrementing from zero evaluates to zero. The `|| true` in `backup_dir "$dir" || (( FAILURES++ )) || true` suppresses that exit by ensuring the overall expression always succeeds. An alternative that avoids this entirely is `FAILURES=$(( FAILURES + 1 ))`, which uses command substitution and does not carry the arithmetic exit code.
+The `(( ... ))` construct returns exit code 1 when the arithmetic result is zero. With `set -e` active, a standalone `(( FAILURES++ ))` can terminate the script on the first increment from zero, because incrementing from zero evaluates to zero before the variable changes. That is why the loop above uses `FAILURES=$(( FAILURES + 1 ))`: `$(( ... ))` is arithmetic expansion, and the assignment itself succeeds.
 </Aside>
 
 ## Regular Expressions
 
 Regular expressions (universally shortened to **regex**) are a pattern language for text. A regex describes a set of strings: any line containing an IP address, any filename ending in `.log`, any timestamp in a particular format. The same core syntax is shared by `grep`, `sed`, `awk`, `vi`, and most general-purpose programming languages including Python, JavaScript, and Ruby. Learning regex once pays dividends across every text-processing tool you will encounter. Barnett's [Introduction to Regular Expressions](https://www.grymoire.com/Unix/Regular.html) at the Grymoire is a thorough reference for the full syntax and the subtle differences between tools.
 
-The most important distinction in practice is between **basic regular expressions (BRE)**, the default for `grep`, and **extended regular expressions (ERE)**, used by `grep -E`. BRE requires backslash-escaping for operators like `+`, `?`, `|`, and `{n,m}` to activate them as metacharacters; ERE treats them as metacharacters directly and requires no escaping. ERE syntax is more readable and is what most modern tools default to, so this lecture uses it throughout.
+The most important distinction in practice is between **basic regular expressions (BRE)**, the default for `grep`, and **extended regular expressions (ERE)**, used by `grep -E`. BRE requires backslash-escaping for operators like `+`, `?`, `|`, and `{n,m}` to activate them as metacharacters; ERE treats them as metacharacters directly and requires no escaping. ERE syntax is more readable, and many modern regex engines use a similar notation, so this lecture uses it throughout.
 
 ### Basic Operators
 
@@ -400,10 +402,10 @@ grep "\(dogs\) \1" file
 grep -E "([0-9]{1,3}\.){3}[0-9]{1,3}" access.log
 ```
 
-This ERE pattern matches lines containing an IPv4 address. The group `[0-9]{1,3}` matches one to three digits; `\.` matches a literal dot; `{3}` repeats the group three times for the first three octets; and the final `[0-9]{1,3}` matches the last octet.
+This ERE pattern matches lines containing an IPv4-like dotted quad. It is useful for quick log filtering, but it is not full IPv4 validation: it will also match values like `999.999.999.999` or a dotted quad embedded inside other text. The group `[0-9]{1,3}` matches one to three digits; `\.` matches a literal dot; `{3}` repeats the group three times for the first three octets; and the final `[0-9]{1,3}` matches the last octet.
 
 <Aside type="tip" title="Prefer Extended Regular Expressions">
-Use `grep -E` (or `egrep`) for extended regular expressions. ERE allows `+`, `?`, `|`, and `{n}` without backslash escaping and is more readable than BRE in all but the simplest patterns.
+Use `grep -E` for extended regular expressions. ERE allows `+`, `?`, `|`, and `{n}` without backslash escaping and is more readable than BRE in all but the simplest patterns. The older `egrep` command is a legacy synonym on many systems.
 </Aside>
 
 ### `sed` for Stream Editing
@@ -414,10 +416,10 @@ Use `grep -E` (or `egrep`) for extended regular expressions. ERE allows `+`, `?`
 sed 's/foo/bar/' input.txt
 sed 's/foo/bar/g' input.txt
 sed '/^#/d' config.txt
-sed -i 's/oldvalue/newvalue/g' config.txt
+sed -i.bak 's/oldvalue/newvalue/g' config.txt
 ```
 
-The third command deletes all comment lines from a config file (lines starting with `#`). The `-i` flag edits the file in place; without it the file is never changed and the command outputs to the terminal. `sed` is the right tool for line-by-line text transformation; it is less suited to extracting structured data from tabular output, which is where `awk` fits better.
+The third command deletes all comment lines from a config file (lines starting with `#`). The `-i.bak` form edits the file in place and keeps a backup as `config.txt.bak`; this works on both GNU `sed` and BSD/macOS `sed`. Without `-i`, the file is never changed and the command outputs to the terminal. `sed` is the right tool for line-by-line text transformation; it is less suited to extracting structured data from tabular output, which is where `awk` fits better.
 
 ### `awk` for Field Processing
 
@@ -467,7 +469,7 @@ The practical rule is this: start with Bash for simple, single-machine automatio
 
 Bash and Python are the two languages a Linux administrator is most likely to write. Beyond those, the scripting landscape is wide, and different environments favor different tools. Understanding the rough position of each language helps you read job descriptions, understand what tools are written in, and choose the right language when the task does not fit neatly into Bash or Python.
 
-**PowerShell** is the native scripting language for Windows Server and, since PowerShell Core (2018), runs cross-platform on Linux and macOS as well. Its most significant architectural difference from Bash is that it passes objects between pipeline stages rather than text: a `Get-Process | Where-Object {$_.CPU -gt 10}` pipeline filters structured process objects, not formatted output lines. Microsoft's management APIs for Active Directory, Azure, and Exchange are exposed through PowerShell cmdlets with no Linux equivalent, which makes PowerShell essential for Windows-focused administration. In mixed Linux and Windows environments, PowerShell Core is increasingly used as a common scripting layer across both.
+**PowerShell** is the native scripting language for Windows Server and, since PowerShell Core (2018), runs cross-platform on Linux and macOS as well. Its most significant architectural difference from Bash is that it passes objects between pipeline stages rather than text: a `Get-Process | Where-Object {$_.CPU -gt 10}` pipeline filters structured process objects, not formatted output lines. Microsoft's management surfaces for Active Directory and Exchange remain especially PowerShell-centric, and Azure has first-class PowerShell support alongside Azure CLI, REST APIs, and SDKs. In mixed Linux and Windows environments, PowerShell Core is increasingly used as a common scripting layer across both.
 
 **Go** is the language of choice for building system tools that are distributed as compiled binaries. Docker, Kubernetes, Terraform, and `kubectl` are all written in Go. It compiles to a single static binary with no runtime dependency, which simplifies deployment significantly compared to Python or Ruby. When an automation script evolves into a tool that other people will install and run, Go's deployment model and static typing make the higher entry cost worthwhile.
 
@@ -483,7 +485,7 @@ Bash and Python are the two languages a Linux administrator is most likely to wr
 
 Shell scripting occupies a specific position in the automation landscape. The Infrastructure as Code lecture introduced the declarative alternative: describe the desired end state and let the tool figure out how to reach it. Shell scripts are the opposite approach, imperative and sequential, encoding exactly the steps to perform a task. That imperative approach is the right one for single-machine automation where the sequence matters and where you are not managing idempotency at scale. Bash requires nothing beyond the shell already on the server and produces output you can read and log.
 
-The building blocks of this lecture connect in a realistic backup script: variables and quoting prevent path-splitting bugs, script arguments let the same logic run against any source and destination, the exported environment controls what child processes can see, conditionals validate preconditions before any work begins, loops process arrays of directories, functions isolate reusable logic, and `set -euo pipefail` causes the script to fail loudly rather than silently continuing after an error. Exit codes carry success or failure to cron, systemd, and any calling script. A `trap EXIT` clause ensures cleanup runs regardless of how the script exits. Scheduling the script with cron automates the work; the minimal cron environment means absolute paths are essential, and appending both stdout and stderr to a log file with `>> /var/log/backup.log 2>&1` ensures failures leave evidence that can be diagnosed later.
+The building blocks of this lecture connect in a realistic backup script: variables and quoting prevent path-splitting bugs, script arguments let the same logic run against any source and destination, the exported environment controls what child processes can see, conditionals validate preconditions before any work begins, loops process arrays of directories, functions isolate reusable logic, and `set -euo pipefail` catches undefined variables, broken pipelines, and unhandled command failures near the point where they occur. Exit codes carry success or failure to cron, systemd, and any calling script. A `trap EXIT` clause ensures cleanup runs regardless of how the script exits. Scheduling the script with cron automates the work; the minimal cron environment means absolute paths are essential, and appending both stdout and stderr to a log file with `>> /var/log/backup.log 2>&1` ensures failures leave evidence that can be diagnosed later.
 
 Regular expressions extend Bash's reach into text processing. The pattern language is the same across `grep`, `sed`, `awk`, and most programming languages; learning it once applies everywhere. The distinction to carry forward is what each tool is best at: `grep` filters lines, `sed` transforms lines with substitutions, and `awk` processes fields within lines and can aggregate values across rows.
 
