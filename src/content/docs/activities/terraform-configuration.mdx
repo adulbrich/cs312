@@ -108,7 +108,7 @@ Before adding any resources, set up the working directory, introduce two data so
      required_providers {
        aws = {
          source  = "hashicorp/aws"
-         version = "6.41.0"
+         version = ">= 6.41.0"
        }
      }
    }
@@ -138,7 +138,7 @@ Before adding any resources, set up the working directory, introduce two data so
    }
    ```
 
-   `main.tf` is the primary configuration file for this project. The `terraform {}` block pins the required Terraform version and lists provider dependencies. The `provider "aws" {}` block configures how the AWS provider connects to your account: which region to target and how to authenticate. See the [AWS provider documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs) for the full set of arguments. The two `data {}` blocks are data sources: unlike resource blocks, data sources read existing infrastructure rather than create it. They are read-only queries whose results you can reference anywhere in the configuration.
+    `main.tf` is the primary configuration file for this project. The `terraform {}` block sets the required Terraform version and constrains provider dependencies. This AWS constraint allows any compatible 6.x provider release at or above 6.41.0. The `provider "aws" {}` block configures how the AWS provider connects to your account: which region to target and how to authenticate. See the [AWS provider documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs) for the full set of arguments. The two `data {}` blocks are data sources: unlike resource blocks, data sources read existing infrastructure rather than create it. They are read-only queries whose results you can reference anywhere in the configuration.
 
    `owners = ["099720109477"]` limits results to images published by Canonical. Ubuntu 24.04 images now use the `hvm-ssd-gp3` naming family, so an older `hvm-ssd` filter will not match current releases.
 
@@ -270,6 +270,8 @@ An instance with no explicit security group uses the VPC default, which gives yo
      }
    }
    ```
+
+   This activity keeps security group rules inline so each example stays in one block. Current AWS provider guidance prefers separate `aws_vpc_security_group_ingress_rule` and `aws_vpc_security_group_egress_rule` resources in production code. Do not mix those resources with inline rules on the same security group.
 
 2. **Wire the security group to the instance** by adding this line inside `resource "aws_instance" "web"`:
 
@@ -476,6 +478,150 @@ You rewrote both resource blocks but Terraform reported no infrastructure change
 
 ---
 
+## Create a Reusable Module
+
+The configuration now manages two resources at root level. As configurations grow, repeating similar resource blocks across projects becomes error-prone. Terraform modules let you package a set of resources into a reusable unit with a declared input and output interface.
+
+In this section you will write a small child module for a database-tier security group, call it from the root configuration, and observe how module addresses appear throughout Terraform's output.
+
+<Steps>
+
+1. **Create the module directory:**
+
+   ```bash
+   mkdir -p modules/db_sg
+   ```
+
+   Each directory containing `.tf` files is a module. The project root you have been editing is the **root module**. A directory you create and call from the root is a **child module**. A child module has no awareness of the root module; it only sees the variables passed to it.
+
+2. **Write `modules/db_sg/variables.tf`:**
+
+   ```hcl
+   variable "onid" {
+     description = "ONID, used for naming and tagging"
+     type        = string
+   }
+
+   variable "web_sg_id" {
+     description = "ID of the web-tier security group, allowed to reach the database"
+     type        = string
+   }
+   ```
+
+3. **Write `modules/db_sg/main.tf`:**
+
+   ```hcl
+   data "aws_vpc" "default" {
+     default = true
+   }
+
+   resource "aws_security_group" "db" {
+     name        = "tf-activity-db-sg-${var.onid}"
+     description = "Database tier security group"
+     vpc_id      = data.aws_vpc.default.id
+
+     ingress {
+       description     = "MySQL from web tier"
+       from_port       = 3306
+       to_port         = 3306
+       protocol        = "tcp"
+       security_groups = [var.web_sg_id]
+     }
+
+     egress {
+       from_port   = 0
+       to_port     = 0
+       protocol    = "-1"
+       cidr_blocks = ["0.0.0.0/0"]
+     }
+
+     tags = {
+       Name  = "tf-activity-db-sg-${var.onid}"
+       Owner = var.onid
+     }
+   }
+   ```
+
+   The module has its own `data` block for the default VPC. Data sources inside a module are scoped to that module: `data.aws_vpc.default` here is a separate lookup from the identically named block in the root module. Child modules inherit the root module's provider configuration, so no `provider "aws"` block is needed here.
+
+4. **Write `modules/db_sg/outputs.tf`:**
+
+   ```hcl
+   output "security_group_id" {
+     description = "Database security group ID"
+     value       = aws_security_group.db.id
+   }
+   ```
+
+5. **Call the module from root `main.tf`** by adding this block below the `locals` block:
+
+   ```hcl
+   module "db_sg" {
+     source    = "./modules/db_sg"
+     onid      = var.onid
+     web_sg_id = aws_security_group.web.id
+   }
+   ```
+
+   `web_sg_id = aws_security_group.web.id` is an attribute reference, so Terraform infers that `module.db_sg` depends on `aws_security_group.web`. The web security group will be provisioned before the module runs.
+
+6. **Add an output** for the module's result by appending to `outputs.tf`:
+
+   ```hcl
+   output "db_sg_id" {
+     description = "Database security group ID"
+     value       = module.db_sg.security_group_id
+   }
+   ```
+
+   Module outputs are accessed as `module.<name>.<output_name>`, the same dot notation as resource attributes.
+
+7. **Re-initialize to register the new module:**
+
+   ```bash
+   terraform init
+   ```
+
+   You should see:
+
+   ```
+   Initializing modules...
+   - db_sg in modules/db_sg
+   ```
+
+   Terraform must register new modules during `init` even when the source is a local path.
+
+8. **Read the plan:**
+
+   ```bash
+   terraform plan
+   ```
+
+   Find the new resource in the output. Its address is `module.db_sg.aws_security_group.db`. Every resource declared inside a child module is prefixed with the module call path. Notice it appears after `aws_security_group.web` in the plan, reflecting the dependency Terraform inferred from the `web_sg_id` reference.
+
+9. **Apply and inspect:**
+
+   ```bash
+   terraform apply
+   ```
+
+   After applying, run:
+
+   ```bash
+   terraform state list
+   terraform output db_sg_id
+   ```
+
+   `terraform state list` now shows three managed resources. The module resource appears as `module.db_sg.aws_security_group.db`. The new output prints the security group ID directly from the module's exposed output.
+
+</Steps>
+
+<ActivityQuestion>
+The module declares its own `data "aws_vpc" "default"` block even though the root module has an identical one. An alternative design would pass the VPC ID in as a third variable. What are the tradeoffs between the two approaches? Consider what happens when a caller wants to target a non-default VPC, and how each design handles that case.
+</ActivityQuestion>
+
+---
+
 ## Import an Existing Resource
 
 The lecture describes a common real-world situation: inheriting infrastructure created by hand that must be brought under Terraform management. In this section you will import the `cs312-vpc` from the previous activity, inspect what Terraform recorded, and reconcile any meaningful differences between the real VPC and your HCL before removing that VPC from this configuration.
@@ -555,7 +701,7 @@ Step 4 showed that importing a resource does not automatically produce correct H
 </ActivityQuestion>
 
 <Aside type="note" title="If you deleted cs312-vpc">
-If you removed `cs312-vpc` after the previous activity, skip this section. You can still observe the state-versus-HCL gap: run `terraform state show aws_security_group.web` and compare the output to what you wrote in `main.tf`. Every attribute in state but absent from your HCL is exactly what would need to be reconciled during an import.
+If you removed `cs312-vpc` after the previous activity, skip this section. You can still observe the state-versus-HCL gap: run `terraform state show aws_security_group.web` and compare the output to what you wrote in `main.tf`. Focus on arguments you intentionally control. Computed attributes still appear in state, and omitted arguments that already match provider defaults do not always need to be written back into HCL.
 </Aside>
 
 ---
@@ -601,7 +747,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
    terraform state list
    ```
 
-   You should see `aws_instance.web` and `aws_security_group.web`.
+    You should see `aws_instance.web`, `aws_security_group.web`, and `module.db_sg.aws_security_group.db`.
 
 5. **Destroy everything:**
 
@@ -609,7 +755,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
    terraform destroy
    ```
 
-   Review the plan in the confirmation prompt before typing `yes`. Both resources should appear in the destroy list.
+    Review the plan in the confirmation prompt before typing `yes`. All three managed resources should appear in the destroy list: `aws_instance.web`, `aws_security_group.web`, and `module.db_sg.aws_security_group.db`.
 
 6. **Confirm the state is empty:**
 
@@ -619,7 +765,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
 
    No output means no managed resources remain.
 
-7. **Verify in the AWS Console.** Navigate to **EC2 > Instances** and confirm the instance tagged with your ONID is no longer listed as running. Navigate to **EC2 > Security Groups** and confirm the corresponding group is gone.
+7. **Verify in the AWS Console.** Navigate to **EC2 > Instances** and confirm the instance tagged with your ONID is no longer listed as running. Navigate to **EC2 > Security Groups** and confirm both security groups created by this activity, the web group and the database group, are gone.
 
 </Steps>
 

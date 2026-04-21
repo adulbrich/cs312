@@ -44,7 +44,7 @@ cp -r "$SOURCE" "$DEST"
 
 Notice the double quotes around `$SOURCE` and `$DEST`. Quoting is one of the most important habits in shell scripting. If a path ever contains a space (for example, `/var/www/my site`), an unquoted `$SOURCE` would split into two separate arguments and break the command. The rule of thumb is simple: always double-quote variable expansions.
 
-**Single quotes vs. double quotes.** Double quotes allow variable expansion and command substitution; single quotes treat everything literally. `"Hello $NAME"` expands `$NAME`; `'Hello $NAME'` prints the literal string `$NAME`.
+**Double quotes** allow variable expansion and command substitution; **single quotes** treat everything literally. `"Hello $NAME"` expands `$NAME`; `'Hello $NAME'` prints the literal string `$NAME`.
 
 **Command substitution** lets you capture the output of a command into a variable. This is invaluable for timestamps, hostnames, and dynamic paths:
 
@@ -55,6 +55,46 @@ cp -r "$SOURCE" "$DEST"
 ```
 
 Now every run creates a uniquely named backup directory. The `$(...)` syntax is the modern form. The older backtick form (`` TIMESTAMP=`date +%Y%m%d-%H%M%S` ``) does the same thing but cannot be nested without escaping, which makes it harder to read in complex expressions.
+
+A related construct, the **here document** (heredoc), feeds a block of inline text to a command as standard input. It is not a quote type in the same sense as single or double quotes; it is an input-redirection form whose body may either expand shell syntax or preserve it literally depending on how you write the delimiter. The `<<` operator introduces the block, followed immediately by a delimiter word of your choosing; the block ends when that word appears alone on a line. `EOF` is only a conventional delimiter name, short for "end of file"; you could use `END`, `REPORT`, or any other word that does not appear by itself inside the body. The important part is that Bash looks at the delimiter word on the opening line to decide how to treat the entire heredoc body. That is why the quotes, if any, appear around `EOF` rather than around the block itself. If the delimiter is quoted, Bash does not perform parameter expansion, command substitution, or arithmetic expansion inside the body. If the delimiter is unquoted, Bash performs those expansions before passing the text to the command:
+
+```bash
+SOURCE="/var/www/html"
+
+cat > /tmp/literal-report.txt << 'EOF'
+Source: $SOURCE
+Generated: $(date)
+Check: $(( 2 + 2 ))
+EOF
+
+cat > /tmp/expanded-report.txt << EOF
+Source: $SOURCE
+Generated: $(date)
+Check: $(( 2 + 2 ))
+EOF
+```
+
+The first block writes the characters `$SOURCE`, `$(date)`, and `$(( 2 + 2 ))` literally into the file. The second writes the expanded values instead. Using nearly identical bodies is the important teaching point here: the only difference is whether the delimiter is quoted. Heredocs are the idiomatic way to generate multi-line input from within a script without creating a temporary file or chaining multiple `echo` calls.
+
+For example, if `date` returned `Tue Apr 21 15:30:00 UTC 2026`, inspecting the two files would show:
+
+```text
+$ cat /tmp/literal-report.txt
+Source: $SOURCE
+Generated: $(date)
+Check: $(( 2 + 2 ))
+
+$ cat /tmp/expanded-report.txt
+Source: /var/www/html
+Generated: Tue Apr 21 15:30:00 UTC 2026
+Check: 4
+```
+
+If the order of `>` and `<<` looks surprising, Bash also accepts `cat << EOF > /tmp/expanded-report.txt` and treats it the same way here. `<< EOF` connects the command's standard input, while `> /tmp/expanded-report.txt` redirects the command's standard output. Because those redirections affect different streams, Bash can set them both up before it runs `cat`, and the order does not change the result in this example. By contrast, the order *does* matter when two redirections interact with the same stream, such as `2>&1`.
+
+<Aside type="note" title="Delimiter Rules Matter">
+The closing delimiter must appear by itself on a line. You cannot indent it with spaces or add trailing characters after it. The quotes, if any, appear only on the opening line, so `<< 'EOF'` still closes with a plain `EOF`. If you want to indent a heredoc in your script, Bash also supports `<<-`, which strips leading tab characters from the heredoc body and closing delimiter. It does not strip spaces.
+</Aside>
 
 ## Script Arguments
 
@@ -354,8 +394,10 @@ Square brackets match any one character from a set. The class can enumerate spec
 |---|---|
 | `[abc]` | Any one of `a`, `b`, or `c` |
 | `[^abc]` | Any character except `a`, `b`, or `c` |
-| `[a-z]` | Any lowercase letter (range defined by ASCII order) |
+| `[a-z]` | Lowercase ASCII letters in the C/POSIX locale |
 | `[0-9]` | Any digit |
+
+Character ranges are locale-sensitive in POSIX tools. If you need locale-aware alphabetic matching, POSIX character classes like `[[:lower:]]` and `[[:digit:]]` are usually safer than hard-coded ranges.
 
 ### Anchoring and Exact Matching
 
@@ -438,7 +480,7 @@ The conceptual distinction between `sed` and `awk` is this: reach for `sed` when
 
 ## Scheduling with Cron
 
-A backup script is only useful if it runs on a schedule. Cron is the traditional Unix job scheduler and is available on every Linux system. Each user has a crontab (cron table) that lists commands and their schedules. Edit yours with `crontab -e`. The format is five fields followed by the command:
+A backup script is only useful if it runs on a schedule. Cron is the traditional Unix job scheduler and is installed on most general-purpose Linux systems, though some minimal containers and cloud images omit the daemon entirely. Each user has a crontab (cron table) that lists commands and their schedules. Edit yours with `crontab -e`. If that command is missing or cron is not running, the system may not have cron installed. The format is five fields followed by the command:
 
 ```
 0    2     *    *      *         /usr/local/bin/backup.sh
