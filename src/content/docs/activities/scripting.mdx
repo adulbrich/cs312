@@ -1,9 +1,8 @@
 ---
-title: "Automate Your Server Setup"
+title: "Shell Scripting"
 description: "Write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and adds a cron-based health check. In the next activity, you will reimplement the core web-server configuration declaratively with Ansible."
 sidebar:
   order: 8
-draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
@@ -13,10 +12,11 @@ This activity puts into practice the concepts from the [Shell Scripting and Auto
 
 ## What You Will Need
 
-- Your EC2 instance from Lab 2, running Ubuntu, with SSH access
-- Your `cs312-key.pem` SSH private key in `~/.ssh/`
+- Your AWS Academy Learner Lab session started
+- An EC2 instance with 20 GiB of storage, running Ubuntu, with SSH and HTTP (port 80) access configured on the security group
+- Your instance's SSH private key in `~/.ssh/`
 - Your instance's public IP from the EC2 console
-- HTTP (port 80) open in the instance's security group (if you completed a previous activity that used port 80, this is already done)
+- A terminal with `ssh` available
 
 ---
 
@@ -96,7 +96,7 @@ You saw that cron's PATH is `/usr/bin:/bin`. After installing nginx in a later s
 
 ## Your First Script
 
-Create `setup.sh` with a shebang, safe defaults, and argument validation. You will add functionality to it in each section that follows.
+You will build `setup.sh` piece by piece, running the script after each change so you can see the effect of each new concept before the next one is added.
 
 <Steps>
 1. Create the file and make it executable:
@@ -106,7 +106,75 @@ Create `setup.sh` with a shebang, safe defaults, and argument validation. You wi
    chmod +x setup.sh
    ```
 
-2. Open `setup.sh` in any editor and add the following:
+   Without `chmod +x`, the kernel refuses to run the file directly. You will call it with `./setup.sh` throughout.
+
+2. Open `setup.sh` in any editor and add a shebang and a single print statement:
+
+   ```bash
+   #!/usr/bin/env bash
+   printf "Hello from %s\n" "$(hostname)"
+   ```
+
+   Run it:
+
+   ```bash
+   ./setup.sh
+   ```
+
+   ```
+   Hello from ip-10-0-1-42
+   ```
+
+   The shebang tells the kernel which interpreter to use. `#!/usr/bin/env bash` searches your `PATH` for `bash` rather than assuming a fixed location like `/bin/bash`, which makes the script more portable across systems where Bash lives elsewhere.
+
+3. Add variables for the paths the script will manage. Update `setup.sh` to:
+
+   ```bash
+   #!/usr/bin/env bash
+   ONID="ulbrical"
+   WEBROOT="/var/www/html"
+   LOG_FILE="/tmp/setup-${ONID}.log"
+   printf "=== Setup: %s on %s ===\n" "$ONID" "$(hostname)"
+   printf "Log will be written to: %s\n" "$LOG_FILE"
+   ```
+
+   Run it:
+
+   ```bash
+   ./setup.sh
+   ```
+
+   ```
+   === Setup: ulbrical on ip-10-0-1-42 ===
+   Log will be written to: /tmp/setup-ulbrical.log
+   ```
+
+   Notice the double quotes around every `$VARIABLE`. If a path ever contained a space, an unquoted expansion would split into two separate arguments and silently break commands like `cp` or `rm`. The `${ONID}` form with braces is used in the log path to separate the variable name from the literal `.log` suffix that follows it.
+
+4. Add `set -euo pipefail` immediately after the shebang line. The file now starts:
+
+   ```bash
+   #!/usr/bin/env bash
+   set -euo pipefail
+   ONID="ulbrical"
+   ...
+   ```
+
+   Run the script again: the output is the same. Now see what `set -u` catches. Run these two commands directly in your shell session:
+
+   ```bash
+   bash -c 'echo "no set -u:   [$TYPO_VAR]"'
+   bash -c 'set -u; echo "with set -u: [$TYPO_VAR]"'
+   ```
+
+   ```
+   no set -u:   []
+   bash: TYPO_VAR: unbound variable
+   ```
+
+   The first silently substitutes an empty string. The second aborts at the point of the mistake. With `set -euo pipefail` in `setup.sh`, a typo in a variable name will fail loudly there rather than passing an empty value into a later `cp`, `rm`, or `apt-get` call.
+
+5. Replace the hardcoded `ONID` with argument validation. The script will need to run as root to install packages, so add that check too. Update `setup.sh` to:
 
    ```bash
    #!/usr/bin/env bash
@@ -127,12 +195,10 @@ Create `setup.sh` with a shebang, safe defaults, and argument validation. You wi
    NGINX_DEFAULT="/etc/nginx/sites-available/default"
    LOG_FILE="/tmp/setup-${ONID}.log"
 
-   trap 'printf "[trap] Exiting. Log: %s\n" "$LOG_FILE"' EXIT
-
    printf "=== Server Setup: %s on %s ===\n" "$ONID" "$(hostname)"
    ```
 
-3. Run it without arguments to see the usage message:
+   Run without arguments to see the usage message:
 
    ```bash
    sudo ./setup.sh
@@ -142,7 +208,7 @@ Create `setup.sh` with a shebang, safe defaults, and argument validation. You wi
    Usage: sudo setup.sh <your-onid>
    ```
 
-4. Run it without `sudo` to confirm the root check:
+   Run without `sudo` to trigger the root check:
 
    ```bash
    ./setup.sh myonid
@@ -152,32 +218,40 @@ Create `setup.sh` with a shebang, safe defaults, and argument validation. You wi
    Run as root: sudo setup.sh <your-onid>
    ```
 
-5. Run it correctly with your actual ONID:
+   A few of Bash's built-in variables are doing work here. `$EUID` is the effective user ID of the running process; root is always 0, so `-ne 0` means "not equal to zero, i.e., not root." `$#` is the count of arguments the caller passed; the script expects exactly one, so `-ne 1` catches both zero and two-or-more. `$1` is the first argument, which becomes `ONID`. `$0` is the script's own name as invoked; `$(basename "$0")` strips any leading path so the usage line prints `setup.sh` rather than `./setup.sh` or `/home/ubuntu/cs312-scripts/setup.sh`. Both error messages go to stderr with `>&2` so they do not corrupt any pipeline that might consume the script's normal output.
+
+6. Run the script correctly with your actual ONID:
+
+   ```bash
+   sudo ./setup.sh ulbrical
+   ```
+
+   ```
+   === Server Setup: ulbrical on ip-10-0-1-42 ===
+   ```
+
+   Now add a `trap` to the script, right after the variable block:
+
+   ```bash
+   trap 'printf "[trap] Exiting. Log: %s\n" "$LOG_FILE"' EXIT
+   ```
+
+   Run it again:
 
    ```bash
    sudo ./setup.sh your-onid
    ```
 
-   You will see the header line with your ONID and hostname, then the trap message as the script exits. Both lines appear even though the script succeeded: the trap fires on every exit, not just failures.
-
-6. Still in the SSH session (not inside `setup.sh`), see what `set -u` actually prevents. Run these two commands:
-
-   ```bash
-   bash -c 'echo "no set -u:   [$TYPO_VAR]"'
-   bash -c 'set -u; echo "with set -u: [$TYPO_VAR]"'
+   ```
+   === Server Setup: your-onid on ip-10-0-1-42 ===
+   [trap] Exiting. Log: /tmp/setup-your-onid.log
    ```
 
-   The first prints `no set -u:   []`, silently substituting an empty string. The second aborts immediately:
-
-   ```
-   bash: TYPO_VAR: unbound variable
-   ```
-
-   This is what `set -u` in `setup.sh` buys you: a typo in a variable name fails loudly at the point of the mistake rather than propagating an empty value to a later `cp`, `rm`, or `apt-get` call.
+   The trap fires on every exit, successful or not. You can use it to clean up temporary files or release locks even if the script fails midway. Later you will call `trap - EXIT` at the end of the script to clear the handler so the message does not appear on a normal successful exit.
 </Steps>
 
 <ActivityQuestion>
-The `trap ... EXIT` fires on every exit, including a clean one, so "Exiting. Log:" appears even when the script finishes normally. Two approaches fix this: checking `$?` inside the handler (it holds the exit code when the trap fires), or calling `trap - EXIT` at the very end of the script to clear the handler before the normal exit. Which approach would you use, and why? How does `set -u` (which you observed in step 6) differ from `trap` in what it protects against?
+The `trap ... EXIT` fires on every exit, including a clean one, so "Exiting. Log:" appears even when the script finishes normally. Two approaches fix this: checking `$?` inside the handler (it holds the exit code when the trap fires), or calling `trap - EXIT` at the very end of the script to clear the handler before the normal exit. Which approach would you use, and why? How does `set -u` (which you observed in step 4) differ from `trap` in what it protects against?
 </ActivityQuestion>
 
 ---
@@ -323,7 +397,7 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 </Steps>
 
 <ActivityQuestion>
-Your `ensure_installed` function makes package installation idempotent by calling `dpkg -l` to check the current state before acting. The Ansible `apt` module achieves the same result but differently. What is the fundamental difference in how each one decides whether to install? What would have to happen for `ensure_installed` to give a wrong answer?
+On the second run, both packages showed `OK (already installed)` and `apt-get install` never ran. But `apt-get install -y nginx` does not fail or break if nginx is already installed: try running it manually and observe the output. If `apt-get` handles the already-installed case gracefully on its own, what is the `is_installed` check inside `ensure_installed` actually buying you? What would the log output look like on a re-run if you removed the check and always called `apt-get install -y`?
 </ActivityQuestion>
 
 ---
@@ -336,7 +410,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
 1. Confirm that the default nginx configuration is valid before modifying it:
 
    ```bash
-   nginx -t
+   sudo nginx -t
    ```
 
    ```
@@ -371,7 +445,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
    EOF
    ```
 
-   The heredoc writes multiple lines in a single statement. Variables inside expand immediately when the script runs: `$ONID` comes from the argument you validated at the start, `$CURRENT_HOST` from the `$(hostname)` call above, and `$(date)` records the deployment time. Because the page includes `$(date)`, rerunning the script writes a fresh timestamp each time.
+   The `<< EOF` syntax is a heredoc: it feeds everything between the opening `EOF` and the closing `EOF` (which must appear alone on its own line) into the command on the left as stdin. `cat > "$WEBROOT/index.html"` writes that stdin to a file, so the heredoc becomes a multi-line write in a single statement. The word `EOF` is a convention; any word works as long as the opening and closing markers match exactly. Because the delimiter is unquoted (`<< EOF`), the shell expands variables and command substitutions inside the block as it reads it: `${ONID}`, `${CURRENT_HOST}`, and `$(date)` all evaluate when the script runs. In the health-check script later you will see `<< 'HEALTHEOF'` with a quoted delimiter, which suppresses all expansion so the variables are written literally into the installed script rather than resolved now.
 
 4. Add the config test, restart, and verification right after the heredoc:
 
