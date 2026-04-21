@@ -6,11 +6,14 @@ This repository contains the source code for the CS312 website.
 
 Watch https://www.youtube.com/watch?v=Cpy20DnIDTI
 
+- [ ] When the term ends, review all slugs and titles for consistency.
+- [ ] Ask GenAI for a very detailed summary of all pages so that we can then use GenAI to check for any gaps, overlap, consistency, etc. across the content.
+- [ ] Labs might be a little light on contents compared to activities? Need to check in with TAs.
+- [ ] Consider adding some references to other hashicorps products either in IaC or in other more relevant lectures (e.g., vault for secrets management, nomad for orchestration, consul for service discovery)
+- [ ] Force GitOps?
 - [ ] The "Resources" section should include not just reading but videos, podcasts, etc.
 - [ ] Do we cover emails at all? (i.e., mail in lab with builtin cron + email server, or just talk about it in lectures? see previous scheduling lab) - we could add emails to the last lab when there is an alert - we cover email alerts in observability a little bit
 - [ ] Add the DNS exercise back from 2024 (the website from julia evans)
-- [ ] GitOps?
-- [ ] cron anywhere? -> should be an in-class activity
 - [ ] Focus on the process, less than the tools. Offer different tooling options but let students choose, note https://www.tigerdata.com/blog/its-2026-just-use-postgres
 - [ ] Improve project rubric
 - [ ] Check linux sysadmin handbook for key contents
