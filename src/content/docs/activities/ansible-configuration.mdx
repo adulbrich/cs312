@@ -1,0 +1,539 @@
+---
+title: "Ansible Configuration"
+description: "Launch a fresh EC2 instance, bootstrap it for Ansible, explore it with ad-hoc modules, and write a playbook that installs nginx, deploys a custom page, and schedules a health check."
+sidebar:
+  order: 9
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
+
+{/* ai-summary
+type: activity
+slug: ansible-configuration
+order: 9
+paired_lecture: configuration-management
+practices: agentless push architecture; user-data and cloud-init for managed-node bootstrap; inventory and host variables; ad-hoc modules (ping, setup, command, copy, apt); idempotency observation; playbook structure with handlers; ansible-lint static analysis; --check --diff dry-run habit; ansible.builtin.cron for health-check automation
+prereq_activities:
+output: a playbook that installs nginx and curl, deploys a custom page, schedules a cron health check, and passes ansible-lint on a live EC2 instance
+*/}
+
+This activity puts into practice the concepts from the [Configuration Management with Ansible](/lectures/configuration-management/) lecture. Where the earlier scripting activity handled the same web-server setup imperatively from inside the EC2 instance, here you will reimplement it declaratively with Ansible from your control machine over SSH. By the end, nginx will be installed, running, serving your custom page, and monitored by the same cron health check, all through a playbook you can re-run safely and commit to version control.
+
+## What You Will Need
+
+- Your AWS Academy Learner Lab session started
+- Your `cs312-key.pem` SSH key pair (created in your Learner Lab, already in `~/.ssh/`)
+- A Linux-style control environment with `ssh` available. macOS works directly, Windows users should use WSL rather than PowerShell for this activity, and the Arch Linux VM from the earlier activity is also a good control node if you still have it.
+- Ansible installed on your **control node** (your local machine) before class: follow the [official installation guide](https://docs.ansible.com/ansible/latest/installation_guide/index.html) and verify with `ansible --version`
+- An internet connection
+
+---
+
+## Launch Your EC2 Instance
+
+You will create a fresh EC2 instance for this activity. The instance will serve as your Ansible **managed node**: the server that Ansible configures remotely over SSH. AWS gives every instance a **user-data** field: a script that cloud-init runs exactly once, on first boot, before anything else starts. You will use it to ensure the instance is ready for Ansible without logging in and manually preparing the server.
+
+<Steps>
+
+1. **Open the EC2 console and start the launch wizard.**
+
+   In your Learner Lab, click "AWS" to open the console. Navigate to EC2 and click "Launch instances."
+
+2. **Set the instance name and choose an AMI.**
+
+   - Name: `cs312-ansible-lab`
+   - AMI: Ubuntu Server 24.04 LTS (the default Ubuntu option)
+   - Architecture: 64-bit (x86)
+
+3. **Choose instance type and key pair.**
+
+   - Instance type: `t2.micro`
+   - Key pair: select `cs312-key` from the dropdown
+
+4. **Configure the security group.**
+
+   Under "Network settings," click "Edit." Create a new security group named `cs312-ansible-sg` with two inbound rules:
+
+   | Type | Port | Source |
+   |------|------|--------|
+   | SSH  | 22   | My IP  |
+   | HTTP | 80   | Anywhere (0.0.0.0/0) |
+
+5. **Add the user-data script.**
+
+   Expand "Advanced details." Scroll to the "User data" field at the bottom and paste:
+
+   ```bash
+   #!/bin/bash
+   # cloud-init runs this script once at first boot.
+   # The standard Ansible modules used in this activity need Python 3.
+   # Everything else on this server will be configured by Ansible.
+   apt-get update -y
+   apt-get install -y python3
+   ```
+
+   This script ensures a usable Python 3 interpreter is present. For the standard Linux modules used in this activity, Ansible transfers small Python modules to the managed node and executes them remotely. Without Python 3, modules like `ping`, `setup`, `apt`, `copy`, and `service` cannot run.
+
+6. **Launch the instance and note the public IP.**
+
+   Click "Launch instance." Once the instance reaches the `Running` state, copy the **Public IPv4 address**. You will use this address throughout the activity.
+
+7. **Wait for cloud-init to finish before using Ansible.**
+
+   Replace `<YOUR-EC2-PUBLIC-IP>` with the value you just copied, then run:
+
+   ```bash
+   ssh -i ~/.ssh/cs312-key.pem ubuntu@<YOUR-EC2-PUBLIC-IP> \
+     'cloud-init status --wait && python3 --version'
+   ```
+
+   If this is your first SSH connection to the instance, type `yes` to accept the host key. This command waits for first-boot setup to finish and confirms that Python 3 is installed before Ansible tries to connect. It can take a minute or two on a new instance.
+
+</Steps>
+
+<Aside type="note" title="User Data Runs Once">
+cloud-init executes the user-data script on the first boot only. If you stop and restart the instance, the script does not re-run. For ongoing configuration, Ansible handles the rest. That is exactly the division of labor this activity demonstrates.
+</Aside>
+
+<ActivityQuestion>
+The user-data script installs Python 3 but nothing else. The scripting activity installed nginx, configured it, deployed a page, and added a cron job, all inside a single Bash script run on the server. Why is it appropriate to stop at Python 3 here and defer everything else to Ansible?
+</ActivityQuestion>
+
+---
+
+## Set Up the Control Node
+
+The **control node** is your local machine: the place where you write and run Ansible commands. Ansible connects to the EC2 instance over SSH and executes modules remotely. Nothing extra needs to be installed on the EC2 instance beyond what user-data already handled.
+
+<Steps>
+
+1. **Verify your Ansible installation:**
+
+   ```bash
+   ansible --version
+   ```
+
+   You should see `ansible [core X.X.X]` and a Python version below it. If Ansible is not installed, follow the [official installation guide](https://docs.ansible.com/ansible/latest/installation_guide/index.html) for your platform.
+
+2. **Create your working directory:**
+
+   ```bash
+   mkdir -p ~/cs312-ansible
+   cd ~/cs312-ansible
+   ```
+
+   All files you create for this activity go in this directory.
+
+</Steps>
+
+---
+
+## Build Your Inventory
+
+An **inventory** tells Ansible which machines to manage and how to reach them. You will create a minimal INI-format inventory file with your EC2 instance.
+
+Create a file named `hosts.ini` in your working directory with the following content. Replace `<YOUR-EC2-PUBLIC-IP>` with your instance's actual public IP from the EC2 console:
+
+```ini
+[managed]
+ec2 ansible_host=<YOUR-EC2-PUBLIC-IP> ansible_user=ubuntu
+
+[managed:vars]
+ansible_ssh_private_key_file=~/.ssh/cs312-key.pem
+ansible_ssh_common_args=-o StrictHostKeyChecking=accept-new
+```
+
+The `[managed]` block defines a group named `managed` with one host aliased `ec2`. The `[managed:vars]` block applies variables to every host in that group: `ansible_ssh_private_key_file` points to your key, and `ansible_ssh_common_args` tells SSH to accept the host key automatically on first connection without prompting.
+
+Now test connectivity using the `ping` module:
+
+```bash
+ansible -i hosts.ini managed -m ansible.builtin.ping
+```
+
+A successful result looks like this:
+
+```
+ec2 | SUCCESS => {
+    "changed": false,
+    "ping": "pong"
+}
+```
+
+<Aside type="caution" title="If You See UNREACHABLE">
+Check that your EC2 instance is running, that cloud-init finished in the previous section, that its security group allows inbound SSH (port 22) from your current IP, and that the path to your key in `hosts.ini` is correct. Test manually with `ssh -i ~/.ssh/cs312-key.pem ubuntu@<YOUR-IP>` to isolate whether the problem is SSH connectivity or Ansible configuration.
+</Aside>
+
+<ActivityQuestion>
+The `ping` module returned `"ping": "pong"` but did not send an ICMP packet. Based on what the lecture says about Ansible's architecture, what did it actually do to produce this result? Why is this meaningful as a connectivity test?
+</ActivityQuestion>
+
+---
+
+## Explore the Managed Node
+
+With connectivity confirmed, you can run ad-hoc commands to inspect the server. Each command uses `-m` to name a module and optionally `-a` to pass arguments.
+
+<Steps>
+
+1. **Gather system facts.** The `setup` module collects information about the managed node: OS version, memory, CPU, network interfaces, and more. The `filter` argument narrows the output:
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.setup -a "filter=ansible_distribution*"
+   ```
+   Note the OS name and version. These values are available as variables in playbooks by default because Ansible gathers facts automatically unless you disable it.
+
+2. **Check disk usage:**
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.command -a "df -h /"
+   ```
+   Notice that the output begins with `"changed": true` even though `df` reads disk usage and changes nothing at all. In this ad-hoc form, the `command` module runs a shell-free command without inspecting remote state first, so Ansible reports it as changed by default.
+
+3. **Create a file with your name.** Replace `YOUR NAME` with your actual name:
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.copy \
+     -a "content='Deployed by: YOUR NAME\n' dest=/tmp/cs312.txt"
+   ```
+   The output shows `"changed": true` and a green `changed` label.
+
+4. **Read the file back to confirm it was created:**
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.command -a "cat /tmp/cs312.txt"
+   ```
+   Your name appears in the `stdout` field.
+
+5. **Run the copy command again, identical to step 3:**
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.copy \
+     -a "content='Deployed by: YOUR NAME\n' dest=/tmp/cs312.txt"
+   ```
+   This time the output shows `"changed": false` and a yellow `ok` label. The file already exists with exactly that content, so Ansible made no changes.
+
+</Steps>
+
+<ActivityQuestion>
+Step 2 showed `"changed": true` for `df -h`, a command that reads nothing and modifies nothing. Step 5 showed `"changed": false` when the file already had the correct content. What is the fundamental difference between the `command` module and the `copy` module that produces this behavior? What does this mean for building automation you can trust?
+</ActivityQuestion>
+
+---
+
+## Manage Packages Ad-Hoc
+
+The `apt` module manages packages on Debian-based systems. Package management requires root privileges, which Ansible requests with the `--become` flag.
+
+<Steps>
+
+1. **Install the `tree` package:**
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.apt \
+     -a "name=tree state=present update_cache=yes cache_valid_time=3600" --become
+   ```
+   The output shows `"changed": true`.
+
+2. **Verify the installation:**
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.command -a "tree --version"
+   ```
+
+3. **Run the same install command again:**
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.apt \
+     -a "name=tree state=present update_cache=yes cache_valid_time=3600" --become
+   ```
+   Because you just refreshed the package cache and installed the package, this immediate second run should show `"changed": false`. The `apt` module found `tree` already installed at the requested state and the cache still fresh, so it did nothing.
+
+4. **Remove the package:**
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.apt \
+     -a "name=tree state=absent" --become
+   ```
+
+</Steps>
+
+<Aside type="note" title="The --become Flag">
+`--become` tells Ansible to escalate privileges using `sudo` on the managed node. Package management always requires root access. In a playbook, you can set `become: true` at the play level instead of passing `--become` on the command line for each task.
+</Aside>
+
+---
+
+## Your First Playbook
+
+Ad-hoc commands are convenient for exploration, but they are one-off operations: nothing is recorded, reviewed, or repeatable. A **playbook** is a YAML file that describes the desired state of your server and can be committed to version control, reviewed, and re-run safely.
+
+Rather than writing the entire playbook at once, you will grow it in three passes. First you will manage packages and the nginx service, then add the custom page and handler, then add the cron health check. After each pass, lint the playbook and run it so you can see exactly what changed and what stayed boring.
+
+### Start with Packages and Service
+
+Begin with the smallest useful playbook. This first version only installs the packages you need and ensures nginx is running, which gives you an immediate visible result before you add templating or cron.
+
+<Steps>
+
+1. **Install ansible-lint:**
+    ```bash
+    python3 -m pip install --user ansible-lint
+    ```
+    macOS users who installed Ansible with Homebrew can also run `brew install ansible-lint`.
+
+2. **Create the first version of `site.yml`:**
+    ```yaml
+    ---
+    - name: Configure web server
+       hosts: managed
+       become: true
+
+       tasks:
+          - name: Install nginx and curl
+             ansible.builtin.apt:
+                name:
+                   - nginx
+                   - curl
+                state: present
+                update_cache: true
+                cache_valid_time: 3600
+
+          - name: Ensure nginx is running and enabled
+             ansible.builtin.service:
+                name: nginx
+                state: started
+                enabled: true
+    ```
+    Save the file in `~/cs312-ansible/site.yml`.
+
+3. **Run the linter against this first version:**
+    ```bash
+    ansible-lint site.yml
+    ```
+    A clean playbook produces no output. If you see warnings, fix them before continuing.
+
+4. **Preview what this version will do:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml --check --diff
+    ```
+    This preview should predict package and service changes. There may not be much diff output yet because this version does not manage any file content.
+
+5. **Run the playbook:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml
+    ```
+    On the first run, the package task should show `changed`, and the service task may also show `changed` if nginx was not already started.
+
+6. **Run the same playbook a second time right away:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml
+    ```
+    On this immediate second run, both tasks should now show `ok`. The server is already in the declared state.
+
+7. **Verify that nginx is serving its default page:**
+    ```bash
+    ansible -i hosts.ini managed -m ansible.builtin.command -a "/usr/bin/curl -s http://localhost/"
+    ```
+    You should see HTML containing `Welcome to nginx!`. That is your first proof that the playbook is doing useful work.
+
+</Steps>
+
+### Add the Custom Page and Handler
+
+Now that the base web server is working, replace nginx's default page with your own content. This is also where the playbook starts to show Ansible's handler behavior: change the page, and nginx reloads exactly once at the end of the play.
+
+<Steps>
+
+1. **Replace `site.yml` with this second version.** Replace `Your Name` with your actual name before saving:
+    ```diff lang="yaml"
+      ---
+      - name: Configure web server
+         hosts: managed
+         become: true
+
+         vars:
+            student_name: "Your Name"
+
+         tasks:
+            - name: Install nginx and curl
+               ansible.builtin.apt:
+                  name:
+                     - nginx
+                     - curl
+                  state: present
+                  update_cache: true
+                  cache_valid_time: 3600
+    +
+    +       - name: Deploy custom index page
+    +          ansible.builtin.copy:
+    +             content: "<h1>Deployed by {{ student_name }} on {{ ansible_hostname }}</h1>\n"
+    +             dest: /var/www/html/index.html
+    +             owner: www-data
+    +             group: www-data
+    +             mode: "0644"
+    +          notify: Reload nginx
+
+            - name: Ensure nginx is running and enabled
+               ansible.builtin.service:
+                  name: nginx
+                  state: started
+                  enabled: true
+    +
+    +    handlers:
+    +       - name: Reload nginx
+    +          ansible.builtin.service:
+    +             name: nginx
+    +             state: reloaded
+    ```
+
+2. **Lint the updated playbook:**
+    ```bash
+    ansible-lint site.yml
+    ```
+
+3. **Preview the file change before applying it:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml --check --diff
+    ```
+    You should see a diff for `/var/www/html/index.html` showing the default page being replaced with your custom heading.
+
+4. **Run the updated playbook:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml
+    ```
+    This time the page task should show `changed`, and the `Reload nginx` handler should appear once near the end of the play.
+
+5. **Run the updated playbook a second time:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml
+    ```
+    Now every task should show `ok`, and the handler should not appear. Nothing about the page changed, so Ansible has no reason to reload nginx.
+
+6. **Verify the deployed page:**
+    ```bash
+    ansible -i hosts.ini managed -m ansible.builtin.command -a "/usr/bin/curl -s http://localhost/"
+    ```
+    You should see:
+    ```
+    <h1>Deployed by Your Name on ip-X-X-X-X</h1>
+    ```
+    Your name and the EC2 hostname appear in the response.
+
+</Steps>
+
+<ActivityQuestion>
+The `Reload nginx` handler ran during the first execution of this second-version playbook but not the second. What specifically caused it to run the first time? What prevented it from running the second time? Why is this behavior preferable to a dedicated `restart nginx` task at the end of every play?
+</ActivityQuestion>
+
+### Add the Health Check
+
+The last pass adds the cron-based health check from the scripting activity. This final version keeps the page and service behavior you already verified, then adds one more piece of state for Ansible to manage.
+
+<Steps>
+
+1. **Replace `site.yml` with the final version:**
+    ```diff lang="yaml"
+      ---
+      - name: Configure web server
+         hosts: managed
+         become: true
+
+         vars:
+            student_name: "Your Name"
+
+         tasks:
+            - name: Install nginx and curl
+               ansible.builtin.apt:
+                  name:
+                     - nginx
+                     - curl
+                  state: present
+                  update_cache: true
+                  cache_valid_time: 3600
+
+            - name: Deploy custom index page
+               ansible.builtin.copy:
+                  content: "<h1>Deployed by {{ student_name }} on {{ ansible_hostname }}</h1>\n"
+                  dest: /var/www/html/index.html
+                  owner: www-data
+                  group: www-data
+                  mode: "0644"
+               notify: Reload nginx
+
+            - name: Ensure nginx is running and enabled
+               ansible.builtin.service:
+                  name: nginx
+                  state: started
+                  enabled: true
+    +
+    +       - name: Install nginx health-check script
+    +          ansible.builtin.copy:
+    +             content: |
+    +                #!/usr/bin/env bash
+    +                set -euo pipefail
+    +                STATUS=$(/usr/bin/curl -s -o /dev/null -w "%{http_code}" http://localhost/)
+    +                printf "[%s] nginx: %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$STATUS" >> /tmp/nginx-health.log
+    +             dest: /usr/local/bin/nginx-health.sh
+    +             owner: root
+    +             group: root
+    +             mode: "0755"
+    +
+    +       - name: Schedule nginx health check
+    +          ansible.builtin.cron:
+    +             name: nginx health check
+    +             minute: "*"
+    +             user: root
+    +             job: /usr/local/bin/nginx-health.sh
+    +             cron_file: nginx-health
+
+         handlers:
+            - name: Reload nginx
+               ansible.builtin.service:
+                  name: nginx
+                  state: reloaded
+    ```
+
+2. **Lint the final playbook:**
+    ```bash
+    ansible-lint site.yml
+    ```
+
+3. **Preview the final additions:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml --check --diff
+    ```
+    You should see `changed` predictions for the health-check script and the cron entry. The page task should usually remain `ok` because you already applied that change in the previous pass.
+
+4. **Run the final playbook:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml
+    ```
+    The health-check script and cron task should show `changed` on this first final run.
+
+5. **Run the final playbook a second time right away:**
+    ```bash
+    ansible-playbook -i hosts.ini site.yml
+    ```
+    If you rerun it immediately, every task should now show `ok`. The package cache is still fresh, the page already matches, and the cron job already exists with the desired content.
+
+6. **Wait for the next cron run and then check the health log:**
+    ```bash
+    ansible -i hosts.ini managed -m ansible.builtin.command -a "cat /tmp/nginx-health.log"
+    ```
+    Wait until the next minute boundary, then run the command. You should see one or more lines like:
+    ```
+    [2026-04-22 10:25:01] nginx: 200
+    ```
+    Status `200` means nginx is responding correctly. If the file is still empty, wait one more minute and run the command again.
+
+</Steps>
+
+---
+
+## Going Further
+
+You have built the core Ansible workflow: inventory, ad-hoc exploration to understand a system, a playbook with handlers that is safe to re-run, lint checks before every run, and a dry-run preview before applying changes. The natural next step is to make playbooks more flexible and reusable.
+
+A small but impactful structural improvement is to move `student_name` out of `site.yml` and into a `group_vars/managed.yml` file alongside `hosts.ini`. Once you do that, the playbook itself contains no environment-specific values and can target any group with the right variable files in place. The [Variables guide](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_variables.html) explains `group_vars` and `host_vars` in detail.
+
+Jeff Geerling's [Ansible 101 YouTube series](https://www.youtube.com/watch?v=goclfp6a2IQ&list=PL2_OBreMn7FqZkvMYt6ATmgC0KAGGJNAN) starts exactly where this activity ends and walks through variables, templates, and roles with practical examples. Plan an hour or two to work through the first several episodes.
+
+If you prefer to explore specific topics:
+
+- [Roles](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html) package tasks, handlers, templates, and defaults into a reusable directory structure. Once you have written a role for nginx, you can apply it to any inventory with a single line.
+- The `template` module and [Jinja2 templating](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_templating.html) let you render configuration files differently per host. Replace the inline `content:` in the index page task with a `.j2` template file to see how templates differ from static copies.
+- [Ansible Galaxy](https://galaxy.ansible.com/) hosts community-maintained roles. Try installing `geerlingguy.nginx` and applying it, then compare its structure to the nginx task you wrote by hand.
