@@ -1,0 +1,786 @@
+---
+title: CI/CD Pipelines and GitHub Actions
+description: "How continuous integration and continuous delivery pipelines work, why they exist, and how to build them with GitHub Actions: workflows, jobs, runners, matrix builds, caching, deployment strategies, and operational tradeoffs."
+sidebar:
+  order: 10
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
+
+{/* ai-summary
+type: lecture
+slug: ci-cd
+order: 10
+covers: deployment environments; CI vs continuous delivery vs continuous deployment; feedback loops and DORA metrics; pipeline design principles; CI/CD tools landscape; GitHub Actions concepts (workflows, events, jobs, steps, runners); triggers; marketplace actions and supply chain; secrets and OIDC; matrix builds; service containers; caching and artifacts; reusable workflows and composite actions; concurrency control; self-hosted runners; local testing with act; debugging; deployment strategies (rolling, blue-green, canary); operational concerns
+prereq_lectures: containerization-with-docker, infrastructure-as-code, shell-scripting-and-automation-basics, configuration-management
+followup_lectures: system-security-and-hardening
+paired_activities: github-actions-workflow
+supports_labs: automated-configuration-and-deployment
+*/}
+
+Imagine a team of developers working on a containerized web application. Every time someone merges a feature, a designated team member must pull the latest code, run the tests locally, build a Docker image, push it to a registry, and then SSH into a server to deploy the new version. The process is slow, error-prone, and utterly dependent on a single person remembering every step in the right order. If that person is sick, on vacation, or simply distracted, the release stalls or, worse, ships with a defect nobody caught. Even when everything goes well, each release consumes an hour of engineering time that could have gone to product work.
+
+Continuous Integration and Continuous Delivery (CI/CD) exist to solve exactly this problem. By automating the path from code commit to running software, pipelines eliminate human error, shorten feedback loops, and turn deployments from a stressful ritual into a boring, routine event. The shift is cultural as much as technical: a team that can deploy on demand behaves differently than one that batches changes into a quarterly release. This lecture explains what CI/CD pipelines actually are, why they are structured the way they are, what tradeoffs exist between competing tools and patterns, and how to build one in GitHub Actions that you could defend in a code review.
+
+## Deployment Environments
+
+Before discussing pipeline mechanics, it helps to understand the landscape the pipeline is moving code through. A **deployment environment** is a distinct place where code runs at a particular stage of its lifecycle. Each environment has its own infrastructure, its own configuration, and its own purpose. Pipelines exist precisely to promote code from one environment to the next with the right checks at each boundary.
+
+| Environment | Also called | Purpose |
+|-------------|-------------|---------|
+| Development | Dev | An individual engineer's laptop or sandbox. Fast feedback, no durability guarantees. |
+| Test | CI | A clean, automation-only environment that exists only for the duration of a pipeline run. |
+| Staging | Qualification, Pre-production | A production-like environment for integration testing and final validation. |
+| Acceptance | UAT (User Acceptance Testing) | Business stakeholders or QA verify that requirements are actually met. |
+| Production | Prod | Real users, real data, real consequences. |
+
+Production is the environment that matters, and the one it is most expensive to break. The purpose of the others is to progressively raise confidence that a change will behave in production the way you expect. Notice that each environment represents a tradeoff between realism and safety. Development is maximally safe but least realistic; production is maximally realistic but least safe. Staging tries to split the difference: configured like production, but populated with synthetic or anonymized data so that a bad deploy embarrasses no one.
+
+Not every team uses all five. A small startup may collapse the middle three into a single "staging" and rely on feature flags to gate production behavior. A regulated enterprise may have six or seven environments to satisfy compliance boundaries. The pipeline's job is to move artifacts across whatever boundaries your organization has chosen, with appropriate automation at each hop.
+
+## Continuous Integration, Delivery, and Deployment
+
+The phrase "CI/CD" actually covers three distinct practices, and it is worth separating them clearly because teams routinely confuse them.
+
+**Continuous Integration (CI)** is the practice of merging every developer's working copy into a shared mainline frequently, at least once per day, and running an automated build and test suite on every merge. The goal is to catch integration bugs early, when they are cheap to fix, rather than late in a release cycle when dozens of changes have piled up and conflicts are intertwined. CI is a discipline, not just a tool: it requires that developers actually integrate their work frequently and that the test suite is trusted enough that people do not ignore red builds. A team can have Jenkins set up and still not be "doing CI" if they let branches live for weeks or routinely merge on a red pipeline.
+
+**Continuous Delivery (CD)** extends CI by ensuring that the codebase is always in a deployable state. After the build and tests pass, the pipeline produces an artifact, typically a Docker image, a compiled binary, or a deployment bundle, that *could* be released to production at any time. A human still decides when to press the button, but the artifact is ready and has been verified. Continuous delivery is the right target for most teams: it captures almost all the benefits of automation while preserving a human checkpoint for the highest-risk step.
+
+**Continuous Deployment** takes this one step further: every change that passes the full pipeline is automatically deployed to production with no human gate. This requires a very high degree of confidence in the test suite, strong monitoring, and the operational discipline to respond quickly when something slips through. Organizations that achieve it (Amazon, Netflix, Etsy, and many smaller teams) can ship hundreds of times per day. The benefit is that every change is tiny, so when something does go wrong, the blast radius is small and the fix is obvious.
+
+<Aside type="tip" title="Most Teams Stop at Delivery">
+Most teams should start with continuous integration and continuous delivery. Continuous deployment is a maturity goal, not a prerequisite. Without automated rollback, strong observability, and fast mean-time-to-recovery, removing the human gate trades speed for outages.
+</Aside>
+
+<HistoricalNote title="From CruiseControl to GitHub Actions (2001 to today)">
+The phrase "continuous integration" appeared in Grady Booch's 1994 object-oriented design book, though the practice he described was far less automated than modern CI. Kent Beck's Extreme Programming (1999) formalized it: merge small changes frequently, run tests immediately, fix failures before continuing. CruiseControl (2001) was the first open-source CI server and introduced the idea that a dedicated machine should continuously watch source control and build on every change. Jenkins (2011, a fork of the older Hudson project) became ubiquitous because it was free, self-hosted, and infinitely extensible with plugins. Travis CI (2011) changed the economics for open-source projects by offering hosted CI integrated directly with GitHub, with no server to maintain. GitHub Actions launched in general availability in 2019, bringing CI/CD infrastructure into the same interface where code already lived and eliminating the operational overhead of running a separate CI system. The arc is clear: CI started as something you built yourself, became something you hosted yourself, and is now something you rent. Most new projects today use a hosted service, a complete reversal from the Jenkins era a decade ago.
+</HistoricalNote>
+
+## Why Pipelines Change How Teams Work
+
+CI/CD is not just a tooling choice; it reshapes how engineering teams operate. When a deployment takes an hour of manual work, teams naturally batch changes and deploy rarely. When a deployment takes four minutes and happens automatically, the calculus inverts: small, frequent changes become safer than large ones, because each change is easy to verify in isolation and easy to roll back.
+
+The industry has tried to measure this shift. The **DORA metrics**, published annually in the Accelerate State of DevOps report, track four indicators that correlate with team performance: deployment frequency, lead time for changes, change failure rate, and mean time to restore service. Teams with strong CI/CD practices consistently score better on all four. A team that deploys once a quarter and a team that deploys forty times a day are not just moving at different speeds; they are operating under different assumptions about what "done" means and how risk is managed.
+
+The cultural piece matters because CI/CD can be adopted superficially. A team that wires up GitHub Actions but still lets pull requests sit for a week, merges on red builds, or reviews deploys as a special event has bought the tool without the practice. The pipeline is a forcing function: it makes the cost of bad habits (flaky tests, merges with unresolved conflicts, undocumented deploy steps) immediately visible, and it rewards the habits (small commits, trunk-based development, reproducible builds) that compound over time.
+
+## The Feedback Loop
+
+A pipeline is, at its core, a feedback loop. A developer pushes a commit, and the pipeline answers a single question: "Is this change safe to ship?" The faster the pipeline answers, the faster the developer can act on the result. Every minute spent waiting is a minute during which the author is likely context-switched to something else, and the cost of resuming the change later is nonzero.
+
+A typical loop for a containerized web application looks like this:
+
+<Steps>
+1. **Commit and push.** A developer pushes code to a shared repository.
+2. **Lint and static analysis.** The pipeline checks code style and catches common mistakes before any code executes.
+3. **Build.** The application compiles (if applicable) and dependencies are installed.
+4. **Test.** Unit tests, integration tests, and possibly end-to-end tests run against the built artifact.
+5. **Build container image.** A Docker image is assembled from the tested code.
+6. **Push to registry.** The image is pushed to a container registry (Docker Hub, GitHub Container Registry, Amazon ECR).
+7. **Deploy.** The new image is pulled onto a server or cluster and begins serving traffic.
+</Steps>
+
+Each stage acts as a gate. If linting fails, there is no point running the full test suite. If tests fail, there is no point building an image. This "fail fast" principle keeps the loop tight: developers learn about problems within minutes, not hours, and the pipeline does not waste runner time on work that is already doomed.
+
+A useful mental model is that the pipeline is a cost-sorting machine. Cheap, noisy checks go first (a syntax error caught in two seconds saves ten minutes of test time); expensive, conclusive checks go last (a staging deployment and smoke test takes minutes but catches the bugs that slipped through earlier). If you find yourself with a slow pipeline, the first question is almost always "are the checks ordered by cost and signal quality?"
+
+## Pipeline Design Principles
+
+Good pipelines share a small set of properties that are easier to describe than to enforce. Recognizing them helps when you are reading an unfamiliar pipeline or deciding whether your own needs work.
+
+**Reproducibility.** Given the same commit, the pipeline should produce the same result, no matter which runner executes it or when it runs. Tests that depend on the current date, on an external API that changes, or on whatever happened to be cached on a runner are **flaky**: they sometimes pass and sometimes fail for reasons unrelated to the code. Flaky tests destroy trust in the pipeline. The cure is to pin dependencies (explicit versions in lockfiles), control inputs (seeded random data, mocked time, stable test databases), and isolate state (run each test in a fresh container or fresh database schema).
+
+**Determinism in build outputs.** Ideally, building the same commit twice should produce byte-identical artifacts. True bit-for-bit determinism is hard and depends on your language and toolchain, but the weaker property of "functionally equivalent" outputs is achievable with lockfiles, pinned base images, and careful handling of timestamps. Determinism matters operationally because it lets you verify that the artifact you tested is the same artifact you deployed.
+
+**Idempotency.** As covered in the Configuration Management lecture, idempotency means that running an operation multiple times has the same effect as running it once. Deployment steps in particular benefit from this property: a re-run of a deploy job should not produce a second copy of your application or append duplicate entries to a load balancer configuration. Idempotent deploys make retries safe, which is important because partial failures happen and manual cleanup is expensive.
+
+**Fast feedback at the earliest stage.** Lint in seconds, unit tests in a minute or two, integration tests in under ten minutes. If any stage takes longer than that band, look for opportunities to parallelize, to cache, or to move work into a nightly job. A ninety-minute pipeline is a pipeline that developers route around.
+
+**Observable failures.** When a job fails, it should be immediately obvious which step failed and why. Logs should be readable, test reports should surface the specific failing assertion, and error messages should point at a fix. Pipelines that fail with "exit code 1" and nothing else are worse than no pipeline at all because they train people to ignore them.
+
+## The Tools Landscape
+
+Many CI/CD platforms exist, and you will encounter several of them over a career. Their differences are mostly operational (self-hosted vs managed, how runners are provisioned, how configuration is expressed) rather than conceptual: they all model the same set of events, jobs, and steps. Knowing the major players helps you read job postings, inherit existing systems, and make sensible choices for new projects.
+
+| Tool | Hosting model | Strengths | Weaknesses |
+|------|---------------|-----------|------------|
+| **Jenkins CI** | Self-hosted | Mature, enormous plugin ecosystem, runs anywhere | You operate it (upgrades, plugin CVEs, storage, scaling) |
+| **GitLab CI/CD** | Self-hosted or SaaS | Tight integration with GitLab repos, DAG pipelines, built-in registry | Configuration quirks, slower evolution than GitHub Actions |
+| **GitHub Actions** | SaaS (self-hosted runners optional) | Native to GitHub, marketplace, generous free tier for public repos | Vendor lock-in; cost scales quickly on private repos |
+| **CircleCI** | SaaS | Fast hosted runners, good caching primitives, orbs for reuse | Smaller ecosystem than Actions; pricing |
+| **Azure Pipelines** | SaaS or self-hosted | Deep Azure integration, multi-stage pipelines, classic + YAML | Two configuration systems (classic UI and YAML) cause confusion |
+| **AWS CodePipeline** | SaaS (AWS) | Native AWS IAM and service integration | Awkward outside AWS; UI-centric configuration |
+| **GCP Cloud Build** | SaaS (GCP) | Serverless, fast, native to Google Cloud | Limited triggers and marketplace vs alternatives |
+| **TeamCity** | Self-hosted | Polished UI, excellent for .NET and Java shops | Commercial license for larger teams |
+| **Travis CI** | SaaS | One of the earliest hosted CIs | In long decline since 2020; rarely a new-project choice |
+| **Drone, Buildkite, Woodpecker** | Mixed | Lightweight, container-native, good for self-hosted setups | Smaller communities and marketplaces |
+
+This course focuses on GitHub Actions because it integrates directly with the repositories you already use, requires no infrastructure to operate, and reflects current industry usage trends. The concepts transfer: once you understand how events trigger workflows that run jobs composed of steps on runners, you can read a GitLab `.gitlab-ci.yml` or a Jenkinsfile without much trouble.
+
+<Aside type="note" title="Self-Hosted Still Matters">
+Managed services dominate new projects, but self-hosted CI is very much alive in regulated industries, for workloads that need specialized hardware (GPUs, Apple Silicon, big-memory builds), and in organizations that cannot send source code to a third party. Jenkins, GitLab Runner, and GitHub's self-hosted runners are all common sights. The tradeoff is the same one you see everywhere in ops: rent and move fast, or own and control everything.
+</Aside>
+
+## GitHub Actions: Core Concepts
+
+GitHub Actions is a CI/CD platform built directly into GitHub. Its core vocabulary is small, and once you learn it, most workflows in the wild are easy to read even when they are large.
+
+### Workflows
+
+A **workflow** is an automated process defined in a YAML file stored at `.github/workflows/` in your repository. A single repository can have multiple workflow files: one for CI, one for deployment, one for nightly security scans, one for publishing documentation. Each file is independent and can be triggered by different events. Keeping workflows separate by purpose is a helpful convention, because it means you can read a single file and know everything about one responsibility rather than untangling a thousand-line megapipeline.
+
+### Events
+
+An **event** is something that happens in or to your repository and triggers a workflow. Common events include pushing commits, opening a pull request, creating a release tag, or a scheduled cron expression. Workflows can also be triggered manually through `workflow_dispatch`, called by other workflows through `workflow_call`, or fired by external systems through `repository_dispatch`. The full list is long, but in practice you will use four or five of them on most projects.
+
+### Jobs
+
+A workflow contains one or more **jobs**. Each job is a sequence of steps that runs on a single runner. By default, jobs run in parallel, which is useful when the work is independent (lint and test can run at the same time). When one job depends on another, you declare the dependency with `needs`, which builds a directed acyclic graph (DAG) of jobs. The scheduler runs jobs as soon as their dependencies complete, maximizing parallelism while respecting ordering constraints.
+
+### Steps
+
+A **step** is either a shell command (specified with `run`) or a reference to a reusable action (specified with `uses`). Steps within a job execute sequentially on the same runner, so they share a filesystem and can pass data to one another through files, environment variables, or explicit step outputs. A step fails when its command returns a nonzero exit code, which halts the job unless the step sets `continue-on-error: true`.
+
+### Runners
+
+A **runner** is the machine that executes a job. GitHub provides hosted runners preinstalled with common tools (Ubuntu, Windows, macOS, in several sizes), or you can register your own self-hosted runners for specialized hardware, network access to private resources, or predictable pricing. Most workflows use `runs-on: ubuntu-latest` for Linux-based builds. Hosted runners are ephemeral: each job gets a fresh VM, which is great for reproducibility but means nothing persists between runs except what you explicitly cache or upload.
+
+### Actions
+
+An **action** is a reusable unit of work packaged for reuse across workflows. Actions come in three flavors: JavaScript actions (run directly in the runner's Node.js), Docker actions (run inside a container), and composite actions (bundle a set of steps into a reusable unit). The [GitHub Actions Marketplace](https://github.com/marketplace?type=actions) publishes tens of thousands of community and vendor actions, which is both the platform's greatest strength and its most obvious supply-chain risk.
+
+## Writing Your First Workflow
+
+Workflows are easier to read than to describe. Consider a workflow for a Node.js web application with `package.json` scripts for linting and testing. Create a file at `.github/workflows/ci.yml`:
+
+```yaml
+name: CI Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+```
+
+This workflow fires on every push to `main` and on every pull request targeting `main`. It has one job (`lint-and-test`) that checks out the code, installs Node.js, installs dependencies, lints the code, and runs the test suite.
+
+Several details in this short file repay attention. The `actions/checkout@v6` step is a marketplace action that clones your repository onto the runner, and without it the runner's filesystem is empty; your code is not magically available. The `actions/setup-node@v6` action installs Node.js and, because we specified `cache: npm`, restores and updates npm's package cache between runs so that subsequent installs are faster. The `npm ci` command performs a clean install from the lockfile, which is more reproducible than `npm install` because it refuses to modify the lockfile and errors out if dependencies are inconsistent. These small choices accumulate: a pipeline built from careful defaults stays fast and reliable; one built from whatever-worked-last-time drifts into flakiness.
+
+<Aside type="note" title="Pinning Action Versions">
+A suffix like `@v6` pins the action to a major version, which protects your workflow from breaking changes while still receiving patches and security fixes. For higher-security environments, pin to a specific commit SHA (for example `actions/checkout@<full-commit-sha>`), which removes all trust in the tag system. Dependabot can open pull requests to bump pinned SHAs, which is the only way to operate at scale without reintroducing the risk that tag pinning eliminated.
+</Aside>
+
+## Triggers in Depth
+
+GitHub Actions supports a wide variety of events. The ones you will use most often are `push`, `pull_request`, `schedule`, and `workflow_dispatch`, and they each fit a distinct pattern.
+
+`push` fires when commits are pushed to a branch. Filtering by branch name is how you ensure that expensive workflows (image builds, deploys) run only on your main branch, and filtering by file path is how you avoid rebuilding the world for a README change:
+
+```yaml
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'src/**'
+      - 'Dockerfile'
+```
+
+`pull_request` fires when a pull request is opened, synchronized (new commits pushed), or reopened. This is the primary trigger for running CI checks on proposed changes before they are merged. A subtle but important variant is `pull_request_target`, which runs in the context of the *target* branch rather than the PR branch; it is more privileged and has been the source of many publicized supply-chain incidents, so reach for it only when you understand the implications.
+
+`schedule` uses cron syntax to run workflows on a timer. Nightly dependency audits, weekly security scans, and garbage collection jobs fit naturally here:
+
+```yaml
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 06:00 UTC
+```
+
+`workflow_dispatch` adds a "Run workflow" button in the GitHub UI, allowing you to trigger the workflow manually with optional input parameters. GitHub exposes that UI only when the workflow file exists on the default branch, though the actual run can target another branch from the branch selector. This is essential for deploy workflows where you want a human to pick the target environment or the version to ship:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+```
+
+You can combine multiple triggers in a single workflow, which is how you typically get CI on every push and pull request with a manual "ad hoc build" button on top.
+
+## Marketplace Actions and Supply-Chain Risk
+
+One of the most powerful features of GitHub Actions is its marketplace of reusable actions. Rather than writing shell commands for common tasks, you reference community or vendor actions that encapsulate complex logic. A few you will meet constantly:
+
+| Action | Purpose |
+|--------|---------|
+| `actions/checkout@v6` | Clone the repository onto the runner |
+| `actions/setup-node@v6` | Install Node.js (sister actions exist for Python, Go, Java, Ruby) |
+| `actions/cache@v4` | Cache arbitrary directories between workflow runs |
+| `actions/upload-artifact@v4` | Persist files as workflow artifacts |
+| `docker/setup-buildx-action@v3` | Set up Docker Buildx for multi-platform and cached image builds |
+| `docker/login-action@v3` | Authenticate to a container registry |
+| `docker/build-push-action@v6` | Build and push Docker images in a single step |
+| `aws-actions/configure-aws-credentials@v4` | Assume an AWS role using OIDC |
+
+Extending the earlier pipeline to build and push a Docker image once tests pass looks like this:
+
+```yaml
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  build-image:
+    needs: lint-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+```
+
+`build-image` declares `needs: lint-and-test`, so it will not start until the first job succeeds. The `if` condition further restricts it to pushes on `main`, since there is no reason to push images for pull request branches. The `cache-from` and `cache-to` lines enable GitHub Actions' built-in layer caching for Docker builds, which can dramatically reduce build times by reusing unchanged layers across runs.
+
+The marketplace is GitHub Actions' killer feature and its most significant operational risk. Every third-party action you reference is code you are running with access to your repository, your secrets, and sometimes your cloud credentials. Supply-chain attacks on the marketplace are real: compromised action releases have leaked secrets from major open-source projects. The defensive posture is a hierarchy:
+
+1. **Prefer first-party actions** published by organizations you already trust (`actions/*`, `docker/*`, `aws-actions/*`, `hashicorp/*`).
+2. **Pin to a commit SHA**, not a tag, for any third-party action that will touch secrets or deployment credentials.
+3. **Restrict the `permissions` block** on workflows so that even a compromised action cannot escalate.
+4. **Enable dependency review and Dependabot** so that action updates flow through pull requests you can review.
+
+<Aside type="caution" title="Never Grant Blanket Write Access">
+Repository and organization defaults for `GITHUB_TOKEN` vary, and even the restricted default can still be broader than a single workflow actually needs. A compromised action with unnecessary write access to contents, packages, or pull requests can do meaningful damage. Set `permissions:` at the workflow or job level and grant only what is actually required.
+</Aside>
+
+## Secrets, Variables, and OIDC
+
+Pipelines frequently need credentials: registry passwords, API keys, deployment tokens. Hardcoding these into a workflow file would be a serious security mistake: workflow files are committed to the repository and visible to anyone with read access. GitHub addresses this with three distinct mechanisms, each with a different threat model.
+
+**Encrypted secrets** are the workhorse. You define them at the repository, environment, or organization level in the GitHub settings UI. The workflow references them with `${{ secrets.SECRET_NAME }}`, and GitHub injects them at runtime. Secret values are write-only through the UI; once saved, they cannot be read back, and the logs automatically mask known secret values:
+
+```yaml
+- name: Deploy to server
+  env:
+    DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+    SERVER_HOST: ${{ secrets.SERVER_HOST }}
+    SERVER_KNOWN_HOST: ${{ secrets.SERVER_KNOWN_HOST }}
+  run: |
+    install -m 700 -d ~/.ssh
+    printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+    chmod 600 ~/.ssh/deploy_key
+    printf '%s\n' "$SERVER_KNOWN_HOST" >> ~/.ssh/known_hosts
+    ssh -i ~/.ssh/deploy_key \
+      deploy@"$SERVER_HOST" "docker pull ghcr.io/myorg/myapp:latest && docker compose up -d"
+```
+
+There is also a special secret called `GITHUB_TOKEN` that GitHub automatically generates for every workflow run. This token is scoped to the current repository, further limited by the repository or organization default and any workflow-level `permissions` block, and expires when the job finishes. It is the right choice for pushing to GitHub Container Registry, commenting on pull requests, or creating releases. You do not need to create it manually.
+
+**OpenID Connect (OIDC)** is the modern alternative to long-lived cloud credentials. Instead of storing an AWS access key and secret in GitHub, you configure AWS to trust GitHub's OIDC provider and assume a role scoped to the workflow. The workflow exchanges a short-lived GitHub-issued token for temporary AWS credentials that exist only for the job's duration. OIDC is strictly better than static keys wherever it is supported (AWS, Azure, Google Cloud, HashiCorp Vault, and a growing list of others): there are no credentials to rotate, no secrets to leak, and the cloud-side IAM policy can be scoped to the specific repository and branch.
+
+```yaml
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/GitHubActionsDeploy
+          aws-region: us-west-2
+      - run: aws s3 sync ./build/ s3://my-bucket/
+```
+
+<Aside type="caution" title="Never Echo Secrets">
+GitHub masks known secrets in log output, but careless string manipulation can still expose them. A common mistake is to write a secret to a file, cat the file later, and watch the mask fail to fire because the substring was recomposed. Treat every secret as something that must never appear in plain text anywhere.
+</Aside>
+
+You can also set non-secret environment variables at the workflow, job, or step level using the `env` key. Variables defined at a broader scope are inherited by narrower scopes, and a narrower definition overrides a broader one:
+
+```yaml
+env:
+  NODE_ENV: production
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      CI: true
+    steps:
+      - name: Show environment
+        env:
+          STEP_VAR: only-here
+        run: echo "NODE_ENV=$NODE_ENV CI=$CI STEP_VAR=$STEP_VAR"
+```
+
+## Matrix Builds
+
+Sometimes you need to test your application across multiple environments: different operating systems, different language versions, or different database backends. Rather than duplicating jobs, GitHub Actions supports **matrix strategies** that generate a job for every combination of parameters.
+
+```yaml
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+```
+
+This configuration produces four jobs: Ubuntu with Node 20, Ubuntu with Node 22, macOS with Node 20, and macOS with Node 22. The `fail-fast: false` setting tells GitHub to run all combinations even if one fails, which is useful when you want a complete picture of compatibility rather than stopping at the first failure. The default (`fail-fast: true`) cancels the remaining matrix jobs the moment one fails, which saves runner minutes when you just want to know if *anything* broke.
+
+Matrix builds are particularly valuable for libraries that must support multiple platforms or language versions. Even application teams use them to validate compatibility with upcoming language versions before upgrading, which turns "does our code work on Node 24?" into an empirical question instead of a guess. You can also `include` specific extra combinations or `exclude` ones that do not make sense (some database backends may not support some operating systems).
+
+<Aside type="note" title="Matrix Scale Limits">
+A matrix generates a maximum of 256 jobs per workflow run. By default, GitHub maximizes parallelism based on available runner capacity, though you can throttle with `max-parallel` to avoid saturating a pool of self-hosted runners.
+</Aside>
+
+## Service Containers
+
+Some jobs need a running service (a database, a cache, a message broker) available during the test steps. Rather than installing and starting services manually in shell commands, GitHub Actions supports **service containers**: Docker containers that run alongside your job and are accessible by hostname within the same network.
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: testpassword
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+      - run: npm ci
+      - run: npm test
+        env:
+          DATABASE_URL: postgresql://postgres:testpassword@localhost:5432/testdb
+```
+
+The `postgres` service container starts before the job's steps execute and is torn down automatically when the job finishes. The health-check options tell GitHub to wait until PostgreSQL is actually accepting connections before proceeding, which is the single most common source of flaky integration-test pipelines. Service containers are a Linux-runner feature, but within that constraint they work with essentially any Docker image, so Redis, MySQL, MongoDB, RabbitMQ, Elasticsearch, and LocalStack are all a few lines away.
+
+An alternative pattern is to run `docker compose up -d` inside a step and use the same `docker-compose.yml` you use locally. That keeps the CI environment closer to the developer environment but gives up the health-check and lifecycle integration that service containers provide. Both are reasonable; the right choice depends on whether you value "exactly matches local dev" or "minimal YAML" more.
+
+## Caching and Artifacts
+
+Caching and artifacts are related but different. A **cache** is a shortcut: a mechanism for skipping work by reusing outputs from an earlier run. An **artifact** is a deliverable: a file produced by the pipeline that you want to persist for download, for promotion to another job, or for audit. Understanding the distinction keeps you from misusing one for the other.
+
+Caching is what makes pipelines fast enough to be worth waiting for. The first run of a workflow might download three hundred megabytes of dependencies; the second run reuses them. The `actions/setup-*` family of actions handles language-specific caching automatically through their `cache` parameter. For everything else, `actions/cache` lets you declare a cache key (usually derived from a hash of a lockfile) and the directories to save:
+
+```yaml
+- name: Cache Cargo registry
+  uses: actions/cache@v4
+  with:
+    path: |
+      ~/.cargo/registry
+      ~/.cargo/git
+      target
+    key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+    restore-keys: |
+      ${{ runner.os }}-cargo-
+```
+
+The `key` is an exact match; a cache hit restores the files and skips the work. The `restore-keys` are fallback prefixes: if no exact match is found, GitHub picks the most recent cache whose key starts with one of these prefixes. That fallback is important because it means a changed lockfile still benefits from the previous build's cached dependencies as a warm starting point.
+
+Docker layer caching deserves its own note. Hosted runners do not preserve the local Docker image cache between runs, so without special handling every build pulls base images and re-runs every layer from scratch. The `type=gha` cache backend (`cache-from: type=gha`, `cache-to: type=gha,mode=max`) stores Docker layers in the GitHub Actions cache, giving you near-instant rebuilds when only application code changes. The `mode=max` setting caches intermediate layers, not just the final image, which is what actually produces dramatic speedups.
+
+Artifacts are for outputs you want to keep. Use `actions/upload-artifact` to preserve test reports, coverage data, build outputs, or generated binaries, and `actions/download-artifact` to consume them in a later job:
+
+```yaml
+- uses: actions/upload-artifact@v4
+  with:
+    name: coverage-report
+    path: coverage/
+    retention-days: 14
+```
+
+Artifacts default to ninety days of retention, can be downloaded from the workflow run UI, and are the right mechanism for preserving build outputs across job boundaries within a single workflow run. They are the wrong mechanism for caching: they are slower, they count against storage quota, and they are scoped to a single run unless you explicitly reference them from outside.
+
+## Reusable Workflows and Composite Actions
+
+Pipelines duplicate themselves naturally. Every service in a monorepo needs the same lint-and-test dance. Every deploy job sets up the same cloud credentials. Copying and pasting works until it does not, and by the time you have twelve workflows that all need the same change, you wish you had factored the shared logic out earlier.
+
+GitHub Actions offers two mechanisms for factoring. **Reusable workflows** are full workflows called from other workflows. The caller passes inputs and secrets, and the callee runs its own jobs on its own runners. They are the right tool when you want to share an entire pipeline skeleton across repositories:
+
+```yaml
+# In .github/workflows/ci.yml (the caller)
+jobs:
+  standard-ci:
+    uses: my-org/shared-workflows/.github/workflows/node-ci.yml@v2
+    with:
+      node-version: 22
+```
+
+**Composite actions** are a smaller unit: a bundle of steps that runs inside a single job. You publish them in their own repository (or reference them with a relative path) and call them with `uses:` like any other action. They are the right tool for sharing a few steps that always go together, such as "configure AWS credentials, log into ECR, set up Buildx."
+
+The tradeoff between them is about granularity and isolation. Reusable workflows are heavier: they run as separate jobs, potentially on separate runners, with their own billing. Composite actions are lightweight but cannot declare their own runner or their own services. Most organizations end up using both: composite actions for reusable step sequences, reusable workflows for standardized pipeline skeletons.
+
+## Concurrency Control
+
+By default, every push creates a new workflow run, and runs proceed in parallel. That is usually what you want for CI on pull requests, but it is rarely what you want for deployments: if two pushes to `main` land within thirty seconds, two deploy jobs racing each other can produce a broken production state, or worse, an older artifact overwriting a newer one.
+
+The `concurrency` keyword solves this. A workflow or job can declare a concurrency group, and GitHub ensures that only one run in that group is active at a time:
+
+```yaml
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+```
+
+With `cancel-in-progress: false`, new runs queue behind the current one; with `cancel-in-progress: true`, a new run cancels the old one immediately, which is the right behavior for CI on pull request branches (no point testing a stale commit when a newer one has arrived). For deploy workflows, queueing is safer than cancelling: a half-run deploy that gets cancelled can leave infrastructure in an undefined state.
+
+## Self-Hosted Runners
+
+Self-hosted runners are machines you provide and register with GitHub to run your jobs. They exist to solve problems the hosted runners cannot: access to private networks, specialized hardware (GPUs, ARM, macOS with specific Xcode versions), builds too large to fit on a hosted runner, or compliance requirements that forbid sending source to a third-party build environment.
+
+The operational model is straightforward: you run a small runner agent on each machine, and GitHub dispatches jobs to it. Runners can be physical hardware, long-lived VMs, or ephemeral containers spun up on demand through autoscaling tools like Actions Runner Controller on Kubernetes or other ephemeral VM/container orchestration on your cloud platform. Ephemeral runners are strongly preferred for security because a compromised job cannot persist state onto the next job's runner.
+
+The tradeoffs are the same ones you weigh anywhere self-hosting is an option. You pay for the machines whether they are busy or not, you operate them (patching, scaling, monitoring), and you inherit the security responsibility: a self-hosted runner that accepts jobs from a public repository is a potential foothold for anyone who can open a pull request. GitHub's documentation explicitly warns against using self-hosted runners on public repos for exactly this reason. In exchange, you get predictable performance, access to whatever the host can see, and escape from hosted-runner per-minute billing.
+
+## Testing Workflows Locally
+
+Iterating on a workflow by pushing commits, waiting for a run, reading the log, and pushing again is a slow and frustrating loop. Several tools exist to execute workflows locally, and the most widely used is [`act`](https://github.com/nektos/act), which runs jobs inside Docker containers that mimic the hosted runner environment.
+
+```bash
+# Install
+brew install act   # or see https://nektosact.com/ for other platforms
+
+# Run the default push workflow
+act
+
+# Run a specific event or workflow
+act pull_request
+act -W .github/workflows/ci.yml
+
+# Supply secrets without committing them
+act --secret-file .secrets
+```
+
+`act` is not a perfect simulator. Its runner images differ from GitHub's in size and installed tools, some actions behave differently inside Docker than on a real VM, and services like OIDC against AWS only work through workarounds. Use it to catch mechanical issues (YAML typos, missing steps, wrong environment variable names) before pushing, and accept that any workflow that touches external systems will still need a real run to fully verify.
+
+For workflows that are too expensive or too stateful to run locally, the next-best debugging strategy is to push to a branch, watch the run, and iterate rapidly. GitHub's **re-run job** button is useful for retrying flaky failures, and `workflow_dispatch` with custom inputs lets you trigger a run against a selected branch without pushing a new commit, provided the workflow is defined on the default branch so GitHub exposes the manual trigger.
+
+## Debugging Failed Runs
+
+When a workflow fails, the first instinct is to reach for the log viewer. That is usually sufficient: every step's stdout and stderr is captured, timestamped, and searchable. Three additional techniques are worth knowing when the log alone does not answer the question.
+
+**Debug logging** is off by default because it is extremely verbose. Setting the repository secrets `ACTIONS_STEP_DEBUG` to `true` and, for an even deeper trace, `ACTIONS_RUNNER_DEBUG` to `true`, produces a log that shows every command, every environment variable, and every internal action step. Leave these off in normal operation and enable them only while chasing a bug.
+
+**Interactive SSH** is possible through community actions such as `mxschmitt/action-tmate`. Adding a step like this pauses the workflow and prints an SSH connection string you can use to log into the runner while the job is live, which turns "I cannot reproduce this bug locally" into "let me look at the runner's filesystem." Like debug logging, this is a diagnostic tool, not a production pattern: never leave it enabled in a workflow that handles real secrets.
+
+**Artifact uploads on failure** are the durable alternative. Adding `if: failure()` to an `actions/upload-artifact` step captures logs, core dumps, database snapshots, or anything else you would want to inspect after the fact. The idiom is particularly valuable for end-to-end test failures where a screenshot or a trace file tells a story the log cannot:
+
+```yaml
+- name: Upload Playwright report
+  if: failure()
+  uses: actions/upload-artifact@v4
+  with:
+    name: playwright-report
+    path: playwright-report/
+    retention-days: 7
+```
+
+## Deployment Patterns and Strategies
+
+A pipeline that only runs tests is valuable, but the full power of CI/CD emerges when the pipeline also handles deployment. Deployment itself is a subject of some depth because production systems cannot simply be turned off while you swap in a new version: users are active, requests are in flight, and any gap in availability is a real cost. The pipeline choice (when to deploy) and the strategy choice (how to roll out) are orthogonal.
+
+### Tag-Triggered Deploys
+
+A popular pattern is to deploy only when a Git tag matching a version pattern is pushed. This gives the team explicit control over releases while keeping the process automated, and it pairs naturally with semantic versioning:
+
+```yaml
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Extract version from tag
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push versioned image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
+            ghcr.io/${{ github.repository }}:latest
+```
+
+When someone runs `git tag v1.2.0 && git push --tags`, this workflow builds an image tagged with both `v1.2.0` and `latest`, then pushes both to the registry. The immutable version tag gives you a stable reference for rollback; the moving `latest` tag gives you a convenient "always the newest" pointer for casual use. A common refinement is to produce both a full semver tag (`v1.2.0`) and a rolling minor tag (`v1.2`) so that downstream consumers can choose their own update cadence.
+
+### Environment Protection Rules
+
+GitHub supports **environments** (such as "staging" and "production") with configurable protection rules. You can require manual approval, restrict which branches may deploy, or add a wait timer. In your workflow, you reference an environment with the `environment` key:
+
+```yaml
+jobs:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - run: echo "Deploying to staging..."
+
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Deploying to production..."
+```
+
+If the "production" environment is configured to require approval from a designated reviewer, the `deploy-production` job will pause and wait for that approval before proceeding. Environment-level secrets are also bound to the environment, so a workflow running against "staging" cannot accidentally reach production credentials. This provides a human checkpoint at exactly the right moment: after all automated checks have passed but before the change reaches users.
+
+### Rollout Strategies
+
+The previous sections described *when* and *how* a pipeline triggers a deployment. A separate question is *how the new version is actually rolled out to running servers*. Three patterns recur, and they represent a spectrum from simple to cautious.
+
+**Rolling deployment** replaces instances of the old version one at a time (or in small batches) while the rest of the fleet continues serving traffic. At any moment during the rollout, some instances run the old version and some run the new one. This is the default behavior for Kubernetes `Deployment` objects and most platform-as-a-service offerings. Rolling deployments are simple to operate and require no extra infrastructure, but because old and new versions coexist briefly, your code and database schema must be backwards-compatible during the transition. That compatibility constraint is not a minor footnote: it changes how you write database migrations and how you version your API.
+
+**Blue-green deployment** runs two identical environments side by side: the "blue" environment currently serves production traffic; the "green" environment receives the new version. Once the green environment passes health checks, a load balancer or DNS switch instantly redirects all traffic from blue to green. Because the switch is atomic, there is no period where old and new versions coexist. Rollback is equally instant: flip the switch back to blue. The cost is infrastructure: you need two full production environments running simultaneously, even if only one is serving users at any given time.
+
+```bash
+# Switch production traffic to the new (green) target group
+aws elbv2 modify-listener \
+  --listener-arn $LISTENER_ARN \
+  --default-actions Type=forward,TargetGroupArn=$GREEN_TARGET_GROUP
+
+# To roll back, flip back to blue
+aws elbv2 modify-listener \
+  --listener-arn $LISTENER_ARN \
+  --default-actions Type=forward,TargetGroupArn=$BLUE_TARGET_GROUP
+```
+
+**Canary deployment** sends a small fraction of real production traffic (say, 5 percent) to the new version while the remaining 95 percent continues hitting the old version. The name comes from the mining practice of carrying a canary into a coal mine: if the canary dies, something is wrong. You monitor error rates, latency, and business metrics on the canary. If everything looks healthy after a set period, you gradually shift more traffic over. If the metrics degrade, you pull all traffic back to the old version before most users were ever affected. Canary releases are more complex to implement because they require a traffic-splitting layer such as a load balancer with weighted routing or a service mesh, which is a dedicated infrastructure layer that manages traffic between microservices. In return, they give you real-world validation with limited blast radius.
+
+| Pattern | Downtime | Rollback speed | Infrastructure cost | Version coexistence |
+|---------|----------|----------------|---------------------|---------------------|
+| Rolling | None | Minutes (re-roll forward or back) | None | Yes, briefly |
+| Blue-green | None | Instant (traffic switch) | 2x production | No |
+| Canary | None | Fast (redirect traffic) | Moderate | Yes, intentionally |
+
+These patterns combine with the pipeline mechanics above. A typical setup uses a rolling or canary deployment to staging on every merge to `main`, then requires manual approval and performs a blue-green swap to production. Kubernetes, covered in a later lecture, offers native support for rolling deploys and first-class building blocks for canary and blue-green patterns through tools like Argo Rollouts and Flagger. The point is that the pipeline is deployment-strategy-agnostic: the job is to produce a verified artifact; how it reaches users is an infrastructure concern that sits alongside.
+
+## A Complete Pipeline
+
+Let us bring everything together into a single, realistic workflow for a containerized web application. This pipeline lints, tests, builds a Docker image, pushes it to a registry, and deploys to staging:
+
+```yaml
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  build-and-push:
+    needs: quality
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Deploy to staging server
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.STAGING_HOST }}
+          KNOWN_HOSTS: ${{ secrets.STAGING_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/key && chmod 600 ~/.ssh/key
+          printf '%s\n' "$KNOWN_HOSTS" >> ~/.ssh/known_hosts
+          ssh -i ~/.ssh/key deploy@"$HOST" \
+            "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+             && docker compose up -d"
+          rm ~/.ssh/key
+```
+
+Because this single workflow handles both pull request validation and `main`-branch delivery, the concurrency block conditionally cancels stale pull request runs while allowing `main` runs to finish. That keeps CI feedback tight without interrupting a deployment that is already in progress.
+
+This workflow demonstrates the full feedback loop. A pull request triggers only the `quality` job (lint and test), giving the author rapid feedback without the cost of a full build. A push to `main` runs `quality`, then `build-and-push`, then `deploy`, with the concurrency group ensuring that two rapid merges do not race each other into production. The `permissions` block at the top follows the principle of least privilege: the workflow can read repository contents and write packages, but nothing else.
+
+## Operational Concerns: Cost, Security, Governance
+
+Pipelines move from "cool idea" to "load-bearing infrastructure" quickly, and once they do, a handful of operational topics become important.
+
+**Cost.** Hosted runners are billed per minute, and the rates vary dramatically by operating system and change over time. In current pricing, macOS runners are far more expensive than Linux and Windows runners also cost more, so check GitHub's billing page before estimating spend. Public repositories get a generous free tier; private repositories quickly start producing real invoices. The usual first optimization is to move heavy workloads to Linux runners wherever possible. The second is to cache aggressively, so that the pipeline spends its minutes on work that actually changed. The third is to be thoughtful about matrix breadth: a 4x4 matrix that runs for ten minutes costs 160 runner-minutes per trigger, which adds up fast if your team pushes hourly.
+
+**Build reproducibility and SBOMs.** Supply-chain security is a growing concern, and pipelines are the natural place to address it. A **Software Bill of Materials (SBOM)** is a machine-readable inventory of every component that went into a build (direct dependencies, transitive dependencies, base images, build tools). Generating an SBOM on every build, typically with tools like Syft or the `docker/build-push-action` SBOM flag, lets downstream consumers answer "are we affected by this CVE?" in minutes rather than days. Pairing SBOMs with image signing (Cosign, Sigstore) and attestations closes the loop: a consumer can verify cryptographically that the image they are pulling came from your pipeline.
+
+**Audit and compliance.** Every GitHub Actions run is logged and retained according to your plan's policy, which gives you a searchable record of who changed what and when. Regulated industries lean on this heavily: a pipeline that produces signed artifacts, records approver identities through environment protection, and retains logs for the required period satisfies most change-control frameworks without a separate workflow tool.
+
+**Governance across repositories.** At scale, you do not want every team to invent its own deploy pipeline. Reusable workflows, composite actions, and organization-level policies (required status checks, restricted action usage, blocked marketplace publishers) let a platform team set sensible defaults while individual teams still own their own workflows. The best setups feel like library design: clear interfaces, sensible defaults, and escape hatches for the cases the library did not anticipate.
+
+## Takeaways
+
+CI/CD transforms software delivery from a manual, error-prone process into an automated, repeatable one. The mental model to carry forward is the feedback loop: a developer pushes a commit, and the pipeline answers "is this safe to ship?" as quickly and as reliably as possible. Every design choice in a pipeline serves that loop. Fail-fast ordering makes the answer arrive sooner. Reproducibility makes the answer trustworthy. Artifact promotion makes the answer propagate through environments without re-deriving work. Human gates at the right checkpoints make the answer actionable at the scale of your team's risk tolerance.
+
+Picture a day in the life of a change. A developer working in a branch pushes a commit. Lint and unit tests run in three minutes on a hosted Linux runner, with dependencies served from cache. A pull request opens, and the same checks plus integration tests against a PostgreSQL service container run in eight minutes total. Review happens; the PR merges to `main`. The CI/CD workflow re-runs the quality job, then builds a container image with Docker Buildx using cached layers, pushes it to GitHub Container Registry tagged with the commit SHA and `latest`, and kicks off a deploy job that assumes an AWS role through OIDC and performs a rolling update on ECS. The entire path from merge to production takes under twelve minutes. If something breaks, the concurrency group ensures the rollback does not race with a new deploy, the SBOM attached to the image tells the on-call engineer what libraries are in play, and the artifact in the registry gives them a stable rollback target. None of this is exotic; it is the current baseline for a competent team.
+
+The adjacent lectures connect directly to this one. The Configuration Management lecture explained how tools like Ansible describe the desired state of existing servers; CI/CD is the automated pressure that applies those descriptions on every change. The Infrastructure as Code lecture explained how Terraform creates the servers themselves; CI/CD is where Terraform runs safely, with policy checks and approval gates. The System Security and Hardening lecture that follows will sharpen the operational security questions this lecture raised: secrets handling, network exposure, and the principle of least privilege applied to the machines your pipeline deploys to. Pipelines are the connective tissue that makes all of it repeatable.
+
+## Resources
+
+- <a href="https://docs.github.com/en/actions" target="_blank" rel="noopener noreferrer">GitHub Actions Documentation (GitHub Docs)</a>
+- <a href="https://www.youtube.com/watch?v=R8_veQiYBjI" target="_blank" rel="noopener noreferrer">GitHub Actions Tutorial: Basic Concepts and CI/CD Pipeline with Docker (TechWorld with Nana) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=mFFXuXjVgkU" target="_blank" rel="noopener noreferrer">GitHub Actions in 100 Seconds (Fireship) (YouTube)</a>
+- <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments" target="_blank" rel="noopener noreferrer">Security Hardening for GitHub Actions Deployments (GitHub Docs)</a>
+- <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect" target="_blank" rel="noopener noreferrer">About Security Hardening with OpenID Connect (GitHub Docs)</a>
+- <a href="https://martinfowler.com/articles/continuousIntegration.html" target="_blank" rel="noopener noreferrer">Continuous Integration (Martin Fowler)</a>
+- <a href="https://martinfowler.com/bliki/BlueGreenDeployment.html" target="_blank" rel="noopener noreferrer">Blue-Green Deployment (Martin Fowler)</a>
+- <a href="https://cloud.google.com/devops" target="_blank" rel="noopener noreferrer">DORA and the State of DevOps Reports (Google Cloud)</a>
+- <a href="https://nektosact.com/" target="_blank" rel="noopener noreferrer">act: Run GitHub Actions Locally (nektos)</a>
+- <a href="https://github.com/sdras/awesome-actions" target="_blank" rel="noopener noreferrer">awesome-actions: Curated List of GitHub Actions (GitHub)</a>
+- <a href="https://www.thoughtworks.com/insights/blog/continuous-delivery-huh" target="_blank" rel="noopener noreferrer">Continuous Delivery: Huh? (Thoughtworks)</a>

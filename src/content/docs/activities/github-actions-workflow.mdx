@@ -1,125 +1,442 @@
 ---
 title: "GitHub Actions"
-description: "Create a GitHub repository, write a workflow that runs on push, and capture a successful pipeline run with your name in the output."
+description: "Build a real CI pipeline from scratch: events, jobs, steps, matrix builds, caching, artifacts, secrets, manual triggers, and debugging a failing run."
 sidebar:
   order: 10
 draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-CI/CD pipelines run automatically in response to git events. The fastest way to understand them is to build one. This activity has you write a minimal workflow from scratch, push to trigger it, and read the output.
+{/* ai-summary
+type: activity
+slug: github-actions-workflow
+order: 10
+paired_lecture: ci-cd
+practices: workflow file layout; push and workflow_dispatch events; jobs, steps, and runners; actions/checkout and setup-python; dependency caching; matrix builds across language versions; job dependencies with needs; artifact upload and download; repository secrets and automatic masking; workflow_dispatch inputs; reading logs and diagnosing a failing run
+prereq_activities:
+output: a public GitHub repository whose green CI workflow lints YAML and shell files across a Python matrix, produces a downloadable report artifact, accepts a manual trigger with inputs, references a secret, and ends with a run whose log shows the student's GitHub username
+*/}
 
-**Prerequisite:** A GitHub account. No AWS access required for this activity.
+This activity puts into practice the concepts from the [CI/CD Pipelines and GitHub Actions](/lectures/ci-cd/) lecture. Starting from an empty GitHub repository, you will write a workflow that grows step by step from a single "hello" job into a real DevOps pipeline: linting YAML and shell files, running across a matrix of Python versions with dependency caching, producing an artifact you can download, accepting a manual trigger with inputs, reading a repository secret, and finally recovering from a deliberately broken run. By the end, you will have exercised the same mechanics you will see in every production pipeline you encounter.
 
-## Steps
+## What You Will Need
+
+- A [GitHub account](https://github.com/join) (you will create a public repository for this activity)
+- [Git installed on your laptop](https://git-scm.com/downloads) and configured with your GitHub username and email
+- A text editor (VS Code, vim, or anything that saves YAML cleanly)
+- A terminal with `bash` available (macOS Terminal, Linux shell, or WSL on Windows)
+- An internet connection; no AWS access is required for this activity
+
+---
+
+## Bootstrap the Repository
+
+You will create a new public repository dedicated to this activity and clone it locally. Workflow files live in a fixed path inside the repository, so the directory structure needs to exist before the first workflow will trigger.
 
 <Steps>
 
-1. **Create a new public GitHub repository** named `cs312-cicd-activity`. Initialize it with a README.
+1. **Create a new public GitHub repository.** On [github.com/new](https://github.com/new), name it `cs312-ci-activity`, set visibility to **Public**, check **Add a README file**, and click **Create repository**. Public repos get generous free runner minutes, which is why we are using one here.
 
-2. **Clone it locally:**
+2. **Clone the repository locally:**
+
    ```bash
-   git clone https://github.com/YOUR_GITHUB_USERNAME/cs312-cicd-activity.git
-   cd cs312-cicd-activity
+   git clone https://github.com/YOUR_GITHUB_USERNAME/cs312-ci-activity.git
+   cd cs312-ci-activity
    ```
 
-3. **Create the workflow directory:**
+   Replace `YOUR_GITHUB_USERNAME` with your actual handle. If the clone fails with an authentication error, set up a [personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) or SSH keys first.
+
+3. **Create the workflow directory and a couple of files to lint:**
+
    ```bash
-   mkdir -p .github/workflows
+   mkdir -p .github/workflows configs scripts
    ```
 
-4. **Write the workflow file** at `.github/workflows/activity.yml`:
+   GitHub only recognizes workflow files under `.github/workflows/`. The `configs/` and `scripts/` directories will hold the YAML and shell files your pipeline will check.
+
+4. **Write a sample YAML config** at `configs/app.yml`:
 
    ```yaml
-   name: CS 312 Activity
+   service: web
+   replicas: 3
+   ports:
+     - 80
+     - 443
+   env:
+     LOG_LEVEL: info
+     TIMEOUT_SECONDS: 30
+   ```
+
+5. **Write a sample shell script** at `scripts/deploy.sh`:
+
+   ```bash
+   #!/usr/bin/env bash
+   set -euo pipefail
+
+   SERVICE="${1:?service name required}"
+   echo "Deploying ${SERVICE}..."
+   echo "Done."
+   ```
+
+   These two files give your pipeline something realistic to work on. They are the kind of artifacts a real DevOps repository accumulates: configuration in YAML, operational glue in shell.
+
+</Steps>
+
+---
+
+## Your First Workflow
+
+A workflow is a YAML file under `.github/workflows/` that tells GitHub what to run, when to run it, and where. You will start with the smallest useful workflow: one job, a handful of steps, and a single trigger. Pushing the commit that adds the file will cause the workflow to fire.
+
+<Steps>
+
+1. **Create the workflow file** at `.github/workflows/ci.yml`:
+
+   ```yaml
+   name: CI
 
    on:
      push:
        branches: [main]
+     pull_request:
+       branches: [main]
      workflow_dispatch:
 
    jobs:
-     identify:
+     hello:
        runs-on: ubuntu-latest
        steps:
-         - name: Check out code
+         - name: Check out the repository
            uses: actions/checkout@v4
 
-         - name: Print student info
+         - name: Identify the run
            run: |
-             echo "Student: YOUR_NAME"
-             echo "GitHub user: ${{ github.actor }}"
-             echo "Triggered by: ${{ github.event_name }}"
-             echo "Repository: ${{ github.repository }}"
-
-         - name: System info
-           run: |
-             uname -a
-             echo "Runner OS: ${{ runner.os }}"
-
-         - name: List repo files
-           run: ls -la
-
-     lint:
-       runs-on: ubuntu-latest
-       needs: identify
-       steps:
-         - name: Check out code
-           uses: actions/checkout@v4
-
-         - name: Check for trailing whitespace
-           run: |
-             if grep -rn " $" --include="*.yml" --include="*.md" .; then
-               echo "Trailing whitespace found"
-               exit 1
-             else
-               echo "No trailing whitespace found"
-             fi
+             echo "Triggered by: ${{ github.actor }}"
+             echo "Event: ${{ github.event_name }}"
+             echo "Ref: ${{ github.ref }}"
+             echo "Runner OS: $(uname -s) $(uname -m)"
    ```
 
-   Replace `YOUR_NAME` with your actual name.
+   The `on:` block declares three triggers: every push to `main`, every pull request targeting `main`, and a manual "Run workflow" button. The `jobs:` block defines one job named `hello` that runs on an Ubuntu runner and has two steps.
 
-5. **Commit and push:**
+2. **Commit and push:**
+
    ```bash
-   git add .
-   git commit -m "Add CI activity workflow"
+   git add .github configs scripts
+   git commit -m "Add first workflow and sample files"
    git push origin main
    ```
 
-6. **Watch the workflow run:** navigate to your repository on GitHub, click the **Actions** tab, and open the running workflow. Wait for it to complete.
+3. **Open the Actions tab** in your repository on GitHub. You should see a running or just-completed workflow named **CI** with a commit title matching your commit message. Click into it.
 
-7. **Take a screenshot** of the completed workflow run showing:
-   - The green checkmark indicating success
-   - The "Print student info" step expanded, showing your name and GitHub username in the output
+4. **Expand the "Identify the run" step** by clicking its title. The log should contain four lines, beginning with `Triggered by:` followed by your GitHub username. Notice that the runner reported `Linux x86_64`: GitHub spun up a fresh Ubuntu VM, ran your job, and will destroy that VM as soon as the workflow finishes.
 
 </Steps>
 
-## Extend the Workflow
+<ActivityQuestion>
+You declared three triggers (`push`, `pull_request`, `workflow_dispatch`) but only one of them fired this run. Which one, and how can you tell from the log? Why might a team want the workflow to fire on all three events rather than just on `push`?
+</ActivityQuestion>
 
-Add a third job called `report` that:
-- Runs after both `identify` and `lint` complete (use `needs: [identify, lint]`)
-- Prints: `"Pipeline complete for: YOUR_NAME"`
+---
 
-Commit and push. Take a screenshot of the updated workflow graph showing all three jobs and their dependency relationship.
+## Real Checks and Matrix Builds
 
-## Questions
+A hello-world job is useful for confirming the plumbing works, but a pipeline earns its keep by running real checks. You will replace `hello` with a `lint` job that validates your YAML with `yamllint` and your shell scripts with `shellcheck`. You will then turn that job into a matrix that runs against two Python versions in parallel, using dependency caching so the second run is fast.
 
-1. What is the difference between `on: push` and `on: workflow_dispatch` as triggers?
-2. What does `needs: identify` in the `lint` job do? What would happen if you removed it?
-3. The `lint` job would fail if it found trailing whitespace. This is an example of a CI gate. Name two other things you would commonly gate on in a production CI pipeline for a web application.
-4. GitHub Actions runners are ephemeral. What does that mean, and why does it matter for storing state between pipeline runs?
+<Steps>
 
-## Deliverable
+1. **Replace the contents of `.github/workflows/ci.yml`** with this expanded workflow:
 
-Submit a PDF to Canvas containing:
-- Screenshot of the initial workflow run with your name visible in the "Print student info" step
-- Screenshot of the updated workflow showing all three jobs and their dependency graph
-- The URL of your GitHub repository
-- Answers to the four questions
+   ```yaml
+   name: CI
 
-Your **full name and student ID** must appear in the PDF header.
+   on:
+     push:
+       branches: [main]
+     pull_request:
+       branches: [main]
+     workflow_dispatch:
 
-<Aside type="tip">
-If your workflow fails, click the failing step to expand the logs. GitHub Actions logs are detailed enough that most failures are diagnosable directly from the error message.
+   jobs:
+     lint:
+       runs-on: ubuntu-latest
+       strategy:
+         fail-fast: false
+         matrix:
+           python: ['3.11', '3.12']
+       steps:
+         - uses: actions/checkout@v4
+
+         - name: Set up Python ${{ matrix.python }}
+           uses: actions/setup-python@v5
+           with:
+             python-version: ${{ matrix.python }}
+             cache: pip
+
+         - name: Install yamllint
+           run: pip install yamllint==1.35.1
+
+         - name: Lint YAML
+           run: yamllint configs/
+
+         - name: Lint shell scripts
+           run: shellcheck scripts/*.sh
+
+         - name: Identify the run
+           run: echo "Linted by ${{ github.actor }} on Python ${{ matrix.python }}"
+   ```
+
+   The `strategy.matrix` block tells GitHub to run the job twice, once per Python version, in parallel. `fail-fast: false` keeps both jobs running even if one fails, so you see the full picture. `cache: pip` is a parameter of `actions/setup-python` that stores pip's download cache between runs, keyed on your Python version and on whatever requirements files it finds.
+
+2. **Commit and push:**
+
+   ```bash
+   git add .github/workflows/ci.yml
+   git commit -m "Add YAML and shell linting with a Python matrix"
+   git push
+   ```
+
+3. **Open the Actions tab** and click into the new run. You should see **two** jobs listed under the workflow: `lint (3.11)` and `lint (3.12)`. They run in parallel on separate runners.
+
+4. **Watch the YAML lint step**. It should pass, printing nothing (no output is `yamllint`'s way of saying "looks good"). The shell lint step should also pass. The final "Identify the run" step will print a line that includes both your GitHub username and the Python version that particular matrix cell used.
+
+5. **Push a trivial change** to see caching in action:
+
+   ```bash
+   echo "" >> configs/app.yml
+   git commit -am "Touch config"
+   git push
+   ```
+
+   Open the new run and expand the "Set up Python" step on either matrix cell. Near the end of the step you will see a line like `Cache restored from key: setup_python-Linux-...`. The first run populated the cache; this one restored it, saving the pip download time.
+
+</Steps>
+
+<ActivityQuestion>
+You watched both matrix cells run in parallel and both cached their pip directories. The lecture described matrix builds as a way to verify compatibility across environments. For this activity the two cells are testing identical Python code, so the matrix is not catching incompatibility. What is it demonstrating instead, and what would you change about the matrix to turn it into a real compatibility check for a library?
+</ActivityQuestion>
+
+---
+
+## Jobs, Dependencies, and Artifacts
+
+A single job is often enough for simple pipelines, but real workflows split work into multiple jobs so that failures are easy to localize and so that unrelated stages can run in parallel. In this section you will add a second job that depends on `lint`, produces a report file, and uploads that file as an **artifact** you can download from the GitHub UI.
+
+<Steps>
+
+1. **Append a `report` job** to `.github/workflows/ci.yml`. Add this block after the `lint:` job, keeping the existing indentation:
+
+   ```yaml
+     report:
+       needs: lint
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v4
+
+         - name: Generate lint report
+           run: |
+             mkdir -p out
+             {
+               echo "# Lint Report"
+               echo ""
+               echo "- Actor: ${{ github.actor }}"
+               echo "- Commit: ${{ github.sha }}"
+               echo "- Ref: ${{ github.ref }}"
+               echo "- Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+               echo ""
+               echo "## Files checked"
+               echo ""
+               find configs scripts -type f | sort | sed 's/^/- /'
+             } > out/report.md
+
+         - name: Upload report artifact
+           uses: actions/upload-artifact@v4
+           with:
+             name: lint-report
+             path: out/report.md
+             retention-days: 7
+   ```
+
+   `needs: lint` tells GitHub to run `report` only after every matrix cell of `lint` succeeds. If any cell fails, `report` is skipped. `actions/upload-artifact@v4` takes the file or directory you point it at, compresses it, and attaches it to the workflow run for seven days.
+
+2. **Commit and push:**
+
+   ```bash
+   git commit -am "Add report job with artifact upload"
+   git push
+   ```
+
+3. **Open the new run.** The jobs sidebar now shows three entries: `lint (3.11)`, `lint (3.12)`, and `report`. The visualization at the top of the page draws arrows showing that `report` waits for both lint cells.
+
+4. **Download the artifact.** Scroll to the bottom of the run page. In the **Artifacts** section you will see `lint-report`. Click it to download the zip, unzip it, and open `report.md`. The file should include your GitHub username, the commit SHA of the run, and a bulleted list of the two files your workflow checked.
+
+</Steps>
+
+<ActivityQuestion>
+If `lint (3.11)` fails but `lint (3.12)` passes, will the `report` job run? Look at the logic of `needs:` and `fail-fast: false` together. How would you change the workflow if you wanted `report` to run as long as *any* matrix cell succeeded?
+</ActivityQuestion>
+
+---
+
+## Secrets and Manual Triggers
+
+Pipelines frequently need two things that a simple `push` trigger cannot provide: credentials (which must never be committed to the repository) and an operator-controlled way to kick off a run with parameters. GitHub's answers are **repository secrets** and **workflow_dispatch inputs**. You will set up both, reference them from the workflow, and observe how secret values are automatically masked in the log.
+
+<Steps>
+
+1. **Create a repository secret.** On GitHub, navigate to **Settings > Secrets and variables > Actions** in your `cs312-ci-activity` repository. Click **New repository secret**. Set:
+
+   - **Name**: `GREETING_SECRET`
+   - **Secret**: pick any short value, for example `hello-from-ci-312`
+
+   Click **Add secret**. The value disappears as soon as you save it; you can never read it back through the UI.
+
+2. **Extend the `workflow_dispatch` trigger** in `.github/workflows/ci.yml` to accept inputs. Replace the existing `workflow_dispatch:` line with this expanded block:
+
+   ```yaml
+     workflow_dispatch:
+       inputs:
+         environment:
+           description: 'Target environment'
+           required: true
+           default: 'staging'
+           type: choice
+           options:
+             - staging
+             - production
+         note:
+           description: 'Short free-form note'
+           required: false
+           type: string
+   ```
+
+   Inputs appear as form fields on the "Run workflow" dialog, so a human triggering the run can pick the environment and leave a note.
+
+3. **Add a `notify` job** at the bottom of the workflow that uses both the secret and the inputs:
+
+   ```yaml
+     notify:
+       needs: report
+       runs-on: ubuntu-latest
+       steps:
+         - name: Summarize the run
+           env:
+             GREETING: ${{ secrets.GREETING_SECRET }}
+             TARGET: ${{ github.event.inputs.environment || 'automatic' }}
+             NOTE: ${{ github.event.inputs.note || 'no note provided' }}
+           run: |
+             echo "Secret length: ${#GREETING}"
+             echo "Secret (should be masked): $GREETING"
+             echo "Target environment: $TARGET"
+             echo "Note: $NOTE"
+             echo "Triggered by: ${{ github.actor }}"
+   ```
+
+   Passing the secret through `env:` rather than referencing it directly in the `run:` block is the recommended pattern: it keeps the value out of the literal script body and works cleanly with shell quoting.
+
+4. **Commit and push:**
+
+   ```bash
+   git commit -am "Add secrets, inputs, and notify job"
+   git push
+   ```
+
+5. **Trigger the workflow manually.** Go to the Actions tab, click **CI** in the left sidebar, and click the **Run workflow** dropdown on the right. The dropdown now shows two fields: a choice for the environment and a free-form note. Pick `production`, type a short note, and click **Run workflow**.
+
+6. **Open the run and expand the "Summarize the run" step** in the `notify` job. You should see:
+
+   - `Secret length: 17` (or whatever length your value had)
+   - `Secret (should be masked): ***`
+   - Your target environment and note exactly as you typed them
+
+   GitHub recognized the secret value in the log stream and replaced it with `***` automatically.
+
+</Steps>
+
+<ActivityQuestion>
+The log printed `Secret length: 17` but showed `***` when you tried to print the value itself. Why did the length leak through when the value did not? What does this imply about careless string manipulation inside a workflow, for example `echo "user_$GREETING"` or base64-encoding a secret before printing it?
+</ActivityQuestion>
+
+<Aside type="caution" title="Do Not Commit Secrets">
+Repository secrets live in GitHub's encrypted store; they are never checked into git. Never paste a real API key or password into a workflow file, a commit message, or a pull request body. Even a brief exposure triggers vendor-side revocation in most cloud platforms.
 </Aside>
+
+---
+
+## Break It, Read the Logs, Fix It
+
+A real CI pipeline's value shows up when something fails. You will introduce a deliberate YAML error, watch the pipeline turn red, trace the failure to the exact step and line, and fix it. The final green run will be your submittable artifact.
+
+<Steps>
+
+1. **Introduce a mistake.** Open `configs/app.yml` and change the first two lines to this:
+
+   ```yaml
+   service: web
+     replicas: 3
+   ```
+
+   The indentation on `replicas` is wrong; `yamllint` will flag it. Save the file.
+
+2. **Commit and push:**
+
+   ```bash
+   git commit -am "Break the config on purpose"
+   git push
+   ```
+
+3. **Open the run.** Both `lint` matrix cells should show a red X. Click `lint (3.11)` and then click the **Lint YAML** step. The log ends with a `yamllint` error pointing at `configs/app.yml` around line 2, with text about wrong indentation or a mapping value not allowed here. Notice that `report` and `notify` were both skipped because `lint` failed: `needs:` gates downstream jobs on the success of what they depend on.
+
+4. **Re-run only the failed jobs.** At the top right of the run page click **Re-run jobs > Re-run failed jobs**. Both cells will fail again, because the failure is in the code, not the runner. This is how flaky failures are diagnosed in practice: real bugs re-fail, infrastructure hiccups do not.
+
+5. **Fix the file.** Restore `configs/app.yml` to its original form:
+
+   ```yaml
+   service: web
+   replicas: 3
+   ports:
+     - 80
+     - 443
+   env:
+     LOG_LEVEL: info
+     TIMEOUT_SECONDS: 30
+   ```
+
+6. **Commit and push the fix:**
+
+   ```bash
+   git commit -am "Fix config indentation"
+   git push
+   ```
+
+7. **Open the new run and wait for it to finish.** All four jobs (`lint (3.11)`, `lint (3.12)`, `report`, `notify`) should show green checkmarks. Click into `notify` and expand the **Summarize the run** step. The log will display your GitHub username next to `Triggered by:`, which closes the loop on the pipeline you built.
+
+</Steps>
+
+<Aside type="tip" title="Enable Debug Logging When Stuck">
+If a step fails with a cryptic error, add two repository secrets named `ACTIONS_STEP_DEBUG` and `ACTIONS_RUNNER_DEBUG`, both set to `true`, and re-run the workflow. The logs become much more verbose, showing every command, every environment variable, and every internal action step. Turn them off once you are done; the extra output is noisy during normal operation.
+</Aside>
+
+---
+
+## Going Further
+
+You have run every core mechanic of a production CI pipeline: events, jobs, steps, matrix builds, caching, artifacts, job dependencies, secrets, manual triggers, and the full fail-and-fix loop. The natural next step is to layer in the mechanics that distinguish a hobby pipeline from a platform-team one.
+
+Pick one of these extensions and spend fifteen to thirty minutes on it. Each one is a concrete next move, not just a doc link.
+
+Refactor the `lint` job into a **reusable workflow** in a separate file under `.github/workflows/reusable-lint.yml` and call it from `ci.yml` with `uses: ./.github/workflows/reusable-lint.yml`. The [reusable workflows documentation](https://docs.github.com/en/actions/sharing-automations/reusing-workflows) shows the input and secret passing syntax. This is how platform teams stop every repository from reinventing the same pipeline.
+
+Add a **concurrency group** at the top of `ci.yml` so that rapid successive pushes to the same branch cancel previous in-flight runs:
+
+```yaml
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+```
+
+Push two commits a few seconds apart and watch the first run get cancelled the moment the second one starts. The [concurrency reference](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs) lists the edge cases; deploy workflows typically want `cancel-in-progress: false` instead.
+
+Install [`act`](https://nektosact.com/) (`brew install act` on macOS, see the docs for Linux and WSL) and run your workflow locally with `act push`. It will not be a perfect simulation, but mechanical issues like typos and wrong environment variable names show up in seconds instead of after a push. Use it during early development and accept that anything touching the GitHub API or external services still needs a real run to fully verify.
