@@ -532,9 +532,7 @@ You have built the core Ansible workflow: inventory, ad-hoc exploration to under
 
 A small but impactful structural improvement is to move `student_name` out of `site.yml` and into a `group_vars/managed.yml` file alongside `hosts.ini`. Once you do that, the playbook itself contains no environment-specific values and can target any group with the right variable files in place. The [Variables guide](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_variables.html) explains `group_vars` and `host_vars` in detail.
 
-Jeff Geerling's [Ansible 101 YouTube series](https://www.youtube.com/watch?v=goclfp6a2IQ&list=PL2_OBreMn7FqZkvMYt6ATmgC0KAGGJNAN) starts exactly where this activity ends and walks through variables, templates, and roles with practical examples. Plan an hour or two to work through the first several episodes.
-
-If you prefer to explore specific topics:
+I highly recommend Jeff Geerling's [Ansible 101 YouTube series](https://www.youtube.com/watch?v=goclfp6a2IQ&list=PL2_OBreMn7FqZkvMYt6ATmgC0KAGGJNAN) if you want to explore Ansible further.
 
 - [Roles](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_reuse_roles.html) package tasks, handlers, templates, and defaults into a reusable directory structure. Once you have written a role for nginx, you can apply it to any inventory with a single line.
 - The `template` module and [Jinja2 templating](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_templating.html) let you render configuration files differently per host. Replace the inline `content:` in the index page task with a `.j2` template file to see how templates differ from static copies.
