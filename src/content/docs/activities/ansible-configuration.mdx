@@ -1,5 +1,5 @@
 ---
-title: "Ansible Configuration"
+title: "Ansible"
 description: "Launch a fresh EC2 instance, bootstrap it for Ansible, explore it with ad-hoc modules, and write a playbook that installs nginx, deploys a custom page, and schedules a health check."
 sidebar:
   order: 9
@@ -247,6 +247,7 @@ The `apt` module manages packages on Debian-based systems. Package management re
    ansible -i hosts.ini managed -m ansible.builtin.apt \
      -a "name=tree state=absent" --become
    ```
+   This demonstrates the `state=absent` pattern: the same module manages both installation and removal. Tracking absent packages as code matters in real playbooks when you need to ensure a forbidden package is never present.
 
 </Steps>
 
@@ -304,7 +305,7 @@ Begin with the smallest useful playbook. This first version only installs the pa
     ```bash
     ansible-lint site.yml
     ```
-    A clean playbook produces no output. If you see warnings, fix them before continuing. You can run `ansible-lint site.yml --fix` to automatically apply some fixes.
+    A clean playbook produces no output. If you see warnings, fix them before continuing. One of the conventions ansible-lint enforces is fully qualified collection names: `ansible.builtin.apt` instead of the short form `apt`. Every module in this playbook uses that convention, which makes the source collection unambiguous as playbooks grow to include modules from multiple collections. You can run `ansible-lint site.yml --fix` to automatically apply some fixes.
 
 4. **Preview what this version will do:**
     ```bash
@@ -322,7 +323,7 @@ Begin with the smallest useful playbook. This first version only installs the pa
     ```bash
     ansible-playbook -i hosts.ini site.yml
     ```
-    On this immediate second run, both tasks should now show `ok`. The server is already in the declared state.
+    On this immediate second run, both tasks should now show `ok`. Look at the PLAY RECAP printed at the bottom of the output: it shows one line per host with counters for `ok` (found the system already correct), `changed` (took an action), `failed`, and `skipped`. On this second run, `changed` should be zero. The server is already in the declared state, so Ansible had nothing to do. A PLAY RECAP with `changed=0` on a re-run is idempotency made visible.
 
 7. **Verify that nginx is serving its default page:**
     ```bash
@@ -487,6 +488,8 @@ The last pass adds the cron-based health check from the scripting activity. This
               state: reloaded
 
     ```
+
+    The `cron_file` parameter writes the job to `/etc/cron.d/nginx-health` as a system cron file rather than a user crontab. The `name` field (`nginx health check`) is how Ansible identifies this specific entry across runs: it is written as a comment in the cron file so a re-run can find and update it rather than adding a duplicate.
 
 2. **Lint the final playbook:**
     ```bash
