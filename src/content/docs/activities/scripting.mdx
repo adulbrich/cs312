@@ -8,7 +8,7 @@ sidebar:
 import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
-This activity puts into practice the concepts from the [Shell Scripting and Automation Basics](/lectures/shell-scripting-and-automation-basics/) lecture. You will write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and adds a cron-based health check. By the end, you will have a working imperative setup script you can rerun safely and compare against the declarative Ansible workflow in the next activity.
+This activity puts into practice the concepts from the [Shell Scripting and Automation Basics](/lectures/shell-scripting-and-automation-basics/) lecture. You will write a Bash script that installs nginx on your EC2 instance, deploys a custom page with your ONID, and adds a cron-based health check. By the end, you will have a working imperative setup script you can rerun predictably and compare against the declarative Ansible workflow in the next activity.
 
 ## What You Will Need
 
@@ -47,7 +47,7 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
 
    This PATH is built from profile files (`/etc/profile`, `~/.bashrc`) when you log in. The shell searches these directories left to right each time you type a command name without a full path.
 
-3. Simulate the minimal environment that cron and other non-interactive launchers use:
+3. Simulate a minimal cron-like environment:
 
    ```bash
    env -i PATH=/usr/bin:/bin bash -c 'echo $PATH'
@@ -59,7 +59,7 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
    /usr/bin:/bin
    ```
 
-   `env -i` clears every environment variable, then sets `PATH` to cron's typical value before launching the inner bash. Notice what is gone: `/usr/local/bin`, `/usr/sbin`, and `/snap/bin`. Any command installed in those directories would fail under cron with "command not found," even though it works at your interactive prompt.
+   `env -i` clears every environment variable, then sets `PATH` to a typical minimal cron value before launching the inner bash. Notice what is gone: `/usr/local/bin`, `/usr/sbin`, and `/snap/bin`. Any command installed in those directories would fail in that stripped-down environment with "command not found," even though it works at your interactive prompt.
 
 4. Check where `curl` lives on this system:
 
@@ -67,7 +67,7 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
    which curl
    ```
 
-   `curl` is at `/usr/bin/curl`, which is inside cron's minimal PATH. Keep this in mind for the health-check script you will write later.
+   `curl` is at `/usr/bin/curl`, which is inside the minimal PATH you just simulated. Keep this in mind for the health-check script you will write later.
 
 5. Observe the difference between exported and unexported variables:
 
@@ -89,7 +89,7 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
 </Steps>
 
 <ActivityQuestion>
-You saw that cron's PATH is `/usr/bin:/bin`. After installing nginx in a later section, run `which nginx`. Is nginx in `/usr/bin` or `/usr/sbin`? Is `/usr/sbin` in cron's minimal PATH? What practical rule avoids this entire class of failure when writing scripts that cron will run?
+You simulated a minimal cron-like PATH of `/usr/bin:/bin`. After installing nginx in a later section, run `which nginx`. Is nginx in `/usr/bin` or `/usr/sbin`? Is `/usr/sbin` in that minimal PATH? What practical rule avoids this entire class of failure when writing scripts that cron will run?
 </ActivityQuestion>
 
 ---
@@ -404,7 +404,7 @@ On the second run, both packages showed `OK (already installed)` and `apt-get in
 
 ## Configure nginx and Deploy Your Page
 
-With nginx installed, configure it and deploy a page that identifies the server. This section uses `sed` to modify the nginx configuration file and a [heredoc](https://en.wikipedia.org/wiki/Here_document) to write the HTML, and because the page includes a deployment timestamp and the restart is unconditional, rerunning it will update the page and restart nginx again.
+With nginx installed, configure it and deploy a page that identifies the server. This section uses `sed` to update the `server_name` directive in the nginx configuration, and a [heredoc](https://en.wikipedia.org/wiki/Here_document) to write the HTML. Because the page includes a deployment timestamp and the restart is unconditional, rerunning the script will update the page and restart nginx again.
 
 <Steps>
 1. Confirm that the default nginx configuration is valid before modifying it:
@@ -425,6 +425,10 @@ With nginx installed, configure it and deploy a page that identifies the server.
    CURRENT_HOST="$(hostname)"
    sed -i "s|server_name [^;]*;|server_name ${CURRENT_HOST};|" "$NGINX_DEFAULT"
    ```
+
+   The `server_name` directive tells nginx which `Host` headers this server block matches. In Ubuntu's default site, the value `_` is not a special wildcard or catch-all token; it is just an invalid hostname commonly used as a placeholder. This server block is still the default for port 80 because the file's `listen 80 default_server` line makes it the default, not because of `_`. Replacing `_` with the actual EC2 hostname gives you a concrete line to edit and makes one expected host value explicit, but this block will still answer unmatched requests as the default server unless you add other server blocks.
+
+   That is why the later verification with `curl http://localhost/` still works: `localhost` does not match the EC2 hostname, but this server block remains the default server on port 80.
 
    `sed -i` edits the file in place. The default delimiter for a `sed` substitution is `/`: `s/pattern/replacement/`. Using `|` here swaps that delimiter so you do not have to escape any slashes that might appear in a hostname or path. The pattern `[^;]*` is a negated character class: it matches any run of characters that are not a semicolon, stopping at the first `;`. Using `.*` instead would be greedy and could overshoot on a line like `server_name _ ; # default;`, matching past the intended semicolon and into the comment.
 
@@ -496,10 +500,25 @@ The `sed` substitution uses `|` as a delimiter instead of the default `/`. What 
 
 ## Schedule a Health Check
 
-The last piece is a health-check script that cron runs every minute, recording the HTTP status code from nginx. This goes one step beyond the paired Ansible activity so you can see one more example of what a single imperative setup script can bundle together.
+The last piece is a health-check script that cron runs every minute, recording the HTTP status code from nginx. Before relying on that schedule, confirm that the cron daemon is actually installed and running on your instance.
 
 <Steps>
-1. Add the health-check installation block to `setup.sh`, below the nginx verification:
+1. Confirm that cron is present and active:
+
+   ```bash
+   systemctl status cron --no-pager
+   ```
+
+   On Ubuntu Server images, cron is usually already present. You should see `Active: active (running)`. If the unit is missing or inactive, install and start it now:
+
+   ```bash
+   sudo apt-get install -y cron
+   sudo systemctl enable --now cron
+   ```
+
+   Continue once `systemctl status cron --no-pager` shows the service running.
+
+2. Add the health-check installation block to `setup.sh`, below the nginx verification:
 
    ```bash
    log "Installing health check..."
@@ -514,9 +533,9 @@ The last piece is a health-check script that cron runs every minute, recording t
 
    The `<< 'HEALTHEOF'` uses a single-quoted delimiter: this prevents the outer script from expanding `$STATUS` and `$(...)` while writing the inner script. Those variables must expand when the health check *runs*, not when `setup.sh` installs it.
 
-   The health check uses `/usr/bin/curl` with an absolute path. Run `which curl` to confirm that is its actual location. Cron will run this script with `PATH=/usr/bin:/bin`. Using absolute paths removes any dependency on the calling environment.
+   The health check uses `/usr/bin/curl` with an absolute path. Run `which curl` to confirm that is its actual location. Cron will usually run this script with a minimal PATH such as `/usr/bin:/bin`. Using absolute paths removes any dependency on the calling environment.
 
-2. Add the cron job registration right after:
+3. Add the cron job registration right after:
 
    ```bash
    log "Scheduling health check..."
@@ -529,16 +548,16 @@ The last piece is a health-check script that cron runs every minute, recording t
 
    `/etc/cron.d/` is the system-wide cron directory. Each line contains: `schedule user command`. The `root` field specifies which user runs the job. Overwriting this file with the same content is idempotent: the cron job does not duplicate.
 
-3. Add a final completion line at the very end of `setup.sh`:
+4. Add a final completion line at the very end of `setup.sh`:
 
    ```bash
    trap - EXIT
    log "Setup complete"
    ```
 
-   `trap - EXIT` clears the handler you registered at the start, so the "[trap] Exiting" message no longer fires. Since the script only reaches this line if everything above succeeded, clearing the trap here is the right answer to the question from Section 2.
+   `trap - EXIT` clears the handler you registered at the start, so the "[trap] Exiting" message no longer fires on a clean run. That is reasonable here because this trap only prints a status line. For a real cleanup trap that removes temporary files or releases locks, you would usually leave the trap installed and branch on `$?` inside the handler instead.
 
-4. Run the complete setup script:
+5. Run the complete setup script:
 
    ```bash
    sudo ./setup.sh your-onid
@@ -546,13 +565,13 @@ The last piece is a health-check script that cron runs every minute, recording t
 
    You should see the health-check installation and scheduling lines, followed by `Setup complete` with no trap message.
 
-5. Confirm the cron job is registered:
+6. Confirm the cron job is registered:
 
    ```bash
    cat /etc/cron.d/nginx-health
    ```
 
-6. Wait about 60 seconds, then check the health log:
+7. Wait about 60 seconds, then check the health log:
 
    ```bash
    cat /tmp/nginx-health.log
@@ -611,7 +630,7 @@ Run the complete script one final time and notice which parts detect state versu
 
 ## Going Further
 
-Your script configures a server correctly and is safe to re-run. The natural next upgrade is replacing the cron job with a systemd timer, which handles missed runs automatically.
+Your script configures a server correctly and is reasonable to re-run, but it is not fully idempotent: it rewrites timestamped content and restarts nginx on every run. The natural next upgrade is replacing the cron job with a systemd timer, which handles missed runs automatically.
 
 On your EC2 instance, remove the cron file first (`sudo rm /etc/cron.d/nginx-health`) so you do not run both schedulers at once. Then create two unit files: `nginx-health.service` (a `Type=oneshot` service that calls `/usr/local/bin/nginx-health.sh`) and `nginx-health.timer` (a timer with `OnCalendar=minutely` and `Persistent=true`). After writing them, run `sudo systemctl daemon-reload`, then enable and start the timer with `sudo systemctl enable --now nginx-health.timer`. Verify the timer is active with `systemctl list-timers`. Then stop the instance, restart it, and confirm that `Persistent=true` caused the timer to fire at boot rather than waiting for the next scheduled minute.
 

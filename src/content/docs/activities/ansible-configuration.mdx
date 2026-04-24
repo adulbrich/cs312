@@ -43,22 +43,22 @@ You will create a fresh EC2 instance for this activity. The instance will serve 
 
 2. **Set the instance name and choose an AMI.**
 
-   - Name: `cs312-ansible-lab`
+   - Name: `cs312-ansible-activity`
    - AMI: Ubuntu Server 24.04 LTS (the default Ubuntu option)
    - Architecture: 64-bit (x86)
 
 3. **Choose instance type and key pair.**
 
-   - Instance type: `t2.micro`
+   - Instance type: `t3.micro`
    - Key pair: select `cs312-key` from the dropdown
 
 4. **Configure the security group.**
 
-   Under "Network settings," click "Edit." Create a new security group named `cs312-ansible-sg` with two inbound rules:
+   Under "Network settings," click "Edit." Create a new security group with two inbound rules:
 
    | Type | Port | Source |
    |------|------|--------|
-   | SSH  | 22   | My IP  |
+   | SSH  | 22   | My IP or Anywhere (0.0.0.0/0) |
    | HTTP | 80   | Anywhere (0.0.0.0/0) |
 
 5. **Add the user-data script.**
@@ -279,24 +279,25 @@ Begin with the smallest useful playbook. This first version only installs the pa
     ```yaml
     ---
     - name: Configure web server
-       hosts: managed
-       become: true
+      hosts: managed
+      become: true
 
-       tasks:
-          - name: Install nginx and curl
-             ansible.builtin.apt:
-                name:
-                   - nginx
-                   - curl
-                state: present
-                update_cache: true
-                cache_valid_time: 3600
+      tasks:
+        - name: Install nginx and curl
+          ansible.builtin.apt:
+            name:
+              - nginx
+              - curl
+            state: present
+            update_cache: true
+            cache_valid_time: 3600
 
-          - name: Ensure nginx is running and enabled
-             ansible.builtin.service:
-                name: nginx
-                state: started
-                enabled: true
+        - name: Ensure nginx is running and enabled
+          ansible.builtin.service:
+            name: nginx
+            state: started
+            enabled: true
+
     ```
     Save the file in `~/cs312-ansible/site.yml`.
 
@@ -304,7 +305,7 @@ Begin with the smallest useful playbook. This first version only installs the pa
     ```bash
     ansible-lint site.yml
     ```
-    A clean playbook produces no output. If you see warnings, fix them before continuing.
+    A clean playbook produces no output. If you see warnings, fix them before continuing. You can run `ansible-lint site.yml --fix` to automatically apply some fixes.
 
 4. **Preview what this version will do:**
     ```bash
@@ -342,42 +343,42 @@ Now that the base web server is working, replace nginx's default page with your 
     ```diff lang="yaml"
       ---
       - name: Configure web server
-         hosts: managed
-         become: true
+        hosts: managed
+        become: true
 
-         vars:
-            student_name: "Your Name"
+        vars:
+          student_name: "Your Name"
 
-         tasks:
-            - name: Install nginx and curl
-               ansible.builtin.apt:
-                  name:
-                     - nginx
-                     - curl
-                  state: present
-                  update_cache: true
-                  cache_valid_time: 3600
+        tasks:
+          - name: Install nginx and curl
+            ansible.builtin.apt:
+              name:
+                - nginx
+                - curl
+              state: present
+              update_cache: true
+              cache_valid_time: 3600
     +
-    +       - name: Deploy custom index page
-    +          ansible.builtin.copy:
-    +             content: "<h1>Deployed by {{ student_name }} on {{ ansible_hostname }}</h1>\n"
-    +             dest: /var/www/html/index.html
-    +             owner: www-data
-    +             group: www-data
-    +             mode: "0644"
-    +          notify: Reload nginx
+    +     - name: Deploy custom index page
+    +       ansible.builtin.copy:
+    +         content: "<h1>Deployed by {{ student_name }} on {{ ansible_hostname }}</h1>\n"
+    +         dest: /var/www/html/index.html
+    +         owner: www-data
+    +         group: www-data
+    +         mode: "0644"
+    +       notify: Reload nginx
 
-            - name: Ensure nginx is running and enabled
-               ansible.builtin.service:
-                  name: nginx
-                  state: started
-                  enabled: true
+          - name: Ensure nginx is running and enabled
+            ansible.builtin.service:
+              name: nginx
+              state: started
+              enabled: true
     +
-    +    handlers:
-    +       - name: Reload nginx
-    +          ansible.builtin.service:
-    +             name: nginx
-    +             state: reloaded
+    +   handlers:
+    +     - name: Reload nginx
+    +       ansible.builtin.service:
+    +         name: nginx
+    +         state: reloaded
     ```
 
 2. **Lint the updated playbook:**
@@ -429,62 +430,63 @@ The last pass adds the cron-based health check from the scripting activity. This
     ```diff lang="yaml"
       ---
       - name: Configure web server
-         hosts: managed
-         become: true
+        hosts: managed
+        become: true
 
-         vars:
-            student_name: "Your Name"
+        vars:
+          student_name: "Your Name"
 
-         tasks:
-            - name: Install nginx and curl
-               ansible.builtin.apt:
-                  name:
-                     - nginx
-                     - curl
-                  state: present
-                  update_cache: true
-                  cache_valid_time: 3600
+        tasks:
+          - name: Install nginx and curl
+            ansible.builtin.apt:
+              name:
+                - nginx
+                - curl
+              state: present
+              update_cache: true
+              cache_valid_time: 3600
 
-            - name: Deploy custom index page
-               ansible.builtin.copy:
-                  content: "<h1>Deployed by {{ student_name }} on {{ ansible_hostname }}</h1>\n"
-                  dest: /var/www/html/index.html
-                  owner: www-data
-                  group: www-data
-                  mode: "0644"
-               notify: Reload nginx
+          - name: Deploy custom index page
+            ansible.builtin.copy:
+              content: "<h1>Deployed by {{ student_name }} on {{ ansible_hostname }}</h1>\n"
+              dest: /var/www/html/index.html
+              owner: www-data
+              group: www-data
+              mode: "0644"
+            notify: Reload nginx
 
-            - name: Ensure nginx is running and enabled
-               ansible.builtin.service:
-                  name: nginx
-                  state: started
-                  enabled: true
+          - name: Ensure nginx is running and enabled
+            ansible.builtin.service:
+              name: nginx
+              state: started
+              enabled: true
     +
-    +       - name: Install nginx health-check script
-    +          ansible.builtin.copy:
-    +             content: |
-    +                #!/usr/bin/env bash
-    +                set -euo pipefail
-    +                STATUS=$(/usr/bin/curl -s -o /dev/null -w "%{http_code}" http://localhost/)
-    +                printf "[%s] nginx: %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$STATUS" >> /tmp/nginx-health.log
-    +             dest: /usr/local/bin/nginx-health.sh
-    +             owner: root
-    +             group: root
-    +             mode: "0755"
+    +     - name: Install nginx health-check script
+    +       ansible.builtin.copy:
+    +         content: |
+    +           #!/usr/bin/env bash
+    +           set -euo pipefail
+    +           STATUS=$(/usr/bin/curl -s -o /dev/null -w "%{http_code}" http://localhost/)
+    +           printf "[%s] nginx: %s\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$STATUS" >> /tmp/nginx-health.log
+    +         dest: /usr/local/bin/nginx-health.sh
+    +         owner: root
+    +         group: root
+    +         mode: "0755"
     +
-    +       - name: Schedule nginx health check
-    +          ansible.builtin.cron:
-    +             name: nginx health check
-    +             minute: "*"
-    +             user: root
-    +             job: /usr/local/bin/nginx-health.sh
-    +             cron_file: nginx-health
+    +     - name: Schedule nginx health check
+    +       ansible.builtin.cron:
+    +         name: nginx health check
+    +         minute: "*"
+    +         user: root
+    +         job: /usr/local/bin/nginx-health.sh
+    +         cron_file: nginx-health
 
-         handlers:
-            - name: Reload nginx
-               ansible.builtin.service:
-                  name: nginx
-                  state: reloaded
+        handlers:
+          - name: Reload nginx
+            ansible.builtin.service:
+              name: nginx
+              state: reloaded
+
     ```
 
 2. **Lint the final playbook:**
