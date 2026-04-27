@@ -71,37 +71,41 @@ Terraform is introduced Tuesday so you have the full week to internalize IaC con
 
 Both lectures directly prepare you for Lab 6 the following week, giving you a full week to absorb Ansible and GitHub Actions before building the automated pipeline. The Terraform infrastructure from Lab 5 is exactly what Ansible and CI/CD will configure and deploy to in Lab 6.
 
-## Week 6: Security, Networking, and Automation
+## Week 6: Kubernetes and Security Retrospective
 
 | | |
 |---|---|
-| **Lecture 11** | System Security and Hardening |
-| **Lecture 12** | Building and Operating a Company Network |
+| **Lecture 11** | Container Orchestration |
+| **Lecture 12** | System Security (Retrospective) |
 | **Lab 6** | [Automated Configuration and Deployment (Ansible + GitHub Actions)](/labs/automated-configuration-and-deployment/) |
 | **Assignment 3** | **Sunday: [Ops 3: Infrastructure Automation](/assignments/minecraft-3-infrastructure-automation/)** |
 
-Five weeks of hands-on cloud infrastructure experience make the security hardening and network design concepts land with real operational weight. Both lectures deepen your ability to reason about the infrastructure you are now automating with Ansible and GitHub Actions in this week's lab.
+Kubernetes is introduced a full week and a half before Lab 7's k3s deployment so the orchestration concepts have time to settle before you apply them. The security lecture then revisits Linux, networking, containers, cloud, IaC, configuration management, and CI/CD through a security lens, and extends forward to the cluster security concerns (RBAC, secrets, network policies) that Lab 7 will begin to surface.
 
-## Week 7: Container Orchestration and Monitoring
+<Aside type="note">
+The Kubernetes lecture may later be split into two sessions (concepts and architecture on Tuesday; networking, services, and probes on Thursday), in which case one of the breadth lectures in Weeks 8 through 10 would shift to accommodate it.
+</Aside>
+
+## Week 7: Operating in Production
 
 | | |
 |---|---|
-| **Lecture 13** | Container Orchestration with Kubernetes |
-| **Lecture 14** | Monitoring and Performance Management |
+| **Lecture 13** | Monitoring and Performance Management |
+| **Lecture 14** | Incident Response and Disaster Recovery |
 | **Lab 7** | [First Container Orchestration Deployment (k3s)](/labs/first-container-orchestration-deployment/) |
 
-Kubernetes introduces orchestration concepts directly before the k3s lab. Monitoring is moved here, one full week before Lab 8's health probe and failure drill work, so the metrics and alerting concepts are solidly in place before you need to apply them.
+Monitoring lands one week before Lab 8's health-probe work so metric, probe, and alerting concepts are fresh when you need them. Incident Response follows on Thursday, one week ahead of Lab 8's failure drills (bad images, OOM kills, rollbacks), so you arrive at those drills with the right mental model for triage.
 
-## Week 8: Incident Response and Log Management
+## Week 8: Diagnostics and Network Breadth
 
 | | |
 |---|---|
-| **Lecture 15** | Incident Response and Disaster Recovery |
-| **Lecture 16** | Log Management and Analysis |
+| **Lecture 15** | Log Management and Analysis |
+| **Lecture 16** | Building and Operating a Company Network |
 | **Lab 8** | [Cluster Operations: Health Probes, Rollouts, and Failure Drills (Kubernetes)](/labs/cluster-operations/) |
 | **Assignment 4** | **Sunday: [Ops 4: Container Orchestration](/assignments/minecraft-4-container-orchestration/)** |
 
-Lab 8's failure drills (bad images, OOM kills, rollbacks) are the exact scenarios the Incident Response lecture prepares you for. Log Management pairs naturally here: when a pod crashes or a rollout fails, logs are the first diagnostic tool you reach for.
+Log Management pairs with Lab 8 in real time: when a pod crashes or a rollout fails during a failure drill, logs are the first diagnostic tool you reach for. Building and Operating a Company Network then zooms out to the broader networking layer that your cluster sits on, giving you the context to reason about cluster networking in terms of the enterprise environment around it.
 
 ## Week 9: Postmortems and Server Breadth
 
@@ -111,7 +115,7 @@ Lab 8's failure drills (bad images, OOM kills, rollbacks) are the exact scenario
 | **Lecture 18** | Windows Server Administration and Active Directory |
 | **Lab 9** | [Observability Workshop: Metrics and Dashboards (Prometheus + Grafana)](/labs/observability-workshop/) |
 
-The observability lab builds on the monitoring concepts from Week 7. Postmortems is paired here, one week before Assignment 5's postmortem requirement, so the blameless review framework and communication templates are fresh when you sit down to write. Windows Server broadens your perspective: the same administration principles apply outside Linux.
+The observability lab extends the monitoring concepts introduced in Week 7 into dashboards and alerting. Postmortems is paired here, one week before Assignment 5's postmortem requirement, so the blameless review framework and communication templates are fresh when you sit down to write. Windows Server broadens your perspective: the same administration principles apply outside Linux.
 
 ## Week 10: Architecture and Wrap-Up
 
@@ -122,4 +126,4 @@ The observability lab builds on the monitoring concepts from Week 7. Postmortems
 | **Lab 10** | Make-up lab (catch up on incomplete lab work) |
 | **Assignment 5** | **Sunday: [Ops 5: Observability and Incident Response](/assignments/minecraft-5-observability/)** |
 
-Server and Data Center Architecture works as a capstone breadth lecture: you now have the full-stack context — from containers to clusters to cloud — to understand server hardware, storage hierarchies, and physical infrastructure at a meaningful level. The course wrap-up follows.
+Server and Data Center Architecture works as a capstone breadth lecture: you now have the full-stack context (from containers to clusters to cloud) to understand server hardware, storage hierarchies, and physical infrastructure at a meaningful level. The course wrap-up follows.
