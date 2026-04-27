@@ -1,0 +1,709 @@
+---
+title: Container Orchestration
+description: "From Docker Compose to clusters: how Kubernetes solves the single-host problem with declarative state, Pods, Deployments, Services, and a self-healing control loop, why it won the orchestration wars, and how its distributions and managed offerings fit into real infrastructure."
+sidebar:
+  order: 11
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
+
+{/* ai-summary
+type: lecture
+slug: container-orchestration
+order: 11
+covers: limits of single-host Docker Compose; orchestration history (Borg, Mesos, Nomad, Swarm, ECS); why Kubernetes won; desired state and reconciliation loops; control plane and worker components; Pods, Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs, CronJobs; Services and Ingress; ConfigMaps and Secrets; Namespaces; flat pod network and CNI; persistent volumes and storage classes; liveness, readiness, and startup probes; rolling updates and rollbacks; horizontal scaling and HPA; Kubernetes distributions (minikube, kind, k3s, k0s, MicroK8s, OpenShift, Rancher); managed services (EKS, GKE, AKS); ecosystem tools (Helm, Kustomize, Argo CD, Flux, k9s, Lens, kubectx)
+prereq_lectures: containerization-with-docker, networking-fundamentals, infrastructure-as-code, configuration-management, ci-cd
+followup_lectures: system-security-and-hardening, monitoring-and-performance, log-management-and-analysis
+paired_activities:
+supports_labs: first-container-orchestration-deployment, cluster-operations
+*/}
+
+Docker Compose runs containers on a single host. That single host is both a performance ceiling and a single point of failure: when the underlying machine goes down (hardware failure, cloud provider interruption, a required reboot), every container stops with it, and nothing brings them back automatically. Scaling up to a larger instance raises the ceiling but leaves you with one point of failure; spreading workloads across multiple machines by hand means managing placement, coordination, and recovery yourself. Add the operational realities of a production deployment (zero-downtime upgrades, rolling rollbacks, secrets that should not live in environment variables, services that should be reachable by name from anywhere in the cluster) and the gap between "I can run this on a server" and "I can run this for users" becomes obvious.
+
+**Container orchestration** closes that gap by treating a pool of machines as a single unified compute resource. You declare what should be running; the orchestrator decides where, keeps it there, and replaces failed copies automatically. This lecture explains the orchestration problem, surveys the platforms that have tried to solve it, and then goes deep on Kubernetes, the platform that has become the industry standard. It covers the architecture, the core API objects, networking, storage, health checking, rolling updates, and scaling. It also looks at how Kubernetes is actually deployed in practice: the lightweight distributions used for learning and the edge, the managed offerings that hide the control plane, and the surrounding ecosystem of tools that most engineers eventually encounter.
+
+## The Limits of Docker Compose
+
+Docker Compose is an excellent tool for its intended purpose: coordinating multiple containers on a single machine. It creates a shared user-defined network, manages startup order, handles named volumes, and restarts crashed containers. For a development environment or a low-traffic production deployment, it does the job well, and a small Compose stack of a web service, a database, and a cache is an honest production-style deployment at small scale.
+
+But Compose has a hard boundary: it operates on one host. That constraint creates three problems that grow more serious as your system becomes more critical.
+
+**Single point of failure.** If the host machine crashes, is terminated by the cloud provider, or requires maintenance, every container on it goes down simultaneously. There is no automatic failover to a healthy machine, because there is no other machine in the picture.
+
+**Vertical scaling ceiling.** When one machine is not enough, you can move to a larger instance (scale up), but there is a limit. EC2 instances top out at a certain CPU count and memory size, the largest sizes are expensive, and you still have a single point of failure. At some scale, no single machine is adequate regardless of how much you spend.
+
+**Manual placement.** If you want to spread your containers across multiple servers, you have to do it by hand: SSHing into each machine, deciding which containers run where, coordinating updates, and writing your own scripts to restart things when something dies. Six servers is tedious. Sixty servers is a full-time job. Six hundred is impossible.
+
+A real production deployment also wants things Compose does not provide on its own: automatic restart of a pod when its node disappears, rolling upgrades with health checking, declarative service-to-service routing, scheduled background jobs, horizontal autoscaling under load, and a coherent way to push configuration and secrets without baking them into images. Each of these can be built around Compose with enough scripting, but the result is a custom orchestration system that nobody else operates and nobody else has tested.
+
+Container orchestration platforms package the answers to all of those questions into a coherent system. You stop thinking about individual servers and start thinking about the cluster as a whole.
+
+## A Brief History of Orchestration
+
+Before Kubernetes was the obvious answer, several systems competed to define what cluster orchestration should look like. Understanding that history is the easiest way to understand why Kubernetes is shaped the way it is, and why some of the alternatives are still in active production use.
+
+**Google Borg (2003 onward)** was the first large-scale cluster manager that ran like a modern orchestrator. Borg ran across hundreds of thousands of machines inside Google, scheduling jobs, restarting failures, enforcing resource limits, and bin-packing workloads onto shared hardware to drive utilization up. It introduced concepts that are now considered foundational: declarative job specifications, label-based service discovery, automatic restart on failure, and a reconciliation loop that continuously drove the cluster toward its desired state. Borg was internal to Google, but the people who built it eventually built Kubernetes.
+
+**Apache Mesos (2010)** brought a different model to industry. Mesos was a *two-level* scheduler: the Mesos master managed cluster resources and offered them to higher-level frameworks (Marathon for long-running services, Chronos for batch jobs) which made the actual scheduling decisions. This separation made Mesos extremely flexible. Twitter, Airbnb, and Apple ran very large Mesos clusters in the early 2010s. The flexibility came at a cost: you had to choose and operate the framework layer yourself, and the resulting system had two control planes to reason about.
+
+**HashiCorp Nomad (2015)** went the other direction. Nomad is a single binary, scheduling-only orchestrator that supports containers, raw executables, Java applications, and others. It is simpler than Kubernetes by design, integrates closely with the rest of the HashiCorp stack (Consul for service discovery, Vault for secrets), and is genuinely pleasant to operate. Nomad still has a strong following at companies like Cloudflare and Roblox where its simplicity is valued, but it never accumulated the ecosystem that Kubernetes did.
+
+**Docker Swarm (2014, modern Swarm Mode in 2016)** was Docker's own answer to orchestration. It ran a swarm of Docker engines as a single virtual engine and added scheduling, service discovery, and rolling updates on top. The selling point was familiarity: if you knew Docker, you already knew most of Swarm. The cluster was set up with `docker swarm init`, services were declared with the same Compose-style YAML, and the operational vocabulary was unchanged. For a while, Swarm looked like the easy default, and it is still a perfectly reasonable orchestrator for a small, homogeneous set of services.
+
+**Amazon ECS (2014)** is AWS's proprietary container orchestrator. It uses an AWS-native API and integrates tightly with the rest of AWS: IAM for permissions, ALB for load balancing, CloudWatch for logs and metrics, EFS for shared storage. ECS is operationally simpler than Kubernetes and remains widely used at companies that have committed deeply to AWS, especially in its serverless mode (Fargate) where AWS manages the underlying compute as well.
+
+**Kubernetes (2014)** was Google's open-source attempt to bring Borg's ideas to the rest of the industry. It was announced at Google I/O in June 2014 and donated to the **Cloud Native Computing Foundation (CNCF)** in 2016. By 2018, when it became the first CNCF project to graduate, it had become the de facto standard for new container deployments at every scale.
+
+<HistoricalNote title="From Borg to Kubernetes (2003 to 2014)">
+Google began running its production services in containers using an internal cluster manager called **Borg** around 2003, more than a decade before Docker existed. Borg ran across hundreds of thousands of machines, scheduling jobs, restarting failures, and enforcing resource limits. A successor system called **Omega** was developed to address Borg's architectural limitations and to allow multiple schedulers to operate on the same cluster without central coordination.
+
+When Docker emerged in 2013 and the industry started containerizing everything, Google recognized that the lessons from Borg and Omega could be packaged into an open-source product. **Kubernetes** was announced at Google I/O in June 2014 and open-sourced the same month. The founding engineers (Brendan Burns, Craig McLuckie, and Joe Beda) designed it to apply Borg's core ideas (desired-state reconciliation, pods as the scheduling unit, label-based service discovery) while being operable by companies that did not have Google's internal tooling. The word "Kubernetes" comes from the Greek for "helmsman" or "governor," the person who steers a ship. The abbreviation **k8s** counts the eight letters between the K and the s.
+
+In 2016, Google donated Kubernetes to the **Cloud Native Computing Foundation (CNCF)**, a vendor-neutral nonprofit under the Linux Foundation umbrella, to ensure it would not be controlled by any single company. Kubernetes became the first CNCF project to graduate, in 2018, and remains the foundational layer of the cloud-native ecosystem.
+</HistoricalNote>
+
+### Why Kubernetes Won
+
+For a few years between 2015 and 2018, it genuinely was not obvious that Kubernetes would dominate. Mesos ran the largest clusters in the world. Swarm was the path of least resistance for a Docker shop. Nomad was technically excellent. Kubernetes was complicated, opinionated, and rough around the edges. Several factors tipped the balance.
+
+**It was not controlled by a single vendor.** When Google donated Kubernetes to the CNCF, every cloud provider, every Linux distribution vendor, and every infrastructure company could invest in it without that investment benefiting a competitor. AWS, Microsoft, IBM, Red Hat, VMware, and others all built businesses on top of Kubernetes precisely because no one of them owned it. Swarm was Docker Inc., ECS was AWS, Mesos was a foundation but heavily Twitter-and-Mesosphere, and Nomad was HashiCorp. Only Kubernetes was genuinely vendor-neutral.
+
+**It exposed an extensible API.** A Kubernetes cluster is not a fixed set of features; it is an API server you can extend with **Custom Resource Definitions (CRDs)** and your own controllers that reconcile them. This turned Kubernetes into a platform for building platforms. Service meshes (Istio, Linkerd), GitOps tools (Argo CD, Flux), database operators, machine-learning platforms, and even other infrastructure tools all express themselves as Kubernetes resources. The ecosystem effect is enormous: every new tool that targets Kubernetes makes Kubernetes more useful, which makes more tools target it.
+
+**It got the abstractions roughly right.** Pods, Services, Deployments, and label-based selection were already proven inside Borg. The translation to a public API kept enough of that proven design to feel coherent in practice, even when individual pieces were awkward. Swarm's model was simpler but hit ceilings quickly when applications needed anything beyond stateless services. Nomad's model was clean but had less surface area for the ecosystem to attach to.
+
+**Cloud providers bet on it.** Once GKE (2015), AKS (2018 GA), and EKS (2018 GA) were available and reliable, "I want a Kubernetes cluster" became a credit-card transaction. Customers stopped having to operate the control plane themselves, which was the most painful part of running Kubernetes. Swarm and Mesos never got equivalent first-class managed offerings on every major cloud.
+
+The result is that today, Kubernetes is the assumed default for new container deployments at almost every scale. Docker Swarm Mode still works and is still a fine choice for a small homogeneous deployment. ECS is alive and well inside AWS. Nomad has its devoted users. But the gravitational center of the orchestration world is Kubernetes, and that is where this lecture spends the rest of its time.
+
+<Aside type="note" title="The Cost of Winning">
+Kubernetes won partly *by being more capable than it strictly needed to be*. The same generality that made it extensible also makes it complex. A small team running a handful of services on Swarm or Nomad will write less YAML and operate fewer moving parts than the same team running Kubernetes. Choosing Kubernetes because "everyone else does" without weighing the operational cost is a real pattern, and a real source of pain. Pick the smallest tool that solves your actual problem, then graduate when you outgrow it.
+</Aside>
+
+## Desired State and the Control Loop
+
+The central idea in Kubernetes is **declarative state management**. Instead of issuing commands ("start two copies of this container on servers A and B"), you write a description of what you want ("there should always be two copies of this container running somewhere in the cluster"). Kubernetes stores that description and continuously works to make reality match it.
+
+This is the **control loop**, sometimes called a reconciliation loop. Every component in Kubernetes (and there are many) runs a loop that looks roughly like this:
+
+1. Read the desired state (what you asked for).
+2. Observe the actual state (what is currently running).
+3. If they differ, take the minimum action required to close the gap.
+
+When a container crashes, the control loop notices that actual state (one replica) diverges from desired state (two replicas) and starts a replacement. When a node fails, all the pods that were running on it disappear from actual state, and the scheduler places them on healthy nodes. You did not issue a "recover from failure" command; you simply declared what you wanted, and the system keeps pursuing that description indefinitely.
+
+This is the same philosophy as Terraform, which you encountered earlier in the Infrastructure as Code lecture: describe the end state, let the tool figure out the steps. The difference is that Kubernetes operates on running processes in real time, not on infrastructure provisioned once and left alone. Terraform reconciles your AWS account against a plan when you run it; Kubernetes reconciles every object in the cluster every few seconds, forever.
+
+<Aside type="note" title="Declarative vs Imperative">
+An imperative instruction is "start a container on server 3." A declarative instruction is "make sure two replicas of this container are running." The first tells the system what to do; the second tells it what to achieve. Declarative systems are more resilient because they keep trying to achieve the goal regardless of what happens in the environment. If the container you started on server 3 crashes ten minutes later, an imperative system does nothing; a declarative system notices the gap and acts.
+</Aside>
+
+## Kubernetes Architecture
+
+A Kubernetes cluster consists of two logical roles: the **control plane**, which makes all scheduling and management decisions, and **worker nodes**, which do the actual work of running containers. Understanding which component does what is essential for debugging real clusters: when something stops working, the question is almost always "which loop has stopped reconciling, and why."
+
+### The Control Plane
+
+The control plane is the cluster's brain. In a production cluster, it runs on dedicated machines (often three, for high availability), but for learning and lightweight deployments it can run on a single node alongside the workloads it manages.
+
+**The API server** (`kube-apiserver`) is the single entry point for all cluster operations. Every interaction with Kubernetes, whether from `kubectl`, a CI/CD pipeline, or an internal controller, goes through the API server as an authenticated HTTPS request. Each request flows through a fixed pipeline: authentication (who is asking), authorization (are they allowed), admission (are there policy or mutation rules that should reject or modify this), and finally validation and persistence to etcd. Every other component watches the API server for changes; nothing in Kubernetes talks directly to anything else.
+
+The admission step deserves attention because it is where most cluster-wide policy is enforced. **Admission controllers** are plugins that intercept every API request after it has been authorized but before it is stored. A **validating** admission controller can reject a request that violates a policy ("this Pod has no resource limits and the cluster requires them"). A **mutating** admission controller can modify the request before it is stored, such as filling in defaults, injecting sidecars, or adding labels. Some admission controllers are built into Kubernetes (the `LimitRanger` that enforces default resource limits, the `PodSecurity` admission that enforces pod security standards); others are external services registered through **admission webhooks**, which is how third-party policy engines like OPA Gatekeeper or Kyverno hook into the cluster, and how service meshes inject their sidecars automatically. Admission control is the cluster's last line of defense for declarative policy: every object that exists in etcd has, by definition, passed admission.
+
+**etcd** is a distributed key-value store that holds every piece of cluster state: what nodes exist, what pods should be running, what Services are defined, what the current health of every object is. If you lose etcd and have no backup, you lose the cluster's entire record of itself. etcd is built on the **Raft** consensus algorithm: every write must be acknowledged by a majority of replicas before it is considered committed, which is why production etcd runs as a cluster of three or five nodes (an even number provides no extra fault tolerance and complicates quorum). Raft is the algorithm that lets a small group of machines agree on a single ordered log of changes even when some of them fail or fall behind, and it is the same family of algorithm used by other coordination systems like Consul and Zookeeper. The practical implication for a cluster operator is that etcd availability is the cluster's availability: lose quorum, and the API server can no longer accept writes, which means no new pods can be scheduled and no controllers can act on changes.
+
+**The scheduler** (`kube-scheduler`) watches for newly created pods that have not yet been assigned to a node and decides where to place them. Placement decisions account for resource requests (CPU, memory), node capacity, taints and tolerations, affinity rules (this pod should run near that pod), and anti-affinity rules (these replicas must not share a node). The scheduler writes its decision back to the API server, which stores it in etcd. The kubelet on the chosen node then sees the assignment and acts.
+
+**The controller manager** (`kube-controller-manager`) bundles many individual control loops into a single process. The Deployment controller watches Deployments and ensures the correct number of replica pods exist. The Node controller watches for nodes that stop sending heartbeats and marks them as unreachable. The Endpoints controller populates the list of pod IPs behind each Service. Each controller runs its reconciliation loop independently and continuously.
+
+**The cloud controller manager** (`cloud-controller-manager`) is a separate process on cloud-managed clusters. It contains the cloud-provider-specific logic: provisioning load balancers when you create a `LoadBalancer` Service, attaching EBS or Persistent Disk volumes when a PVC is created, and reflecting node lifecycle events between the cloud provider and the cluster. Bare clusters and lightweight distributions run without this component.
+
+### Worker Nodes
+
+Worker nodes are the machines that actually run your containers. A cluster can have anywhere from one to thousands.
+
+**The kubelet** is an agent process that runs on every node. It watches the API server for pods that have been scheduled to its node, tells the container runtime to start or stop the required containers, reports node health and resource usage back to the API server, and runs the liveness and readiness probes that determine whether a container is healthy. The kubelet is the reason a node "joins" a cluster: a machine without a kubelet is just a machine.
+
+**The container runtime** is responsible for the actual mechanics of starting and stopping containers. Kubernetes defines a standard interface called the **Container Runtime Interface (CRI)**; any runtime that implements CRI can be used. The most common today is **containerd**, which handles pulling images, unpacking them, and calling into the OS kernel (via `runc` and libcontainer) to create the namespaces and cgroups. **CRI-O** is a minimal alternative used heavily on Red Hat platforms. Kubernetes itself does not care which CRI-compatible runtime you use, which is why "Kubernetes deprecated Docker" in 2020 was widely misunderstood: the runtime layer changed, the container images and the user-facing experience did not.
+
+**kube-proxy** runs on every node and maintains network rules (typically iptables or IPVS rules) that implement Services. When a request arrives for a Service's virtual IP, kube-proxy's rules redirect it to one of the pods backing that Service.
+
+<Aside type="tip" title="kubectl: The Primary Interface">
+`kubectl` is the command-line client for the Kubernetes API. It reads cluster credentials from `~/.kube/config` (or a path set by the `KUBECONFIG` environment variable) and sends API requests on your behalf. Most operations follow the pattern `kubectl <verb> <resource> [name]`. For example:
+
+```bash
+kubectl get pods
+kubectl describe pod my-pod
+kubectl apply -f deployment.yaml
+kubectl delete service my-service
+kubectl logs -f my-pod
+```
+
+`kubectl apply` is the declarative command: it takes a YAML manifest describing desired state and sends it to the API server. Kubernetes figures out what needs to change. `kubectl logs` and `kubectl exec` are the equivalents of `docker logs` and `docker exec` you already know, except that they go through the API server rather than talking to a local daemon.
+</Aside>
+
+## Core Primitives
+
+Kubernetes defines a set of API objects, each representing a different aspect of desired state. Understanding these objects is the foundation of working with the platform. The same object model is used by every Kubernetes cluster, on every cloud, at every scale; once you know the primitives, you can read any Kubernetes manifest in any environment.
+
+### Pods
+
+A **Pod** is the smallest deployable unit in Kubernetes. It is not a container: a Pod wraps one or more containers that share the same network namespace and can share storage volumes. Containers within a Pod communicate over localhost and see the same IP address.
+
+The reason the Pod exists rather than a bare container is that some applications are genuinely composed of tightly coupled processes: an application container and a log-shipping sidecar, for example, or a web server and a configuration-refresher that reads from a secret store. These processes need to share a filesystem and network but are maintained and versioned separately. Wrapping them in a Pod lets Kubernetes schedule and manage them as a unit while keeping the container images independent.
+
+In practice, most Pods contain a single container. You would never create a Pod directly for a long-running workload; instead, you create a Deployment or another higher-level object that creates and manages Pods on your behalf. Direct Pods are for one-off debugging containers and short-lived tasks.
+
+A Pod can also declare **init containers**: containers that run to completion in order before the main containers start. Init containers are useful for setup work that should not be part of the main image, like preparing a directory structure, waiting for a dependency to become reachable, or fetching configuration from an external store. Each init container must exit successfully before the next one runs, and only when all of them have finished do the main containers start. If an init container fails, Kubernetes retries the Pod from the beginning rather than starting the main containers in an inconsistent state. Pods can additionally declare **sidecar containers** (in modern Kubernetes, a special kind of init container with `restartPolicy: Always`) that run alongside the main container for the entire lifetime of the Pod, providing capabilities like log shipping, mTLS proxying, or metric collection without modifying the application image.
+
+Every Pod moves through a small set of **lifecycle phases** that summarize where it is overall. *Pending* means the Pod has been accepted by the API server but at least one container is not yet running: the image is still being pulled, the scheduler has not placed it, or an init container is still working. *Running* means the Pod is bound to a node and at least one container is running (or restarting). *Succeeded* means all containers have exited cleanly and will not be restarted, which is the normal terminal state for a Job. *Failed* means all containers have exited and at least one ended in error. *Unknown* means the kubelet on the Pod's node has stopped reporting in. Each container inside the Pod has its own status (waiting, running, terminated) with reason codes that explain *why* it is in that state, and those reasons are usually the first thing to read when something is stuck.
+
+### Deployments
+
+A **Deployment** is a declaration that a certain number of identical Pods should exist at all times. You specify an image, a replica count, resource requests and limits, environment variables, and volume mounts. The Deployment controller creates a **ReplicaSet** (a lower-level object that tracks a specific set of pod replicas), monitors it continuously, and takes action if the actual count diverges from the desired count.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wordpress
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: wordpress
+  template:
+    metadata:
+      labels:
+        app: wordpress
+    spec:
+      containers:
+        - name: wordpress
+          image: wordpress:6.4-php8.2-apache
+          ports:
+            - containerPort: 80
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: mysql-service
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+```
+
+The `selector` and `labels` fields are how Kubernetes knows which pods belong to which Deployment. Every pod created by this Deployment gets the label `app: wordpress`, and the Deployment watches for pods matching that selector. Labels are how Kubernetes glues most things together: Services find pods by label, NetworkPolicies select pods by label, and tooling filters and groups resources by label.
+
+**Resource requests and limits** deserve attention. A `request` is the minimum amount of CPU or memory a container needs; the scheduler uses requests to decide which nodes have enough capacity to host a pod. A `limit` is the maximum a container is allowed to consume; if a container exceeds its memory limit, the kernel kills it. CPU limits throttle the container's CPU time rather than killing it. Setting both requests and limits is a best practice: without requests, the scheduler places pods blindly; without limits, a runaway container can starve every other workload on the node.
+
+CPU is expressed in millicores: `250m` means 250 millicores, or one-quarter of one CPU core. Memory is in standard SI units: `128Mi` is 128 mebibytes.
+
+Kubernetes assigns each Pod a **Quality of Service (QoS) class** based on how completely its resource requests and limits are specified. **Guaranteed** Pods set requests equal to limits for every container; the scheduler can promise them their full request, and they are the last to be evicted under memory pressure. **Burstable** Pods set requests but allow limits to be higher, or set them only on some containers; they receive their requested capacity but may be throttled or killed if they push past it. **BestEffort** Pods set neither requests nor limits; they consume whatever the node has spare and are the first to be evicted when the node runs out of memory. The QoS class is not a field you set directly; Kubernetes infers it from the resource specification. The implication is concrete: a Deployment without resource requests is silently a BestEffort workload, which on a busy cluster is also the workload most likely to disappear during a memory spike.
+
+When a Deployment is created, it does not create Pods directly. The Deployment controller creates a ReplicaSet, the ReplicaSet creates Pods, and Kubernetes records **owner references** on each child object pointing back to its parent. Owner references are how cascading deletion works: deleting the Deployment marks its ReplicaSets for deletion, which in turn marks their Pods for deletion. The same mechanism is what `kubectl get pods` uses to show which Deployment a Pod belongs to. Owner references are a small piece of metadata, but they are the structural glue that holds the workload hierarchy together.
+
+### StatefulSets
+
+Deployments assume their pods are interchangeable. That assumption breaks for stateful workloads: a database replica named `mysql-0` is not the same thing as `mysql-1`, and the storage attached to one is not interchangeable with the storage attached to another. A **StatefulSet** is the workload controller for that case.
+
+A StatefulSet gives each pod a stable, ordinal name (`mysql-0`, `mysql-1`, `mysql-2`), a stable DNS name, and a dedicated PersistentVolumeClaim that follows the pod across restarts. Pods are started and stopped in order, so consensus systems and primary/replica databases can rely on predictable startup sequences. When `mysql-0` is rescheduled to a different node, it keeps its name and reattaches to the same volume.
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 3
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+```
+
+A `volumeClaimTemplate` is the StatefulSet's way of saying "every pod I manage gets its own PersistentVolumeClaim with this shape." The three replicas in this example produce three PVCs (`data-postgres-0`, `data-postgres-1`, `data-postgres-2`), each bound to a different underlying volume. The database files survive pod restarts, node reboots, and rescheduling, because the volume is bound to the StatefulSet's logical pod identity, not to the underlying host. A StatefulSet is also paired with a **headless Service**, a Service with no ClusterIP that creates per-pod DNS records (`postgres-0.postgres`, `postgres-1.postgres`, and so on), so other workloads can address a specific replica when ordering matters.
+
+### DaemonSets
+
+A **DaemonSet** ensures that a copy of a pod runs on every node (or every node matching a selector). This is the right primitive for things that are intrinsically per-node: log collectors that read the node's container logs, metrics agents that report node-level resource usage, network plugins that program kube-proxy rules, and storage agents that mount cluster-wide filesystems. As nodes are added to the cluster, the DaemonSet automatically schedules its pod on them; as nodes are removed, the pod goes away with the node.
+
+### Jobs and CronJobs
+
+Not every workload runs forever. A **Job** runs a pod (or a set of pods in parallel) until it completes successfully, and then stops. This is the right primitive for batch processing, database migrations, one-off backfills, and similar finite tasks. A **CronJob** runs a Job on a schedule, using the same cron syntax you would expect from `cron(8)`. Together, Jobs and CronJobs cover the use cases that would otherwise need a separate batch scheduler.
+
+### Services
+
+Pods have IP addresses, but those addresses are ephemeral. When a Deployment replaces a crashed pod, the new pod gets a new IP. Clients cannot hold a reference to a pod IP and expect it to remain stable.
+
+A **Service** solves this by providing a stable network identity for a logical group of pods. You define a Service that selects pods by label; Kubernetes assigns the Service a virtual IP address (called the **ClusterIP**) and registers a DNS name. Traffic sent to the ClusterIP is load-balanced across the current set of healthy pods matching the selector, automatically updating as pods come and go.
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: wordpress-service
+spec:
+  selector:
+    app: wordpress
+  ports:
+    - port: 80
+      targetPort: 80
+  type: ClusterIP
+```
+
+Three Service types cover the most common needs:
+
+- **ClusterIP** (the default): the Service is reachable only from within the cluster. Use this for inter-service communication.
+- **NodePort**: exposes the Service on a static port on every node's IP address. Reachable from outside the cluster by hitting `<any-node-ip>:<nodePort>`. Useful for development and small deployments where a load balancer is overkill; less common in mature production setups because it exposes a port on every node.
+- **LoadBalancer**: provisions an external load balancer through the cloud provider and assigns it a public IP. This is the standard way to expose a Service to the internet on managed Kubernetes clusters (EKS, GKE, AKS). On a bare cluster without cloud integration, a LoadBalancer Service has nothing to call, and the Service stays in `Pending` indefinitely. **MetalLB** fills that gap on bare-metal and self-hosted clusters: it hands out IP addresses from a pool the operator has configured and announces those IPs to the surrounding network, either through ARP/NDP (Layer 2 mode) or through BGP (Layer 3 mode). The result is that LoadBalancer Services work identically on bare metal and on a cloud, even though the implementation underneath is completely different. Lightweight distributions like k3s ship their own minimal load balancer (klipper-lb) so the same Service type works out of the box.
+
+### ConfigMaps and Secrets
+
+Baking configuration values directly into container images is a bad practice for the same reason that baking secrets into Dockerfiles is: you lose the ability to change configuration without rebuilding the image, and sensitive values end up in the image layer history.
+
+A **ConfigMap** stores non-sensitive configuration as key-value pairs or arbitrary files. A **Secret** stores sensitive data (passwords, tokens, certificates) in a similar structure, with the distinction that etcd can be configured to encrypt Secrets at rest, and the API server restricts access to them through RBAC (Role-Based Access Control).
+
+Both can be projected into a container as environment variables or mounted as files in the container's filesystem. The mounted-file approach is generally preferred for secrets because the value never appears in `kubectl describe pod` output, reducing accidental exposure.
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-secret
+type: Opaque
+data:
+  db-password: bXlzZWNyZXRwYXNzd29yZA==
+```
+
+<Aside type="caution" title="Base64 Is Not Encryption">
+Kubernetes Secrets store values as base64-encoded strings. Base64 is an encoding, not encryption: anyone who can read the Secret object can trivially decode the value with `base64 --decode`. The security benefit comes from access controls (RBAC limiting which service accounts can read which Secrets) and optional encryption at rest in etcd. Do not assume a Kubernetes Secret is safe simply because the value looks scrambled. The System Security lecture later in the course revisits secret handling, including encryption at rest and external secret stores, in more depth.
+</Aside>
+
+### Namespaces
+
+A **Namespace** provides a scope for names and a boundary for access control within a single cluster. Objects in one Namespace are invisible to objects in another by default, and RBAC policies can be applied per Namespace, allowing multiple teams to share a cluster without seeing each other's workloads.
+
+Kubernetes creates three Namespaces automatically: `default` (where objects land if you do not specify a Namespace), `kube-system` (where Kubernetes' own components run), and `kube-public` (for cluster-wide public resources). For any non-trivial deployment, create a dedicated Namespace per application or environment (`production`, `staging`, `monitoring`).
+
+```bash
+kubectl create namespace production
+kubectl apply -f deployment.yaml -n production
+kubectl get pods -n production
+```
+
+### ServiceAccounts and RBAC
+
+A Namespace scopes objects, but it does not on its own decide *who* is allowed to do what inside it. That is the job of two related concepts: ServiceAccounts and RBAC.
+
+A **ServiceAccount** is a cluster identity for a workload, the same way a Namespace is a scope for objects and a User is an identity for a human. Every Pod runs under a ServiceAccount; if you do not specify one, Kubernetes assigns the Pod the ServiceAccount named `default` in its Namespace. Kubernetes mounts a token for that ServiceAccount into the Pod's filesystem at a known path, and the workload can present that token to the API server (or to other systems that trust the cluster's identity, such as cloud IAM through workload-identity federation) to prove who it is. ServiceAccounts are how a workload says "I am the metrics collector," not just "I am some Pod."
+
+**Role-Based Access Control (RBAC)** is the policy layer that authorizes API requests. A **Role** is a set of permissions (verbs like `get`, `list`, `create`, `update`, `delete`) on a set of resource types within one Namespace; a **ClusterRole** is the equivalent at cluster scope. A **RoleBinding** or **ClusterRoleBinding** ties a Role to a subject, which can be a ServiceAccount, a User, or a Group. When the API server receives a request, it consults RBAC rules to decide whether the requester is allowed to perform the requested verb on the requested resource. RBAC is the reason a compromised Pod is not automatically a compromised cluster: if its ServiceAccount has only the permissions it actually needs, an attacker who escapes into it can only do those things. The default ServiceAccount has no permissions beyond what every authenticated identity has, which is intentionally close to nothing; granting more is an explicit decision.
+
+Together, Namespaces, ServiceAccounts, and RBAC form the cluster's primary multi-tenancy boundary. Two teams can share a cluster, each with its own Namespace, each with its own ServiceAccounts and Roles, and neither can read or modify the other's objects. The boundary is not as strong as a separate cluster (a kernel exploit or a misconfigured ClusterRole can still cross it), but it is strong enough that multi-tenant Kubernetes is a routine pattern in real organizations.
+
+## Health and Self-Healing
+
+A core promise of Kubernetes is that crashed pods are replaced automatically. That promise depends on Kubernetes knowing what "healthy" actually means for your application, and that knowledge has to be encoded explicitly. Kubernetes defines three kinds of probes, each answering a different question.
+
+A **liveness probe** answers: is this container still functioning? If the liveness probe fails consistently, Kubernetes kills the container and the kubelet restarts it. This catches cases where the process is still running but stuck (deadlocked thread pool, unresponsive request handler, infinite GC loop). Without a liveness probe, a stuck process looks healthy to Kubernetes because the process exists.
+
+A **readiness probe** answers: is this container ready to receive traffic right now? Pods that fail their readiness probe are removed from Service endpoints, so traffic stops being routed to them, but they are not killed. This is the right tool for "I am running but not ready yet" states: a database connection pool is still warming up, a cache is being populated, or a configuration reload is in progress. The pod stays alive; Kubernetes simply stops sending it requests until it recovers.
+
+A **startup probe** answers: has this container finished starting up? It exists because some applications take a long time to start (large JVM heap warmup, slow data load, expensive initialization), and you want to give them generous time without weakening your liveness probe. While the startup probe is failing, Kubernetes does not run liveness or readiness probes against the container; once the startup probe succeeds, the other two take over with their own (typically tighter) timing.
+
+```yaml
+containers:
+  - name: api
+    image: example/api:1.4.0
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /ready
+        port: 8080
+      initialDelaySeconds: 5
+      periodSeconds: 5
+    startupProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+      failureThreshold: 30
+      periodSeconds: 10
+```
+
+Probes can also be implemented with `tcpSocket` (open a connection to a port) or `exec` (run a command inside the container). The HTTP probe is preferred when the application can expose a status endpoint, because it can encode application-specific health logic that a TCP check would miss.
+
+<Aside type="caution" title="Naive Probes Are Worse Than No Probes">
+A liveness probe that just checks "is the port open" will pass for a hung process that has accepted a connection and never replies, and Kubernetes will happily leave the broken pod in the Service. Worse, a liveness probe that depends on a backing service (for example, returning failure when the database is unreachable) will cause cascading restarts when that backing service has a bad minute: every pod restarts itself in unison, the database is hammered with reconnects, and a small problem becomes an outage. Probes should reflect *the local container's own health*, not the health of every dependency it has.
+</Aside>
+
+### Graceful Shutdown
+
+Probes describe how a workload tells the cluster it is healthy. **Graceful shutdown** describes how a workload tells the cluster it is *finished* without dropping in-flight work. The two together are what makes rolling updates and scale-downs invisible to users.
+
+When Kubernetes terminates a Pod, it does not immediately kill the process. It sends a `SIGTERM` signal to the main process and waits up to **`terminationGracePeriodSeconds`** (30 seconds by default) for the process to exit on its own. If the application catches `SIGTERM` and shuts down cleanly (finishing in-flight requests, closing database connections, deregistering from any external service registry), termination is graceful. If the application ignores `SIGTERM`, Kubernetes sends `SIGKILL` after the grace period, and the kernel terminates it abruptly. Applications written without a `SIGTERM` handler are a frequent cause of dropped requests during deployments, even though everything else looks correct.
+
+A Pod can additionally declare a **`preStop` hook**: a command or HTTP call that runs *before* the `SIGTERM` is sent. This is the right place to take actions that need to happen while the application is still serving, such as removing the Pod from upstream load balancers, giving in-flight requests time to drain, or flushing a cache. Probes, the preStop hook, `SIGTERM`, and `terminationGracePeriodSeconds` together form a four-step termination contract: the readiness probe goes false (the cluster stops sending new traffic), the preStop hook runs (the application drains existing traffic), `SIGTERM` arrives (the application stops accepting new work), and only after the grace period expires does `SIGKILL` enforce a hard stop.
+
+### Disruption Budgets
+
+Self-healing addresses *involuntary* disruption: a node crashes, a pod is OOM-killed, the underlying disk fails. The cluster has no choice but to react, and replication is the answer. **Voluntary** disruption is different. Voluntary disruptions happen when a human or another system deliberately removes pods: an operator running `kubectl drain` to take a node offline for maintenance, the Cluster Autoscaler scaling down an underused node, a rolling update walking through replicas one at a time. Voluntary disruption can be negotiated, because there is something asking permission first.
+
+A **PodDisruptionBudget (PDB)** is how a workload expresses what it can tolerate. A PDB declares either the minimum number of pods of a workload that must remain available, or the maximum number that can be unavailable, during voluntary disruptions. With a PDB in place, an operator running `kubectl drain` will pause if removing the next pod would violate the budget, instead of cheerfully deleting the last replica. PDBs are how a workload says "I tolerate one pod missing at a time" or "I need at least three of my five pods to keep working." They have no effect on involuntary disruption, because there is no negotiation possible when the underlying machine has already failed.
+
+## Networking
+
+Kubernetes networking is built on a flat IP model: every Pod gets a unique IP address, and every Pod can reach every other Pod by IP directly, without NAT. This is different from Docker's default bridge network, where containers on different hosts cannot reach each other without explicit port mapping.
+
+The flat network is implemented by a **Container Network Interface (CNI) plugin**, not by Kubernetes itself. The choice of CNI plugin is an operational decision; the pod-to-pod flat network contract is the same regardless of which plugin implements it. The differences between the popular CNIs come down to *how* they implement that contract.
+
+**Flannel** uses **VXLAN**, a tunneling protocol that wraps Pod-to-Pod packets inside UDP packets that are routed normally between nodes. The receiving node unwraps the packet and delivers it to the destination Pod. VXLAN is simple and works on any cloud, at the cost of a small encapsulation overhead per packet and an extra hop through user-space.
+
+**Calico** uses **BGP**, the same routing protocol the public internet runs on, to advertise each node's Pod CIDR (the IP range it owns) to every other node in the cluster. Once every node knows where every Pod range lives, Pod-to-Pod packets are routed natively without encapsulation, exactly as if Pods were physical machines on the same network. The result is fast and supports rich NetworkPolicy enforcement, but BGP imposes a configuration discipline that not every environment provides cleanly, especially in restrictive cloud networks.
+
+**Cilium** uses **eBPF**, a Linux kernel technology that lets small, verified programs run safely inside the kernel itself. Instead of programming iptables rules from user space (which is what kube-proxy does by default), Cilium attaches eBPF programs directly to network interfaces and makes routing, NAT, and policy decisions in the kernel. The result is significantly higher performance, better observability (eBPF programs can record exactly what they decided), and the ability to replace kube-proxy entirely. Cilium has become the default choice on many modern clusters for these reasons.
+
+The point of these examples is not to memorize tunneling protocols. The point is to see that "the cluster has a flat IP network" is a single conceptual contract that the substrate honors regardless of how. A workload author writes the same manifest no matter which CNI is installed; the cluster operator picks the implementation that fits their performance, observability, and policy requirements.
+
+### Services and DNS
+
+When you create a Service, the cluster's DNS server (CoreDNS) automatically creates a DNS entry: `<service-name>.<namespace>.svc.cluster.local`. Within the same Namespace, pods can reach a Service simply by its name. If your WordPress pod needs to reach a Service named `mysql-service` in the same Namespace, it can connect to `mysql-service` and DNS resolves it to the Service's ClusterIP. No IP addresses need to be hardcoded.
+
+This is the same pattern Docker Compose uses (services reach each other by service name on a shared user-defined network), generalized to a multi-host cluster with proper DNS records. The mental model carries over directly.
+
+### Ingress
+
+A Service of type LoadBalancer exposes a single application to the outside world. For clusters running multiple HTTP services, an **Ingress** object routes traffic based on hostname or URL path to the appropriate Service, letting a single external load balancer serve many applications.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: site-ingress
+spec:
+  rules:
+    - host: myapp.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress-service
+                port:
+                  number: 80
+```
+
+An Ingress object is just a routing rule. It requires an **Ingress controller** (a running process that watches Ingress objects and configures an actual reverse proxy) to have any effect. Common options are **nginx-ingress** and **Traefik**. k3s ships with Traefik pre-installed, so Ingress works without any additional setup. On a managed cluster, the Ingress controller often programs the cloud's L7 load balancer directly (for example, AWS Load Balancer Controller programs ALBs).
+
+A newer API, the **Gateway API**, is gradually replacing Ingress for advanced use cases. It expresses the same routing intent with cleaner separation between cluster operators (who manage the gateway) and application developers (who define routes). Most clusters today still use Ingress, but Gateway API is where the API is heading.
+
+### NetworkPolicy
+
+By default, every pod in a Kubernetes cluster can reach every other pod. That is convenient for development and dangerous in production: a compromised pod has the entire cluster as its blast radius. A **NetworkPolicy** restricts which pods can talk to which, expressed as label-selector rules. Implementing them requires a CNI that supports NetworkPolicy (Calico and Cilium do; basic Flannel does not). The System Security lecture goes deeper on the threat model that motivates NetworkPolicy and how it interacts with cluster RBAC.
+
+## Storage
+
+Containers write to an ephemeral filesystem: when the container is replaced, everything written to that filesystem is lost. For a stateless web application this is fine, but a database, a message queue, an object cache, or any other piece of state must persist across pod restarts.
+
+Kubernetes separates the concern of *providing* storage from the concern of *consuming* it through two objects:
+
+A **PersistentVolume (PV)** represents a piece of storage that has been provisioned in the cluster: an NFS mount, an AWS EBS volume, a local SSD, or any number of other backends. The PV knows how large the storage is, how it can be accessed (read-write by one node, read-write by many nodes, read-only by many), and what to do when the claim on it is released.
+
+A **PersistentVolumeClaim (PVC)** is a request from a pod for storage. A PVC says "I need 10 GB of storage with read-write-once access." Kubernetes matches the PVC to a suitable PV, binds them, and mounts the PV into the requesting pod.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+```
+
+In a Pod spec, you reference the PVC by name:
+
+```yaml
+volumes:
+  - name: mysql-storage
+    persistentVolumeClaim:
+      claimName: mysql-pvc
+containers:
+  - name: mysql
+    volumeMounts:
+      - mountPath: /var/lib/mysql
+        name: mysql-storage
+```
+
+**StorageClasses** allow dynamic provisioning: instead of an administrator pre-creating PVs, a StorageClass defines a provisioner (for example, AWS EBS or GCP Persistent Disk) and a PVC can request storage from that class. Kubernetes automatically provisions the underlying volume and binds it to the PVC. On cloud providers, this is the default behaviour; on bare-metal clusters including k3s, a StorageClass backed by local-path provisioner is typically configured to create local volumes on each node.
+
+The key difference from Docker volumes: a Docker volume is local to one host. A PVC backed by a network storage provider (EBS, NFS, Ceph) can be unmounted from a failing pod and remounted to its replacement on a different node without data loss, because the underlying storage is not tied to any specific machine. On a single-node k3s cluster with local-path storage, that property is obviously not available; if the node dies, the data dies with it. This is one of the practical reasons "Kubernetes" and "highly available Kubernetes" are not the same thing, and why production deployments either use replicated storage backends or replicate state at the application layer.
+
+## Rolling Updates and Rollbacks
+
+One of Kubernetes' most operationally valuable features is the ability to update a running application without taking it offline. When you change the image tag in a Deployment and apply the updated manifest, Kubernetes performs a **rolling update** by default.
+
+The strategy is controlled by two parameters in the Deployment spec:
+
+- **`maxUnavailable`**: the maximum number of pods that can be unavailable during the update. Setting this to `0` ensures the old version keeps serving traffic while the new version starts.
+- **`maxSurge`**: the maximum number of pods that can be created above the desired replica count. A surge of `1` on a Deployment with 3 replicas means Kubernetes starts one new pod (now 4 total), waits for it to pass its readiness probe, then terminates one old pod (back to 3), and so on.
+
+```yaml
+spec:
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+```
+
+You can watch the progress with:
+
+```bash
+kubectl rollout status deployment/wordpress
+```
+
+If something goes wrong (the new version crashes on startup, readiness probes fail), Kubernetes halts the rollout, leaving the old version running. You can roll back to the previous revision with:
+
+```bash
+kubectl rollout undo deployment/wordpress
+```
+
+Kubernetes keeps a history of Deployment revisions (configurable with `revisionHistoryLimit`) so you can roll back to any recent version, not just the immediate predecessor.
+
+For higher-risk deployments, two patterns extend this baseline. **Blue-green** runs two complete versions side by side and switches traffic atomically by changing a Service's selector. **Canary** sends a small percentage of traffic to the new version first, watches for errors, and only completes the rollout if it stays healthy. Both can be expressed in plain Kubernetes with two Deployments and some labeling discipline, but in practice they are typically driven by progressive-delivery tools like **Argo Rollouts** or **Flagger** that automate the traffic-shifting and rollback logic.
+
+<Aside type="caution" title="Readiness Probes Are Not Optional">
+A rolling update with `maxUnavailable: 0` only prevents downtime if your readiness probe accurately reflects whether the new pod is ready to serve traffic. If the new pod starts, passes a naive readiness probe (say, a TCP check that just confirms the port is open), and begins receiving requests before the application has fully initialized, users will hit errors during the transition. Define readiness probes that check the application's actual health endpoint, not just whether the process started.
+</Aside>
+
+## Scaling Workloads
+
+A static replica count is fine when load is stable. When it is not, Kubernetes can adjust the count automatically.
+
+The **Horizontal Pod Autoscaler (HPA)** watches a metric (CPU utilization is the default, but custom and external metrics work too) and changes the replica count of a Deployment or StatefulSet to keep the metric within a target range. Doubling the replicas under load and shrinking back when load drops is a one-line declaration:
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+```
+
+The HPA depends on a metrics source: the lightweight `metrics-server` for CPU and memory, or a more capable system like Prometheus (with the `prometheus-adapter`) for application metrics. Without metrics, the HPA has nothing to scale on.
+
+Two related autoscalers complete the picture. The **Vertical Pod Autoscaler (VPA)** adjusts requests and limits on a workload over time based on observed usage; it is useful for workloads where the right replica count is fixed but the right size per pod is hard to guess. The **Cluster Autoscaler** sits below the HPA: when pods cannot be scheduled because no node has enough capacity, the Cluster Autoscaler asks the cloud provider for more nodes, and removes underused ones when load drops. On AWS, this is traditionally integrated with EC2 Auto Scaling Groups; on GKE, it is built into the managed control plane.
+
+A newer alternative on AWS is [**Karpenter**](https://karpenter.sh/), a node provisioner that takes a more direct approach. Instead of scaling pre-defined node groups of a fixed instance type, Karpenter looks at pending pods, computes which instance types would fit them best (mixing sizes, families, and spot vs on-demand), and provisions exactly those instances directly through the cloud API. The result is faster scale-up, better bin-packing, and lower cost. The tradeoff is that Karpenter is more cloud-aware than the cluster-autoscaler abstraction, and currently has the strongest support on AWS with growing support elsewhere.
+
+Together, HPA, VPA, Cluster Autoscaler, and Karpenter are why "Kubernetes scales" is more than a marketing line: each layer has an explicit, declarative scaling story, and each one operates on a different axis (replica count, per-pod size, total node count, total node *shape*).
+
+## Extending Kubernetes: CRDs and the Operator Pattern
+
+The built-in API objects (Pods, Deployments, Services, and so on) cover the basics, but real systems usually need more: a managed Postgres cluster, a TLS certificate, a Prometheus instance, a Kafka topic. Kubernetes does not ship those primitives, but it does ship something more powerful: a way to add new ones.
+
+A **Custom Resource Definition (CRD)** lets you teach the API server a new type of object. Once a CRD is registered, the API server accepts manifests for that type and stores them in etcd alongside the built-in types; `kubectl get <yourtype>` works exactly like `kubectl get pods`. A CRD is just a schema: by itself it adds a new noun to the cluster API but does nothing else. The cluster will happily accept a `PostgresCluster` resource, but no Postgres database will appear, because nothing is reconciling that resource.
+
+The action comes from a **controller** that watches the new type and reconciles it. When someone creates a `PostgresCluster` resource, a Postgres operator reads the spec, decides what underlying resources are needed (a StatefulSet, a Service, ConfigMaps, Secrets), and creates them. As the cluster's state evolves (a pod fails, a backup runs, the user requests a version upgrade), the operator continuously reconciles the actual state against the desired state expressed in the `PostgresCluster` object. This is the same control-loop pattern Kubernetes uses for its built-in objects, applied to a new domain.
+
+The combination of CRD plus controller is called the **operator pattern**, and it is how Kubernetes was extended from "a system for running containers" into "a system for running anything declaratively." Cert-manager (an operator that turns Certificate resources into actual TLS certificates from Let's Encrypt or another issuer), the Prometheus Operator (an operator that turns Prometheus and ServiceMonitor resources into a running monitoring stack), the various database operators (Postgres, MongoDB, Cassandra, Redis), and the GitOps tools discussed later (Argo CD, Flux) are all operators. From the user's perspective, every operator-managed application looks the same: write a YAML manifest, apply it, and the operator does the rest. The workload author never has to know the underlying StatefulSets and ConfigMaps exist.
+
+The operator pattern is also why "a Kubernetes cluster" can mean very different things in different organizations. A bare cluster runs only the built-in types; a richly extended cluster runs dozens of operators that together implement an internal platform. Both are valid configurations of the same underlying API.
+
+## Kubernetes Distributions
+
+"Kubernetes" is not a single binary you install. The upstream project releases the components, and a wide range of distributions package them in different ways for different audiences. They all run the same API; what differs is what is bundled, how the control plane is operated, and what tradeoffs are made for size and convenience. A Kubernetes manifest that runs on one of them runs on all of them.
+
+### kubeadm
+
+[**kubeadm**](https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/) is the upstream project's official tool for bootstrapping a cluster, and it is the reference point against which other distributions are best understood. It is not a distribution in the strict sense: it is a bootstrapper that installs the control plane on a designated machine and joins worker nodes to it, leaving most operational decisions (which CNI to use, which storage classes to provision, which monitoring stack to run) to the operator. Many other distributions are themselves built on kubeadm, and a self-managed production Kubernetes cluster is most often a kubeadm cluster underneath whatever automation wraps it.
+
+### minikube
+
+[**minikube**](https://minikube.sigs.k8s.io/) is the original local Kubernetes for development. It runs a single-node cluster inside a VM (VirtualBox, HyperKit, KVM, or others) or a container, and is maintained by the Kubernetes project itself. It supports multiple Kubernetes versions, includes addons for Ingress, the dashboard, and registry mirroring, and is a reasonable choice when you want a real isolated cluster on your laptop and do not mind the VM overhead.
+
+### kind
+
+[**kind**](https://kind.sigs.k8s.io/) ("Kubernetes in Docker") runs a Kubernetes cluster as a set of Docker containers, each container playing the role of a node. Because it does not need a VM, kind starts in seconds and is the standard tool for running ephemeral clusters in CI pipelines. It is also widely used by Kubernetes developers themselves to test changes against a real multi-node cluster on a laptop.
+
+### k3s
+
+[**k3s**](https://k3s.io/) is a CNCF-certified Kubernetes distribution created by Rancher (now SUSE) that strips out cloud-provider-specific components, ships everything as a single ~70 MB binary, and uses an etcd-API-compatible storage shim called **kine** instead of running real etcd. It is genuine, conformant Kubernetes: every object covered in this lecture works identically. Any YAML manifest that runs on EKS runs unchanged on k3s.
+
+The kine substitution is worth understanding because it is what makes k3s small. From the perspective of the rest of Kubernetes, kine looks exactly like etcd: it speaks the same wire protocol and offers the same key-value semantics. Underneath, kine translates those operations into a relational database backend: SQLite by default (a single file, no external service), or MySQL, Postgres, or real etcd if configured. The motivation is operational: real etcd is heavy, opinionated about disk and network, and unforgiving when misconfigured; SQLite is a single file. For a single-node cluster, kine plus SQLite eliminates an entire class of operational concerns at the cost of features that single-node clusters do not need anyway. For a multi-node high-availability cluster, kine can run against an external Postgres or against real etcd; nothing in the API changes.
+
+What k3s omits or simplifies:
+
+- Cloud provider integrations (AWS EBS, GCP PD storage drivers) are not bundled; local-path provisioner handles storage by default on a single node.
+- etcd is replaced by the kine shim with a SQLite backend for single-node deployments; clustered k3s can still use real etcd or an external SQL database.
+- Several deprecated or alpha feature gates are removed.
+- The entire control plane runs as one process (`k3s server`) rather than several.
+
+What k3s includes that upstream Kubernetes does not:
+
+- Traefik as a built-in Ingress controller (no separate installation needed).
+- CoreDNS, metrics-server, and local-path provisioner pre-configured.
+- A built-in lightweight load balancer (klipper-lb) so `LoadBalancer` Services work without a cloud provider.
+- A single `curl | sh` installation that works on any Linux system with sufficient kernel support.
+
+k3s is not a toy. It runs in production at IoT companies (it is the reference distribution for many edge Kubernetes deployments), retail chains, and small engineering teams that do not want to operate a full Kubernetes control plane. For learning purposes, it means you can get a fully functional Kubernetes environment on a single t3.small instance and never feel like you are using a watered-down version.
+
+### k0s
+
+[**k0s**](https://k0sproject.io/), maintained by Mirantis, is another single-binary distribution that targets a similar audience to k3s: edge deployments, embedded systems, and minimal-footprint clusters. It differs in implementation details (it does not ship Traefik or a built-in load balancer by default, and it uses real etcd rather than kine) but the user experience is comparable.
+
+### MicroK8s
+
+[**MicroK8s**](https://microk8s.io/), maintained by Canonical, is packaged as a Snap and is popular in Ubuntu-heavy environments. It includes an addon system for enabling and disabling features (DNS, ingress, the dashboard, GPU support) with single commands, and supports multi-node clustering. It is a common choice on Ubuntu workstations and Raspberry Pi clusters.
+
+### Talos Linux
+
+[**Talos Linux**](https://www.talos.dev/) is an immutable, minimal Linux distribution built specifically to run Kubernetes. It has no SSH, no shell, and no package manager; the only management interface is a gRPC API. Configuration is declarative, the disk image is read-only, and there is essentially nothing on the system that is not Kubernetes itself. The premise is that a node should be cattle to the maximum possible extent: replaceable, undisturbed by humans, and configured exactly as expected at all times. Talos is most often used in production deployments that prioritize reproducibility and security over operator familiarity.
+
+### OpenShift
+
+[**OpenShift**](https://www.redhat.com/en/technologies/cloud-computing/openshift) is Red Hat's enterprise Kubernetes distribution. It is a superset of Kubernetes: every standard object works, and OpenShift adds opinionated layers for build pipelines (BuildConfigs, ImageStreams), routing (Routes, the historical predecessor to Ingress), authentication, and multi-tenant security. OpenShift restricts running containers as root by default and enforces several security defaults that upstream Kubernetes leaves to the operator. It is widely used in regulated industries and at companies that already standardize on Red Hat.
+
+### Rancher and Rancher Desktop
+
+[**Rancher**](https://www.rancher.com/) is a Kubernetes management platform (also from SUSE) that runs on top of one or more Kubernetes clusters and provides a unified UI, cluster provisioning across clouds, fleet management, and policy enforcement. [**Rancher Desktop**](https://rancherdesktop.io/) is a separate developer tool that bundles k3s with a Docker-compatible CLI for local development. The two share a brand and a philosophy but solve different problems.
+
+### Choosing a Distribution
+
+For learning and small production: k3s is hard to beat, especially if you are working on a single VM. For local development on a laptop: kind for ephemeral clusters and CI work; minikube or Rancher Desktop for an always-on cluster you keep around. For an enterprise platform with strict compliance and authentication needs: OpenShift. For multi-cluster fleet management: Rancher on top of any of the above. For very large production clusters: upstream Kubernetes installed with `kubeadm`, or a managed service.
+
+## Managed Kubernetes
+
+The most painful part of running Kubernetes is operating the control plane: keeping etcd healthy, upgrading the control plane safely, recovering from API server outages, and patching vulnerabilities without dropping the cluster. The major cloud providers offer managed services that take that burden off the operator's plate while leaving the rest of the cluster (worker nodes, workloads, storage, networking) under your control. The user experience converges quickly: once the cluster exists, `kubectl` looks the same as it does anywhere else.
+
+### Amazon EKS
+
+[**Amazon Elastic Kubernetes Service (EKS)**](https://aws.amazon.com/eks/) runs the Kubernetes control plane as an AWS-managed service across multiple Availability Zones. AWS handles control plane upgrades, etcd backups, and high availability. Worker nodes can be self-managed EC2 instances, EKS-managed node groups, or Fargate tasks (where AWS runs the pod's underlying compute as a serverless workload). EKS integrates with the rest of AWS for storage (EBS, EFS), load balancing (ALB and NLB through the AWS Load Balancer Controller), authentication (IAM, mapped to Kubernetes RBAC), and image hosting (ECR, which you have already used).
+
+EKS charges for the control plane (a flat hourly fee per cluster) and for the underlying compute. It is the most common production Kubernetes choice for AWS-resident teams, and it is the path most companies take when they outgrow ECS.
+
+### Google Kubernetes Engine
+
+[**Google Kubernetes Engine (GKE)**](https://cloud.google.com/kubernetes-engine) is the oldest of the managed offerings (general availability in 2015) and benefits from being run by the company that originally built Kubernetes. It generally tracks upstream Kubernetes most closely, ships features earliest, and offers an "Autopilot" mode where Google manages worker nodes as well as the control plane: you submit pods, Google decides where they run and what compute to provision. Autopilot is closest in spirit to the original "submit work to a cluster" Borg experience.
+
+### Azure Kubernetes Service
+
+[**Azure Kubernetes Service (AKS)**](https://azure.microsoft.com/en-us/products/kubernetes-service) is Microsoft's managed offering. The control plane is free; you pay for worker nodes and any other Azure resources you use. AKS integrates with Azure Active Directory for authentication, Azure Monitor for observability, and Azure CNI for advanced networking. It is a strong choice for organizations that already use Azure heavily.
+
+### Other Managed and Hybrid Offerings
+
+Beyond the big three, [**DigitalOcean Kubernetes**](https://www.digitalocean.com/products/kubernetes), [**Linode Kubernetes Engine**](https://www.linode.com/products/kubernetes/), and [**OVHcloud Managed Kubernetes**](https://www.ovhcloud.com/en/public-cloud/kubernetes/) target smaller deployments at lower price points. **Anthos** (Google) and **Azure Arc** extend their respective managed control planes to on-premises and other-cloud environments, letting a single management plane span heterogeneous infrastructure. **Amazon EKS Anywhere** is the AWS equivalent for running EKS-flavored Kubernetes in your own data center.
+
+The underlying lesson is consistent across all these offerings: managed Kubernetes is mostly an answer to "who operates the control plane and how do nodes join it?" Once you are inside the cluster, you are working with the same API objects and the same tooling, regardless of which logo is on the bill.
+
+<Aside type="tip" title="Use Managed Kubernetes by Default">
+Running your own Kubernetes control plane is a non-trivial operational commitment: control plane upgrades, etcd backups, certificate rotation, and CVE response are all your problem. Unless you have a strong reason to operate the control plane yourself (regulatory, air-gapped deployment, very specific customizations), use a managed service. The flat fee per cluster is almost always smaller than the on-call cost of operating it yourself.
+</Aside>
+
+## The Surrounding Ecosystem
+
+Plain Kubernetes manifests work, but real teams almost never stop there. A handful of tools recur across nearly every production deployment, and recognizing them is part of being literate in the ecosystem.
+
+### Helm
+
+[**Helm**](https://helm.sh/) is the de facto package manager for Kubernetes. A **chart** is a versioned bundle of templated manifests with a values file that parametrizes the templates; installing a chart applies the rendered manifests to the cluster. Most third-party software is distributed as a Helm chart: Prometheus, Grafana, ingress controllers, databases, the Kubernetes Dashboard. Internally, teams package their own applications as charts so that environment differences (dev, staging, prod) can be captured as separate values files rather than separate copies of YAML.
+
+### Kustomize
+
+[**Kustomize**](https://kustomize.io/) takes a different approach to the same problem. Instead of templating, Kustomize layers patches over a base set of manifests: a base Deployment is shared, and each environment overlays its own changes (different replica counts, different image tags, different ConfigMap values). Kustomize is built into `kubectl` (`kubectl apply -k`) and is preferred by teams that find Helm's templating too magical.
+
+Helm and Kustomize are not mutually exclusive; some teams use Helm to install third-party software and Kustomize to manage their own.
+
+### Argo CD and Flux
+
+A **GitOps** workflow keeps the desired state of every cluster in a Git repository, and a controller in the cluster continuously reconciles the cluster against that repository. Pushing to Git is how you deploy; the cluster pulls. [**Argo CD**](https://argo-cd.readthedocs.io/) and [**Flux**](https://fluxcd.io/) are the two dominant implementations. Both are CNCF projects, both are widely adopted, and both have extensive support for Helm and Kustomize as the rendering layer. GitOps is the natural endpoint of declarative infrastructure, and it pairs particularly well with the CI/CD patterns from the previous lecture: CI builds the artifact and updates the manifest in Git; CD is whatever Argo CD or Flux does next.
+
+### k9s, Lens, kubectx, and Other Daily Tools
+
+The plain `kubectl` command-line is fine for ad-hoc work, but several tools make day-to-day cluster operation much faster.
+
+[**k9s**](https://k9scli.io/) is a terminal UI that lets you navigate a cluster the way `htop` lets you navigate processes: arrow keys to move between resources, single-letter shortcuts to view logs, exec into pods, port-forward, and edit objects. Engineers who spend significant time in clusters tend to spend most of it in k9s.
+
+[**Lens**](https://k8slens.dev/) is a desktop GUI with similar goals, more visual and less keyboard-driven. It is a reasonable choice if you prefer a window over a terminal.
+
+[**kubectx and kubens**](https://github.com/ahmetb/kubectx) are tiny shell tools for switching between Kubernetes contexts and namespaces quickly. If you regularly hop between clusters or namespaces, they save real time.
+
+[**stern**](https://github.com/stern/stern) tails logs across multiple pods at once, which is essential for debugging anything that runs as more than a single replica.
+
+### Service Meshes and Observability
+
+A **service mesh** adds traffic management, mTLS encryption, and rich observability to service-to-service communication by injecting a sidecar proxy (typically Envoy) into every pod. [**Istio**](https://istio.io/) and [**Linkerd**](https://linkerd.io/) are the dominant choices. Service meshes are powerful and add real operational weight; they are most useful at the scale where dozens of services need consistent encryption, retries, and traffic policies, and they are usually overkill at smaller scales.
+
+For observability, **Prometheus** is the standard metrics system, **Grafana** is the standard visualization tool, **Loki** and the **Elastic stack** are common log aggregation choices, and **OpenTelemetry** is the emerging standard for distributed tracing. The Monitoring and Performance lecture later in the course goes deep on the metrics side; the Log Management lecture covers the log side. All of these tools were designed for or adopted heavily into the Kubernetes ecosystem because the cluster gives them a uniform substrate to instrument.
+
+## Takeaways
+
+Container orchestration is a significant step up in operational complexity from Docker Compose. You gain self-healing, horizontal scaling, declarative service discovery, and zero-downtime deployments, but you also take on a richer object model, a more involved networking stack, and the need to understand control plane health. Whether the tradeoff makes sense depends on your requirements: a single-server deployment that can tolerate brief downtime during updates may not need a cluster, but any workload that requires high availability, horizontal scaling, or automated rollout is a strong candidate.
+
+The mental model shift is the important thing to internalize. With Docker Compose, you work with hosts: you SSH into a machine and tell it what to run. With Kubernetes, you work with the API: you submit desired state to the cluster and let it decide where and how to run things. That shift, from imperative to declarative, from host-centric to cluster-centric, is what makes Kubernetes powerful and what takes the most adjustment when you first encounter it.
+
+Picture a realistic production setup that touches every concept from this lecture. Your application is packaged as a Docker image (the Containerization lecture) and pushed to a registry by a CI pipeline (the CI/CD lecture). The cluster itself was provisioned by Terraform (the Infrastructure as Code lecture); the worker nodes were configured by Ansible (the Configuration Management lecture). On the cluster, your application runs as a Deployment with a readiness probe and resource requests, behind a Service of type ClusterIP. A separate Ingress object routes external HTTPS traffic from the cloud's L7 load balancer to that Service. Your database runs as a StatefulSet with a PersistentVolumeClaim backed by a cloud-provider StorageClass, so the volume survives any pod replacement. Configuration lives in a ConfigMap, secrets live in a Secret. Argo CD watches a Git repository and reapplies changes automatically. The Horizontal Pod Autoscaler keeps the replica count between 2 and 20 based on CPU. When load spikes, the Cluster Autoscaler asks AWS for more EC2 capacity. The same manifests, with one different values file, also run on a single-node k3s cluster on a laptop and on a kind cluster in CI. Every layer is declarative; every layer is reconciled by a controller; every layer can be torn down and re-created from text in a Git repository.
+
+That picture is what the rest of the course builds toward. The System Security lecture revisits this stack through a security lens (RBAC, NetworkPolicy, image scanning, secret management). The Monitoring and Performance lecture covers what to instrument, and the Log Management lecture covers how to consume the resulting telemetry. The same orchestration concepts apply to the metrics and logging stacks themselves, because every observability tool you might run is also just a workload on a cluster.
+
+## Resources
+
+- <a href="https://www.youtube.com/watch?v=vBjonut1JMk" target="_blank" rel="noopener noreferrer">How Kubernetes is Built with Kat Cosgrove (The Pragmatic Engineer Podcast) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=s_o8dwzRlu4" target="_blank" rel="noopener noreferrer">Kubernetes Explained in 6 Minutes (YouTube)</a>
+- <a href="https://kubernetes.io/docs/concepts/" target="_blank" rel="noopener noreferrer">Kubernetes Concepts (official documentation)</a>
+- <a href="https://kubernetes.io/docs/reference/kubectl/cheatsheet/" target="_blank" rel="noopener noreferrer">kubectl Cheat Sheet (Kubernetes official docs)</a>
+- <a href="https://research.google/pubs/large-scale-cluster-management-at-google-with-borg/" target="_blank" rel="noopener noreferrer">Large-scale cluster management at Google with Borg (Google Research)</a>
+- <a href="https://www.cncf.io/reports/cncf-annual-survey-2023/" target="_blank" rel="noopener noreferrer">CNCF Annual Survey (CNCF)</a>
+- <a href="https://blog.cloudflare.com/one-line-kubernetes-fix-saved-600-hours-a-year/" target="_blank" rel="noopener noreferrer">One Line Kubernetes Fix Saved 600 Hours a Year (The Cloudflare Blog)</a>
+- <a href="https://learnk8s.io/production-best-practices" target="_blank" rel="noopener noreferrer">Kubernetes Production Best Practices (learnk8s)</a>
+- <a href="https://www.youtube.com/watch?v=PziYflu8cB8" target="_blank" rel="noopener noreferrer">Kubernetes Architecture Explained (TechWorld with Nana) (YouTube)</a>
+- <a href="https://k3s.io/" target="_blank" rel="noopener noreferrer">k3s Project Site (Rancher / SUSE)</a>
+- <a href="https://helm.sh/docs/intro/using_helm/" target="_blank" rel="noopener noreferrer">Using Helm (Helm official docs)</a>
+- <a href="https://argo-cd.readthedocs.io/en/stable/understand_the_basics/" target="_blank" rel="noopener noreferrer">Argo CD: Understand the Basics (Argo CD official docs)</a>

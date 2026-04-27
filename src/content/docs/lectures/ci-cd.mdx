@@ -1,19 +1,19 @@
 ---
-title: CI/CD Pipelines and GitHub Actions
+title: CI/CD Pipelines
 description: "How continuous integration and continuous delivery pipelines work, why they exist, and how to build them with GitHub Actions: workflows, jobs, runners, matrix builds, caching, deployment strategies, and operational tradeoffs."
 sidebar:
   order: 10
 draft: true
 ---
 
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 {/* ai-summary
 type: lecture
 slug: ci-cd
 order: 10
-covers: deployment environments; CI vs continuous delivery vs continuous deployment; feedback loops and DORA metrics; pipeline design principles; CI/CD tools landscape; GitHub Actions concepts (workflows, events, jobs, steps, runners); triggers; marketplace actions and supply chain; secrets and OIDC; matrix builds; service containers; caching and artifacts; reusable workflows and composite actions; concurrency control; self-hosted runners; local testing with act; debugging; deployment strategies (rolling, blue-green, canary); operational concerns
+covers: deployment environments; CI vs continuous delivery vs continuous deployment; feedback loops and DORA metrics; pipeline design principles; CI/CD tools landscape; GitHub Actions concepts (workflows, events, jobs, steps, runners); triggers; marketplace actions and supply chain; secrets and OIDC; matrix builds; service containers; caching and artifacts; reusable workflows and composite actions; concurrency control; self-hosted runners; local testing with act; debugging; deployment strategies (rolling, blue-green, canary); preview environments and feature flags; operational concerns; merge queues on busy shared branches; GitHub merge_group
 prereq_lectures: containerization-with-docker, infrastructure-as-code, shell-scripting-and-automation-basics, configuration-management
 followup_lectures: system-security-and-hardening
 paired_activities: github-actions-workflow
@@ -39,6 +39,8 @@ Before discussing pipeline mechanics, it helps to understand the landscape the p
 Production is the environment that matters, and the one it is most expensive to break. The purpose of the others is to progressively raise confidence that a change will behave in production the way you expect. Notice that each environment represents a tradeoff between realism and safety. Development is maximally safe but least realistic; production is maximally realistic but least safe. Staging tries to split the difference: configured like production, but populated with synthetic or anonymized data so that a bad deploy embarrasses no one.
 
 Not every team uses all five. A small startup may collapse the middle three into a single "staging" and rely on feature flags to gate production behavior. A regulated enterprise may have six or seven environments to satisfy compliance boundaries. The pipeline's job is to move artifacts across whatever boundaries your organization has chosen, with appropriate automation at each hop.
+
+A common modern extension is the **preview environment** (sometimes called a review app). Instead of reserving a long-lived staging stack for every proposed change, the platform creates an ephemeral environment for a pull request, deploys that branch there, and destroys it when the review closes. Preview environments are especially valuable for web applications because reviewers can click a URL and see the exact branch running. The tradeoff is cost and cleanup discipline: ephemeral infrastructure is powerful only if it is cheap enough to create routinely and reliably torn down afterward.
 
 ## Continuous Integration, Delivery, and Deployment
 
@@ -72,7 +74,6 @@ A pipeline is, at its core, a feedback loop. A developer pushes a commit, and th
 
 A typical loop for a containerized web application looks like this:
 
-<Steps>
 1. **Commit and push.** A developer pushes code to a shared repository.
 2. **Lint and static analysis.** The pipeline checks code style and catches common mistakes before any code executes.
 3. **Build.** The application compiles (if applicable) and dependencies are installed.
@@ -80,7 +81,6 @@ A typical loop for a containerized web application looks like this:
 5. **Build container image.** A Docker image is assembled from the tested code.
 6. **Push to registry.** The image is pushed to a container registry (Docker Hub, GitHub Container Registry, Amazon ECR).
 7. **Deploy.** The new image is pulled onto a server or cluster and begins serving traffic.
-</Steps>
 
 Each stage acts as a gate. If linting fails, there is no point running the full test suite. If tests fail, there is no point building an image. This "fail fast" principle keeps the loop tight: developers learn about problems within minutes, not hours, and the pipeline does not waste runner time on work that is already doomed.
 
@@ -413,7 +413,7 @@ A matrix generates a maximum of 256 jobs per workflow run. By default, GitHub ma
 
 ## Service Containers
 
-Some jobs need a running service (a database, a cache, a message broker) available during the test steps. Rather than installing and starting services manually in shell commands, GitHub Actions supports **service containers**: Docker containers that run alongside your job and are accessible by hostname within the same network.
+Some jobs need a running service (a database, a cache, a message broker) available during the test steps. Rather than installing and starting services manually in shell commands, GitHub Actions supports **service containers**: Docker containers that run alongside your job. If the job itself runs in a container, you reach those services by hostname on the shared Docker network; if the job runs directly on the runner, you reach them through mapped `localhost` ports.
 
 ```yaml
 jobs:
@@ -510,7 +510,7 @@ concurrency:
   cancel-in-progress: false
 ```
 
-With `cancel-in-progress: false`, new runs queue behind the current one; with `cancel-in-progress: true`, a new run cancels the old one immediately, which is the right behavior for CI on pull request branches (no point testing a stale commit when a newer one has arrived). For deploy workflows, queueing is safer than cancelling: a half-run deploy that gets cancelled can leave infrastructure in an undefined state.
+With `cancel-in-progress: false`, GitHub allows the current run to keep going and at most one newer run to wait as pending in the same concurrency group. If additional runs arrive, the older pending one is replaced by the newest, and execution order is not guaranteed. With `cancel-in-progress: true`, GitHub also cancels the currently running workflow, which is often the right behavior for CI on pull request branches because there is no value in finishing checks for a commit that has already been superseded. For deploy workflows, allowing the active run to finish is safer than cancelling it midway through an infrastructure change.
 
 ## Self-Hosted Runners
 
@@ -643,6 +643,8 @@ aws elbv2 modify-listener \
 
 **Canary deployment** sends a small fraction of real production traffic (say, 5 percent) to the new version while the remaining 95 percent continues hitting the old version. The name comes from the mining practice of carrying a canary into a coal mine: if the canary dies, something is wrong. You monitor error rates, latency, and business metrics on the canary. If everything looks healthy after a set period, you gradually shift more traffic over. If the metrics degrade, you pull all traffic back to the old version before most users were ever affected. Canary releases are more complex to implement because they require a traffic-splitting layer such as a load balancer with weighted routing or a service mesh, which is a dedicated infrastructure layer that manages traffic between microservices. In return, they give you real-world validation with limited blast radius.
 
+A related production pattern is **progressive delivery**, which separates *deployment* from *release*. The pipeline may deploy code to production infrastructure, but feature flags, audience targeting, or configuration switches determine who can actually use the new behavior. This is powerful because disabling a misbehaving feature is often faster and less disruptive than rolling back an entire deploy. The tradeoff is operational complexity: flags need naming discipline, ownership, cleanup, and careful thought about which combinations of old and new behavior the system must support safely.
+
 | Pattern | Downtime | Rollback speed | Infrastructure cost | Version coexistence |
 |---------|----------|----------------|---------------------|---------------------|
 | Rolling | None | Minutes (re-roll forward or back) | None | Yes, briefly |
@@ -663,6 +665,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -747,9 +751,9 @@ jobs:
           rm ~/.ssh/key
 ```
 
-Because this single workflow handles both pull request validation and `main`-branch delivery, the concurrency block conditionally cancels stale pull request runs while allowing `main` runs to finish. That keeps CI feedback tight without interrupting a deployment that is already in progress.
+Because this single workflow handles pull request validation, merge-group validation, and `main`-branch delivery, the concurrency block conditionally cancels stale pull request runs while allowing `main` runs to finish. That keeps CI feedback tight without interrupting a deployment that is already in progress.
 
-This workflow demonstrates the full feedback loop. A pull request triggers only the `quality` job (lint and test), giving the author rapid feedback without the cost of a full build. A push to `main` runs `quality`, then `build-and-push`, then `deploy`, with the concurrency group ensuring that two rapid merges do not race each other into production. The `permissions` block at the top follows the principle of least privilege: the workflow can read repository contents and write packages, but nothing else.
+This workflow demonstrates the full feedback loop. A pull request or GitHub merge-group validation run triggers only the `quality` job (lint and test), giving fast feedback without the cost of a full build. A push to `main` runs `quality`, then `build-and-push`, then `deploy`, with the concurrency group ensuring that two rapid merges do not race each other into production. The `permissions` block at the top follows the principle of least privilege: the workflow can read repository contents and write packages, but nothing else.
 
 ## Operational Concerns: Cost, Security, Governance
 
@@ -762,6 +766,57 @@ Pipelines move from "cool idea" to "load-bearing infrastructure" quickly, and on
 **Audit and compliance.** Every GitHub Actions run is logged and retained according to your plan's policy, which gives you a searchable record of who changed what and when. Regulated industries lean on this heavily: a pipeline that produces signed artifacts, records approver identities through environment protection, and retains logs for the required period satisfies most change-control frameworks without a separate workflow tool.
 
 **Governance across repositories.** At scale, you do not want every team to invent its own deploy pipeline. Reusable workflows, composite actions, and organization-level policies (required status checks, restricted action usage, blocked marketplace publishers) let a platform team set sensible defaults while individual teams still own their own workflows. The best setups feel like library design: clear interfaces, sensible defaults, and escape hatches for the cases the library did not anticipate.
+
+## Merge Queues
+
+A pipeline that runs on every pull request answers the question "is this change safe to ship against main as it existed when the PR branched off?" That is not quite the same question as "is this change safe to ship against main as it exists right now." On a small team with a slow-moving main branch, asking authors to update their branch before merging is often enough. On a busy shared branch, that habit stops scaling. Every merge invalidates someone else's test result, approvals grow stale, and developers spend real time rebasing, rerunning CI, and racing one another to land before the branch moves again. A **merge queue** exists to move that coordination burden out of human habit and into automation at the branch boundary.
+
+The failure mode is called a **semantic merge conflict**: two pull requests pass their own CI runs, neither has a textual conflict with the other, and yet merging both into main produces a broken build or a failing test. One PR renames a function while another adds a new caller of the old name. One PR tightens a database constraint while another writes data the constraint will reject. Git's three-way merge cannot detect these because they are not conflicts at the text level; they appear only when the combined code runs. Required status checks ensure each PR was green at some point, not that the resulting main is green now. When many developers are landing work in the same day, that distinction becomes operationally important: without a queue, "please update your branch and rerun CI" turns into a constant tax on the whole team.
+
+Without a queue, approved changes can still break the shared branch because the branch may move between the moment CI passed and the moment a human clicks merge:
+
+```mermaid
+flowchart LR
+  A[PR 1 green] --> B[Human merges PR 1]
+  C[PR 2 green on older main] --> D[Human merges PR 2]
+  B --> E[main has changed]
+  E --> D
+  D --> F[shared branch can still break]
+```
+
+A merge queue changes the question. Instead of asking "did this PR pass on its own?" the queue asks "does the exact next state of the protected branch pass the required checks?" Approved pull requests enter the queue. The queue composes the next merge candidate from the current protected branch plus whichever queued changes would land before it, runs CI on that candidate state, and only advances the branch when that candidate passes. If checks fail, the queue removes or regroups the offending entry and rebuilds the candidate. The important idea is not serialization for its own sake. The important idea is that the automation tests the branch state that would actually land, at the pace the team is really merging.
+
+```mermaid
+flowchart TD
+  P[Approved pull requests] --> Q[Merge queue]
+  B[Current protected branch] --> C[Compose next merge candidate]
+  Q --> C
+  C --> T[Run required checks on that candidate state]
+  T -->|Pass| G[Merge verified state]
+  T -->|Fail| R[Remove or regroup failing entry]
+  R --> C
+  G --> S[Shared branch stays green]
+```
+
+The pattern predates GitHub's built-in support. The Rust project's **bors** bot popularized it in the early 2010s for exactly this reason: a flood of contributors meant main was broken often enough to be a real tax on the project. Hosted versions followed (**Mergify**, **Aviator**, **Graphite Merge Queue**, GitLab's **merge trains**, and others), and **GitHub Merge Queue** went generally available in 2023. They differ in UX and policy knobs but share the same core mechanism: replace the manual "rebase race" on a busy branch with automation that continuously validates the next branch state.
+
+GitHub's implementation makes the abstraction concrete with temporary **merge groups**. A queued pull request is tested not only as an isolated PR branch, but as a temporary branch representing the queued candidate state. That detail matters if GitHub Actions is providing required checks: the workflow that reports those checks must trigger on `merge_group` as well as `pull_request`, or the queue will wait for a required status that never reports.
+
+```yaml
+on:
+  pull_request:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+```
+
+Many merge queue systems also support grouping multiple pull requests or limiting how many land together when CI cost or queue depth makes that worthwhile. The exact behavior varies by product. Some test larger groups, some cap how many can merge at once, and some rebuild the queue aggressively after a failure. The shared goal is throughput: keep the protected branch healthy without making every developer manually babysit branch freshness.
+
+For platform teams, and for any repository with a heavily used shared branch, a merge queue is not just about PR correctness. It is about branch health under concurrency. Required status checks ensure no PR can merge without passing CI; a merge queue ensures no change reaches the shared branch without passing CI in the exact form that would land. That distinction is the difference between "main is usually green" and "main stays green even while many developers are merging," and it shows up directly in the metrics teams care about: time-to-merge, broken-main minutes per week, deploy success rate, and how much engineering time is wasted on branch freshness churn.
+
+<Aside type="note" title="Concurrency Control vs Merge Queues">
+The `concurrency` keyword discussed earlier serializes *workflow runs*: it prevents two deploy jobs from racing each other after merges have already happened. A merge queue serializes *the final branch integration step* before changes reach `main`. The two mechanisms compose naturally and address different problems, and a mature setup often uses both.
+</Aside>
 
 ## Takeaways
 
@@ -784,3 +839,5 @@ The adjacent lectures connect directly to this one. The Configuration Management
 - <a href="https://nektosact.com/" target="_blank" rel="noopener noreferrer">act: Run GitHub Actions Locally (nektos)</a>
 - <a href="https://github.com/sdras/awesome-actions" target="_blank" rel="noopener noreferrer">awesome-actions: Curated List of GitHub Actions (GitHub)</a>
 - <a href="https://www.thoughtworks.com/insights/blog/continuous-delivery-huh" target="_blank" rel="noopener noreferrer">Continuous Delivery: Huh? (Thoughtworks)</a>
+- <a href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue" target="_blank" rel="noopener noreferrer">Managing a Merge Queue (GitHub Docs)</a>
+- <a href="https://graydon2.dreamwidth.org/1597.html" target="_blank" rel="noopener noreferrer">The Not Rocket Science Rule of Software Engineering (Graydon Hoare)</a>

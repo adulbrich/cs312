@@ -5,7 +5,7 @@ sidebar:
   order: 9
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 {/* ai-summary
@@ -15,8 +15,8 @@ order: 9
 covers: configuration drift; desired state; convergence; idempotency; Ansible architecture; inventories and variables; playbooks; task flow and conditions; roles and templates; testing automation with ansible-lint and Molecule; mutable vs immutable infrastructure; golden images; orchestration layer vs OS layer; secrets management; operational controls; endpoint and device management (MDM, UEM, Apple DDM)
 prereq_lectures: shell-scripting-and-automation-basics, infrastructure-as-code
 followup_lectures: ci-cd
-paired_activities: 
-supports_labs:
+paired_activities: ansible-configuration
+supports_labs: automated-configuration-and-deployment
 */}
 
 Imagine you are responsible for three web servers that must serve identical content behind a load balancer. On day one you log into each machine, install nginx, copy over a configuration file, and start the service. Everything works. A month later, a colleague patches one server but forgets the other two. Someone else tweaks a timeout setting on the third machine to debug a problem, then never reverts it. Before long, the three "identical" servers have quietly diverged. This phenomenon is called **configuration drift**, and it is one of the most common sources of mysterious, hard-to-reproduce bugs in production environments.
@@ -89,7 +89,7 @@ flowchart TB
 
 An inventory is more than a host list. It is the first abstraction layer over your fleet. The moment you group hosts as `webservers`, `dbservers`, `staging`, or `production`, you are telling the automation which machines share responsibilities, which machines should receive the same configuration, and what your blast radius is when you target a group. The [Ansible inventory documentation](https://docs.ansible.com/ansible/latest/inventory_guide/intro_inventory.html) formalizes this idea, but the concept applies far beyond Ansible: any configuration management system needs some model of "which machines are these?" before it can do useful work.
 
-Here is a simple static inventory:
+Here is a simple static inventory written in an [INI file](https://en.wikipedia.org/wiki/INI_file):
 
 ```ini
 [webservers]
@@ -117,15 +117,15 @@ Three hosts are placed into the `webservers` group, one host is placed into `dbs
 
 Variables deepen that model. Instead of hardcoding ports, paths, users, and package names inside every task, you define them once at the right scope and let hosts inherit or override them. Ansible commonly stores these values in `group_vars/` and `host_vars/` directories alongside the inventory:
 
-```text
-project/
-  hosts.ini
-  group_vars/
-    webservers.yml
-  host_vars/
-    web1.yml
-  site.yml
-```
+<FileTree>
+- project
+  - hosts.ini
+  - group_vars
+    - webservers.yml
+  - host_vars
+    - web1.yml
+  - site.yml
+</FileTree>
 
 If `group_vars/webservers.yml` defines `nginx_worker_processes: 4` and `nginx_listen_port: 80`, every web server inherits those values. If `host_vars/web1.yml` sets `nginx_worker_processes: 8`, that one machine diverges intentionally, in code, rather than accidentally, through a manual edit at 2 AM. That distinction is operationally crucial. Planned difference is not drift. Unrecorded difference is drift.
 
@@ -164,6 +164,7 @@ This playbook shows the structure clearly:
         name: nginx
         state: present
         update_cache: true
+        cache_valid_time: 3600
 
     - name: Deploy nginx configuration
       ansible.builtin.copy:
@@ -195,22 +196,44 @@ This is also where the limits of declarative tooling become visible. Modules suc
 
 Ansible does support ad-hoc commands, and they are genuinely useful for inspection and quick probes. `ansible webservers -i hosts.ini -m ansible.builtin.ping` is a fleet connectivity check, not an ICMP ping, and `ansible-doc ansible.builtin.apt` is a fast way to inspect module behavior locally. The useful rule of thumb is this: if a command matters more than once, it probably belongs in a playbook, because repeatability and review matter more than convenience.
 
+### Updates, Upgrades, and Reboots
+
+Using configuration management to update software is entirely normal, and it is one of the most common day-two jobs. The same package task that ensures nginx is present can also keep it on an approved version or move it forward during a maintenance window. Routine patching is the easy case. If the declared state is "install the current approved nginx package," Ansible can keep converging hosts toward that state every time the play runs.
+
+The harder case is a major version bump or any update that carries a migration with it. A package manager can make PostgreSQL 16 packages available while the real operational work is still `pg_upgrade` or a logical migration, and nginx can pull in a new module layout or configuration syntax, but "package upgraded" is not the same thing as "application safely migrated." Mature playbooks treat those upgrades as explicit change-management workflows: pin the target version, back up or snapshot state, drain or limit traffic, run any required migration or syntax validation step, verify the service, and widen the rollout only after the canary host behaves correctly. Declarative tooling makes the mechanics repeatable. It does not remove the need to understand the upgrade path.
+
+The same boundary explains where kernel and VM-level changes belong. Configuration management is a good fit for kernel packages, `sysctl` values, loaded modules, systemd units, and reboot coordination, because those live inside the operating system. Virtual machine shape, such as vCPU count, memory size, disk class, attached NICs, or subnet placement, is infrastructure and belongs to provisioning tools such as Terraform. A useful rule is that Ansible changes the inside of the machine; provisioning changes what machine exists in the first place.
+
 ### Reading a Playbook Run
 
-Idempotency is easy to describe but worth seeing in terms of what Ansible actually reports. When a play runs, common task outcomes include `ok` (inspected, already in the desired state), `changed` (action taken and something on the system changed), `skipped` (a `when` condition evaluated to false), and `failed` (something went wrong and execution stopped). At the end of every run, Ansible also prints recap counters per host:
+Idempotency is easy to describe but worth seeing in terms of what Ansible actually reports. When a play runs, common task outcomes include `ok` (task succeeded), `changed` (task succeeded and modified state), `skipped` (a `when` condition or other gate kept it from running), and `failed` (something went wrong and execution stopped). At the end of every run, Ansible also prints recap counters per host. These numbers are per-host counters, not one global total:
 
 ```
 PLAY RECAP *********************************************************************
-web1  : ok=6   changed=2   unreachable=0   failed=0   skipped=1   rescued=0
-web2  : ok=6   changed=2   unreachable=0   failed=0   skipped=1   rescued=0
-web3  : ok=6   changed=0   unreachable=0   failed=0   skipped=1   rescued=0
+web1  : ok=6   changed=2   unreachable=0   failed=0   skipped=1   rescued=0   ignored=0
+web2  : ok=6   changed=2   unreachable=0   failed=0   skipped=1   rescued=0   ignored=0
+web3  : ok=6   changed=0   unreachable=0   failed=0   skipped=1   rescued=0   ignored=0
 ```
 
-This recap tells a story. Six tasks ran successfully on all three hosts. Two of them made changes on `web1` and `web2`. Zero changes were needed on `web3`, which indicates that `web3` was already in the desired state before the run started. Nothing failed. One task was skipped on every host, probably a conditional that evaluated to false in the current environment.
+The recap fields are easier to read if you treat them as a compact incident summary for each host.
+
+| Field | What it means |
+|-------|---------------|
+| `ok` | The task completed successfully. Some of those successful tasks may also contribute to `changed`. |
+| `changed` | The task successfully modified the host. This is the counter you watch for drift correction or rollout activity. |
+| `unreachable` | Ansible could not connect to the host or start normal module execution, usually because of SSH, authentication, networking, or bootstrap issues. |
+| `failed` | A task failed and the play did not recover from it on that host. |
+| `skipped` | A task was intentionally not run, often because of `when`, tags, check mode behavior, or host targeting. |
+| `rescued` | A task inside a `block` failed, but a `rescue` path handled that failure. |
+| `ignored` | A task failed, but `ignore_errors: true` let the play continue anyway. |
+
+This recap tells a story. Every host completed six successful tasks. On `web1` and `web2`, two of those successful tasks actually modified state. Zero changes were needed on `web3`, which indicates that `web3` was already in the desired state before the run started. No host became unreachable, no unhandled failure stopped the play, no recovery path was needed, and no failed task was ignored. One task was skipped on every host, probably because a conditional evaluated to false in the current environment.
+
+Two recap fields deserve extra attention. `unreachable` is different from `failed`: it means Ansible never got far enough to perform normal task logic on that host. `rescued` is different from a clean success: it means something did go wrong, but the playbook had an explicit recovery path and used it.
 
 On a well-maintained fleet, the second run of any playbook should produce almost entirely `ok` lines. A recap showing many `changed` items on a second run is a diagnostic signal worth investigating: either the tasks are not genuinely idempotent, the system is reverting to a different state between runs, or the definition of desired state is changing between invocations. Each of those causes has a different remedy, but the recap is the right place to start.
 
-The `--check` flag runs the play in dry-run mode, predicting what would change without applying anything. Combined with `--diff`, modules that support diff mode can show before-and-after differences, especially for file-oriented changes. Running both together before a maintenance window is one of the cheapest risk-reduction habits available:
+The `--check` flag is a command-line option on `ansible-playbook` that runs the play in dry-run mode, predicting what would change without applying anything. Combined with `--diff`, modules that support diff mode can show before-and-after differences, especially for file-oriented changes. Running both together before a maintenance window is one of the cheapest risk-reduction habits available:
 
 ```bash
 ansible-playbook site.yml -i hosts.ini --check --diff
@@ -222,7 +245,7 @@ For supporting modules, the output can show which files would change and how. It
 
 The Shell Scripting lecture introduced conditionals, exit codes, and one-time setup logic in Bash. Ansible has the same operational needs, but it expresses them as data attached to tasks rather than as control-flow syntax wrapped around whole scripts. That shift matters because it lets you reason about intent one task at a time: why this task runs, what counts as change, and what should be considered a failure.
 
-Three task-flow tools show up constantly in real playbooks. `register` captures a task result so later tasks can inspect it. `when` turns that result into a gate. `changed_when` and `failed_when` let you correct Ansible's default interpretation when a raw command does not map neatly onto the framework's idea of success or change. The example below is short, but it captures the pattern.
+Several task-flow tools show up constantly in real playbooks. `register` captures a task result so later tasks can inspect it. `when` turns that result into a gate. `changed_when` and `failed_when` let you correct Ansible's default interpretation when a raw command does not map neatly onto the framework's idea of success or change. For multi-step work, `block`, `rescue`, and `always` group tasks into a success path, a recovery path, and a cleanup path. The first example is short, but it captures the pattern.
 
 ```yaml
 - name: Check whether the bootstrap marker exists
@@ -241,6 +264,15 @@ Three task-flow tools show up constantly in real playbooks. `register` captures 
   changed_when: false
   failed_when: service_state.stdout != "active"
 ```
+
+Read that snippet from top to bottom:
+
+1. `ansible.builtin.stat` inspects `/srv/myapp/.bootstrapped` and `register: bootstrap_marker` stores the full result object for later use. That stored object includes fields such as whether the path exists, the return code, and whether the task changed anything.
+2. `when: not bootstrap_marker.stat.exists` turns the stored result into a gate. If the marker file already exists, the bootstrap task is skipped.
+3. `changed_when: true` tells Ansible to count a successful bootstrap as a real change. The `command` module cannot infer whether `/usr/local/bin/bootstrap-myapp` actually altered the system, so you must state that intent yourself.
+4. The service check uses `register` again, this time to capture the output of `systemctl is-active myapp` in `service_state`.
+5. `changed_when: false` marks that command as observational. You want the recap to say, "I checked status," not, "I changed the server."
+6. `failed_when: service_state.stdout != "active"` rewrites the success rule for the task. In other words, this command only counts as healthy if it reports exactly `active`.
 
 This is the point where configuration management stops feeling like a prettier package installer and starts feeling like a systems language. A task result is not just pass or fail. It can be "ran and changed," "ran and did not change," "should be skipped," or "ran but its stdout means something is wrong." When file existence is the natural guard, `creates` and `removes` are even cleaner than a separate `stat` task because they state the gate directly. That is especially useful for imports, archive extraction, key installation, or bootstrap actions that should run once and then become boring.
 
@@ -263,7 +295,24 @@ Sometimes the unit of failure is larger than one task. You might need to render 
       ansible.builtin.copy:
         src: files/nginx.conf.backup
         dest: /etc/nginx/nginx.conf
+
+  always:
+    - name: Probe final nginx state
+      ansible.builtin.command: systemctl is-active nginx
+      changed_when: false
+      failed_when: false
 ```
+
+This second snippet also reads cleanly as a timeline:
+
+1. Ansible enters `block` and runs its tasks in order. Here that means render the configuration, then validate it with `nginx -t`.
+2. `changed_when: false` on the validation command says that a syntax check is inspection, not configuration drift correction.
+3. If every task in `block` succeeds, Ansible skips `rescue` entirely.
+4. If a task in `block` returns a normal `failed` result, Ansible stops the remaining block tasks and jumps to `rescue`. In this example, a failed `nginx -t` would trigger the rollback copy.
+5. If the rescue tasks succeed, the recap increments `rescued` rather than `failed`. If a rescue task fails, or if you deliberately add an `ansible.builtin.fail` task at the end of rescue, the host still ends the play as failed.
+6. `always` usually runs after the success path or the rescue path while the host is still executing normal task flow. It is where you put cleanup, notifications, or diagnostic checks that should run after ordinary block processing. Here `failed_when: false` keeps the status probe from masking the original outcome with a second, less important failure.
+
+One subtle boundary matters here: `rescue` handles normal task failures, not transport failures. If a host is `unreachable` because SSH or authentication broke, Ansible never gets a normal task result to rescue from. The same limitation applies to `always`, and invalid task definitions bypass both sections as well.
 
 The reason this matters is not elegance. It is operational safety. A playbook that can distinguish "no change," "healthy change," and "change that must be rolled back" is a playbook you can trust during a maintenance window.
 
@@ -271,23 +320,28 @@ The reason this matters is not elegance. It is operational safety. A playbook th
 
 As the amount of automation grows, the next problem is not syntax. It is structure. A single giant playbook works for a while, then turns into a hard-to-review blob of tasks, variables, and special cases. Configuration management needs the same kind of decomposition that application code needs. In Ansible, the first two major reuse mechanisms are **roles** and **templates**.
 
-Roles package related tasks, handlers, files, templates, and defaults into a reusable unit with a predictable directory structure:
+[Roles](https://docs.ansible.com/projects/ansible/latest/playbook_guide/playbooks_reuse_roles.html) package related tasks, handlers, files, templates, and defaults into a reusable unit with a predictable directory structure:
 
-```text
-roles/
-  nginx/
-    tasks/main.yml
-    handlers/main.yml
-    templates/nginx.conf.j2
-    files/index.html
-    defaults/main.yml
-```
+<FileTree>
+- roles
+  - nginx
+    - tasks/
+      - main.yml
+    - handlers
+      - main.yml
+    - templates/
+      - nginx.conf.j2
+    - files/
+      - index.html
+    - defaults/
+      - main.yml
+</FileTree>
 
 Once you think in roles, you stop asking "How do I configure this one server?" and start asking "What is the reusable definition of a web tier, a monitoring agent, or a bastion host?" That is a healthier question. It encourages consistent naming, variable defaults, and cleaner separation between generic behavior and environment-specific values.
 
 Roles also force you to think about **variable precedence**, which is one of the first places a growing Ansible codebase becomes confusing. The override chain is useful because it lets a role publish gentle defaults while inventories or operator-supplied variables tighten those values for an environment. It is dangerous because a value can appear to come from nowhere if the team cannot explain which layer owns it. Role defaults should usually be weak suggestions, group variables should express environment-wide policy, host variables should be rare exceptions, and extra vars should be reserved for deliberate operator overrides rather than daily configuration.
 
-Templates solve the corresponding file problem. Static file copies are fine when every target should receive exactly the same bytes. Real fleets rarely stay that uniform. Ports differ, hostnames differ, upstream backends differ, and security settings differ by environment. Ansible uses the [Jinja2 templating engine](https://jinja.palletsprojects.com/en/stable/templates/) so one configuration file can be rendered differently for each host:
+[Templates](https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/template_module.html) solve the corresponding file problem. Static file copies are fine when every target should receive exactly the same bytes. Real fleets rarely stay that uniform. Ports differ, hostnames differ, upstream backends differ, and security settings differ by environment. Ansible uses the [Jinja2 templating engine](https://jinja.palletsprojects.com/en/stable/templates/) so one configuration file can be rendered differently for each host:
 
 ```jinja2
 worker_processes {{ nginx_worker_processes }};
@@ -303,7 +357,7 @@ The template is only half the story. The other half is the variable model behind
 
 Ansible also separates **roles** from **collections**. A role is a reusable component inside your codebase or inside a downloaded package. A collection is the broader distribution unit that can contain roles, modules, plugins, and documentation. [Ansible Galaxy](https://galaxy.ansible.com/) is the public hub for sharing that content. This is powerful, but it comes with the same supply-chain caution as any package registry: version pinning, maintenance quality, and code review still matter. Reuse is only a win when you trust what you are reusing.
 
-Collections deserve the same dependency discipline as application libraries. A small `requirements.yml` file records which collections the project expects and what version range the team has actually tested.
+[Collections](https://docs.ansible.com/projects/ansible/latest/collections_guide/index.html) deserve the same dependency discipline as application libraries. A small `requirements.yml` file records which collections the project expects and what version range the team has actually tested.
 
 ```yaml
 collections:
@@ -324,7 +378,7 @@ ansible-lint site.yml
 ansible-lint roles/nginx/
 ```
 
-Most violations reported by ansible-lint are inexpensive to fix: consistent indentation, fully qualified module names such as `ansible.builtin.apt` rather than the short-form `apt`, and explicit `state` declarations. The violations worth reading carefully are the logic warnings. A task flagged for missing `changed_when` is a task that will always report `changed`, which breaks idempotency's core promise that a second run should be boring, and also makes it impossible to tell from the recap whether the playbook actually did anything.
+Most violations reported by ansible-lint are inexpensive to fix: consistent indentation, fully qualified module names such as `ansible.builtin.apt` rather than the short-form `apt`, and explicit `state` declarations. The violations worth reading carefully are the logic warnings. A task flagged by ansible-lint here is usually a task, often using `command` or `shell`, whose change behavior is ambiguous to Ansible. The fix is to describe that behavior explicitly with `changed_when` or, when appropriate, `creates` or `removes`. Otherwise the recap becomes noisy and it becomes much harder to tell whether the playbook actually changed the system.
 
 [Molecule](https://ansible.readthedocs.io/projects/molecule/) goes further by actually running roles inside ephemeral containers or virtual machines. A Molecule scenario provisions a test instance, applies the role under test, reruns it to check idempotence, runs a verifier to assert the expected system state, and destroys the instance when finished. In current Molecule workflows that verification step is commonly Ansible-native, often through a `verify.yml` playbook. Some teams also use [Testinfra](https://testinfra.readthedocs.io/), which lets you write Python assertions about files, services, packages, and sockets on the guest system:
 
@@ -396,7 +450,7 @@ The practical consequence is that fully automated infrastructure usually involve
 
 ## Artifacts, Versions, and Deployment Boundaries
 
-The next important boundary is between producing software artifacts and deploying them. The CI/CD Pipelines and GitHub Actions lecture goes deeper on how pipelines build, test, and publish software, but configuration management still has to consume whatever those pipelines produce. That boundary is easy to blur if you treat deployment as "run latest thing." It becomes much clearer if you divide responsibilities deliberately.
+The next important boundary is between producing software artifacts and deploying them. The CI/CD Pipelines lecture goes deeper on how pipelines build, test, and publish software, but configuration management still has to consume whatever those pipelines produce. That boundary is easy to blur if you treat deployment as "run latest thing." It becomes much clearer if you divide responsibilities deliberately.
 
 The diagram below shows the cleaner separation. Provisioning creates the host and its surrounding infrastructure. CI/CD produces a versioned artifact. Configuration management takes an already-reviewed artifact and makes a particular environment run it with the right runtime, files, credentials, and policies.
 
@@ -425,22 +479,30 @@ Pinned versions matter because reproducibility is part of trust. The tag `latest
 
 The word **secret** is often overloaded in automation conversations. A database password, TLS private key, or API token is a secret value. A cloud instance profile, service account, or workload identity is not a secret value. It is an identity with permissions. Good automation distinguishes those categories because they are distributed, rotated, and audited in different ways.
 
-Ansible Vault still matters because some values really do need to be materialized inside the playbook or on the target. Secrets cannot live as plain text in a repository and still be called automation done responsibly. [Ansible Vault](https://docs.ansible.com/ansible/latest/user_guide/vault.html) exists because teams need encrypted variables and files that can still travel through version control and review workflows.
+Ansible Vault still matters because some values really do need to be materialized inside the playbook or on the target. Secrets cannot live as plain text in a repository and still be called automation done responsibly. [Ansible Vault](https://docs.ansible.com/ansible/latest/user_guide/vault.html) exists because teams need encrypted variables and files that can still travel through version control and review workflows. Behind the scenes, Vault encrypts the file contents locally before you commit them, so Git stores ciphertext beginning with an `$ANSIBLE_VAULT` header rather than plaintext. A teammate who has the vault password, or access to the vault password file or secret-manager entry used by automation, can decrypt, edit, or run against that file. A teammate without that credential sees only encrypted text. During playbook execution the control node decrypts the data so tasks can use it, but that does not mean plaintext can never touch disk anywhere: `ansible-vault edit` uses a temporary decrypted file under the hood, and tasks may intentionally render secrets into target configuration files.
 
 ```bash
-# Encrypt an entire variables file
-ansible-vault encrypt group_vars/production/secrets.yml
+# Create a new encrypted variables file from the start
+ansible-vault create group_vars/production/secrets.yml
 
-# Edit an encrypted file
+# Edit an encrypted file without keeping a plaintext copy in git
 ansible-vault edit group_vars/production/secrets.yml
 
 # Run a playbook that uses encrypted variables
 ansible-playbook site.yml --ask-vault-pass
 ```
 
-<Aside type="caution" title="Secrets Belong in Vault, Not in Git">
-Never commit plaintext secrets, SSH private keys, or cloud credentials to your repository. Use Ansible Vault or an external secrets manager for secret values, and use platform identity for permissions whenever that is available.
+A healthy Vault workflow is usually this simple:
+
+1. Create or edit the secrets file with `ansible-vault create` or `ansible-vault edit`, so the copy in your working tree stays encrypted at rest.
+2. Commit the encrypted file like any other source file.
+3. Give authorized humans and CI the vault password through a password manager, CI secret, or protected `--vault-password-file`, not through the repository itself.
+
+<Aside type="caution" title="Plaintext Secrets Do Not Belong in Git">
+Encrypted Vault files can live in the repository. The vault password, SSH private keys, cloud credentials, and any decrypted copy cannot.
 </Aside>
+
+The easiest way to avoid accidentally pushing plaintext is to avoid `ansible-vault decrypt` in normal editing workflows. Create and edit encrypted files in place, let secret-scanning or pre-commit hooks reject obvious credentials, and treat permanent decryption as an exceptional recovery step that is followed immediately by re-encryption. If a task handles sensitive values directly, `no_log: true` and careful review of the rendered target files matter just as much as Vault itself.
 
 In cloud environments, the cleanest pattern is often to avoid copying long-lived access keys onto the host at all. If a machine only needs permission to pull from a private registry or read backups from object storage, platform identity is usually a better fit: an instance profile, service account, or workload identity grants that permission at run time. That changes the trust boundary in a good way. The playbook still configures the machine, but the machine obtains its credentials from the platform rather than from a file sitting on disk.
 
@@ -450,15 +512,18 @@ This distinction also clarifies what Vault is for. Vault stores secret values th
 
 Once fleets grow, safety features stop being optional conveniences and become part of the design. You need ways to reduce blast radius, preview impact, and debug late-stage failures without rerunning an entire playbook from the top every time. Ansible's operational controls are valuable not because they are clever, but because they let you narrow the scope of risk.
 
-The table below shows the controls worth internalizing early. Each one limits a different dimension of change.
+Most of these controls are things you add to the `ansible-playbook` command during a maintenance window. The main exception is `serial`, which is a playbook keyword inside the YAML because it defines how many hosts a play changes at once. The table below shows the controls worth internalizing early.
 
-| Control | What it limits | Why it matters |
-|---------|----------------|----------------|
-| `--limit` | Host scope | Proves a change on a subset before widening it |
-| `--tags` / `--skip-tags` | Task scope | Runs only the intent you mean, not every task in the play |
-| `serial` | Concurrent host changes | Prevents rolling changes from taking every node down at once |
-| `--check --diff` | Unreviewed impact | Previews likely changes before the maintenance window begins |
-| `-vvv` and `--start-at-task` | Debugging scope | Shortens the feedback loop when a long playbook fails late |
+| Control | Where you use it | What it actually does | Example |
+|---------|------------------|-----------------------|---------|
+| `--limit` | On the `ansible-playbook` command line | Temporarily narrows host targeting, even if the play itself targets a larger group. | `ansible-playbook site.yml -i hosts.ini --limit web1` |
+| `--tags` / `--skip-tags` | On the `ansible-playbook` command line | Includes only tagged tasks, or excludes tagged tasks, so you can run just the slice you intend. | `ansible-playbook site.yml -i hosts.ini --tags nginx` |
+| `serial` | Inside the playbook YAML | Batches the rollout so the play changes only part of the fleet at one time. | `serial: 1` or `serial: 25%` |
+| `--check --diff` | On the `ansible-playbook` command line | Simulates changes and shows before-and-after diffs for modules that support those modes. | `ansible-playbook site.yml -i hosts.ini --check --diff` |
+| `-vvv` | On the `ansible-playbook` command line | Increases logging detail so you can inspect connections, task results, and module behavior. | `ansible-playbook site.yml -i hosts.ini -vvv` |
+| `--start-at-task` | On the `ansible-playbook` command line | Restarts the playbook at a named task after you fix a late-stage problem. | `ansible-playbook site.yml -i hosts.ini --start-at-task "Validate configuration"` |
+
+Read that table as an answer to the practical question, "What do I add to `ansible-playbook site.yml -i hosts.ini ...` when I want less risk right now?" The one non-command-line answer is `serial`, which you write into the playbook when you want batching to be a permanent property of the rollout.
 
 These controls are strongest when the playbooks themselves are designed to support them. Tags should map to stable concerns, not ad hoc debugging labels. `serial` should match the failure tolerance of the service behind the playbook. Check mode is helpful, but it is not a perfect simulation. As covered in the Shell Scripting lecture, a great deal of operational maturity is simply narrowing the surface area of a risky action before you take it.
 
@@ -470,9 +535,9 @@ The fleet model in this lecture has assumed servers: machines with stable networ
 
 This category is usually called **endpoint management** or **mobile device management (MDM)**, and increasingly **unified endpoint management (UEM)** when one platform covers laptops, phones, and tablets together. The job is structurally familiar: enroll a device, declare what should be true about it, and reconcile reality with that declaration over time. What changes is everything around that core loop. Endpoints connect from coffee shops and airports rather than from a known subnet. Users own part of the configuration through their accounts and personal data. Compliance posture, including disk encryption, screen lock, OS patch level, and certificate trust, matters at least as much as which packages are installed. And users push back against changes that interrupt their work in a way no stateless web server ever does.
 
-The tooling reflects that. [Microsoft Intune](https://learn.microsoft.com/en-us/mem/intune/) is the dominant choice for Windows-centric organizations and now manages macOS, iOS, Android, and Linux as well. [Jamf Pro](https://www.jamf.com/products/jamf-pro/) is the long-standing Apple-focused option, used heavily in education and creative industries. [Omnissa Workspace ONE](https://www.omnissa.com/products/workspace-one-unified-endpoint-management/) (formerly VMware Workspace ONE), [iru](https://www.iru.com/) (formerly Kandji), and [Mosyle](https://mosyle.com/) compete in the same Apple-centric space with different tradeoffs in pricing, automation depth, and target customer. On the open-source side, [Fleet](https://fleetdm.com/) builds on osquery to give visibility and basic configuration enforcement across mixed fleets, and [Munki](https://www.munki.org/munki/) handles Mac software distribution outside a full MDM stack. Older Windows shops still rely on Group Policy, which is conceptually a configuration management system bolted onto Active Directory, although most organizations are migrating that work into Intune.
+The tooling reflects that. [Microsoft Intune](https://learn.microsoft.com/en-us/mem/intune/) is a common choice in Microsoft-centric organizations and manages Windows, macOS, iOS/iPadOS, Android, Linux, and Chrome OS. [Jamf Pro](https://www.jamf.com/products/jamf-pro/) and [Mosyle](https://mosyle.com/) are well-known Apple-focused platforms. [Omnissa Workspace ONE](https://www.omnissa.com/products/workspace-one-unified-endpoint-management/) (formerly VMware Workspace ONE) is a broader cross-platform UEM product, and [Iru](https://www.iru.com/) (formerly Kandji) has expanded from Apple device management into a wider IT and security platform. On the open-source side, [Fleet](https://fleetdm.com/) builds on osquery to give visibility and some policy enforcement across mixed fleets, and [Munki](https://www.munki.org/munki/) handles Mac software distribution outside a full MDM stack. Older Windows shops still rely on Group Policy, which is conceptually a configuration management system bolted onto Active Directory, although many organizations now pair it with, or gradually replace parts of it with, cloud endpoint-management platforms.
 
-Almost all of these tools are pull-based by design, for the same reason that pull dominates in any environment with intermittent connectivity: an enrolled device checks in on a schedule, fetches its assigned policies, applies them, and reports compliance back. The more recent direction, especially from Apple, has been explicitly toward declarative models. [Apple's Declarative Device Management](https://developer.apple.com/documentation/devicemanagement/leveraging-the-declarative-management-data-model-to-scale-devices) lets the device itself evaluate whether it satisfies a declared state and act autonomously, rather than waiting for the server to push every command. The vocabulary is identical to what this lecture has used throughout: declarations, status reports, predicates, reconciliation. Configuration management did not start at the endpoint, but the endpoint world has now thoroughly absorbed the model.
+Most endpoint platforms rely heavily on device-initiated check-ins, but the transport model varies by platform. Apple device management, for example, commonly uses push notifications through Apple Push Notification service (APNs) to tell a device to contact the management service, while other platforms lean more on scheduled sync and periodic polling. That architecture fits intermittent connectivity better than a server-side tool that expects a stable SSH session. The more recent direction, especially from Apple, has been explicitly toward declarative models. [Apple's Declarative Device Management](https://developer.apple.com/documentation/devicemanagement/leveraging-the-declarative-management-data-model-to-scale-devices) lets the device itself evaluate whether it satisfies a declared state and act autonomously, rather than waiting for the server to push every command. The vocabulary is identical to what this lecture has used throughout: declarations, status reports, predicates, reconciliation. Configuration management did not start at the endpoint, but the endpoint world has now thoroughly absorbed the model.
 
 Endpoint management does not replace server-side configuration management, and Ansible is rarely the right tool to manage a fleet of corporate laptops. The connectivity assumptions, user-experience constraints, and security integrations are different enough that purpose-built endpoint platforms almost always win at that job. The useful insight is that the underlying idea, declared state plus a reconciliation loop, is general. Whether the fleet is web servers in a VPC, Kubernetes nodes in a cluster, or laptops in employees' backpacks, the question is the same: what should be true here, and how do we keep it that way?
 
@@ -484,12 +549,11 @@ Within that larger stack, the central mental model is simple: define the desired
 
 The broader lesson is that configuration management is not one thing. It is a set of ideas: desired state, convergence, enforcement frequency, role reuse, and verified correctness. Those ideas apply on a spectrum from long-lived mutable servers managed entirely in place, to golden images baked with Ansible and replaced on every release, to containerized workloads where Kubernetes performs its own reconciliation loop at the workload layer while Ansible manages the OS baseline underneath, and out to the laptops and phones in employees' hands, where endpoint management platforms apply the same declared-state model to a very different fleet. Understanding where a given system sits on that spectrum, and which tool is appropriate for which layer, is more valuable than deep expertise in any single tool.
 
-Ansible is the concrete vehicle here because it makes the underlying ideas visible rather than hiding them behind platform-specific infrastructure. Puppet, Chef, Salt, Packer, cloud-init, and container orchestration are all answers to overlapping subsets of the same family of questions. The right operational habit is not tool loyalty. It is understanding which layer owns which kind of change: provisioning creates the target, CI/CD publishes the reviewed artifact, configuration management makes the environment run that exact artifact with the correct files, identity, policies, and data in place. The CI/CD Pipelines and GitHub Actions lecture goes deeper on the artifact side of that boundary next.
+Ansible is the concrete vehicle here because it makes the underlying ideas visible rather than hiding them behind platform-specific infrastructure. Puppet, Chef, Salt, Packer, cloud-init, and container orchestration are all answers to overlapping subsets of the same family of questions. The right operational habit is not tool loyalty. It is understanding which layer owns which kind of change: provisioning creates the target, CI/CD publishes the reviewed artifact, configuration management makes the environment run that exact artifact with the correct files, identity, policies, and data in place. The CI/CD Pipelines lecture goes deeper on the artifact side of that boundary next.
 
 ## Resources
 
+- <a href="https://www.redhat.com/en/topics/automation/what-is-configuration-management" target="_blank" rel="noopener noreferrer">What is Configuration Management? (Red Hat)</a>
 - <a href="https://www.youtube.com/watch?v=1id6ERvfozo" target="_blank" rel="noopener noreferrer">What is Ansible? (TechWorld with Nana) (YouTube)</a>
 - <a href="https://www.ansiblefordevops.com/" target="_blank" rel="noopener noreferrer">Ansible for DevOps (Jeff Geerling) (Book)</a>
 - <a href="https://www.youtube.com/watch?v=goclfp6a2IQ&list=PL2_OBreMn7FqZkvMYt6ATmgC0KAGGJNAN" target="_blank" rel="noopener noreferrer">Ansible 101 - Episode 1 - Introduction to Ansible (Jeff Geerling) (YouTube)</a>
-- <a href="https://www.redhat.com/en/topics/automation/what-is-configuration-management" target="_blank" rel="noopener noreferrer">What is Configuration Management? (Red Hat)</a>
-- <a href="https://itrevolution.com/product/the-phoenix-project/" target="_blank" rel="noopener noreferrer">The Phoenix Project (Gene Kim, Kevin Behr, and George Spafford) (Book)</a>
