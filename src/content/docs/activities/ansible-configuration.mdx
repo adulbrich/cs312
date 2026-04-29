@@ -13,7 +13,7 @@ type: activity
 slug: ansible-configuration
 order: 9
 paired_lecture: configuration-management
-practices: agentless push architecture; user-data and cloud-init for managed-node bootstrap; inventory and host variables; ad-hoc modules (ping, setup, command, copy, apt); idempotency observation; playbook structure with handlers; ansible-lint static analysis; --check --diff dry-run habit; ansible.builtin.cron for health-check automation
+practices: agentless push architecture; user-data and cloud-init for managed-node bootstrap; inventory and host variables; ad-hoc modules (ping, setup, command, copy, apt); idempotency observation; playbook structure with handlers; ansible-lint static analysis; --check --diff dry-run habit; ansible.builtin.cron for health-check automation; ansible-vault encrypt for secrets in version control; group_vars for variable separation
 prereq_activities:
 output: a playbook that installs nginx and curl, deploys a custom page, schedules a cron health check, and passes ansible-lint on a live EC2 instance
 */}
@@ -26,7 +26,21 @@ This activity puts into practice the concepts from the [Configuration Management
 - Your `cs312-key.pem` SSH key pair (created in your Learner Lab, already in `~/.ssh/`)
 - A Linux-style control environment with `ssh` available. macOS works directly, Windows users should use WSL rather than PowerShell for this activity, and the Arch Linux VM from the earlier activity is also a good control node if you still have it.
 - Ansible installed on your **control node** (your local machine) before class: follow the [official installation guide](https://docs.ansible.com/ansible/latest/installation_guide/index.html) and verify with `ansible --version`
-- An internet connection
+- `ansible-lint` installed on your control node: follow the [official installation guide](https://docs.ansible.com/projects/lint/installing/) or `brew install ansible-lint` on macOS with Homebrew. Verify with `ansible-lint --version`.
+
+<Aside type="note" title="Ansible on WSL2">
+If you plan to use WSL2 on Windows, you might hit some version compaibility issues between ansible-core and ansible-lint. The recommended approach for Ubuntu on WSL2 is the following:
+```bash
+sudo apt update
+sudo apt install -y pipx python3-pip python3-venv
+pipx ensurepath
+```
+Restart your terminal, then install Ansible and ansible-lint with pipx:
+```bash
+pipx install ansible 
+pipx install ansible-lint
+```
+</Aside>
 
 ---
 
@@ -269,13 +283,7 @@ Begin with the smallest useful playbook. This first version only installs the pa
 
 <Steps>
 
-1. **Install ansible-lint:**
-    ```bash
-    python3 -m pip install --user ansible-lint
-    ```
-    macOS users who installed Ansible with Homebrew can also run `brew install ansible-lint`.
-
-2. **Create the first version of `site.yml`:**
+1. **Create the first version of `site.yml`:**
     ```yaml
     ---
     - name: Configure web server
@@ -301,31 +309,31 @@ Begin with the smallest useful playbook. This first version only installs the pa
     ```
     Save the file in `~/cs312-ansible/site.yml`.
 
-3. **Run the linter against this first version:**
+2. **Run the linter against this first version:**
     ```bash
     ansible-lint site.yml
     ```
     A clean playbook produces no output. If you see warnings, fix them before continuing. One of the conventions ansible-lint enforces is fully qualified collection names: `ansible.builtin.apt` instead of the short form `apt`. Every module in this playbook uses that convention, which makes the source collection unambiguous as playbooks grow to include modules from multiple collections. You can run `ansible-lint site.yml --fix` to automatically apply some fixes.
 
-4. **Preview what this version will do:**
+3. **Preview what this version will do:**
     ```bash
     ansible-playbook -i hosts.ini site.yml --check --diff
     ```
-    This preview should predict package and service changes. There may not be much diff output yet because this version does not manage any file content.
+    This preview should predict package and service changes. It should tell you nginx will be installed and fail on the service call because nginx is not yet installed on the system.
 
-5. **Run the playbook:**
+4. **Run the playbook:**
     ```bash
     ansible-playbook -i hosts.ini site.yml
     ```
     On the first run, the package task should show `changed`, and the service task may also show `changed` if nginx was not already started.
 
-6. **Run the same playbook a second time right away:**
+5. **Run the same playbook a second time right away:**
     ```bash
     ansible-playbook -i hosts.ini site.yml
     ```
     On this immediate second run, both tasks should now show `ok`. Look at the PLAY RECAP printed at the bottom of the output: it shows one line per host with counters for `ok` (found the system already correct), `changed` (took an action), `failed`, and `skipped`. On this second run, `changed` should be zero. The server is already in the declared state, so Ansible had nothing to do. A PLAY RECAP with `changed=0` on a re-run is idempotency made visible.
 
-7. **Verify that nginx is serving its default page:**
+6. **Verify that nginx is serving its default page:**
     ```bash
     ansible -i hosts.ini managed -m ansible.builtin.command -a "/usr/bin/curl -s http://localhost/"
     ```
@@ -528,11 +536,86 @@ The last pass adds the cron-based health check from the scripting activity. This
 
 ---
 
+## Store a Secret with Ansible Vault
+
+Ansible Vault encrypts values so they can live safely in version control. Right now `student_name` sits in plain text inside `site.yml`. This section moves it into an encrypted `group_vars` file so you can see what Vault actually stores on disk and what Ansible decrypts at run time.
+
+<Steps>
+
+1. **Create the group_vars directory for the `managed` group:**
+
+   ```bash
+   mkdir -p group_vars/managed
+   ```
+
+   Ansible automatically loads all YAML files inside `group_vars/<groupname>/` and makes their values available to every play targeting that group.
+
+2. **Write the variable as plain text, then encrypt the file.** Replace `Your Name` with your actual name before running:
+
+   ```bash
+   echo 'student_name: "Your Name"' > group_vars/managed/secrets.yml
+   ansible-vault encrypt group_vars/managed/secrets.yml
+   ```
+
+   Ansible will prompt you to set and confirm a vault password. Choose anything you will remember for the rest of this activity.
+
+3. **Inspect the encrypted file:**
+
+   ```bash
+   cat group_vars/managed/secrets.yml
+   ```
+
+   Instead of your name, you will see something like:
+
+   ```
+   $ANSIBLE_VAULT;1.1;AES256
+   62303862363832653831623366383064316135613164393836383432393437363366623763373832
+   ...
+   ```
+
+   This is what would be committed to Git. Anyone without the vault password sees only this ciphertext.
+
+4. **Remove the `vars` block from `site.yml`.** Delete these three lines:
+
+   ```diff lang="yaml"
+   -     vars:
+   -       student_name: "Your Name"
+   -
+   ```
+
+   Ansible will now load `student_name` from the encrypted `group_vars` file instead of from the playbook.
+
+5. **Run the playbook with the vault password:**
+
+   ```bash
+   ansible-playbook -i hosts.ini site.yml --ask-vault-pass
+   ```
+
+   Enter the password you set in step 2. The PLAY RECAP should show `changed=0`: the deployed page has not changed because `student_name` resolved to the same value. Ansible decrypted the file on the control node during the run and discarded it afterward. The managed node never received the vault password or the raw variable file.
+
+6. **Verify the page still shows your name:**
+
+   ```bash
+   ansible -i hosts.ini managed -m ansible.builtin.command -a "/usr/bin/curl -s http://localhost/"
+   ```
+
+   The output should be identical to before:
+
+   ```
+   <h1>Deployed by Your Name on ip-X-X-X-X</h1>
+   ```
+
+</Steps>
+
+<ActivityQuestion>
+Vault protected the variable in your repository, but your name still ended up written to `/var/www/html/index.html` on the managed node. What does this tell you about what Vault actually protects and what it does not? If `student_name` were a real database password being rendered into a configuration file, what would still be at risk?
+</ActivityQuestion>
+
+---
+
 ## Going Further
 
-You have built the core Ansible workflow: inventory, ad-hoc exploration to understand a system, a playbook with handlers that is safe to re-run, lint checks before every run, and a dry-run preview before applying changes. The natural next step is to make playbooks more flexible and reusable.
-
-A small but impactful structural improvement is to move `student_name` out of `site.yml` and into a `group_vars/managed.yml` file alongside `hosts.ini`. Once you do that, the playbook itself contains no environment-specific values and can target any group with the right variable files in place. The [Variables guide](https://docs.ansible.com/ansible/latest/playbook_guide/playbooks_variables.html) explains `group_vars` and `host_vars` in detail.
+You have built the core Ansible workflow: inventory, ad-hoc exploration to understand a system, a playbook with handlers that is safe to re-run, lint checks before every run, a dry-run preview before applying changes, and encrypted variables in version control. The natural next step is to make playbooks more flexible and reusable.
 
 I highly recommend Jeff Geerling's [Ansible 101 YouTube series](https://www.youtube.com/watch?v=goclfp6a2IQ&list=PL2_OBreMn7FqZkvMYt6ATmgC0KAGGJNAN) if you want to explore Ansible further.
 
