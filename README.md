@@ -6,9 +6,11 @@ This repository contains the source code for the CS312 website.
 
 Watch https://www.youtube.com/watch?v=Cpy20DnIDTI
 
-- [ ] When the term ends, review all slugs and titles for consistency.
-- [ ] Ask GenAI for a very detailed summary of all pages so that we can then use GenAI to check for any gaps, overlap, consistency, etc. across the content.
-- [ ] Labs might be a little light on contents compared to activities? Need to check in with TAs.
+- Observability: https://www.youtube.com/watch?v=SvEjS4-2WJQ (Observability: the present and future, with Charity Majors)
+- Investigate https://en.angie.software/angie/
+
+- [ ] When the term ends, review all slugs and titles for consistency (including assignments, labs, activities, lectures, and practicalities). Once the file name has changed, update Canvas for next year (don't use the slug in the frontmatter, use the file name instead, so that it is consistent and doesn't require updating in two places).
+- [ ] Labs might be a little light on contents compared to activities? Need to check in with TAs. Labs should be very "How-To" focused with more steps that go a little further that the activities.
 - [ ] Consider adding some references to other hashicorps products either in IaC or in other more relevant lectures (e.g., vault for secrets management, nomad for orchestration, consul for service discovery)
 - [ ] Force GitOps?
 - [ ] The "Resources" section should include not just reading but videos, podcasts, etc.
