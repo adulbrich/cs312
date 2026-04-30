@@ -13,6 +13,7 @@ type: lecture
 slug: ci-cd
 order: 10
 covers: deployment environments; CI vs continuous delivery vs continuous deployment; feedback loops and DORA metrics; pipeline design principles; CI/CD tools landscape; GitHub Actions concepts (workflows, events, jobs, steps, runners); triggers; marketplace actions and supply chain; secrets and OIDC; matrix builds; service containers; caching and artifacts; reusable workflows and composite actions; concurrency control; self-hosted runners; local testing with act; debugging; deployment strategies (rolling, blue-green, canary); preview environments and feature flags; operational concerns; merge queues on busy shared branches; GitHub merge_group
+covers: deployment environments; CI vs continuous delivery vs continuous deployment; feedback loops and DORA metrics; pipeline design principles; CI/CD tools landscape; GitHub Actions concepts (workflows, events, jobs, steps, runners); triggers; marketplace actions and supply chain; secrets and OIDC; matrix builds; service containers; caching and artifacts; reusable workflows and composite actions; concurrency control; self-hosted runners; local testing with act; debugging; deployment strategies (rolling, blue-green, canary); preview environments and feature flags; operational concerns incl. container vulnerability scanning; merge queues on busy shared branches; GitHub merge_group
 prereq_lectures: containerization-with-docker, infrastructure-as-code, shell-scripting-and-automation-basics, configuration-management
 followup_lectures: system-security-and-hardening
 paired_activities: github-actions-workflow
@@ -322,6 +323,42 @@ jobs:
 `build-image` declares `needs: lint-and-test`, so it will not start until the first job succeeds. The `if` condition further restricts it to pushes on `main`, since there is no reason to push images for pull request branches. The job-level `permissions` block gives only the image-publishing job package write access, and the `Normalize image name` step avoids GHCR failures when the repository owner or name contains uppercase characters. The `cache-from` and `cache-to` lines enable GitHub Actions' built-in layer caching for Docker builds, which can dramatically reduce build times by reusing unchanged layers across runs.
 
 This short example uses only the `latest` tag to keep the YAML readable. In a production pipeline, also publish an immutable tag such as the commit SHA and deploy that exact reference.
+
+### Security Gates Before the Registry
+
+A pipeline that lints source code, runs tests, and smoke-tests a container still has an important blind spot: it can prove the artifact works, but not that the artifact is free of known vulnerabilities in its base image or dependency tree. Those are different questions. A web application can pass every test and still ship with a critical OpenSSL, glibc, or package-manager CVE inherited from the image it was built on top of. For containerized systems, the common answer is to add a vulnerability scan between the build step and the push step.
+
+Among open-source scanners, **Trivy** has become one of the most common tools to encounter in current CI/CD pipelines. It is actively maintained, works well in GitHub Actions, and can scan container images, filesystems, repositories, and infrastructure-as-code definitions with the same engine. That breadth matters operationally because a team can standardize on one scanner across several surfaces instead of teaching a different tool for each one. In a real workflow, teams either install the `trivy` CLI directly or wrap it in the vendor-maintained `aquasecurity/trivy-action`, pinned to a full commit SHA like any other third-party action.
+
+The mechanics are straightforward: build the image locally on the runner, scan it, and only push it if the scan passes the policy threshold. The inserted steps look like this:
+
+```yaml
+      - name: Build image for local scan
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ${{ env.IMAGE_NAME }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan image for known CVEs with Trivy
+        run: |
+          trivy image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            "${{ env.IMAGE_NAME }}"
+
+      - name: Push image after scan passes
+        run: docker push "${{ env.IMAGE_NAME }}"
+```
+
+`load: true` changes the Buildx step from "build and stream directly to the registry" to "build and place the image in the runner's local Docker daemon." That matters because the scanner needs a concrete artifact to inspect before publication. The `--severity HIGH,CRITICAL` threshold keeps the gate focused on issues likely to block a release, while `--ignore-unfixed` avoids failing every build on vulnerabilities that upstream vendors have not patched yet. Different organizations tune those switches differently, but the architecture is the same: scan before the artifact crosses the registry boundary.
+
+<Aside type="note" title="CI Scanning and Registry Scanning Are Complementary">
+Registry-side scanning such as Amazon ECR's scan-on-push is still worth enabling, but it is a second line of defense rather than a substitute for a CI gate. A CI scan can fail the build before the image is published and while the developer is still in context. A registry scan happens after the artifact already exists in the registry, which is valuable for ongoing visibility and rescans, but weaker as a release control.
+</Aside>
 
 The marketplace is GitHub Actions' killer feature and its most significant operational risk. Every third-party action you reference is code you are running with access to your repository, your secrets, and sometimes your cloud credentials. Supply-chain attacks on the marketplace are real: compromised action releases have leaked secrets from major open-source projects. The defensive posture is a hierarchy:
 
@@ -752,6 +789,7 @@ The adjacent lectures connect directly to this one. The Configuration Management
 <a href="https://www.youtube.com/watch?v=zBrP8MzA5y0" target="_blank" rel="noopener noreferrer">GitLab CI CD automation (Docker, Kubernetes, Terraform, and more…) (Christian Lempa) (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=R8_veQiYBjI" target="_blank" rel="noopener noreferrer">GitHub Actions Tutorial: Basic Concepts and CI/CD Pipeline with Docker (TechWorld with Nana) (YouTube)</a>
 - <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments" target="_blank" rel="noopener noreferrer">Security Hardening for GitHub Actions Deployments (GitHub Docs)</a>
+- <a href="https://trivy.dev/latest/docs/" target="_blank" rel="noopener noreferrer">Trivy Documentation (Aqua Security)</a>
 - <a href="https://martinfowler.com/articles/continuousIntegration.html" target="_blank" rel="noopener noreferrer">Continuous Integration (Martin Fowler)</a>
 - <a href="https://github.com/sdras/awesome-actions" target="_blank" rel="noopener noreferrer">awesome-actions: Curated List of GitHub Actions (GitHub)</a>
 - <a href="https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/configuring-pull-request-merges/managing-a-merge-queue" target="_blank" rel="noopener noreferrer">Managing a Merge Queue (GitHub Docs)</a>
