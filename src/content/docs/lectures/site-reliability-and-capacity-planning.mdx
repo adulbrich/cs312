@@ -1,0 +1,231 @@
+---
+title: "Site Reliability Engineering and Capacity Planning"
+description: "SRE as a discipline, toil measurement and reduction, error budgets as organizational policy, capacity planning fundamentals, on-call sustainability, and chaos engineering."
+sidebar:
+  order: 17
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
+
+{/* ai-summary
+type: lecture
+slug: site-reliability-and-capacity-planning
+order: 17
+covers: SRE as discipline and history; SRE vs DevOps vs traditional ops; staffing models (embedded, consultation, platform engineering); toil definition and measurement; 50% toil cap; toil reduction patterns (auto-remediation, deployment automation, self-service tooling); error budgets as organizational policy; error budget policy documents; error budgets and org dynamics; capacity planning (demand forecasting, resource modeling, headroom, performance budget); on-call sustainability (alert quality, rotation design, burnout spiral); chaos engineering (steady-state hypothesis, blast radius, Chaos Monkey, gamedays); LitmusChaos, Chaos Mesh
+prereq_lectures: monitoring-and-performance, incident-response-fundamentals
+followup_lectures: windows-server-administration
+paired_activities:
+supports_labs: observability-workshop
+*/}
+
+A team that runs its own software in production will encounter a tension that is almost universal: as a system grows, the operational work required to keep it running tends to grow faster than the team does. Engineers who should be building new capabilities find themselves spending their time on deployments, on-call pages, manual scaling, and repetitive configuration changes. The work is necessary and real, but it does not produce lasting improvement. If the work were not done, the system would fail; because it is done, the system survives, but nothing gets easier.
+
+This is the problem that **Site Reliability Engineering (SRE)** was designed to solve. SRE is a discipline that applies software engineering principles to operations: instead of accepting manual, repetitive operational work as inevitable, it treats that work as a design problem and invests in eliminating it through automation, instrumentation, and organizational practices grounded in measurement. The tools you have encountered in the preceding weeks, Prometheus for metrics, alerting for detection, Kubernetes for self-healing, Ansible for configuration management, are all building blocks of an SRE approach. This lecture frames those tools in the context of the organizational discipline that makes them work at scale.
+
+## What SRE Is (and Is Not)
+
+SRE began at Google in 2003, when Ben Treynor Sloss was given a production service to run and decided to staff it with software engineers rather than operations specialists. His insight was that operations problems are fundamentally software problems, and they should be solved with software. When a task requires a human to log into a server and run a command, the correct response is to write a program that does it. When an alert requires a human to acknowledge and silence it every Tuesday morning, the correct response is to fix the underlying cause so the alert does not fire.
+
+The discipline he built was formally documented in [Google's Site Reliability Engineering book](https://sre.google/sre-book/table-of-contents/), published in 2016, and later expanded in the [SRE Workbook](https://sre.google/workbook/table-of-contents/). Both are available free online and remain the canonical references.
+
+### SRE vs. Traditional Operations
+
+Traditional operations teams write runbooks that tell engineers how to respond when things go wrong. SRE teams write software that eliminates the need for those runbooks in the first place. This is not a criticism of runbooks (a good runbook is better than no runbook), but a statement about where improvement investment should go. A runbook that gets consulted three times a week is a signal that an automation opportunity exists.
+
+The practical implication is staffing. An SRE team is composed of software engineers, and a significant fraction of their time is spent writing code that improves the reliability and operability of the services they run. Google's stated target is that SREs spend no more than 50 percent of their time on operational work; the remainder goes to engineering that improves the system. If operational work consistently exceeds 50 percent, the team has either taken on too many services or has not invested enough in automation.
+
+### SRE vs. DevOps
+
+DevOps is a cultural and organizational philosophy: it argues that development and operations should share responsibility for the software lifecycle, that silos between "people who write code" and "people who run code" are harmful, and that continuous delivery and feedback loops improve both speed and reliability. SRE is one specific implementation of DevOps values. It provides concrete practices (error budgets, toil measurement, on-call load targets) and organizational models that give DevOps principles operational teeth.
+
+If DevOps is the philosophy, SRE is one way to practice it. An organization can follow DevOps principles without having anyone with "SRE" in their title; an organization with a dedicated SRE team should see that team as an implementation of DevOps values, not a separate discipline competing with them.
+
+### Staffing Models
+
+Three organizational models for SRE are common in practice.
+
+**Embedded SRE** places one or two SREs directly on each product team. The SRE is a full team member who focuses on reliability, automation, and operational instrumentation. This model works well because the SRE has deep context on the team's service and can invest in exactly the improvements that matter most. The risk is that embedded SREs get pulled into feature work and lose the operational focus that makes them valuable.
+
+**Shared SRE consultation** maintains a central SRE team that product teams apply to engage. The SRE team takes on the operational responsibility for a service once it meets a reliability bar (typically a minimum SLO). Services that fall below the bar are returned to the product team with a list of required improvements. This creates an incentive for product teams to invest in reliability before asking SRE to run the service, and lets the SRE team specialize rather than spreading across many different technology stacks.
+
+**Platform engineering** is the direction many organizations are moving. Instead of running each product service directly, the platform team builds internal tools and platforms that make reliability automatic for product teams: deployment pipelines with rollback built in, metrics and alerting that require no per-service configuration, and on-call tooling that routes appropriately. Product teams gain reliable infrastructure without needing an embedded SRE on each of them. Platform engineering encodes SRE practices into the infrastructure itself.
+
+## Toil: The Enemy of Scale
+
+Google's SRE book defines **toil** as work that is manual, repetitive, automatable, tactical rather than strategic, and scales linearly with service size rather than logarithmically with service capability. Toil is not just "work I do not enjoy." It is a precise category.
+
+Consider the difference between two kinds of work. Writing a new alerting rule that catches a failure mode you have never seen before is engineering: it requires thought, it produces a durable result, and it makes the system better. Running through a checklist to restart a service that crashes every Sunday night at 2 AM is toil: it is manual, it is repetitive, it could be automated, and the amount of work grows with the number of instances of that service.
+
+### Measuring Toil
+
+The first step in reducing toil is measuring it. Track, per engineer and per service, what fraction of time goes to operational work that is repetitive and could be automated. This measurement is often uncomfortable, because it reveals that a significant fraction of productive hours are going to work that could be eliminated. That discomfort is the point: toil is invisible until it is measured, and it is not prioritized for elimination until it is visible.
+
+Google's target is that no SRE should spend more than 50 percent of their time on toil. Exceeding that target consistently signals that the team has taken on more services than they can responsibly improve, or that they have underinvested in automation. The correct response is not to work harder; it is to reduce the service portfolio, increase the team, or invest in automation that reduces toil faster than new services add it.
+
+### Toil Reduction in Practice
+
+Toil reduction follows a loop: identify the toil, build the automation, verify that the automation works, and monitor to confirm the toil is actually gone. The last step is frequently skipped. Teams automate a task and are then surprised to find they are still spending time on it, because the automation handles 80 percent of cases and the remaining 20 percent still require human intervention.
+
+**Auto-remediation** takes a defined corrective action automatically when a predictable failure occurs: a pod exits its memory limit, auto-remediation restarts it with a larger limit applied; disk approaches full, auto-remediation archives old logs. This is only safe when the failure mode is well-characterized and the remediation is low-risk. Auto-remediation that misidentifies a novel failure as a known one can make things worse; build it conservatively, starting with the most understood and lowest-risk failure modes.
+
+**Deployment automation** targets every manual step in the deploy process. The Configuration Management and CI/CD lectures covered the tools; the SRE framing makes explicit that the goal is not just speed but the elimination of manual decision-making during deployments. Pipelines that include pre-deployment checks, progressive rollout with automatic pause on elevated error rates, and automatic rollback when the new version fails its readiness probe reduce both the time required to ship and the likelihood that a human error during the deploy process causes an incident.
+
+**Self-service tooling** addresses the toil that grows linearly with the number of teams. When product teams need to restart a service, rotate a credential, or update a configuration, requiring them to file a ticket for an operations team is toil at scale. Building self-service tooling that lets product engineers take those actions safely, with appropriate guardrails, eliminates an entire class of operational work without reducing safety.
+
+<Aside type="note" title="Not All Operations Work Is Toil">
+Designing a capacity plan, debugging a novel failure mode, or writing a runbook for a scenario that has never occurred before are not toil. They require thought and produce lasting results. Toil is the repetitive fraction of operations work. The goal is to shift the balance toward work that improves the system rather than merely sustaining it.
+</Aside>
+
+## Error Budgets as Organizational Policy
+
+The Monitoring and Alerting lecture introduced error budgets as a measurement: if your SLO is 99.9%, your error budget is 0.1% of requests over the measurement window. This section covers what to do with that measurement, which is where most organizations stop short.
+
+An error budget becomes organizationally useful when it is treated as a **spending policy**. When the error budget is healthy, engineering teams can move fast, accept risk, and deploy frequently. When the budget is exhausted or close to exhaustion, reliability work takes priority and deployment pace slows. This conversion of a measurement into a policy is what makes SLOs actionable rather than decorative.
+
+### The Error Budget Policy Document
+
+Every service with an SLO should have a written error budget policy that answers three questions: what happens when the budget is 50 percent consumed? What happens when it is 90 percent consumed? What happens when it is fully consumed?
+
+Typical answers might be: at 50 percent consumed, the team reviews the current deployment rate and any recent reliability regressions. At 90 percent, the team halts non-critical deployments and shifts engineering focus to reliability. At 100 percent (SLO breach), no new features ship until the budget is replenished, and a postmortem is conducted if the breach resulted from a significant incident.
+
+The specifics matter less than the commitment. An error budget policy that everyone has signed off on creates accountability without blame: when the budget runs low, there is no debate about whether reliability is more important than new features this week. The budget made that decision in advance.
+
+### Error Budgets and Organizational Dynamics
+
+The most profound effect of error budgets is on the relationship between development teams and operations teams. Without them, reliability discussions tend to be adversarial: operations wants the system to stay stable, development wants to ship, and both sides are right from their own perspective. An error budget changes the conversation because both sides are looking at the same number.
+
+A development team that has spent 80 percent of their error budget this month has a concrete, data-derived reason to slow their deployment pace, without any operations team imposing that decision. An operations team that sees 70 percent of the budget remaining has concrete data to support accelerating a deployment that might otherwise be delayed for vague stability reasons. The number serves as shared ground truth.
+
+This only works if the error budget policy is enforced. An SLO that nobody acts on when breached is a number on a dashboard, not an organizational tool. Leadership commitment to honoring the policy during the periods when it is inconvenient (when a product deadline coincides with a depleted budget) is what determines whether error budgets are a real organizational practice or a performance of measurement.
+
+<Aside type="caution" title="SLOs Must Match User Reality">
+An SLO that does not reflect actual user experience is worse than no SLO. If your SLO measures server-side availability but your CDN silently serves stale content during outages, your SLO looks good while users experience problems. SLIs should be chosen so that a healthy SLO means users are actually getting the service they expect. When in doubt, measure from as close to the user as possible.
+</Aside>
+
+## Capacity Planning
+
+The goal of capacity planning is to ensure that a service has enough resources to handle expected load without provisioning so much that cost becomes a problem. Getting it right requires forecasting demand, modeling resource consumption, and building in enough headroom to absorb variance.
+
+### Demand Forecasting
+
+Demand forecasting starts with historical data: how has traffic grown over the past year? Are there weekly seasonality patterns? Annual patterns (e-commerce spikes before holidays)? Event-driven spikes from product launches, marketing campaigns, or viral moments?
+
+A simple linear forecast takes the current traffic growth rate and projects it forward. A more careful forecast breaks traffic into components: organic growth (modeled as a rate), seasonal variation (from previous year's data), and known planned events. The honest answer is that traffic forecasting at long time horizons is unreliable. A 90-day forecast can be reasonably confident; a one-year forecast should be treated as a scenario rather than a prediction.
+
+In cloud environments, forecasting is less about provisioning servers in advance and more about ensuring that auto-scaling policies are tuned to handle the expected range, that instance quotas are sufficient, and that budgets and cost controls are appropriate. Auto-scaling compresses the problem but does not eliminate it: it adds capacity in seconds to minutes, not instantaneously, and scale-up events carry their own risk of errors and brief degradation during the transition.
+
+### Resource Modeling
+
+Different resources saturate differently, and that difference shapes how much headroom you need for each.
+
+CPU saturates gracefully: when a CPU-bound system takes on more load than it can handle, response times climb slowly and then more steeply. A service at 90 percent CPU utilization is slower but not broken; there is usually time to respond before users notice.
+
+Memory saturates suddenly. When a system runs out of physical memory and begins paging to disk, performance degrades catastrophically. A service that exhausts its memory limit in Kubernetes gets its container killed by the OOM killer, which the Kubernetes probe system detects and triggers a restart. The saturation event is a hard stop, not a gradual slowdown.
+
+Connection pools exhaust immediately. The 1001st client gets a connection refused regardless of how healthy the first 1000 connections are. For services backed by a database, connection pool sizing is one of the most operationally significant configuration decisions, and it should be revisited each time the number of application instances scales significantly.
+
+The bottleneck also moves as you scale. A service that was CPU-bound at 100 requests per second may become memory-bound at 1000 requests per second, and then connection-pool-bound at 10,000 requests per second as you add more application instances that all connect to the same database. Capacity planning is iterative: re-run the analysis each time scale increases by a meaningful factor.
+
+### Headroom and the Cost of Under-provisioning
+
+The standard headroom target is: provision enough capacity that organic growth over the next two to four months can be absorbed without emergency intervention. "Emergency intervention" means scaling out during an active incident, provisioning new capacity under load, or manually adjusting limits while a service is already degrading. Any of these imposes operational risk during the most vulnerable moments.
+
+The appropriate headroom varies by cost sensitivity and traffic volatility. A service with predictable, slowly growing traffic can plan with a smaller buffer. A service that experiences sudden spikes (a news aggregator, a ticketing system, a game server) needs more headroom because the time between normal load and peak load can be minutes, and the auto-scaling response time is measured in the same unit.
+
+<Aside type="tip" title="The Performance Budget">
+For each request type your service handles, calculate the maximum per-request CPU and memory cost that the service can sustain at peak load without saturation. This is the performance budget. When a new feature would push per-request cost above the budget, it either needs optimization or the service needs to be provisioned for more capacity before the feature ships. Making the budget explicit prevents the gradual performance degradation that accumulates when each new feature adds "just a little" overhead with no accountability.
+</Aside>
+
+## On-Call Sustainability
+
+An on-call rotation distributes the responsibility of responding to incidents outside normal working hours. Done well, it is a manageable professional responsibility that allows a team to run a production service long-term. Done poorly, it is a source of burnout, attrition, and degraded incident response.
+
+### Alert Quality as a Leading Indicator
+
+The most important determinant of on-call health is alert quality. An on-call engineer who receives ten pages per shift, of which eight require no action, is being trained to treat pages as noise. The two real pages that arrive during that shift are processed with the same urgency as the eight false ones, which means urgency has effectively been diluted toward zero.
+
+A common industry standard is no more than two pages per 12-hour shift that require real response. Exceeding this consistently is not a signal to increase the rotation size; it is a signal that alert design needs improvement. Every noisy alert that is not fixed is a withdrawal from the attention budget of every engineer who will be on call until it is fixed. The alert design principles from the Monitoring and Alerting lecture (symptom-based over cause-based, `for` clauses to prevent transient firing, severity routing that separates pages from notifications) exist precisely to make this standard achievable.
+
+### Rotation Design
+
+A sustainable on-call rotation has at minimum four to five engineers. Fewer than four means each engineer is on call too frequently, while also creating a coverage problem if someone leaves or is unavailable. Large organizations often run primary and secondary rotations: the primary responds, the secondary is available for escalation without waking the whole team.
+
+Follow-the-sun rotations spread on-call responsibility across time zones so each engineer is on call primarily during their local daytime. This requires at least two geographically separated groups with overlapping coverage areas and is a significant improvement for teams that have historically relied on one geographic location, requiring that one engineer be woken routinely at 3 AM.
+
+Rotation expectations should be written down before anyone joins: what is the response time SLA for a critical page? Who is the escalation contact? What tools and permissions does the on-call engineer need? What compensation or time-off policy applies? Implicit expectations lead to inconsistent response and accumulating resentment.
+
+### The Burnout Spiral
+
+On-call burnout follows a recognizable pattern. Poor alert quality produces frequent pages. Frequent pages erode sleep and cognitive capacity. Impaired engineers make slower diagnostic decisions, which extends incident duration. Longer incidents produce more post-incident cleanup work, leaving less time for the reliability improvements that would reduce future toil. The system drifts toward more instability, producing more alerts, completing the loop.
+
+Breaking the spiral requires addressing alert quality first. Review the previous week's pages: how many were real incidents, how many were false positives, how many were silenced without investigation? Any alert that fires without producing a meaningful response should be treated as a bug. Fixing it may mean improving the system it monitors, adjusting the threshold, adding a `for` clause, or acknowledging that the alert is measuring the wrong signal entirely.
+
+After alert quality is addressed, the next lever is toil reduction. If the on-call engineer spends two hours per shift on manual checks that could be automated, that is directly addressable. If they spend time answering questions that a runbook would answer, that is a documentation investment. The goal is to make the on-call rotation boring: a shift that ends with no pages and no toil is a successful shift.
+
+## Chaos Engineering
+
+Chaos engineering is the practice of deliberately introducing failures into a system in a controlled way to verify that its resilience mechanisms actually work. The name can be misleading: well-practiced chaos engineering is not chaotic. It is methodical, scoped, and designed to produce specific learnings.
+
+### The Steady-State Hypothesis
+
+The foundation of chaos engineering is defining what "normal" looks like before changing anything. This is called the steady-state hypothesis. The hypothesis might say: under normal load, the service returns successful responses within 200 ms for at least 99.5 percent of requests. Before running a chaos experiment, you confirm that the system is in its defined steady state. During the experiment, you inject a failure. After the experiment, you verify that the system returned to steady state. If it did not, you have learned something about a gap in your resilience.
+
+Without a steady-state hypothesis, chaos engineering is just breaking things and observing what happens. The hypothesis is what makes it engineering.
+
+### Blast Radius Control
+
+Every chaos experiment should have a defined blast radius: the maximum scope of impact if the experiment goes wrong. A blast radius might be "one pod in the test namespace" or "one availability zone of the staging environment" or "5 percent of production traffic." Starting with the smallest possible blast radius and expanding as confidence grows is the responsible approach.
+
+Blast radius control also requires a kill switch: a mechanism to stop the experiment immediately if the system is not recovering as expected. The kill switch might be as simple as a script that reverses the failure injection, or a more sophisticated circuit breaker that the chaos platform provides. Running a chaos experiment without a kill switch is recklessness, not engineering.
+
+<HistoricalNote title="Netflix and the Simian Army (2011)">
+Netflix began their chaos engineering practice in 2011 with a tool called Chaos Monkey, which randomly terminated EC2 instances in their production environment during business hours. The reasoning was straightforward: if Netflix was going to experience instance failures (which their cloud provider would eventually cause), it was better to have those failures occur when engineers were awake and alert rather than in the middle of the night. Chaos Monkey forced the Netflix engineering organization to build services that tolerated instance loss rather than assuming instances would stay healthy.
+
+Netflix later expanded the practice into what they called the Simian Army: a suite of tools that injected different failure types, including Chaos Gorilla (which terminated entire availability zones) and Chaos Kong (which simulated the loss of an entire AWS region). Their public documentation of these practices created the term and the discipline of chaos engineering as it is broadly understood today.
+</HistoricalNote>
+
+### Starting a Chaos Engineering Practice
+
+The most common mistake is beginning in production with aggressive experiments. A better starting point is to identify a failure mode your system is designed to tolerate (a pod crashing and being replaced, a node going offline) and verify that it actually handles it as designed.
+
+In a Kubernetes environment, straightforward early experiments include: deleting a pod and confirming the Deployment controller replaces it within the expected time; killing a node and confirming that pod rescheduling works; exhausting a container's memory limit and confirming the OOM kill is handled gracefully; deploying an image with a failing readiness probe and confirming the rollout halts before replacing all healthy replicas. These can all be run in a staging environment with full monitoring. Confirm that the alerts you expect to fire do fire, that dashboards show the failure and recovery correctly, and that the system returns to steady state within the expected window.
+
+Tools like [LitmusChaos](https://litmuschaos.io/) and [Chaos Mesh](https://chaos-mesh.org/) provide Kubernetes-native chaos injection with blast radius controls built in. They are not required for getting started, but they provide structure and safety controls that become valuable as the practice matures.
+
+### Gamedays
+
+A **gameday** is a planned, announced, scoped chaos experiment where the whole team is present to observe. Teams set aside time, define a scenario, and run a real or simulated failure. Gamedays build muscle memory for incident response: engineers practice triage and mitigation in a lower-stakes context where the blast radius is controlled and nobody is being woken up.
+
+Gamedays are distinct from continuous chaos engineering in that they are explicitly cooperative: everyone knows a gameday is happening, and the focus is on the team's response process as much as on the system's resilience. The debrief after a gameday is at least as valuable as the experiment itself. What did the team try that worked? What did not? What runbook steps were missing or unclear? What monitoring was absent that would have helped?
+
+Run gamedays quarterly, or whenever significant changes happen to your infrastructure or team composition. Rotate roles so that everyone practices being the Incident Commander and the Communications Lead, not just the same senior engineer every time. Keep a log of findings from gamedays alongside your postmortem library; patterns across both reveal the most persistent gaps in your system and process.
+
+## Takeaways
+
+The observability stack from the Monitoring and Alerting lecture and the alerting discipline from the Incident Response lecture are instruments. SRE is the framework that turns those instruments into a sustainable operational practice.
+
+Error budgets make SLOs actionable by converting a measurement into a shared organizational policy. Without that policy, SLOs are aspirational targets that nobody acts on when they are breached. With it, they become a feedback mechanism that aligns development velocity with reliability investment.
+
+Toil measurement makes automation a priority rather than a nicety. When the fraction of operational work that is repetitive and automatable is visible, it is difficult to justify not addressing it. When it is invisible, it accumulates indefinitely.
+
+On-call sustainability requires treating alert quality as a reliability issue rather than a comfort issue. A noisy on-call rotation trains engineers to ignore alerts, which means the next real incident is the one they overlook because it looks like all the noisy ones. Fixing noisy alerts is reliability work, not cosmetic improvement.
+
+Chaos engineering closes the loop between the resilience you designed and the resilience you actually have. The gap between them is where the next serious incident is hiding. Discovering that gap on your own terms, during a controlled experiment with a kill switch, is far better than discovering it at 2 AM when a customer has already noticed.
+
+SRE practices scale with the reliability stakes. A team running a small internal tool does not need error budget policies or gamedays. A team whose service is the foundation of a business that depends on it, and that means most of the services you will run in your career, does. Understanding where your service sits on that spectrum and applying these practices in proportion to the stakes is the judgment this lecture prepares you to exercise.
+
+## Resources
+
+- <a href="https://sre.google/sre-book/table-of-contents/" target="_blank" rel="noopener noreferrer">Site Reliability Engineering (Google SRE Book, free online)</a>
+- <a href="https://sre.google/workbook/table-of-contents/" target="_blank" rel="noopener noreferrer">The Site Reliability Workbook (Google, free online)</a>
+- <a href="https://sre.google/sre-book/eliminating-toil/" target="_blank" rel="noopener noreferrer">Eliminating Toil (Google SRE Book, Chapter 5)</a>
+- <a href="https://sre.google/workbook/error-budget-policy/" target="_blank" rel="noopener noreferrer">Error Budget Policy (Google SRE Workbook)</a>
+- <a href="https://principlesofchaos.org/" target="_blank" rel="noopener noreferrer">Principles of Chaos Engineering</a>
+- <a href="https://netflixtechblog.com/the-netflix-simian-army-16e57fbab116" target="_blank" rel="noopener noreferrer">The Netflix Simian Army (Netflix Tech Blog)</a>
+- <a href="https://increment.com/reliability/" target="_blank" rel="noopener noreferrer">Reliability (Increment Magazine)</a>
+- <a href="https://www.youtube.com/watch?v=uTEL8Ff1Zvk" target="_blank" rel="noopener noreferrer">SLOs Are the API Between SREs and Product Teams (Liz Fong-Jones, SREcon)</a>
+- <a href="https://charity.wtf/2020/10/03/on-call-at-scale/" target="_blank" rel="noopener noreferrer">On-Call at Scale (Charity Majors)</a>
+- <a href="https://litmuschaos.io/docs" target="_blank" rel="noopener noreferrer">LitmusChaos Documentation</a>
+- <a href="https://chaos-mesh.org/docs/" target="_blank" rel="noopener noreferrer">Chaos Mesh Documentation</a>

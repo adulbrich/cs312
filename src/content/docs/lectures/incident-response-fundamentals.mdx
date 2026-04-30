@@ -8,6 +8,17 @@ draft: true
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 
+{/* ai-summary
+type: lecture
+slug: incident-response-fundamentals
+order: 14
+covers: incident definition and severity levels; incident lifecycle (detect, triage, mitigate, resolve, learn); incident roles (IC, ops lead, comms lead, scribe); Kubernetes mitigation commands (rollout undo/pause/resume, cordon, drain, exec, port-forward); communication during incidents (internal channel, status page, bridge calls, templates); recovery and verification; disaster recovery (RTO/RPO, backup strategies, cold/warm/hot standby, failover); building an IR program (on-call rotations, runbooks, game days); blameless postmortems (culture, structure, action items)
+prereq_lectures: monitoring-and-performance, log-management-and-analysis
+followup_lectures: site-reliability-and-capacity-planning
+paired_activities:
+supports_labs: cluster-operations
+*/}
+
 Throughout this page, we will follow a single scenario: your team operates a production web application that processes customer orders. On a busy Friday afternoon, the service goes down during peak hours. We will walk through the complete incident lifecycle, from the first alert firing to the postmortem that prevents it from happening again, using this scenario to ground every concept in practice.
 
 ## What Is an Incident?
@@ -108,6 +119,51 @@ aws elbv2 modify-listener --listener-arn $LISTENER_ARN \
 
 **Graceful degradation** means intentionally reducing functionality to preserve the core experience. If the recommendation service is overloading the database, you can serve a static "popular items" list instead. The experience is worse, but customers can still place orders.
 
+### Kubernetes Mitigation Commands
+
+In a Kubernetes environment, the mitigation toolkit extends to cluster-native operations. These commands assume `kubectl` access and appropriate RBAC permissions.
+
+**Pausing a rollout in progress** stops the update without rolling back, giving you time to investigate whether the new image is responsible:
+
+```bash
+kubectl rollout pause deployment/order-service
+# resume once you have determined the cause
+kubectl rollout resume deployment/order-service
+```
+
+**Rolling back** replaces the current ReplicaSet with the previous known-good one and is the fastest mitigation when a deployment is the cause:
+
+```bash
+kubectl rollout undo deployment/order-service
+```
+
+**Cordoning and draining a node** removes it from scheduling and evacuates existing pods to healthy nodes when a specific node is suspected:
+
+```bash
+kubectl cordon node-prod-03
+kubectl drain node-prod-03 --ignore-daemonsets --delete-emptydir-data
+```
+
+**Forcing a pod restart** without a full rollout: deleting the pod causes the Deployment controller to create an immediate replacement:
+
+```bash
+kubectl delete pod order-service-7d9f4b-xvp2k
+```
+
+**Inspecting a live container** when logs are not enough and you need to run commands inside the running process:
+
+```bash
+kubectl exec -it order-service-7d9f4b-xvp2k -- /bin/sh
+```
+
+**Bypassing Ingress and Service routing** to test a pod directly, ruling out networking as a cause:
+
+```bash
+kubectl port-forward pod/order-service-7d9f4b-xvp2k 8080:8080
+```
+
+These commands complement log investigation. `kubectl logs` and `kubectl events` tell you why a pod is failing; the commands above give you the means to act on that information.
+
 In our scenario, the on-call engineer discovers that the database server's disk is 100% full. The transaction log has grown unchecked because a misconfigured backup job was writing snapshots to the database server's local disk instead of an external volume. The fastest mitigation is to free disk space.
 
 ```bash
@@ -184,35 +240,9 @@ The Scribe records the timeline of events during the incident. They note when al
 On small teams, one person often fills multiple roles. That is fine, but make the roles explicit anyway. Even saying "I am IC and Comms for this one" in the incident channel clarifies the decision structure. The role that suffers most when combined is Scribe, because the person doing technical work rarely has the bandwidth to also document the timeline. If you can only staff two roles, make them IC and Scribe.
 </Aside>
 
-## Detection Methods in Depth
-
-We touched on detection during the lifecycle overview, but it deserves a closer look because the quality of your detection directly determines how quickly you can respond.
-
-### Threshold-Based Alerts
-
-The simplest form of alerting compares a metric against a fixed threshold. "If the error rate exceeds 1% for more than 3 minutes, fire a SEV-2 alert." Threshold alerts are easy to reason about and easy to configure. Their weakness is that they require you to know what "normal" looks like in advance. A threshold set for average traffic will fire too often during a traffic spike, and one set for peak traffic will miss problems during quiet periods.
-
-To handle this, use percentage-based thresholds (error rate rather than error count) and build in hold-down periods (the condition must persist for several minutes before the alert fires). This reduces false positives without significantly delaying detection.
-
-### SLO-Based Alerts
-
-A more sophisticated approach ties alerts to your Service Level Objectives. Instead of asking "is the error rate above 1%?", you ask "at the current error rate, will we burn through our monthly error budget within the next hour?" This is called burn-rate alerting, and it naturally adapts to traffic volume. During peak hours, a 0.5% error rate might be alarming because the sheer volume of errors will exhaust your budget quickly. During quiet hours, the same rate is less urgent.
-
-### Synthetic Monitoring
-
-Synthetic monitors are automated scripts that perform actions a real user would perform, running at regular intervals from locations outside your infrastructure. They are your early warning system for problems that internal metrics cannot see.
-
-A synthetic check for our order service might look like this: load the homepage, search for a product, add it to the cart, proceed to checkout (stopping short of actually placing an order). If any step fails or takes longer than a defined threshold, the check raises an alert.
-
-### Log-Based Detection
-
-Application and system logs contain a wealth of information that metrics alone may not capture. A sudden increase in "connection timeout" log entries from the application, or "out of memory" entries from the kernel, can signal an impending failure before it becomes user-visible.
-
-Modern log aggregation systems (such as Loki, Elasticsearch, or CloudWatch Logs) let you define alerting rules over log patterns, effectively turning qualitative log data into quantitative signals.
-
 ## Triage: Classifying and Assessing
 
-Triage is the bridge between detection and action. Its purpose is to answer three questions quickly: how severe is this, what is affected, and who needs to respond.
+The alert is real. Now you have seconds to decide: how bad is this, what is affected, and who else needs to know? Detection methods and alert design are covered in depth in the Monitoring and Alerting lecture; this section focuses on what happens after the page arrives.
 
 ### Severity Classification in Practice
 
@@ -394,37 +424,25 @@ Escalation:
 
 ### Game Days
 
-A game day is a planned exercise where you intentionally inject a failure into your system and practice responding to it. Think of it as a fire drill for your infrastructure. Game days build muscle memory, reveal gaps in your runbooks, and give engineers a chance to practice incident roles without the pressure of a real outage.
+A game day is a planned exercise where you intentionally inject a failure into your system and practice responding to it while the whole team is present. It tests the process, not just the technology: does the incident channel get opened? Are roles assigned? Does the runbook have the right commands? A game day that reveals three process gaps is more valuable than one where everything goes smoothly, because it surfaces those gaps before a real incident does. The Site Reliability Engineering lecture covers game days in the broader context of chaos engineering: how to scope experiments, define a steady-state hypothesis, and grow from controlled staging exercises to production-grade resilience testing.
 
-Start small. Your first game day might be as simple as having one engineer secretly stop the application process on a staging server and seeing how long it takes the team to detect and recover. As your program matures, you can progress to more ambitious exercises: failing over to a standby database, simulating a cloud region outage, or running a tabletop exercise where the team walks through a catastrophic scenario on a whiteboard without actually touching any systems.
+### Learning From Incidents: Blameless Postmortems
 
-<Aside type="note">
-Game days work best when they are announced but not fully scripted. Tell the team that a game day will happen sometime this week, but do not reveal the exact scenario. This tests the team's ability to respond to the unexpected, which is the whole point.
-</Aside>
+Every significant incident should close with a postmortem: a structured review of what happened, why it was able to happen, and what changes will make the same failure less likely or less severe. The postmortem is not a retrospective on what individuals did right or wrong; it is an examination of the system that allowed the failure to occur.
 
-### Postmortems That Drive Change
+The single most important property of a postmortem is that it is blameless. Blame discourages honesty: engineers who fear being singled out will omit details, qualify their actions, and decline to volunteer information that might look bad. A blameless postmortem assumes that everyone involved acted with the information they had at the time and that failures reflect systemic gaps, not individual negligence. That assumption is correct far more often than organizations expect. The aviation industry built its exceptional safety record on confidential, no-penalty incident reporting from pilots and controllers; software engineering borrowed the same framework about thirty years later.
 
-A postmortem (also called an incident review or retrospective) is the mechanism by which your team converts a painful incident into lasting improvement. The most important attribute of a postmortem is that it is blameless. Blaming individuals discourages honesty, and without honesty, you cannot learn.
+A complete postmortem covers six areas: a one-paragraph summary of what happened and when; a quantified impact statement (users affected, duration, data integrity); a timestamped timeline reconstructing the event sequence from alert through resolution; contributing factors (the conditions that allowed the incident to happen, broader than any single cause); root cause analysis using the 5 Whys to trace the causal chain to something systemic and actionable; and a short list of action items, each with a single owner and a due date.
 
-A good postmortem document includes the following sections.
+Action items are the entire point of the postmortem. A postmortem without tracked, completed action items is documentation; one with them is improvement. The test is simple: will someone ask, in three weeks, whether each item is done? If nobody will check, it will not get done. The Site Reliability Engineering lecture goes deeper on how organizations embed postmortems into a continuous improvement cycle, and how error budgets give postmortem action items organizational weight.
 
-**Summary.** One paragraph describing what happened, when, and how it was resolved. "On March 15, 2026, the order processing service was unavailable for 23 minutes due to the database server running out of disk space. The root cause was a misconfigured backup job writing snapshots to the database server's local disk. The on-call engineer freed disk space by removing the errant backups, restoring service. The backup configuration has been corrected and a disk usage alert has been added."
+## Takeaways
 
-**Impact.** Quantify the damage. How many users were affected? How many orders were lost or delayed? What was the duration of user-facing impact? "Approximately 2,400 active users experienced errors for 23 minutes. An estimated 340 orders failed and needed to be retried by customers."
+Incident response is not a one-time project; it is a practice that improves through repetition. Define severity levels and map them to response expectations before an incident happens. Assign roles, even if your team is small enough that one person fills several. Write runbooks for your most common failure modes. Set up on-call rotations with clear expectations. Run game days to build muscle memory. Conduct blameless postmortems after every significant incident.
 
-**Timeline.** A timestamped record of key events: when the alert fired, when the IC was paged, what actions were taken, and when service was restored.
+In Kubernetes environments, the mitigation toolkit extends to cluster-native commands: pausing and resuming rollouts, cordoning and draining nodes, and using port-forwarding to isolate a pod from the routing layer during diagnosis. Knowing these commands before you need them at 2 AM is what separates a composed response from a chaotic one.
 
-**Root cause analysis.** What conditions allowed this failure to happen? The "5 Whys" technique works well here. Why was the disk full? Because backup files were stored locally. Why were they stored locally? Because the backup script's destination path was misconfigured. Why was it misconfigured? Because the configuration was never reviewed after the server was migrated to new hardware. Why was it not reviewed? Because the migration checklist did not include a step to verify backup destinations.
-
-**Action items.** A short, prioritized list of changes that will reduce the likelihood or impact of a recurrence. Each action item should have an owner and a due date. "Fix the backup script destination (owner: J. Chen, due: March 18). Add a monitoring alert for disk usage above 80% on all database servers (owner: S. Patel, due: March 20). Add backup destination verification to the server migration checklist (owner: M. Torres, due: March 25)."
-
-**What went well.** Acknowledge what worked. "The on-call engineer responded within 3 minutes of the page. The runbook for database issues was helpful. The synthetic monitor detected the outage 45 seconds before the first customer report."
-
-## Putting It All Together
-
-Incident response is not a one-time project; it is a practice that improves through repetition. Start by defining your severity levels and mapping them to response expectations. Assign roles, even if your team is small enough that one person fills several. Write runbooks for your most common failure modes. Set up on-call rotations with clear expectations and fair compensation. Run game days to test your processes. Conduct blameless postmortems after every significant incident. Review your DR plan at least annually and test your backups monthly.
-
-The goal is not to eliminate all incidents (that is impossible) but to detect them quickly, respond to them calmly, resolve them efficiently, and learn from them systematically. The team that practices these fundamentals will handle a 2 AM SEV-1 with composure rather than chaos, and their systems will get more reliable over time, not less.
+The goal is not to eliminate incidents (that is impossible) but to detect them quickly, respond to them calmly, resolve them efficiently, and learn from them systematically. The Site Reliability Engineering lecture that follows examines how organizations turn those learnings into structural improvements through error budgets, toil reduction, and sustainable on-call practices.
 
 ## Resources
 
