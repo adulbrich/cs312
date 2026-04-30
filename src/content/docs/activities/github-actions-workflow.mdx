@@ -1,9 +1,8 @@
 ---
 title: "GitHub Actions"
-description: "Build a real CI pipeline from scratch: events, jobs, steps, matrix builds, caching, artifacts, secrets, manual triggers, and debugging a failing run."
+description: "Build a CI pipeline that lints, tests, and packages a minimal Python web application as a Docker image pushed to GitHub Container Registry."
 sidebar:
   order: 10
-draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
@@ -14,139 +13,123 @@ type: activity
 slug: github-actions-workflow
 order: 10
 paired_lecture: ci-cd
-practices: workflow file layout; push and workflow_dispatch events; jobs, steps, and runners; actions/checkout and setup-python; dependency caching; matrix builds across language versions; job dependencies with needs; artifact upload and download; repository secrets and automatic masking; workflow_dispatch inputs; reading logs and diagnosing a failing run
+practices: workflow file layout; push, pull_request, and workflow_dispatch triggers; permissions block and GITHUB_TOKEN; jobs and steps; actions/checkout and setup-python with pip caching; job dependencies with needs; job-level conditions with if; matrix builds across Python versions; fail-fast behavior; Docker image building with build-push-action; container smoke test via docker run; GHA Docker layer cache backend; GitHub Container Registry; uploading artifacts with upload-artifact; reading failed run logs
 prereq_activities:
-output: a public GitHub repository whose green CI workflow lints YAML and shell files across a Python matrix, produces a downloadable report artifact, accepts a manual trigger with inputs, references a secret, and ends with a run whose log shows the student's GitHub username
+output: a public GitHub repository with a green CI workflow that lints and tests across Python 3.11 and 3.12, runs a container smoke test, pushes a Docker image to GitHub Container Registry, and attaches a test report artifact to each run
 */}
 
-This activity puts into practice the concepts from the [CI/CD Pipelines and GitHub Actions](/lectures/ci-cd/) lecture. Starting from an empty GitHub repository, you will write a workflow that grows step by step from a single "hello" job into a real DevOps pipeline: linting YAML and shell files, running across a matrix of Python versions with dependency caching, producing an artifact you can download, accepting a manual trigger with inputs, reading a repository secret, and finally recovering from a deliberately broken run. By the end, you will have exercised the same mechanics you will see in every production pipeline you encounter.
+This activity puts into practice the concepts from the [CI/CD Pipelines](/lectures/ci-cd/) lecture. Starting from a small Python web application, you will build a pipeline that follows the feedback loop the lecture describes: lint the code, run the tests across two Python versions, build a Docker image, smoke-test the running container, and push it to GitHub Container Registry. By the end, you will have a two-job pipeline with the same dependency pattern and quality gates you would see in a production repository.
 
 ## What You Will Need
 
-- A [GitHub account](https://github.com/join) (you will create a public repository for this activity)
-- [Git installed on your laptop](https://git-scm.com/downloads) and configured with your GitHub username and email
-- A text editor (VS Code, vim, or anything that saves YAML cleanly)
-- A terminal with `bash` available (macOS Terminal, Linux shell, or WSL on Windows)
+- A [GitHub account](https://github.com/join) with a public repository you will create for this activity
+- [Git configured](https://git-scm.com/book/en/v2/Getting-Started-First-Time-Git-Setup) with your GitHub username and email
+- A text editor
+- A terminal with `bash` available
 
 ---
 
-## Bootstrap the Repository
+## Bootstrap the Application
 
-You will create a new public repository dedicated to this activity and clone it locally. Workflow files live in a fixed path inside the repository, so the directory structure needs to exist before the first workflow will trigger.
+Before writing any workflow YAML, you need something to build and test. You will create a minimal Python web service, a short test file, and a Dockerfile. All three live in the repository root.
 
 <Steps>
 
-1. **Create a new public GitHub repository.** On [github.com/new](https://github.com/new), name it `cs312-ci-activity`, set visibility to **Public**, check **Add a README file**, and click **Create repository**. Public repos get generous free runner minutes, which is why we are using one here.
+1. **Create a new public GitHub repository.** Go to [github.com/new](https://github.com/new), name it `cs312-ci-activity`, set visibility to **Public**, check **Add a README file**, and click **Create repository**.
 
-2. **Clone the repository locally:**
+2. **Clone the repository:**
 
    ```bash
    git clone https://github.com/YOUR_GITHUB_USERNAME/cs312-ci-activity.git
    cd cs312-ci-activity
    ```
 
-   Replace `YOUR_GITHUB_USERNAME` with your actual handle. If the clone fails with an authentication error, set up a [personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) or SSH keys first.
+   Replace `YOUR_GITHUB_USERNAME` with your actual handle.
 
-3. **Create the workflow directory and a couple of files to lint:**
+3. **Create `app.py`:**
+
+   ```python
+   from flask import Flask, jsonify
+
+   app = Flask(__name__)
+
+
+   @app.route("/")
+   def index():
+       return jsonify({"status": "ok", "version": "1.0.0"})
+
+
+   if __name__ == "__main__":
+       app.run(host="0.0.0.0", port=8080)
+   ```
+
+   This is a Flask web application with a single endpoint. When the container runs, `GET /` returns a JSON object. It is intentionally small: the goal of this activity is the pipeline, not the application.
+
+4. **Create `test_app.py`:**
+
+   ```python
+   from app import app
+
+
+   def test_index():
+       client = app.test_client()
+       response = client.get("/")
+       assert response.status_code == 200
+       assert response.get_json()["status"] == "ok"
+   ```
+
+   `app.test_client()` is Flask's built-in test client. It sends requests to the application without starting a real HTTP server, so the test runs with no ports open and no external dependencies.
+
+5. **Create `requirements.txt`:**
+
+   ```
+   flask==3.1.0
+   pytest==8.3.4
+   flake8==7.1.0
+   ```
+
+   Pinning exact versions makes builds reproducible: every run, on every runner, installs the same libraries from the same source.
+
+6. **Create the `Dockerfile`:**
+
+   ```dockerfile
+   FROM python:3.12-slim
+
+   WORKDIR /app
+
+   COPY requirements.txt .
+   RUN pip install --no-cache-dir -r requirements.txt
+
+   COPY app.py .
+
+   EXPOSE 8080
+
+   CMD ["python", "app.py"]
+   ```
+
+   The `COPY requirements.txt` and `RUN pip install` steps come before `COPY app.py` deliberately. Docker builds images layer by layer and caches each layer separately. When only `app.py` changes, Docker reuses the cached pip layer instead of re-installing every dependency. This is the same principle as pip caching in the Actions workflow you are about to write.
+
+7. **Commit and push everything:**
 
    ```bash
-   mkdir -p .github/workflows configs scripts
-   ```
-
-   GitHub only recognizes workflow files under `.github/workflows/`. The `configs/` and `scripts/` directories will hold the YAML and shell files your pipeline will check.
-
-4. **Write a sample YAML config** at `configs/app.yml`:
-
-   ```yaml
-   service: web
-   replicas: 3
-   ports:
-     - 80
-     - 443
-   env:
-     LOG_LEVEL: info
-     TIMEOUT_SECONDS: 30
-   ```
-
-5. **Write a sample shell script** at `scripts/deploy.sh`:
-
-   ```bash
-   #!/usr/bin/env bash
-   set -euo pipefail
-
-   SERVICE="${1:?service name required}"
-   echo "Deploying ${SERVICE}..."
-   echo "Done."
-   ```
-
-   These two files give your pipeline something realistic to work on. They are the kind of artifacts a real DevOps repository accumulates: configuration in YAML, operational glue in shell.
-
-</Steps>
-
----
-
-## Your First Workflow
-
-A workflow is a YAML file under `.github/workflows/` that tells GitHub what to run, when to run it, and where. You will start with the smallest useful workflow: one job, a handful of steps, and a single trigger. Pushing the commit that adds the file will cause the workflow to fire.
-
-<Steps>
-
-1. **Create the workflow file** at `.github/workflows/ci.yml`:
-
-   ```yaml
-   name: CI
-
-   on:
-     push:
-       branches: [main]
-     pull_request:
-       branches: [main]
-     workflow_dispatch:
-
-   jobs:
-     hello:
-       runs-on: ubuntu-latest
-       steps:
-         - name: Check out the repository
-           uses: actions/checkout@v4
-
-         - name: Identify the run
-           run: |
-             echo "Triggered by: ${{ github.actor }}"
-             echo "Event: ${{ github.event_name }}"
-             echo "Ref: ${{ github.ref }}"
-             echo "Runner OS: $(uname -s) $(uname -m)"
-   ```
-
-   The `on:` block declares three triggers: every push to `main`, every pull request targeting `main`, and a manual "Run workflow" button. The `jobs:` block defines one job named `hello` that runs on an Ubuntu runner and has two steps.
-
-2. **Commit and push:**
-
-   ```bash
-   git add .github configs scripts
-   git commit -m "Add first workflow and sample files"
+   git add app.py test_app.py requirements.txt Dockerfile
+   git commit -m "Add application source and Dockerfile"
    git push origin main
    ```
 
-3. **Open the Actions tab** in your repository on GitHub. You should see a running or just-completed workflow named **CI** with a commit title matching your commit message. Click into it.
-
-4. **Expand the "Identify the run" step** by clicking its title. The log should contain four lines, beginning with `Triggered by:` followed by your GitHub username. Notice that the runner reported `Linux x86_64`: GitHub spun up a fresh Ubuntu VM, ran your job, and will destroy that VM as soon as the workflow finishes.
-
 </Steps>
-
-<ActivityQuestion>
-You declared three triggers (`push`, `pull_request`, `workflow_dispatch`) but only one of them fired this run. Which one, and how can you tell from the log? Why might a team want the workflow to fire on all three events rather than just on `push`?
-</ActivityQuestion>
 
 ---
 
-## Real Checks and Matrix Builds
+## Your First Workflow: Lint and Test
 
-A hello-world job is useful for confirming the plumbing works, but a pipeline earns its keep by running real checks. You will replace `hello` with a `lint` job that validates your YAML with `yamllint` and your shell scripts with `shellcheck`. You will then turn that job into a matrix that runs against two Python versions in parallel, using dependency caching so the second run is fast.
+The cheapest stage of the feedback loop is checking the code without running it. You will create a workflow with one job, `quality`, that lints the Python source with `flake8` and runs the tests with `pytest`. If either step fails, the pipeline stops here before spending any runner time on a Docker build.
+
+Notice the `permissions` block near the top of the file. GitHub generates an automatic `GITHUB_TOKEN` for every workflow run, and repository or organization defaults can still be broader than this workflow actually needs. Explicitly declaring `contents: read` limits the token to the one permission the `quality` job requires, which is the least-privilege principle the lecture described applied to a real workflow.
 
 <Steps>
 
-1. **Replace the contents of `.github/workflows/ci.yml`** with this expanded workflow:
+1. **Create `.github/workflows/ci.yml`**, creating the `.github/workflows/` directories if your editor asks:
 
    ```yaml
    name: CI
@@ -158,284 +141,402 @@ A hello-world job is useful for confirming the plumbing works, but a pipeline ea
        branches: [main]
      workflow_dispatch:
 
-   jobs:
-     lint:
-       runs-on: ubuntu-latest
-       strategy:
-         fail-fast: false
-         matrix:
-           python: ['3.11', '3.12']
-       steps:
-         - uses: actions/checkout@v4
+   permissions:
+     contents: read
 
-         - name: Set up Python ${{ matrix.python }}
-           uses: actions/setup-python@v5
+   jobs:
+     quality:
+       runs-on: ubuntu-latest
+       steps:
+         - uses: actions/checkout@v6
+
+         - name: Set up Python
+           uses: actions/setup-python@v6
            with:
-             python-version: ${{ matrix.python }}
+             python-version: '3.12'
              cache: pip
 
-         - name: Install yamllint
-           run: pip install yamllint==1.35.1
+         - name: Install dependencies
+           run: pip install -r requirements.txt
 
-         - name: Lint YAML
-           run: yamllint configs/
+         - name: Lint
+           run: flake8 .
 
-         - name: Lint shell scripts
-           run: shellcheck scripts/*.sh
-
-         - name: Identify the run
-           run: echo "Linted by ${{ github.actor }} on Python ${{ matrix.python }}"
+         - name: Test
+           run: pytest -v
    ```
 
-   The `strategy.matrix` block tells GitHub to run the job twice, once per Python version, in parallel. `fail-fast: false` keeps both jobs running even if one fails, so you see the full picture. `cache: pip` is a parameter of `actions/setup-python` that stores pip's download cache between runs, keyed on your Python version and on whatever requirements files it finds.
+   GitHub recognizes workflow files only under `.github/workflows/`, which is why the path matters. The `cache: pip` parameter in `actions/setup-python` stores pip's download cache between runs, keyed to a hash of `requirements.txt`. The first run downloads and saves all packages; every subsequent run restores them instead of pulling from PyPI. You will see a line like `Cache restored from key: setup-python-...` starting with the second run.
 
-2. **Commit and push:**
+   The `workflow_dispatch:` entry enables manual runs from the Actions tab, but GitHub exposes the **Run workflow** button only when the workflow file exists on the repository's default branch. You will satisfy that requirement in step 3 when you commit and push this file to `main`.
+
+2. **Enable GitHub Actions for the repository.** Open your repository on GitHub and click the **Actions** tab. If GitHub shows a prompt to enable workflows for this new repository, enable them before the next push. If Actions are already enabled, continue to the next step.
+
+3. **Commit and push:**
 
    ```bash
    git add .github/workflows/ci.yml
-   git commit -m "Add YAML and shell linting with a Python matrix"
+   git commit -m "Add CI workflow with lint and test"
    git push
    ```
 
-3. **Open the Actions tab** and click into the new run. You should see **two** jobs listed under the workflow: `lint (3.11)` and `lint (3.12)`. They run in parallel on separate runners.
+4. **Return to the Actions tab** on your repository. You should see a workflow named **CI** in progress or just finished. Click into it, then click **quality** to see the job steps.
 
-4. **Watch the YAML lint step**. It should pass, printing nothing (no output is `yamllint`'s way of saying "looks good"). The shell lint step should also pass. The final "Identify the run" step will print a line that includes both your GitHub username and the Python version that particular matrix cell used.
+5. **Expand the Lint and Test steps.** The Lint step should complete silently: no output means `flake8` found no issues. The Test step should print something like:
 
-5. **Push a trivial change** to see caching in action:
-
-   ```bash
-   echo "" >> configs/app.yml
-   git commit -am "Touch config"
-   git push
+   ```
+   test_app.py::test_index PASSED [100%]
+   1 passed in 0.11s
    ```
 
-   Open the new run and expand the "Set up Python" step on either matrix cell. Near the end of the step you will see a line like `Cache restored from key: setup_python-Linux-...`. The first run populated the cache; this one restored it, saving the pip download time.
+   Both steps show checkmarks.
+
+6. **Trigger the workflow manually.** Return to the **Actions** tab and click **CI** in the left sidebar. Because the workflow file now exists on `main`, you should see a **Run workflow** button near the top right of the run list. Click it, leave the branch set to `main`, and click the green **Run workflow** button. A new run appears in the list labeled with a `workflow_dispatch` event. Open it: for this workflow, the jobs run the same way as the push-triggered run. The relevant behavior change here is that `github.event_name` equals `workflow_dispatch` rather than `push`. This is how deploy workflows let a human choose when to ship without requiring a code commit.
 
 </Steps>
 
 <ActivityQuestion>
-You watched both matrix cells run in parallel and both cached their pip directories. The lecture described matrix builds as a way to verify compatibility across environments. For this activity the two cells are testing identical Python code, so the matrix is not catching incompatibility. What is it demonstrating instead, and what would you change about the matrix to turn it into a real compatibility check for a library?
+The `quality` job runs the Lint step before the Test step. What happens to the Test step if Lint fails? How does this connect to the "fail fast" principle the lecture describes? What would the pipeline's cost look like if Test ran first and generated a large HTML coverage report on every invocation?
 </ActivityQuestion>
 
 ---
 
-## Jobs, Dependencies, and Artifacts
+## Building the Docker Image
 
-A single job is often enough for simple pipelines, but real workflows split work into multiple jobs so that failures are easy to localize and so that unrelated stages can run in parallel. In this section you will add a second job that depends on `lint`, produces a report file, and uploads that file as an **artifact** you can download from the GitHub UI.
+Passing lint and tests is necessary but not sufficient: the lecture's feedback loop ends at the registry, not the test runner. You will add a second job, `build`, that starts only after `quality` passes and runs only on pushes to `main`. This job builds the Docker image, starts the container to verify it actually launches and responds to an HTTP request, and then pushes the verified image to GitHub Container Registry.
+
+The `build` job authenticates using `GITHUB_TOKEN`, the same short-lived secret GitHub created automatically for the `quality` job. You do not create or store it anywhere: it is always available as `secrets.GITHUB_TOKEN`, and a job-specific `packages: write` permission allows this job to push to the registry without granting that permission to `quality`.
 
 <Steps>
 
-1. **Append a `report` job** to `.github/workflows/ci.yml`. Add this block after the `lint:` job, keeping the existing indentation:
+1. **Add the `build` job** to `.github/workflows/ci.yml`. Append these lines after the last line of the `quality` job block, at the same indentation level as `quality:` under `jobs:`:
 
    ```yaml
-     report:
-       needs: lint
+     build:
+       needs: quality
+       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
        runs-on: ubuntu-latest
+       permissions:
+         contents: read
+         packages: write
        steps:
-         - uses: actions/checkout@v4
+         - uses: actions/checkout@v6
 
-         - name: Generate lint report
-           run: |
-             mkdir -p out
-             {
-               echo "# Lint Report"
-               echo ""
-               echo "- Actor: ${{ github.actor }}"
-               echo "- Commit: ${{ github.sha }}"
-               echo "- Ref: ${{ github.ref }}"
-               echo "- Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-               echo ""
-               echo "## Files checked"
-               echo ""
-               find configs scripts -type f | sort | sed 's/^/- /'
-             } > out/report.md
+         - name: Set up Docker Buildx
+           uses: docker/setup-buildx-action@v4
 
-         - name: Upload report artifact
-           uses: actions/upload-artifact@v4
+         - name: Log in to GitHub Container Registry
+           uses: docker/login-action@v4
            with:
-             name: lint-report
-             path: out/report.md
-             retention-days: 7
+             registry: ghcr.io
+             username: ${{ github.actor }}
+             password: ${{ secrets.GITHUB_TOKEN }}
+
+         - name: Normalize image name
+           run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> "$GITHUB_ENV"
+
+         - name: Build image
+           uses: docker/build-push-action@v7
+           with:
+             context: .
+             push: false
+             load: true
+             tags: app:smoke-test
+             cache-from: type=gha
+             cache-to: type=gha,mode=max
+
+         - name: Smoke-test the container
+           run: |
+             docker run -d --name smoke -p 8080:8080 app:smoke-test
+             for i in {1..10}; do
+               if curl --fail --silent http://localhost:8080; then
+                 break
+               fi
+               sleep 1
+             done
+             curl --fail http://localhost:8080
+             docker stop smoke && docker rm smoke
+
+         - name: Push to registry
+           run: |
+             docker tag app:smoke-test ${{ env.IMAGE_NAME }}
+             docker push ${{ env.IMAGE_NAME }}
    ```
 
-   `needs: lint` tells GitHub to run `report` only after every matrix cell of `lint` succeeds. If any cell fails, `report` is skipped. `actions/upload-artifact@v4` takes the file or directory you point it at, compresses it, and attaches it to the workflow run for seven days.
+   `needs: quality` declares the dependency: `build` will not start until `quality` finishes successfully. If `quality` fails, `build` is skipped entirely and no runner time is spent on the image.
+
+   The `if:` condition restricts `build` to pushes on `main`. Pull requests still run the `quality` job, giving reviewers fast feedback on linting and tests, but the `build` job is skipped until code actually lands on `main`. That keeps the registry clean and the workflow easier to read than putting the condition inside individual Docker steps.
+
+   The `Normalize image name` step lowercases the GHCR tag. Container image names must be lowercase, so this avoids failures if the repository owner or name contains uppercase characters. In Bash, `${GITHUB_REPOSITORY,,}` converts any uppercase letters to lowercase before writing the result to `GITHUB_ENV`, making it available to all later steps in the same job.
+
+   The `Build image` step uses `push: false` and `load: true`. This builds the image and loads it into the runner's local Docker daemon without pushing it anywhere. The `Smoke-test the container` step then starts that local image and retries the HTTP check for a few seconds while Flask finishes starting. The `--fail` flag makes `curl` exit with a nonzero code for any HTTP error response, which fails the step and skips the push. Only after the container passes does the final step send the verified image to GHCR.
 
 2. **Commit and push:**
 
    ```bash
-   git commit -am "Add report job with artifact upload"
+   git commit -am "Add Docker build, smoke test, and push job"
    git push
    ```
 
-3. **Open the new run.** The jobs sidebar now shows three entries: `lint (3.11)`, `lint (3.12)`, and `report`. The visualization at the top of the page draws arrows showing that `report` waits for both lint cells.
+3. **Open the new Actions run.** The run page now shows two jobs: `quality` and `build`, with an arrow pointing from `quality` to `build`. Watch them in sequence: `build` stays queued until `quality` reports success, then starts immediately.
 
-4. **Download the artifact.** Scroll to the bottom of the run page. In the **Artifacts** section you will see `lint-report`. Click it to download the zip, unzip it, and open `report.md`. The file should include your GitHub username, the commit SHA of the run, and a bulleted list of the two files your workflow checked.
+4. **Expand the Smoke-test step** inside the `build` job. You will see `docker run` start the container, followed by `curl` output showing the JSON response from your application:
+
+   ```
+   {"status":"ok","version":"1.0.0"}
+   ```
+
+   This is step 6 of the lecture's feedback loop: you are verifying that the artifact you will actually deploy, the running container, behaves correctly, not just the source code that went into it.
+
+5. **Find your Docker image.** After both jobs show green checkmarks, check your repository page on GitHub for a **Packages** section or open the package from your account's **Packages** view if the sidebar has not updated yet. You should find `cs312-ci-activity` there, with the image tag, push timestamp, and your GitHub username as the owner.
+
+6. **Push a small change** and watch the layer cache in action:
+
+   ```bash
+   # Edit app.py to change "1.0.0" to "1.0.1", then:
+   git commit -am "Bump version"
+   git push
+   ```
+
+   Open the new run's `build` job and expand the **Build image** step. Layers that did not change (the base image and the pip installation layer) will appear as `CACHED`. Only the layer that copies `app.py` rebuilds. The `Push to registry` step sends only the changed layer to GHCR, not the entire image.
 
 </Steps>
 
+<Aside type="note" title="What is Docker Buildx?">
+Buildx is Docker's extended build client, built on top of BuildKit. It replaces the classic `docker build` command with a plugin that understands advanced cache backends, including the `type=gha` backend used here, which stores Docker layer data in GitHub Actions' own cache storage between runs. Without Buildx set up, the `cache-from` and `cache-to` lines in `build-push-action` would have no effect.
+</Aside>
+
+<Aside type="note" title="GITHUB_TOKEN vs Repository Secrets">
+`GITHUB_TOKEN` is generated automatically for each workflow run, scoped to the current repository, and expires when the job finishes. It requires no setup. Repository secrets (created in **Settings > Secrets and variables > Actions**) are for long-lived external credentials: API keys, SSH keys, cloud provider tokens. Use `GITHUB_TOKEN` whenever it is sufficient; reach for a named secret only when an external system requires it.
+</Aside>
+
 <ActivityQuestion>
-If `lint (3.11)` fails but `lint (3.12)` passes, will the `report` job run? Look at the logic of `needs:` and `fail-fast: false` together. How would you change the workflow if you wanted `report` to run as long as *any* matrix cell succeeded?
+The lecture says the container smoke test "catches a different class of bugs" than the pytest suite does. Look at the Dockerfile and think of one realistic mistake in it that pytest would never catch but the smoke test would catch immediately. What would the `curl` output look like when that mistake is present?
 </ActivityQuestion>
 
 ---
 
-## Secrets and Manual Triggers
+## Testing Across Versions
 
-Pipelines frequently need two things that a simple `push` trigger cannot provide: credentials (which must never be committed to the repository) and an operator-controlled way to kick off a run with parameters. GitHub's answers are **repository secrets** and **workflow_dispatch inputs**. You will set up both, reference them from the workflow, and observe how secret values are automatically masked in the log.
+A single Python version tells you the code works on 3.12. It does not tell you whether a teammate running 3.11 is about to hit a syntax difference or a compatibility edge case in a dependency. Rather than duplicating the `quality` job, you can ask GitHub Actions to generate one job per version automatically with a matrix strategy.
 
 <Steps>
 
-1. **Create a repository secret.** On GitHub, navigate to **Settings > Secrets and variables > Actions** in your `cs312-ci-activity` repository. Click **New repository secret**. Set:
-
-   - **Name**: `GREETING_SECRET`
-   - **Secret**: pick any short value, for example `hello-from-ci-312`
-
-   Click **Add secret**. The value disappears as soon as you save it; you can never read it back through the UI.
-
-2. **Extend the `workflow_dispatch` trigger** in `.github/workflows/ci.yml` to accept inputs. Replace the existing `workflow_dispatch:` line with this expanded block:
+1. **Update the `quality` job** in `.github/workflows/ci.yml` to replace the hardcoded Python version with a matrix. Replace the entire `quality:` block with this version:
 
    ```yaml
-     workflow_dispatch:
-       inputs:
-         environment:
-           description: 'Target environment'
-           required: true
-           default: 'staging'
-           type: choice
-           options:
-             - staging
-             - production
-         note:
-           description: 'Short free-form note'
-           required: false
-           type: string
-   ```
-
-   Inputs appear as form fields on the "Run workflow" dialog, so a human triggering the run can pick the environment and leave a note.
-
-3. **Add a `notify` job** at the bottom of the workflow that uses both the secret and the inputs:
-
-   ```yaml
-     notify:
-       needs: report
+     quality:
        runs-on: ubuntu-latest
+       strategy:
+         matrix:
+           python-version: ['3.11', '3.12']
+         fail-fast: false
        steps:
-         - name: Summarize the run
-           env:
-             GREETING: ${{ secrets.GREETING_SECRET }}
-             TARGET: ${{ github.event.inputs.environment || 'automatic' }}
-             NOTE: ${{ github.event.inputs.note || 'no note provided' }}
-           run: |
-             echo "Secret length: ${#GREETING}"
-             echo "Secret (should be masked): $GREETING"
-             echo "Target environment: $TARGET"
-             echo "Note: $NOTE"
-             echo "Triggered by: ${{ github.actor }}"
+         - uses: actions/checkout@v6
+
+         - name: Set up Python
+           uses: actions/setup-python@v6
+           with:
+             python-version: ${{ matrix.python-version }}
+             cache: pip
+
+         - name: Install dependencies
+           run: pip install -r requirements.txt
+
+         - name: Lint
+           run: flake8 .
+
+         - name: Test
+           run: pytest -v
    ```
 
-   Passing the secret through `env:` rather than referencing it directly in the `run:` block is the recommended pattern: it keeps the value out of the literal script body and works cleanly with shell quoting.
+   The `strategy.matrix` block tells GitHub to run the `quality` job once for each value in `python-version`. The two jobs run in parallel on separate runners. The `${{ matrix.python-version }}` expression in `setup-python` substitutes the current matrix value into that step, so each job installs the correct interpreter.
 
-4. **Commit and push:**
+   Setting `fail-fast: false` tells GitHub to run all matrix combinations to completion even if one fails. With the default (`fail-fast: true`), a failure on 3.11 would cancel the 3.12 job before it finished, leaving you with an incomplete picture of which versions are broken.
+
+2. **Commit and push:**
 
    ```bash
-   git commit -am "Add secrets, inputs, and notify job"
+   git commit -am "Add matrix builds across Python 3.11 and 3.12"
    git push
    ```
 
-5. **Trigger the workflow manually.** Go to the Actions tab, click **CI** in the left sidebar, and click the **Run workflow** dropdown on the right. The dropdown now shows two fields: a choice for the environment and a free-form note. Pick `production`, type a short note, and click **Run workflow**.
+3. **Open the Actions run.** The job list now shows two `quality` entries: `quality (3.11)` and `quality (3.12)`. Both run in parallel on separate runners. The `build` job still shows a single arrow from `quality`, but it waits for both matrix instances to succeed before starting. When you declare `needs: quality`, GitHub waits for every matrix member of that job, not just the first one to finish.
 
-6. **Open the run and expand the "Summarize the run" step** in the `notify` job. You should see:
-
-   - `Secret length: 17` (or whatever length your value had)
-   - `Secret (should be masked): ***`
-   - Your target environment and note exactly as you typed them
-
-   GitHub recognized the secret value in the log stream and replaced it with `***` automatically.
+4. **Notice the job names in the run summary.** GitHub labels each matrix job with its parameter values in parentheses. On a larger matrix, such as four Python versions across two operating systems, you would see eight labeled boxes. Any single failure is immediately identifiable by name without opening a log.
 
 </Steps>
 
 <ActivityQuestion>
-The log printed `Secret length: 17` but showed `***` when you tried to print the value itself. Why did the length leak through when the value did not? What does this imply about careless string manipulation inside a workflow, for example `echo "user_$GREETING"` or base64-encoding a secret before printing it?
+With `fail-fast: false`, both matrix jobs run to completion even when one fails. When would `fail-fast: true` be the better choice? Think about a situation where seeing the first failure gives you enough information and running the rest of the matrix only burns runner minutes you have already paid for.
 </ActivityQuestion>
 
-<Aside type="caution" title="Do Not Commit Secrets">
-Repository secrets live in GitHub's encrypted store; they are never checked into git. Never paste a real API key or password into a workflow file, a commit message, or a pull request body. Even a brief exposure triggers vendor-side revocation in most cloud platforms.
+---
+
+## Saving Test Results
+
+The pytest output scrolls past in the log and disappears when the runner is torn down. If a test fails in a run from last Tuesday, you want to know which specific assertion failed and what value it received, not just that the job was red. Artifacts let you attach files to a workflow run so they are downloadable long after the log has scrolled away.
+
+You will add two things to the `quality` job: a JUnit XML report from pytest, and an upload step that saves it even when the tests fail, since that is exactly when you need the report most.
+
+<Steps>
+
+1. **Update the `Test` step** inside the `quality` job to emit an XML report alongside the normal output:
+
+   ```yaml
+         - name: Test
+           run: pytest -v --junitxml=pytest-report.xml
+   ```
+
+2. **Add an upload step** at the end of the `quality` job's `steps:` list, after the Test step:
+
+   ```yaml
+         - name: Upload test report
+           if: always()
+           uses: actions/upload-artifact@v7
+           with:
+             name: pytest-report-${{ matrix.python-version }}
+             path: pytest-report.xml
+             retention-days: 7
+             if-no-files-found: error
+   ```
+
+   `if: always()` runs this step even if the Test step above it failed. Without it, a failing test would halt the job before reaching the upload step, and the report would be lost precisely when you need it most. The artifact name includes `${{ matrix.python-version }}` so the two parallel matrix jobs do not conflict by uploading files with the same name. `if-no-files-found: error` also catches the different failure mode where pytest crashes before it writes the XML file at all.
+
+3. **Commit and push:**
+
+   ```bash
+   git commit -am "Emit JUnit report and upload as artifact"
+   git push
+   ```
+
+4. **Open the completed run** in the Actions tab. Scroll to the bottom of the run summary page. You will see an **Artifacts** section listing `pytest-report-3.11` and `pytest-report-3.12`. Click either entry to download a zip file containing `pytest-report.xml`. Open the file: it is standard JUnit XML, readable by any CI dashboard, test analytics tool, or IDE that understands test results.
+
+</Steps>
+
+<Aside type="tip" title="Artifacts vs Cache">
+Artifacts and the cache serve different purposes. A cache is a shortcut: it skips work by reusing outputs from a previous run. An artifact is a deliverable: it persists a file produced by the pipeline so you or a downstream job can use it. Both count against your GitHub storage quota, but a cache entry is evicted automatically after seven days without access, while an artifact survives until its retention period expires.
 </Aside>
 
 ---
 
-## Break It, Read the Logs, Fix It
+## Let the Pipeline Protect You
 
-A real CI pipeline's value shows up when something fails. You will introduce a deliberate YAML error, watch the pipeline turn red, trace the failure to the exact step and line, and fix it. The final green run will be your submittable artifact.
+The pipeline's real value appears when something goes wrong. You will introduce a lint error and watch the pipeline block it before a single Docker layer is built.
 
 <Steps>
 
-1. **Introduce a mistake.** Open `configs/app.yml` and change the first two lines to this:
+1. **Introduce a lint error.** Open `app.py` and add an unused import at the top:
 
-   ```yaml
-   service: web
-     replicas: 3
+   ```python
+   import os
+   from flask import Flask, jsonify
    ```
-
-   The indentation on `replicas` is wrong; `yamllint` will flag it. Save the file.
 
 2. **Commit and push:**
 
    ```bash
-   git commit -am "Break the config on purpose"
+   git commit -am "Oops: add unused import"
    git push
    ```
 
-3. **Open the run.** Both `lint` matrix cells should show a red X. Click `lint (3.11)` and then click the **Lint YAML** step. The log ends with a `yamllint` error pointing at `configs/app.yml` around line 2, with text about wrong indentation or a mapping value not allowed here. Notice that `report` and `notify` were both skipped because `lint` failed: `needs:` gates downstream jobs on the success of what they depend on.
+3. **Open the Actions tab.** Both `quality (3.11)` and `quality (3.12)` jobs will fail. Click into either run and expand the **Lint** step. You will see output like:
 
-4. **Re-run only the failed jobs.** At the top right of the run page click **Re-run jobs > Re-run failed jobs**. Both cells will fail again, because the failure is in the code, not the runner. This is how flaky failures are diagnosed in practice: real bugs re-fail, infrastructure hiccups do not.
-
-5. **Fix the file.** Restore `configs/app.yml` to its original form:
-
-   ```yaml
-   service: web
-   replicas: 3
-   ports:
-     - 80
-     - 443
-   env:
-     LOG_LEVEL: info
-     TIMEOUT_SECONDS: 30
+   ```
+   ./app.py:1:1: F401 'os' imported but unused
    ```
 
-6. **Commit and push the fix:**
+   `flake8` reports the file, line, column, and error code. The `build` job shows **Skipped** because `needs: quality` never allowed it to start. The pipeline did not pull any Docker base image, run Buildx, or spend any runner time on the build at all. The lint check, the cheapest step in the pipeline, stopped everything before the expensive work began.
+
+4. **Fix the file.** Remove `import os`, leaving only the original two lines:
+
+   ```python
+   from flask import Flask, jsonify
+   ```
+
+5. **Commit and push the fix:**
 
    ```bash
-   git commit -am "Fix config indentation"
+   git commit -am "Remove unused import"
    git push
    ```
 
-7. **Open the new run and wait for it to finish.** All four jobs (`lint (3.11)`, `lint (3.12)`, `report`, `notify`) should show green checkmarks. Click into `notify` and expand the **Summarize the run** step. The log will display your GitHub username next to `Triggered by:`, which closes the loop on the pipeline you built.
+6. **Wait for the run to finish.** All `quality` jobs and the `build` job should show green checkmarks. If GitHub has linked the package to the repository UI already, the **Packages** section in the sidebar will show a fresh push timestamp. If not, open the package from your account's **Packages** view and confirm the owner, push timestamp, and `latest` tag there.
 
 </Steps>
 
-<Aside type="tip" title="Enable Debug Logging When Stuck">
-If a step fails with a cryptic error, add two repository secrets named `ACTIONS_STEP_DEBUG` and `ACTIONS_RUNNER_DEBUG`, both set to `true`, and re-run the workflow. The logs become much more verbose, showing every command, every environment variable, and every internal action step. Turn them off once you are done; the extra output is noisy during normal operation.
+<Aside type="tip" title="Re-Running Without a New Commit">
+If a step fails for a transient reason (a network timeout, a base image pull failing), click **Re-run jobs > Re-run failed jobs** at the top right of the run page. A real code error re-fails every time; a transient infrastructure issue usually passes on the second attempt. This is how you distinguish flaky failures from genuine bugs without cluttering the commit history.
 </Aside>
 
 ---
 
 ## Going Further
 
-You have run every core mechanic of a production CI pipeline: events, jobs, steps, matrix builds, caching, artifacts, job dependencies, secrets, manual triggers, and the full fail-and-fix loop. The natural next step is to layer in the mechanics that distinguish a hobby pipeline from a platform-team one.
+You have built the full feedback loop from the lecture: lint, test across Python versions, build an image, smoke-test the running container, upload a test report, and push the verified image to a registry. Two extensions move this pipeline closer to what production setups actually look like.
 
-Pick one of these extensions and spend fifteen to thirty minutes on it. Each one is a concrete next move, not just a doc link.
-
-Refactor the `lint` job into a **reusable workflow** in a separate file under `.github/workflows/reusable-lint.yml` and call it from `ci.yml` with `uses: ./.github/workflows/reusable-lint.yml`. The [reusable workflows documentation](https://docs.github.com/en/actions/sharing-automations/reusing-workflows) shows the input and secret passing syntax. This is how platform teams stop every repository from reinventing the same pipeline.
-
-Add a **concurrency group** at the top of `ci.yml` so that rapid successive pushes to the same branch cancel previous in-flight runs:
+**Add concurrency control to the `build` job.** Right now, if you push two commits to `main` within thirty seconds, two `build` jobs can race each other. Add a `concurrency` block to the `build` job to prevent this:
 
 ```yaml
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  build:
+    needs: quality
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: build-main
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    ...
 ```
 
-Push two commits a few seconds apart and watch the first run get cancelled the moment the second one starts. The [concurrency reference](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs) lists the edge cases; deploy workflows typically want `cancel-in-progress: false` instead.
+With `cancel-in-progress: false`, GitHub allows the currently running build to finish and queues at most one additional run. Any further runs that arrive while one is queued replace the queued entry, so only the latest pending commit survives. Push three commits in quick succession and watch the run list: the middle run is cancelled before it reaches the `build` job.
 
-Install [`act`](https://nektosact.com/) (`brew install act` on macOS, see the docs for Linux and WSL) and run your workflow locally with `act push`. It will not be a perfect simulation, but mechanical issues like typos and wrong environment variable names show up in seconds instead of after a push. Use it during early development and accept that anything touching the GitHub API or external services still needs a real run to fully verify.
+**Push to Amazon ECR using OIDC instead of GHCR.** GHCR is convenient because it is built into GitHub and requires no external credentials. ECR is what most production systems running on AWS use. The modern pattern is OIDC: AWS trusts GitHub's identity provider, and the workflow exchanges a short-lived GitHub-issued token for temporary IAM credentials that expire when the job finishes. There is nothing to rotate and nothing to leak. To switch this `build` job from GHCR to ECR, first replace its permissions block with this one:
+
+```yaml
+    permissions:
+      contents: read
+      id-token: write
+```
+
+Then replace the login, build, and push steps with these:
+
+```yaml
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::YOUR_ACCOUNT_ID:role/GitHubActionsDeploy
+          aws-region: us-east-1
+
+      - name: Log in to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: app:smoke-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test the container
+        run: |
+          docker run -d --name smoke -p 8080:8080 app:smoke-test
+          for i in {1..10}; do
+            if curl --fail --silent http://localhost:8080; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail http://localhost:8080
+          docker stop smoke && docker rm smoke
+
+      - name: Push to ECR
+        run: |
+          docker tag app:smoke-test ${{ steps.ecr-login.outputs.registry }}/cs312-ci-activity:latest
+          docker push ${{ steps.ecr-login.outputs.registry }}/cs312-ci-activity:latest
+```
+
+You also need an ECR repository named `cs312-ci-activity` in that AWS account and region before the push step runs, unless your account uses an ECR repository creation template for create-on-push behavior. The [GitHub OIDC documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) covers the AWS trust policy you need to configure on the IAM side. Plan about thirty minutes for the role and trust relationship setup.
