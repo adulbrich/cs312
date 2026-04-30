@@ -4,24 +4,46 @@ This repository contains the source code for the CS312 website.
 
 ## To Do
 
-Watch https://www.youtube.com/watch?v=Cpy20DnIDTI
+### Next Iteration Plan
 
-- Observability: https://www.youtube.com/watch?v=SvEjS4-2WJQ (Observability: the present and future, with Charity Majors)
-- Investigate https://en.angie.software/angie/
+- [ ] Reframe the course around service ownership, engineering judgment, and process over tool syntax.
+- [ ] Start each lab and assignment with a short service-ownership prompt: who uses this service, what promise are we making, what constraints cannot be violated, how will we know when that promise is broken, and what evidence proves success.
+- [ ] Offer multiple tooling options when the learning objective is process rather than a specific vendor or product.
+- [ ] Move observability and recoverability earlier so Ops 1 and Ops 2 already require basic health checks, log inspection, backup and restore evidence, and a simple detection plan.
+- [ ] Use lecture time more often for stakeholder scenarios, design reviews, incident debriefs, and gamedays, while keeping labs implementation-heavy.
+- [ ] Design judgment work for 70+ students as async-first decision studios with optional live debriefs, not as discussion-heavy in-class activities that depend on high attendance.
+- [ ] Treat AI use as unavoidable rather than something to police away. Keep rubrics clear, allow AI as drafting/scaffolding support, and make students responsible for verification, evidence, and final decisions.
+- [ ] Do not reward polished prose by itself. Weight local system evidence, verification of claims, trade-off reasoning, and the ability to defend a decision under the assignment's constraints.
+- [ ] Add lightweight defense mechanisms for major submissions: short recorded walkthroughs, TA spot-audits, random viva questions, peer review, or brief lab check-ins.
+- [ ] Use LLMs, when helpful, as stakeholder simulators and critique partners for async work, not as the sole judge of student decisions.
+- [ ] Update assignment rubrics so a working system is necessary but not sufficient. Weight rollback plans, runbooks, alert quality, blast radius control, capacity and cost reasoning, and written justification more heavily.
+- [ ] Include a few intentionally flawed or risky requirements so students practice pushing back and proposing safer alternatives.
 
-- [ ] When the term ends, review all slugs and titles for consistency (including assignments, labs, activities, lectures, and practicalities). Once the file name has changed, update Canvas for next year (don't use the slug in the frontmatter, use the file name instead, so that it is consistent and doesn't require updating in two places).
-- [ ] Labs might be a little light on contents compared to activities? Need to check in with TAs. Labs should be very "How-To" focused with more steps that go a little further that the activities.
-- [ ] Consider adding some references to other hashicorps products either in IaC or in other more relevant lectures (e.g., vault for secrets management, nomad for orchestration, consul for service discovery)
-- [ ] Force GitOps?
-- [ ] The "Resources" section should include not just reading but videos, podcasts, etc.
-- [ ] Do we cover emails at all? (i.e., mail in lab with builtin cron + email server, or just talk about it in lectures? see previous scheduling lab) - we could add emails to the last lab when there is an alert - we cover email alerts in observability a little bit
-- [ ] Add the DNS exercise back from 2024 (the website from julia evans)
-- [ ] Focus on the process, less than the tools. Offer different tooling options but let students choose, note https://www.tigerdata.com/blog/its-2026-just-use-postgres
-- [ ] Improve project rubric
-- [ ] Check linux sysadmin handbook for key contents
-- [ ] Consider guest lectures
-- [ ] Contents
-  - [ ] Honeypot: https://github.com/telekom-security/tpotce
+### Course Design Backlog
+
+- [ ] At term end, review slugs and titles for consistency across assignments, labs, activities, lectures, and practicalities. After renaming files, update Canvas and rely on filenames rather than duplicated slug values where possible.
+- [ ] Check with TAs whether labs need more step-by-step depth relative to activities. Labs should stay more how-to focused and go slightly further operationally.
+- [ ] Improve the project rubric.
+- [ ] Draft an "AI-tolerant, not AI-proof" assessment pattern for the course: short structured judgment memo, tied to real system evidence, plus a cheap audit path.
+- [ ] Build 4 to 5 async decision studios tied to existing labs and assignments, each with a short prompt, a compact deliverable, and a TA-friendly rubric.
+- [ ] Create a reusable rubric for judgment quality: problem framing, constraint discovery, trade-off quality, safety and operability, evidence and verification, and clarity of recommendation.
+- [ ] Expand the resources sections beyond reading to include videos, podcasts, and other media.
+- [ ] Review the Linux Sysadmin Handbook for gaps in coverage.
+- [ ] Consider guest lectures.
+
+### Content and Tooling Backlog
+
+- [ ] Add references to other HashiCorp tools where they genuinely fit, such as Vault, Nomad, and Consul.
+- [ ] Decide whether GitOps should be required, optional, or discussed as one possible operating model.
+- [ ] Decide whether and where to cover email as part of operations work, especially alert delivery or scheduled job output.
+- [ ] Add the DNS exercise back from 2024.
+- [ ] Evaluate honeypot content, such as T-Pot CE, as a possible addition.
+- [ ] Investigate [Angie](https://en.angie.software/).
+
+### Research Queue
+
+- [ ] Watch [If I would start DevOps from 0 - How would I start and what would I learn](https://www.youtube.com/watch?v=Cpy20DnIDTI).
+- [ ] Watch [Observability: the present and future, with Charity Majors](https://www.youtube.com/watch?v=SvEjS4-2WJQ).
 
 ## Instructor Checklist
 

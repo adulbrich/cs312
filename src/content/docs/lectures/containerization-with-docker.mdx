@@ -347,6 +347,12 @@ docker volume rm db-data
 
 The key distinction between the two mechanisms: bind mounts express "share this specific host path with the container," while volumes express "give this container persistent storage that Docker manages." For production databases, volumes are preferred because they are not tied to a specific host path, integrate cleanly with Docker tooling, and are generally easier to back up or migrate than bind mounts. The backup and migration still require explicit tooling or operational process; Docker does not do them automatically for you.
 
+The most common surprise with persistent storage is permissions. Many production images run as a non-root user for security, but a mounted path keeps the ownership and mode bits of the host directory or Docker-managed volume that is attached at runtime. If that mounted path is owned by `root` or by some other UID/GID, the application can fail with `Permission denied` even though the image itself was built correctly. A `chown` done during `docker build` changes the image layer, not the runtime mount that later covers that path.
+
+<Aside type="caution" title="Mounted Storage Does Not Automatically Match Your Container User">
+When you attach writable storage to a non-root container, you must align the storage permissions with the identity the process actually runs as. On a bind mount, that usually means creating the host directory ahead of time and setting ownership on the host to the UID/GID the container uses. Some images expose runtime settings such as `PUID` and `PGID`, or let you set an explicit user in Compose, but those only work if the mounted path is writable by that same identity. On a named volume, an entrypoint or first-start script often fixes ownership from inside the container before dropping privileges. If that `chown` touches the mounted filesystem itself, the result persists across `docker restart` and even across removing and recreating the container, as long as you reattach the same volume or the same host path. If you attach a fresh empty volume, point at a different host directory, or only changed ownership in the image during `docker build`, you must initialize permissions again.
+</Aside>
+
 <Aside type="note" title="Other Common Uses for Each Mechanism">
 **Bind mounts** appear in several patterns beyond development and config injection:
 
@@ -596,6 +602,8 @@ CMD ["python", "server.py"]
 ```
 
 The `USER` instruction switches all subsequent commands and the container's runtime process to the non-privileged `appuser`.
+
+This hardening step does not solve mounted-storage permissions by itself. If `/data`, `/config`, or another writable path is supplied by a bind mount or volume, that mounted path must also be writable by the same UID/GID. Once the mount itself has been prepared correctly, later restarts and reuse of that same volume or host path usually keep working; a fresh mount is what forces you to initialize permissions again.
 
 ### Add Health Checks
 

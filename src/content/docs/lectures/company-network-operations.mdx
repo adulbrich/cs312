@@ -9,9 +9,20 @@ draft: true
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
+{/* ai-summary
+type: lecture
+slug: company-network-operations
+order: 16
+covers: hierarchical design; VLAN trunking; enterprise Wi-Fi; internal DNS and DHCP; routing and firewall debugging; overlay vs underlay networking; VPNs; reverse proxies; TLS; network storage
+prereq_lectures: networking-fundamentals
+followup_lectures: site-reliability-and-capacity-planning
+paired_activities:
+supports_labs: cluster-operations
+*/}
+
 Running a company network is never just one thing. You are simultaneously a network designer, a systems architect, a security enforcer, and a first responder. When a developer reports that the application is unreachable, you need to know whether to check the VLAN configuration, the firewall rules, the DNS records, or the TLS certificate. And you need to know how to distinguish between those quickly, without guessing.
 
-When a developer reports that an application is unreachable, the failure could live anywhere in a stack that spans physical cables, VLAN assignments, routing tables, firewall rules, DNS records, TLS certificates, and application code. A sysadmin who built and understands the network does not guess; they work through the stack methodically until the failure reveals itself. This lecture builds that capability by combining network design with operational troubleshooting: you cannot diagnose a VLAN problem without knowing what VLANs are supposed to do, and you cannot trust a routing table entry without knowing what created it.
+When a developer reports that an application is unreachable, the failure could live anywhere in a stack that spans physical cables, VLAN assignments, routing tables, firewall rules, DNS records, TLS certificates, and application code. A sysadmin who built and understands the network does not guess; they work through the stack methodically until the failure reveals itself. Building on the Networking Fundamentals lecture, this lecture stays at the enterprise and operational layer: access versus trunk ports, split-horizon DNS, firewall policy layers, certificate renewal, and multi-site connectivity.
 
 ## A systematic troubleshooting methodology
 
@@ -41,9 +52,9 @@ In small-to-medium networks, the distribution and core layers are often *collaps
 
 ## VLANs and network segmentation
 
-Most production networks use VLANs (Virtual Local Area Networks) to divide a single physical switch into multiple logical broadcast domains. VLANs improve security, reduce broadcast traffic, and make network management more predictable.
+Networking Fundamentals already introduced VLANs as a way to segment a switch into multiple logical broadcast domains. In company networks, the operational question is how that segmentation is implemented on real switch ports and what breaks when a port is assigned incorrectly.
 
-Every Ethernet frame on a VLAN-aware network can carry an 802.1Q tag, a small header inserted after the source MAC address that identifies which VLAN the frame belongs to. Switch ports operate in one of two modes.
+On tagged links in a VLAN-aware network, Ethernet frames carry an 802.1Q tag, a small header inserted after the source MAC address that identifies which VLAN the frame belongs to. Switch ports operate in one of two modes.
 
 **Access ports** connect to end devices (servers, workstations, printers). The switch assigns all traffic on an access port to a single VLAN and strips the 802.1Q tag before delivering the frame to the device. The device never sees the tag. Traffic on an access port is *untagged*: no VLAN ID is present in the Ethernet frame, so untagged traffic on a port can only belong to one VLAN.
 
@@ -65,7 +76,7 @@ Wireless networking adds complexity because the physical medium (radio waves) is
 
 ### Standards and bands
 
-The 802.11 family of standards defines how Wi-Fi operates. The most relevant standards today are 802.11ac (Wi-Fi 5) on the 5 GHz band and 802.11ax (Wi-Fi 6/6E), which operates on 2.4 GHz, 5 GHz, and (with 6E) 6 GHz. Older standards like 802.11n (Wi-Fi 4) are still common in legacy environments.
+The 802.11 family of standards defines how Wi-Fi operates. The most relevant standards today are 802.11ac (Wi-Fi 5) on the 5 GHz band and 802.11ax (Wi-Fi 6) on the 2.4 GHz and 5 GHz bands. Wi-Fi 6E extends the same 802.11ax protocol into the 6 GHz band where regulators permit it. Older standards like 802.11n (Wi-Fi 4) are still common in legacy environments.
 
 The 2.4 GHz band offers longer range but only three non-overlapping channels (1, 6, and 11 in North America). The 5 GHz band provides more channels and higher throughput but shorter range. In a dense office, 5 GHz is usually preferable because the additional channels reduce co-channel interference.
 
@@ -74,11 +85,11 @@ The 2.4 GHz band offers longer range but only three non-overlapping channels (1,
 When two nearby access points transmit on the same channel (or overlapping channels), they compete for airtime and degrade each other's performance. Channel allocation by band:
 
 - **2.4 GHz**: Only 3 non-overlapping channels in North America: 1, 6, and 11. Always use one of these three. Using channel 3 or 9 partially overlaps with adjacent channels and creates *worse* interference than sharing one of the standard three channels, because collisions affect both channels simultaneously.
-- **5 GHz**: 24 non-overlapping 20 MHz channels, substantially reducing co-channel interference in dense deployments.
-- **6 GHz** (Wi-Fi 6E / 802.11ax): Up to 59 non-overlapping 20 MHz channels, with room for 29 non-overlapping 40 MHz channels, 14 non-overlapping 80 MHz channels, or 7 non-overlapping 160 MHz channels. The 6 GHz band is well suited to high-bandwidth applications such as HD video streaming and virtual reality, and is preferred in new dense deployments.
+- **5 GHz**: Channel availability depends on the regulatory domain and DFS rules. In the United States you have dozens of non-overlapping 20 MHz channels, which substantially reduces co-channel interference in dense deployments.
+- **6 GHz** (Wi-Fi 6E): Channel availability is even more regulatory-domain-dependent. In the United States, up to 59 non-overlapping 20 MHz channels are available, while other countries may authorize less spectrum. Where it is available, 6 GHz is well suited to dense, high-bandwidth deployments.
 
 <Aside type="caution" title="2.4 GHz Interference Sources">
-Microwave ovens, Bluetooth devices, and cordless phones all operate near 2.4 GHz. If users report intermittent Wi-Fi problems in a break room or kitchen, interference from appliances is a likely culprit. Prefer 5 GHz or 6 GHz in those environments.
+Microwave ovens, Bluetooth devices, and cordless phones all operate near 2.4 GHz. If users report intermittent Wi-Fi problems in a break room or kitchen, interference from appliances is a likely culprit. Prefer 5 GHz or, where client devices and local regulations allow, 6 GHz in those environments.
 </Aside>
 
 ### WAP placement considerations
@@ -97,52 +108,43 @@ If your organization still uses WPA2-PSK (a shared password), rotate the key reg
 
 ## DNS configuration and troubleshooting
 
-DNS is the most common reason users report that "the internet is down." The network may be perfectly healthy, but if name resolution fails, browsers display error pages and applications cannot connect to their backends.
+Networking Fundamentals already introduced DNS, the common record types, and the first-pass use of `dig`. In company networks, the operational questions are narrower and more consequential: which resolver a host is actually using, how long bad data can remain cached, how internal and external answers differ, and which DNS records quietly control email delivery or certificate issuance.
 
-### How the resolver works
+### Resolver configuration and direct queries
 
-When a Linux server needs to resolve a hostname, it consults `/etc/resolv.conf` (or, on modern systems, `systemd-resolved`) to find the configured DNS server. On a workstation that receives DHCP, the DHCP client writes this file automatically. On a server with a static address, it must be configured explicitly. The resolver sends the query to that server; if the server cannot answer authoritatively, it recurses through the DNS hierarchy. A `search` directive in `/etc/resolv.conf` appends a domain suffix to short hostnames: if you type `ping app01`, the resolver tries `app01.example.com` before querying bare `app01`.
+On a Linux server, `/etc/resolv.conf` (or its `systemd-resolved` equivalent) tells the host which resolver to query and which `search` domains to append to short names. Workstations usually receive this from DHCP; servers with static addressing or custom resolver settings often need it to be checked explicitly. In practice, the first DNS troubleshooting step is confirming which resolver the machine is asking, then querying that resolver directly instead of treating "DNS" as a single black box.
 
-### Diagnostic tools
-
-The `dig` command is the most versatile DNS troubleshooting tool. It shows you exactly what the DNS server returns, including the response code, answer section, and query time.
+The `dig` command is the most versatile DNS troubleshooting tool because it shows you the response code, answer section, authority section, and timing. `nslookup` remains useful for quick interactive checks, especially on Windows, but `dig` is the tool that exposes the most detail during an outage.
 
 ```bash
-# Query the default resolver for an A record
+# Query the resolver configured on this host
 dig app.example.com
 
-# Query a specific DNS server
+# Query a specific internal resolver directly
 dig @10.0.1.2 app.example.com
 
-# Check for a specific record type
-dig MX example.com
-
-# Get a short answer (just the IP)
+# Get just the answer section
 dig +short app.example.com
-```
-
-The `nslookup` command provides a simpler interface that works on both Linux and Windows, making it useful for quick checks.
-
-```bash
-nslookup app.example.com
-nslookup app.example.com 10.0.1.2
 ```
 
 ### DNS record types in depth
 
-The Networking Fundamentals lecture covers the record types you encounter most often for forward resolution: A, AAAA, CNAME, and MX. Several others matter operationally.
+Networking Fundamentals already covered the common record types at the conceptual level. The additions here are the records and behaviors that tend to matter during outages, change windows, and external integrations.
 
-**PTR records** and **SOA records** are introduced in the Networking Fundamentals lecture. Their operational consequences are worth expanding here. PTR records have two practical stakes: mail servers use forward-confirmed reverse DNS to validate sender identity (a sending IP with no PTR record or a mismatched one is a strong spam signal), and `traceroute` uses reverse lookups to annotate hop IPs with hostnames. If a mail delivery fails with a "reverse lookup failed" rejection, the first check is whether your sending IP has a PTR record registered with your ISP. When a PTR lookup returns NXDOMAIN, the SOA record in the authority section identifies which organization controls that IP block: the `MNAME` field names the primary nameserver and `RNAME` encodes the abuse contact email, which is what you need when reporting abuse or requesting a PTR record be created.
+**PTR and SOA records** become operationally important the moment mail delivery or reverse lookups fail. Missing or mismatched PTR records are strong spam signals, and reverse DNS is published by whoever controls the IP block rather than by whoever runs the application. When a PTR lookup returns NXDOMAIN, the SOA record in the authority section still tells you which zone answered negatively: `MNAME` names the primary nameserver, and `RNAME` encodes the responsible mailbox for the zone administrator. That is often the contact path you need when asking whoever controls the reverse zone to create or fix a PTR record.
 
-**TXT records** carry arbitrary text data and are widely used for domain verification and email authentication. SPF (Sender Policy Framework), DKIM (DomainKeys Identified Mail), and DMARC policies are all published as TXT records. Cloud providers and SaaS vendors also use TXT records to verify domain ownership: to prove you control a domain, you add a TXT record with a specific token value, and the provider queries DNS to confirm it.
+**TXT records** carry arbitrary text data and are widely used for domain verification and email authentication. SPF, DKIM, and DMARC are all published as TXT records. SaaS providers also use TXT tokens to prove you control a domain before enabling a service.
 
-**CAA (Certification Authority Authorization) records** specify which CAs are authorized to issue certificates for a domain. A CAA record of `0 issue "letsencrypt.org"` means only Let's Encrypt may issue certificates for that domain; any other CA that receives a certificate request must reject it. CAA records are a defense against rogue certificate issuance even if an attacker compromises a CA: the CA checks the CAA record before issuing and refuses if the record does not authorize it. This pairs naturally with Certificate Transparency monitoring.
+**CAA (Certification Authority Authorization) records** tell compliant public Certificate Authorities which issuers are authorized to mint certificates for a domain. A CAA record of `0 issue "letsencrypt.org"` tells a CA that it should issue only if it is Let's Encrypt or otherwise explicitly authorized. CAA reduces accidental or unauthorized issuance by honest public CAs, but it is not a magic guarantee against every CA compromise scenario. It works best alongside Certificate Transparency monitoring.
 
 ```bash
-# Check all record types at once for a domain
-dig ANY example.com
+# Query the specific record types you care about
+dig A example.com
+dig AAAA example.com
+dig MX example.com
+dig TXT example.com
 
-# Check CAA records
+# Check CAA policy
 dig CAA example.com
 
 # Full trace showing the resolution chain from root servers down
@@ -177,7 +179,7 @@ The TTL is too long. A record was changed but resolvers are still returning the 
 
 ### Internal DNS and split-horizon
 
-Most companies run an internal DNS server that answers queries for private hostnames that should never appear in public DNS. For example, `db.company.internal` resolves to `10.0.1.200` for internal clients, while external DNS has no record for it at all.
+Most companies run an internal DNS server that answers queries for private hostnames that should never appear in public DNS. For example, `db.corp.example.com` might resolve to `10.0.1.200` for internal clients, while external DNS has no record for it at all.
 
 **Split-horizon DNS** (also called split-brain DNS) takes this further: the same hostname resolves to different addresses depending on where the query originates. `app.company.com` might resolve to `10.0.1.100` for internal clients (going directly to the backend) and to `203.0.113.5` (the public load balancer) for external clients. The internal answer avoids the round-trip through the internet and eliminates a dependency on the load balancer for internal traffic.
 
@@ -189,22 +191,20 @@ cat /etc/resolv.conf
 # Typical output for a company server:
 # nameserver 10.0.1.2       <- internal DNS server
 # nameserver 10.0.1.3       <- secondary internal DNS
-# search company.internal   <- appended to short hostnames
+# search corp.example.com   <- appended to short hostnames
 ```
 
-The `search` directive appends a domain suffix to unqualified hostnames. If you type `ping app01`, the resolver automatically tries `app01.company.internal` before querying bare `app01`. This is why servers on the same internal domain can reach each other by short name rather than fully qualified hostname.
+The `search` directive appends a domain suffix to unqualified hostnames. If you type `ping app01`, the resolver automatically tries `app01.corp.example.com` before querying bare `app01`. This is why servers on the same internal domain can reach each other by short name rather than fully qualified hostname.
 
 When troubleshooting internal name resolution failures, always check `/etc/resolv.conf` first: is the nameserver IP correct? Is the search domain right? Then use `dig @<nameserver-ip> hostname` to query the internal DNS server directly and bypass any caching layer.
 
 ## DHCP: dynamic addressing
 
-DHCP (Dynamic Host Configuration Protocol) automates IP address assignment. Without it, every device on the network would need manual configuration, a process that scales poorly and invites human error.
+Networking Fundamentals already covered the DORA exchange. In company networks, the harder questions are where that broadcast traffic can and cannot go, when a relay agent is required, and how to keep critical devices on predictable addresses.
 
-### The lease process
+### Operational concerns
 
-A DHCP transaction follows four steps, sometimes called DORA. First, the client broadcasts a **Discover** message; since it has no IP address yet, the source is `0.0.0.0` and the destination is the broadcast address `255.255.255.255`. One or more DHCP servers reply with an **Offer**, proposing an IP address, subnet mask, default gateway, DNS server addresses, and a lease duration. The client then broadcasts a **Request**, naming the server whose offer it accepted (implicitly declining the others). Finally, the chosen server confirms with an **Acknowledge**, and the client configures its interface with the offered parameters.
-
-Leases have a duration. When half the lease time has elapsed, the client attempts to renew. If renewal fails and the lease expires, the client must start the DORA process again and may receive a different address.
+DHCP is still the same four-packet DORA conversation, but the operational constraints matter more than the packet names. Because DHCP starts as a broadcast, clients normally need the server to be on the same broadcast domain unless a router or layer-3 switch is configured as a DHCP relay. Lease duration matters operationally as well: short leases create more renewal traffic, while very long leases make addressing mistakes and moved devices take longer to correct.
 
 ### Static vs. dynamic allocation
 
@@ -277,7 +277,7 @@ Running a mail server requires a static IP with proper reverse DNS, maintaining 
 
 ## Routing and gateway issues
 
-As covered in the Networking Fundamentals lecture, every host sends non-local traffic to a default gateway and the routing table maps destinations to next hops. The diagnostic starting point is always `ip route show`. A missing `default` route means the host can communicate on its local subnet but not beyond it; a default route pointing to the wrong gateway means traffic leaves but arrives at the wrong place or not at all.
+As covered in the Networking Fundamentals lecture, every host sends non-local traffic to a default gateway and the routing table maps destinations to next hops. The later-stage question is not "what is a default route?" but "does this route table match the network you intended to build?" The diagnostic starting point is still `ip route show`, but now you read it against a known topology.
 
 ```bash
 ip route show
@@ -307,7 +307,7 @@ Asymmetric routing is notoriously difficult to diagnose because the problem appe
 
 ## Firewall debugging
 
-Firewalls are the most common cause of "it works from here but not from there" problems. A misconfigured firewall rule can silently drop traffic, making the application appear unreachable even though the server is running and the network path is intact.
+Networking Fundamentals already covered what firewalls, ports, and cloud security groups do. The operational problem here is narrower: proving whether a firewall is the device dropping traffic, and if so, which policy layer is doing it.
 
 ### Linux firewalls: iptables and nftables
 
@@ -340,9 +340,9 @@ sudo nft add rule inet filter input tcp dport 80 accept
 
 ### Cloud security groups
 
-In cloud environments (AWS, Azure, GCP), security groups or network ACLs function as firewalls. A common misconfiguration is allowing inbound traffic on port 443 but forgetting to allow the health check port that the load balancer uses. The application works when accessed directly but fails behind the load balancer.
+In AWS, the two common virtual firewall layers are security groups and network ACLs. Azure and GCP expose comparable controls with different names and scopes, so translate the concept rather than assuming the AWS labels apply everywhere. A common AWS misconfiguration is allowing inbound traffic on port 443 but forgetting to allow the health check path or port that the load balancer uses. The application works when accessed directly but fails behind the load balancer.
 
-When troubleshooting in the cloud, always check both the security group rules and any network ACLs applied to the subnet. Remember that security groups are stateful (return traffic is automatically allowed), while network ACLs are stateless (you must explicitly allow return traffic).
+When troubleshooting in AWS, always check both the security group rules and any network ACLs applied to the subnet. Security groups are stateful (return traffic is automatically allowed), while network ACLs are stateless (you must explicitly allow return traffic).
 
 ### Systematic firewall debugging
 
@@ -434,13 +434,15 @@ Static routes (manually configured entries in the routing table) work for small,
 
 For most enterprise sysadmin work, OSPF is the interior routing protocol you are most likely to encounter. BGP appears when your organization peers with multiple ISPs or uses cloud connectivity (AWS Direct Connect, Azure ExpressRoute).
 
+This underlay-versus-overlay distinction matters more now that clustered systems are common inside company networks. The switches, routers, and WAN links you operate are the **underlay**: the ordinary IP network that actually moves packets. Systems such as SD-WAN and many container network plugins build an **overlay** on top, encapsulating traffic or advertising extra routes so a logical network can span many physical segments. Kubernetes east-west traffic is a good example: depending on the CNI, pod traffic may ride a VXLAN overlay or may require the underlay to route pod CIDRs directly through BGP or static routes. When cluster networking breaks, a good operator asks first whether the overlay is broken or whether the underlay never had a valid path in the first place.
+
 ### Link aggregation and enterprise connectivity
 
 **Link Aggregation (LAG)**, defined by the 802.3ad standard (also called LACP), bonds multiple physical network interfaces into a single logical interface. Two 10 Gbps links bonded together present as one 20 Gbps interface to the operating system. Beyond throughput, LAG provides redundancy: if one physical link fails, traffic shifts to the remaining links without interruption.
 
 On Linux, bonded interfaces are managed via the `bonding` kernel module or, more commonly on newer distributions, via `systemd-networkd` or NetworkManager. You will encounter LAG on server NICs connecting to switches, and on the uplinks between access and distribution switches.
 
-**Multi-homing** (connecting an organization's network to two or more ISPs) requires BGP to advertise the organization's IP block to both providers. If one ISP's link fails, BGP converges on the other within seconds. Large organizations own their own IP address block (allocated from ARIN, RIPE, or another regional registry) and carry that block in BGP rather than using the ISP's address space.
+**Multi-homing** (connecting an organization's network to two or more ISPs) generally requires BGP to advertise the organization's IP block to both providers. If one ISP's link fails, failover speed depends on timers, failure detection, and policy. With tuned edge designs it can be quick, but tens of seconds or longer are common on internet-facing edges. Large organizations own their own IP address block (allocated from ARIN, RIPE, or another regional registry) and carry that block in BGP rather than using the ISP's address space.
 
 ## Virtual Private Networks (VPNs)
 
@@ -449,8 +451,8 @@ A VPN creates an encrypted tunnel between two endpoints over an untrusted networ
 Three common deployment patterns:
 
 - **Site-to-site VPN**: Connects two or more geographically separate offices, allowing their internal networks to communicate securely as if they were on the same LAN. The VPN is configured on the routers/firewalls at each site.
-- **Client-to-site (remote access) VPN**: Allows individual devices (remote workers' laptops) to securely connect to the corporate network. The user runs a VPN client; the organization runs a VPN server.
-- **Remote access VPN**: A variant of client-to-site where access is provided to specific services rather than the full network.
+- **Remote-access VPN (client-to-site)**: Allows individual devices (remote workers' laptops) to securely connect to the corporate network. The user runs a VPN client; the organization runs a VPN server.
+- **Service-specific remote access**: Some organizations expose only selected internal applications rather than the full routed network. Traditional VPN products can enforce this with policy, while many newer products frame it as zero-trust network access instead of a full-network VPN.
 
 Common VPN protocols:
 
@@ -484,13 +486,7 @@ In cloud-first environments, the "company network" increasingly means a hub VPC 
 
 ### Placement and Scope
 
-Firewalls are categorized by where they sit in the network:
-
-- **Perimeter firewalls** sit between your internal network and the internet. Every packet crossing the boundary passes through them.
-- **Internal firewalls** separate network segments; for example, the corporate network from a production environment, or the access layer from the distribution layer. Data center firewalls enforce very specific rules for critical servers.
-- **Access layer firewalls** are deployed at the edge of high-risk environments or for IoT device segments.
-- **Web Application Firewalls (WAFs)** are placed in front of web applications. They inspect HTTP traffic to detect and block attacks like SQL injection, cross-site scripting (XSS), and session hijacking.
-- **Endpoint firewalls** run on the host itself (e.g., `iptables`/`nftables` on Linux, Windows Defender Firewall). They protect the device regardless of which network it is on.
+Firewall placement matters because a firewall can inspect only the traffic that actually crosses it. A perimeter firewall sits between the internal network and the internet, so every external packet passes through it. Internal firewalls segment environments inside the organization, for example corporate from production or user networks from server networks. Access-layer firewalls are a special case of internal segmentation, placed near high-risk segments such as IoT devices. A Web Application Firewall (WAF) sits specifically in front of HTTP services to inspect web traffic for attacks like SQL injection or cross-site scripting, while an endpoint firewall runs on the host itself and protects that device even when traffic never crosses a central appliance.
 
 <Aside type="note" title="Lateral Traffic and Firewall Blindspots">
 Firewalls only inspect traffic that passes through them. Traffic that stays entirely within an unmanaged switch (between two devices on the same switch port group) never hits a firewall unless endpoint firewalls are involved. This is a frequently overlooked gap in network designs.
@@ -498,16 +494,11 @@ Firewalls only inspect traffic that passes through them. Traffic that stays enti
 
 ### Firewall Technologies
 
-Modern firewalls combine multiple inspection techniques:
-
-- **Packet filtering** (OSI layer 3): Allows or denies packets based on source/destination IP, protocol, and port number. Fast but cannot inspect connection state or payload.
-- **Stateful inspection**: Tracks the state of active connections in a session table. Return traffic for established connections is automatically allowed; unsolicited inbound packets are dropped.
-- **Proxy services**: The firewall acts as an intermediary: clients connect to the firewall, which makes the actual request on their behalf. Provides deep control but adds latency.
-- **Deep Packet Inspection (DPI)**: Inspects the packet payload, not just the header. Can detect malware signatures, unauthorized protocols, and data exfiltration. There is always a performance trade-off.
-- **Application-level filtering** (OSI layer 7): Understands specific protocols (HTTP, FTP, DNS) and can make decisions based on application behavior, not just port numbers.
-- **Intrusion Prevention Systems (IPS)**: Active monitoring that detects and blocks vulnerability exploits using anomaly detection, signature matching, and policy rules.
+Modern firewalls combine several inspection techniques rather than relying on a single one. At the simplest end, packet filtering allows or denies traffic based on source or destination IP, protocol, and port. Stateful inspection adds connection awareness, which is why return traffic for an established session is automatically allowed. More advanced devices can proxy connections, inspect payloads with Deep Packet Inspection, or understand application protocols like HTTP and DNS well enough to make layer-7 policy decisions. Many platforms also integrate Intrusion Prevention System behavior, using signatures or anomaly detection to block exploit traffic. The trade-off is consistent across all of these features: richer inspection gives you better control and better detection, but costs CPU, latency, and operational complexity.
 
 ### Common Firewall Terminology
+
+Firewall interfaces and vendor documentation reuse a small vocabulary constantly. Learning these terms makes rule sets much easier to read and compare across products.
 
 | Term | Meaning |
 |------|---------|
@@ -524,12 +515,7 @@ A **reverse proxy** is a server that sits in front of one or more backend server
 
 ### Why Use a Reverse Proxy?
 
-Reverse proxies provide several operational benefits:
-
-- **TLS termination**: The proxy handles HTTPS, accepting encrypted connections from clients and forwarding plain HTTP to backends. Certificates are configured in one place rather than on every backend server.
-- **Single entry point**: All traffic enters through one host, making it straightforward to apply security policies, access logging, and rate limiting uniformly.
-- **Path-based routing**: The proxy can forward requests to different backends based on the URL path: requests to `/api/` go to the API service; requests to `/static/` go to a file server.
-- **Hiding internal topology**: Clients never see backend server addresses or ports, reducing the attack surface.
+Reverse proxies solve several operational problems at once. They centralize TLS termination so certificates are managed in one place, provide a single entry point for access logging and rate limiting, route requests to different backends based on hostname or path, and hide the backend topology from clients. That combination is why reverse proxies show up in almost every serious web deployment even before traffic volume is high enough to demand load balancing.
 
 ### Load Balancers
 
@@ -545,10 +531,7 @@ Common distribution algorithms:
 
 ### Layer 4 vs. Layer 7 Load Balancing
 
-Load balancers operate at different OSI layers, and the distinction affects what routing decisions they can make:
-
-- **Layer 4 (Transport)**: Routes based on IP address and TCP/UDP port. The load balancer forwards the raw TCP stream without inspecting HTTP content, giving lower latency but fewer routing options.
-- **Layer 7 (Application)**: Parses HTTP headers, URL paths, and cookies. Can route traffic to different backends based on hostname or path, inject headers, rewrite URLs, and terminate TLS. More powerful but slightly more overhead.
+Load balancers operate at different OSI layers, and that determines what they can use when making routing decisions. A Layer 4 load balancer looks only at network and transport information such as IP addresses and TCP or UDP ports, so it forwards raw connections quickly but cannot make decisions based on HTTP content. A Layer 7 load balancer parses the application protocol itself, which lets it route by hostname or path, inject headers, rewrite URLs, and terminate TLS. The cost of that flexibility is additional processing overhead.
 
 In AWS, the **Network Load Balancer (NLB)** operates at Layer 4 and the **Application Load Balancer (ALB)** operates at Layer 7. Most web applications use an ALB.
 
@@ -577,7 +560,7 @@ The `upstream` block defines a pool of backends. `proxy_pass` forwards all reque
 
 ## TLS Certificates
 
-HTTPS requires a TLS certificate: a cryptographically signed document that proves the server owns the private key corresponding to the public key in the certificate, and that a trusted Certificate Authority (CA) has verified this. Without a valid certificate, browsers display security warnings and refuse to connect. The Networking Fundamentals lecture introduces the conceptual model: the certificate chain, what a CA is, and how `openssl s_client` reads a handshake. This section covers the operational side: how certificates are obtained, renewed, and managed in practice.
+Networking Fundamentals already introduced the TLS handshake, the certificate chain, and the role of a Certificate Authority. The operational side is different: certificates have to be issued, renewed, logged, stapled, rotated, and debugged under production constraints. That is the focus here.
 
 ### Certificate types
 
@@ -591,7 +574,7 @@ Not all certificates offer the same level of identity verification. Commercial C
 
 ### Certificate Transparency
 
-Since 2018, [Certificate Transparency (CT)](https://certificate.transparency.dev/) is required for all publicly trusted certificates. Every CA must log issued certificates in public, append-only CT logs. Browsers verify that a certificate appears in a CT log before trusting it; a certificate not in any log is rejected. The practical benefit is that it is now impossible to issue a certificate for your domain without the world knowing about it: if an attacker compromises a CA and issues a rogue certificate for `example.com`, the certificate will appear in the CT logs within seconds and can be detected by monitoring services. You can query CT logs directly to see every certificate ever issued for a domain.
+Since 2018, [Certificate Transparency (CT)](https://certificate.transparency.dev/) has been required for publicly trusted certificates. Every CA must log issued certificates in public, append-only CT logs, and browsers expect proof that this logging happened before they trust the certificate. The practical benefit is visibility: if an unexpected certificate is issued for your domain, CT monitoring services can usually detect it quickly because the certificate has to be publicly logged. You can query CT logs directly to see the certificates that have been issued for a domain.
 
 ### Let's Encrypt and automated certificate management
 
@@ -624,7 +607,7 @@ add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" alway
 
 ### Internal certificates
 
-For internal services (the company intranet, internal APIs, database management UIs), public CAs will not issue certificates because the domain is not publicly routable. Two options:
+For internal services, the deciding question is not whether the server is private but whether the name is publicly delegated and can be validated. A public CA can issue a certificate for a privately hosted service under a public domain you control, often using DNS-01, even if the service itself is not exposed to the public internet. When the name is private or purely internal, you typically use one of two approaches:
 
 **Self-signed certificates** are generated locally without any CA involvement. They encrypt traffic but browsers do not trust them by default. Suitable for testing or for services where you control all clients and can manually add the certificate to the trust store.
 
@@ -651,27 +634,21 @@ A wildcard certificate (`*.company.com`) covers all immediate subdomains with a 
 
 ## Network Storage
 
-Network storage allows multiple servers and clients to access shared data over a network rather than through locally attached drives.
+Network storage is where networking and systems administration blur together again: sometimes the machine is healthy and the application is healthy, but the thing that is slow, stale, or missing is the storage path between them. The first distinction to keep in mind is whether the network is carrying files or raw storage blocks.
 
-### NFS (Network File System)
+### File-sharing protocols
 
-NFS was developed by Sun Microsystems and is a client/server protocol that allows computers to access files over a network similarly to how they access local storage. It is the standard for Linux and UNIX environments, particularly in enterprise settings. NFSv4 adds integrated security and encryption features; earlier versions (NFSv3 and below) lack native encryption and should not be used on untrusted networks.
+NFS (Network File System), developed by Sun Microsystems, is the standard file-sharing protocol in Linux and UNIX environments. It lets clients mount remote filesystems and work with them almost as if they were local. NFSv4 adds stronger security and improved operational behavior; older versions such as NFSv3 lack native encryption and are a poor choice on untrusted networks.
 
-### SMB (Server Message Block)
+SMB (Server Message Block), popularized by Microsoft, is the standard choice in mixed-OS environments. It supports file sharing, printer sharing, and communication with network devices, and modern SMB 3.x adds encryption and stronger authentication. SMB is now the normal file-sharing protocol even on modern macOS. AFP (Apple Filing Protocol) was Apple's older file-sharing protocol, but it has been deprecated in favor of SMB.
 
-SMB was developed by IBM and popularized by Microsoft. It supports file sharing, printer sharing, and communication with network devices. Modern SMB versions (3.x) include end-to-end encryption and improved authentication. SMB has broad cross-platform support (Windows, Linux via Samba, macOS), making it the standard for mixed-OS environments.
-
-### AFP (Apple Filing Protocol)
-
-AFP was Apple's native file-sharing protocol for macOS. It has been deprecated in favor of SMB in modern macOS versions.
-
-### SAN (Storage Area Network)
+### SAN and NAS
 
 A SAN is a high-speed, specialized network that provides consolidated block-level storage to servers. Unlike NFS and SMB (which present files), a SAN presents raw storage blocks, and the server formats and manages a filesystem on top. SANs use Fibre Channel or iSCSI for transport, eliminate single points of failure, and are designed for high bandwidth, low latency, and large scale. They are common in data centers for databases and virtual machine storage pools.
 
-### NAS (Network-Attached Storage)
-
 A NAS is a single device (or small cluster) that shares files over a standard TCP/IP network using NFS or SMB. Compared to a SAN, a NAS is simpler, less expensive, and easier to set up, but offers less throughput and scalability. NAS is appropriate for file archiving, home directories, and small-to-medium workloads.
+
+The distinction is worth summarizing directly:
 
 | | SAN | NAS |
 |-|-----|-----|
