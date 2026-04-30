@@ -490,7 +490,9 @@ You have built the full feedback loop from the lecture: lint, test across Python
 
 With `cancel-in-progress: false`, GitHub allows the currently running build to finish and queues at most one additional run. Any further runs that arrive while one is queued replace the queued entry, so only the latest pending commit survives. Push three commits in quick succession and watch the run list: the middle run is cancelled before it reaches the `build` job.
 
-**Push to Amazon ECR using OIDC instead of GHCR.** GHCR is convenient because it is built into GitHub and requires no external credentials. ECR is what most production systems running on AWS use. The modern pattern is OIDC: AWS trusts GitHub's identity provider, and the workflow exchanges a short-lived GitHub-issued token for temporary IAM credentials that expire when the job finishes. There is nothing to rotate and nothing to leak. To switch this `build` job from GHCR to ECR, first replace its permissions block with this one:
+**Push to Amazon ECR using OIDC instead of GHCR.** GHCR is convenient because it is built into GitHub and requires no external credentials. ECR is what most production systems running on AWS use. The modern pattern is OIDC: AWS trusts GitHub's identity provider, and the workflow exchanges a short-lived GitHub-issued token for temporary IAM credentials that expire when the job finishes. 
+
+{/* There is nothing to rotate and nothing to leak. To switch this `build` job from GHCR to ECR, first replace its permissions block with this one:
 
 ```yaml
     permissions:
@@ -539,4 +541,4 @@ Then replace the login, build, and push steps with these:
           docker push ${{ steps.ecr-login.outputs.registry }}/cs312-ci-activity:latest
 ```
 
-You also need an ECR repository named `cs312-ci-activity` in that AWS account and region before the push step runs, unless your account uses an ECR repository creation template for create-on-push behavior. The [GitHub OIDC documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) covers the AWS trust policy you need to configure on the IAM side. Plan about thirty minutes for the role and trust relationship setup.
+You also need an ECR repository named `cs312-ci-activity` in that AWS account and region before the push step runs, unless your account uses an ECR repository creation template for create-on-push behavior. The [GitHub OIDC documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect) covers the AWS trust policy you need to configure on the IAM side. Plan about thirty minutes for the role and trust relationship setup. */}

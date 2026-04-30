@@ -272,7 +272,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   lint-and-test:
@@ -291,6 +290,9 @@ jobs:
     needs: lint-and-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v6
 
@@ -304,17 +306,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Normalize image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}:latest" >> "$GITHUB_ENV"
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:latest
+          tags: ${{ env.IMAGE_NAME }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 ```
 
-`build-image` declares `needs: lint-and-test`, so it will not start until the first job succeeds. The `if` condition further restricts it to pushes on `main`, since there is no reason to push images for pull request branches. The `cache-from` and `cache-to` lines enable GitHub Actions' built-in layer caching for Docker builds, which can dramatically reduce build times by reusing unchanged layers across runs.
+`build-image` declares `needs: lint-and-test`, so it will not start until the first job succeeds. The `if` condition further restricts it to pushes on `main`, since there is no reason to push images for pull request branches. The job-level `permissions` block gives only the image-publishing job package write access, and the `Normalize image name` step avoids GHCR failures when the repository owner or name contains uppercase characters. The `cache-from` and `cache-to` lines enable GitHub Actions' built-in layer caching for Docker builds, which can dramatically reduce build times by reusing unchanged layers across runs.
 
 This short example uses only the `latest` tag to keep the YAML readable. In a production pipeline, also publish an immutable tag such as the commit SHA and deploy that exact reference.
 
@@ -600,17 +605,20 @@ jobs:
         id: version
         run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
+      - name: Normalize image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
       - name: Build and push versioned image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}
-            ghcr.io/${{ github.repository }}:latest
+            ${{ env.IMAGE_NAME }}:${{ steps.version.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:latest
 ```
 
-When someone runs `git tag v1.2.0 && git push --tags`, this workflow builds an image tagged with both `v1.2.0` and `latest`, then pushes both to the registry. The immutable version tag gives you a stable reference for rollback; the moving `latest` tag gives you a convenient "always the newest" pointer for casual use. A common refinement is to produce both a full semver tag (`v1.2.0`) and a rolling minor tag (`v1.2`) so that downstream consumers can choose their own update cadence.
+When someone runs `git tag v1.2.0 && git push --tags`, this workflow builds an image tagged with both `v1.2.0` and `latest`, then pushes both to the registry. The `Normalize image name` step is still necessary here because GHCR image names must be lowercase even when the Git tag itself contains uppercase-safe characters. The immutable version tag gives you a stable reference for rollback; the moving `latest` tag gives you a convenient "always the newest" pointer for casual use. A common refinement is to produce both a full semver tag (`v1.2.0`) and a rolling minor tag (`v1.2`) so that downstream consumers can choose their own update cadence.
 
 A deploy step that pulls from `latest` introduces a subtle race: if two pushes land in quick succession, the deploy triggered by the first push may end up pulling the image from the second. The safer pattern is to pass the specific immutable tag through a step output and reference it explicitly in the deploy step, so the job always runs the exact artifact the pipeline just built rather than whatever the `latest` pointer happens to resolve to at deploy time.
 
@@ -741,6 +749,7 @@ The adjacent lectures connect directly to this one. The Configuration Management
 
 ## Resources
 
+<a href="https://www.youtube.com/watch?v=zBrP8MzA5y0" target="_blank" rel="noopener noreferrer">GitLab CI CD automation (Docker, Kubernetes, Terraform, and more…) (Christian Lempa) (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=R8_veQiYBjI" target="_blank" rel="noopener noreferrer">GitHub Actions Tutorial: Basic Concepts and CI/CD Pipeline with Docker (TechWorld with Nana) (YouTube)</a>
 - <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments" target="_blank" rel="noopener noreferrer">Security Hardening for GitHub Actions Deployments (GitHub Docs)</a>
 - <a href="https://martinfowler.com/articles/continuousIntegration.html" target="_blank" rel="noopener noreferrer">Continuous Integration (Martin Fowler)</a>
