@@ -111,10 +111,10 @@ These pointers address the most common friction points so you can focus on the o
 
 1. **Operator Runbook (PDF)** containing all required documentation sections, the container deployment definition (`docker-compose.yml` or equivalent as a code block), and ECR repository URI with versioning policy and image provenance notes.
 2. **Narrated screen recording (max 3 minutes)**. Your server MOTD must include your name or student ID. **Submit timestamps alongside the video** (e.g., "Checkpoint 1: 0:00, Checkpoint 2: 0:38, ..."):
-  1. Show the running container (`docker ps` or equivalent), run `nmap -sV -Pn -p T:25565 <public-endpoint>` to confirm reachability and display your custom MOTD, then reboot the host and confirm the container returns automatically.
-   2. Identify the persistent world location used by your deployment (bind mount or named volume), create a marker file there, stop and remove the container, recreate it from the same image, and show the marker file and prior world data still exist after recreate.
-   3. Before changing versions, show the S3 backup artifact for that change window, then upgrade to a newer pinned deployable version and confirm the service is healthy (e.g., `nmap` or container status). Roll back to the prior known-good version and confirm it runs correctly. If the version difference depends on runtime configuration such as `VERSION=...`, show that change explicitly.
-   4. Upload a world data backup artifact to S3, then restore from that backup to the live service and confirm the service is healthy after restore.
+    1. Show the running container (`docker ps` or equivalent), run `nmap -sV -Pn -p T:25565 <public-endpoint>` to confirm reachability and display your custom MOTD, then reboot the host and confirm the container returns automatically.
+    2. Identify the persistent world location used by your deployment (bind mount or named volume), create a marker file there, stop and remove the container, recreate it from the same image, and show the marker file and prior world data still exist after recreate.
+    3. Before changing versions, show the S3 backup artifact for that change window, then upgrade to a newer pinned deployable version and confirm the service is healthy (e.g., `nmap` or container status). Roll back to the prior known-good version and confirm it runs correctly. If the version difference depends on runtime configuration such as `VERSION=...`, show that change explicitly.
+    4. Upload a world data backup artifact to S3, then restore from that backup to the live service and confirm the service is healthy after restore.
 
 ## Rubric
 

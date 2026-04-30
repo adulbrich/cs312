@@ -504,6 +504,14 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
      5. **Smoke test**: starts the container, waits 10 seconds, then checks if the health page returns HTTP 200. If it fails, the pipeline stops and the image is **not** pushed.
      6. **Tag and push**: tags the image with the ECR registry prefix and pushes it.
 
+    <Aside type="note" title="Why This Lab Uses AWS Secrets Instead of OIDC">
+    In a production AWS environment, GitHub Actions would usually authenticate with AWS by using **OpenID Connect (OIDC)** and assuming an IAM role. That avoids storing cloud credentials in GitHub.
+
+    AWS Academy Learner Lab does not permit students to create the IAM OIDC provider required for that setup. In testing, attempts to create `token.actions.githubusercontent.com` were denied with `iam:CreateOpenIDConnectProvider`. Because of that limitation, this lab uses the temporary AWS Academy credentials from the **AWS Details** page and stores them as GitHub Actions secrets instead.
+
+    If you later work in a full AWS account, replace this secrets-based step with an OIDC-based role assumption flow.
+    </Aside>
+
 4. **Configure repository secrets**
 
    In your GitHub repository, go to **Settings > Secrets and variables > Actions** and add three secrets:
