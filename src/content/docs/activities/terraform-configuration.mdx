@@ -8,6 +8,16 @@ sidebar:
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
+{/* ai-summary
+type: activity
+slug: terraform-configuration
+order: 7
+paired_lecture: infrastructure-as-code
+practices: provider and data source blocks; resource blocks for security group and EC2 instance; outputs and input variables; plan/apply/destroy workflow; state file inspection with terraform state list and terraform show; terraform import of an existing resource; HCL refactoring with locals
+prereq_activities: aws-console-tour
+output: a Terraform configuration that provisions a security group and EC2 instance, with the VPC from the previous activity imported into state, followed by a complete destroy
+*/}
+
 This activity puts into practice the concepts from the [Infrastructure as Code](/lectures/infrastructure-as-code/) lecture. Starting from a single provider block, you will incrementally build a configuration: two data sources, a security group, an EC2 instance, outputs, and variables. You will then import a VPC that was created by hand in the previous activity, compare the imported state to the HCL that manages it, and remove that VPC from this configuration before the final destroy. By the end, you will have run every phase of the Terraform workflow: plan, apply, state inspection, import, and destroy.
 
 ## What You Will Need

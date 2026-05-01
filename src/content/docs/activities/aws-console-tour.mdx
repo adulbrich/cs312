@@ -8,6 +8,16 @@ sidebar:
 import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
+{/* ai-summary
+type: activity
+slug: aws-console-tour
+order: 6
+paired_lecture: cloud-computing
+practices: VPC and subnet CIDR inspection; public vs private subnet routing (IGW vs local); security group inbound and outbound rules; IAM role creation and EC2 instance attachment; instance metadata service for credential retrieval; S3 bucket creation and object upload using role credentials; ECR repository creation and docker push with no credentials on disk
+prereq_activities:
+output: a two-tier VPC with a public EC2 probe host and a private EC2 instance, an S3 object uploaded using role credentials, and a container image pushed to ECR with no credentials stored on any instance
+*/}
+
 This activity puts into practice the concepts from the [Cloud Networking, Storage, and Identity](/lectures/cloud-computing/) lecture. You will inspect the default VPC, build the routing and security scaffold for a two-tier design, attach an IAM role to a public EC2 probe host, validate access to a private-tier instance, upload files to S3 without touching a credential file, and push a container image to a private ECR registry. By the end, you will have the network and security pieces of a two-tier VPC in place, two instances playing the public and private roles, and a container image running on your public probe host with no credentials stored anywhere on disk.
 
 <Aside type="note" title="How this topology differs from the lecture">
