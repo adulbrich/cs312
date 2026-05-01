@@ -1,0 +1,683 @@
+---
+title: "Local Kubernetes with Minikube"
+description: "Start a local Kubernetes cluster, deploy a personalized web workload with ConfigMaps and Secrets, watch Kubernetes heal and roll it out, and prove PVC-backed state survives pod replacement."
+sidebar:
+  order: 11
+draft: true
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
+
+{/* ai-summary
+type: activity
+slug: local-kubernetes-with-minikube
+order: 11
+paired_lecture: container-orchestration
+practices: minikube as a local Kubernetes distribution; control plane and addon inspection; namespace scoping; ConfigMap and Secret projection; Pod anatomy with an init container and shared volume; Deployment and ReplicaSet hierarchy; Service selection and stable endpoints; StatefulSet identity with PVC-backed storage; readiness, liveness, and startup probes; rolling restart and rollout status; manual scaling and HPA inspection; Ingress on a local cluster
+prereq_activities: docker-image-exploration
+output: a personalized web page served through a Kubernetes Service and Ingress on your laptop, plus a stateful note that survives pod replacement
+*/}
+
+This activity puts into practice the concepts from the [Container Orchestration](/lectures/container-orchestration/) lecture. You will start a local Kubernetes cluster with minikube, deploy a personalized web service using ConfigMaps, Secrets, Deployments, Services, Ingress, and a small StatefulSet with persistent storage, then watch the control loop heal and roll out your changes. By the end, you will have a personalized page reachable through Kubernetes on your laptop and a stateful workload whose data survives pod replacement.
+
+## What You Will Need
+
+- A working Docker environment from the earlier Docker activity, or an equivalent local Docker Engine or Docker Desktop setup that already passes `docker version`
+- `minikube` installed before class using the [official minikube start guide](https://minikube.sigs.k8s.io/docs/start/) and verified with `minikube version`
+- `kubectl` installed before class using the [official Kubernetes tools guide](https://kubernetes.io/docs/tasks/tools/) and verified with `kubectl version --client`
+- A terminal with `bash` or `zsh` available. Windows students should use WSL rather than PowerShell for this activity.
+- A text editor
+- Enough free RAM to run Docker plus a small local cluster comfortably
+
+<Aside type="note" title="Why minikube here?">
+This activity uses minikube because it is a good laptop cluster for one class session: quick to start, easy to discard, and able to expose addons like ingress and metrics-server locally. The later lab uses k3s on EC2 instead. The important part is that the Kubernetes objects you create here are the same API objects you will use there.
+</Aside>
+
+<Aside type="tip" title="What about kind?">
+You could run this activity with `kind` instead: it is fast, disposable, and especially nice for CI-style test clusters because the nodes themselves run as Docker containers. Minikube is the better fit for this class session because its addon workflow makes ingress and metrics-server simpler to expose on a student laptop, so the steps stay closer to one long-lived local cluster and farther from cluster bootstrapping details.
+</Aside>
+
+---
+
+## Start the Cluster
+
+Before you deploy anything, make the cluster itself visible. This section gives you a working node, the two addons this activity depends on, and a first look at which components belong to the control plane, which belong to cluster services, and which will eventually belong to you.
+
+<Steps>
+
+1. **Verify the three tools this activity assumes are already installed:**
+
+   ```bash
+   docker version
+   minikube version
+   kubectl version --client
+   ```
+
+   All three commands should print normal version information and return to the prompt. If `docker version` hangs or reports that the daemon is unavailable, start Docker before continuing.
+
+2. **Create a clean working directory for the manifests you are about to write:**
+
+   ```bash
+   mkdir -p ~/cs312-minikube
+   cd ~/cs312-minikube
+   ```
+
+   Keeping the manifests in one directory makes it easy to apply them again later, check them into Git, or reuse them in a different local cluster.
+
+3. **Start a single-node Kubernetes cluster with the Docker driver:**
+
+   ```bash
+   minikube start --driver=docker
+   ```
+
+   This creates a local cluster and configures your `kubectl` context to point at it. The command prints several setup lines and usually takes a minute or two on the first run.
+
+4. **Enable the ingress and metrics-server addons:**
+
+   ```bash
+   minikube addons enable ingress
+   minikube addons enable metrics-server
+   ```
+
+   The ingress addon gives you a local HTTP entry point later in the activity. The metrics-server addon makes `kubectl top` and the Horizontal Pod Autoscaler possible.
+
+5. **Inspect the cluster at a high level:**
+
+   ```bash
+   kubectl cluster-info
+   kubectl get nodes -o wide
+   kubectl get pods -A
+   kubectl get ns
+   ```
+
+   You should see one node in `Ready` state. In the pod list, look for `coredns`, `etcd`, `kube-apiserver`, and the ingress controller pods. Those are cluster components, not application workloads.
+
+6. **Look specifically at the system namespace:**
+
+   ```bash
+   kubectl get pods -n kube-system
+   ```
+
+   `kube-system` is where Kubernetes and addon components live. Your own application objects should not go here.
+
+</Steps>
+
+<ActivityQuestion>
+In the output from `kubectl get pods -A`, which pods represent the control plane or cluster services, and which of them would still exist even if you had not deployed an application yet? How does that reinforce the lecture's point that Kubernetes is an API platform first and a workload host second?
+</ActivityQuestion>
+
+---
+
+## Create a Namespace and Configuration
+
+Now create the first pieces of desired state. You will make a dedicated namespace for this activity, then store one non-sensitive value in a ConfigMap and one personal identifier in a Secret so the web workload can render both into its page.
+
+<Steps>
+
+1. **Create `namespace.yaml`:**
+
+   ```yaml
+   apiVersion: v1
+   kind: Namespace
+   metadata:
+     name: orchestration-lab
+   ```
+
+   A namespace gives this activity its own naming scope. The name `orchestration-lab` will appear on every object you create from here on.
+
+2. **Apply the namespace and make it your current default:**
+
+   ```bash
+   kubectl apply -f namespace.yaml
+   kubectl config set-context --current --namespace=orchestration-lab
+   kubectl config view --minify -o 'jsonpath={..namespace}'; echo
+   ```
+
+   The final command should print `orchestration-lab`. From now on, `kubectl` commands in this terminal target that namespace unless you override it.
+
+3. **Create `web-config.yaml`:**
+
+   ```yaml
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: orchestra-web-config
+     namespace: orchestration-lab
+   data:
+     message: |
+       This page is coming from a Deployment behind a Service.
+   ---
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: orchestra-web-owner
+     namespace: orchestration-lab
+   type: Opaque
+   stringData:
+     owner: YOUR_ONID
+   ```
+
+   Replace `YOUR_ONID` with your own ONID or another short identifier before saving the file. The ConfigMap holds normal configuration text; the Secret holds the personal value you do not want committed into plain configuration by default.
+
+4. **Apply the ConfigMap and Secret:**
+
+   ```bash
+   kubectl apply -f web-config.yaml
+   ```
+
+   Kubernetes stores both objects immediately. Nothing is using them yet, but the desired state now exists in the API.
+
+5. **Inspect what was stored:**
+
+   ```bash
+   kubectl get configmap,secret
+   kubectl get secret orchestra-web-owner -o jsonpath='{.data.owner}'; echo
+   kubectl get secret orchestra-web-owner -o jsonpath='{.data.owner}' | base64 --decode; echo
+   ```
+
+   The first secret lookup prints the base64-encoded form. The second decodes it back to the original text, which is why the lecture is careful to say that a Secret is an access-control boundary, not encryption by itself.
+
+6. **Inspect the namespace's service accounts:**
+
+   ```bash
+   kubectl get serviceaccount
+   ```
+
+   You should see a `default` service account. Every Pod runs as some service account, even when you have not created a custom one yet.
+
+</Steps>
+
+<ActivityQuestion>
+Why is the `owner` value safer in a Secret than in a ConfigMap or hardcoded into an image, even though you just decoded it with `base64 --decode` in one command? What protections does Kubernetes give you here, and which ones does it not?
+</ActivityQuestion>
+
+---
+
+## Deploy a Stateless Web Workload
+
+The next step is the core stateless case that Kubernetes handles well. You will deploy a web application with two replicas, generate its page in an init container, expose it with a ClusterIP Service, and inspect how the Deployment, ReplicaSet, Pods, labels, probes, and shared volumes fit together.
+
+<Steps>
+
+1. **Create `web-deployment.yaml`:**
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: orchestra-web
+     namespace: orchestration-lab
+   spec:
+     replicas: 2
+     strategy:
+       type: RollingUpdate
+       rollingUpdate:
+         maxUnavailable: 0
+         maxSurge: 1
+     selector:
+       matchLabels:
+         app: orchestra-web
+     template:
+       metadata:
+         labels:
+           app: orchestra-web
+       spec:
+         initContainers:
+           - name: render-page
+             image: busybox:1.36
+             command:
+               - sh
+               - -c
+               - |
+                 OWNER="$(cat /secrets/owner)"
+                 MESSAGE="$(cat /config/message)"
+                 cat > /work/index.html <<EOF
+                 <!doctype html>
+                 <html>
+                 <head>
+                   <meta charset="utf-8">
+                   <title>CS 312 Orchestration</title>
+                 </head>
+                 <body>
+                   <h1>CS 312 Container Orchestration</h1>
+                   <p><strong>Owner:</strong> ${OWNER}</p>
+                   <p>${MESSAGE}</p>
+                 </body>
+                 </html>
+                 EOF
+             volumeMounts:
+               - name: rendered-site
+                 mountPath: /work
+               - name: app-config
+                 mountPath: /config
+                 readOnly: true
+               - name: app-secret
+                 mountPath: /secrets
+                 readOnly: true
+         containers:
+           - name: nginx
+             image: nginx:1.27-alpine
+             ports:
+               - containerPort: 80
+             resources:
+               requests:
+                 cpu: 50m
+                 memory: 64Mi
+               limits:
+                 cpu: 250m
+                 memory: 128Mi
+             startupProbe:
+               httpGet:
+                 path: /
+                 port: 80
+               periodSeconds: 2
+               failureThreshold: 15
+             readinessProbe:
+               httpGet:
+                 path: /
+                 port: 80
+               periodSeconds: 5
+             livenessProbe:
+               httpGet:
+                 path: /
+                 port: 80
+               periodSeconds: 10
+             volumeMounts:
+               - name: rendered-site
+                 mountPath: /usr/share/nginx/html
+                 readOnly: true
+         volumes:
+           - name: rendered-site
+             emptyDir: {}
+           - name: app-config
+             configMap:
+               name: orchestra-web-config
+           - name: app-secret
+             secret:
+               secretName: orchestra-web-owner
+   ---
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: orchestra-web
+     namespace: orchestration-lab
+   spec:
+     type: ClusterIP
+     selector:
+       app: orchestra-web
+     ports:
+       - port: 80
+         targetPort: 80
+   ```
+
+   The Pod in this Deployment has two phases: the init container renders the HTML file from the ConfigMap and Secret into an `emptyDir`, then the nginx container serves that generated file. Both containers are in the same Pod because they need the same shared storage and lifecycle.
+
+2. **Apply the Deployment and wait for it to become ready:**
+
+   ```bash
+   kubectl apply -f web-deployment.yaml
+   kubectl rollout status deployment/orchestra-web
+   ```
+
+   The rollout status should end with `successfully rolled out`. Kubernetes does not just start a container once here; it keeps reconciling until the desired number of ready replicas exists.
+
+3. **Inspect the workload hierarchy:**
+
+   ```bash
+   kubectl get deployment,replicaset,pods,service -o wide
+   ```
+
+   You should see one Deployment, one ReplicaSet created by that Deployment, two Pods created by that ReplicaSet, and one ClusterIP Service selecting those Pods.
+
+4. **Capture one Pod name and inspect its owner and service account:**
+
+   ```bash
+   WEB_POD=$(kubectl get pods -l app=orchestra-web -o jsonpath='{.items[0].metadata.name}')
+   echo "$WEB_POD"
+   kubectl get pod "$WEB_POD" -o jsonpath='{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}'
+   kubectl get pod "$WEB_POD" -o jsonpath='{.spec.serviceAccountName}{"\n"}'
+   ```
+
+   The owner reference should point to a ReplicaSet, not directly to the Deployment. The service account should be `default`, which is the namespace identity the Pod is currently using.
+
+5. **Describe the Pod and look for the init container, probes, and volumes:**
+
+   ```bash
+   kubectl describe pod "$WEB_POD"
+   ```
+
+   Scroll until you find the `Init Containers`, `Containers`, `Mounts`, `Liveness`, `Readiness`, and `Startup` sections. This is where the lecture's abstract Pod model becomes concrete.
+
+6. **Prove the Service works from inside the cluster by DNS name:**
+
+   ```bash
+   kubectl run curl-test --rm -i --restart=Never --image=busybox:1.36 -- wget -qO- http://orchestra-web
+   ```
+
+   You should see the HTML page, including your personal identifier. The workload is reachable by Service name, not by hardcoded Pod IP.
+
+7. **Inspect the Service's current backends:**
+
+   ```bash
+   kubectl get endpoints orchestra-web
+   ```
+
+   The endpoints list should show two Pod IPs. Those are the current backends behind the stable Service name.
+
+</Steps>
+
+<ActivityQuestion>
+Docker Compose also let services reach each other by name on one machine. What new problem does the Kubernetes Service solve beyond that earlier pattern, and why is the stable Service name a better dependency target than a Pod name or Pod IP?
+</ActivityQuestion>
+
+---
+
+## Make Stateful Storage Visible
+
+Stateless frontends are only half the story. This section creates a tiny stateful workload with a PersistentVolumeClaim so you can see the exact difference between a Pod being replaced and the workload's data being lost.
+
+<Steps>
+
+1. **Create `stateful-note.yaml`:**
+
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: note-pad
+     namespace: orchestration-lab
+   spec:
+     clusterIP: None
+     selector:
+       app: note-pad
+     ports:
+       - port: 8080
+         targetPort: 8080
+   ---
+   apiVersion: apps/v1
+   kind: StatefulSet
+   metadata:
+     name: note-pad
+     namespace: orchestration-lab
+   spec:
+     serviceName: note-pad
+     replicas: 1
+     selector:
+       matchLabels:
+         app: note-pad
+     template:
+       metadata:
+         labels:
+           app: note-pad
+       spec:
+         containers:
+           - name: note-pad
+             image: busybox:1.36
+             command:
+               - sh
+               - -c
+               - |
+                 mkdir -p /data
+                 if [ ! -f /data/index.html ]; then
+                   echo '<h1>Stateful note pad</h1><p>Edit /data/index.html to make persistence visible.</p>' > /data/index.html
+                 fi
+                 httpd -f -p 8080 -h /data
+             ports:
+               - containerPort: 8080
+             volumeMounts:
+               - name: notes
+                 mountPath: /data
+     volumeClaimTemplates:
+       - metadata:
+           name: notes
+         spec:
+           accessModes:
+             - ReadWriteOnce
+           resources:
+             requests:
+               storage: 100Mi
+   ```
+
+   The headless Service (`clusterIP: None`) gives the StatefulSet stable DNS names. The volume claim template gives replica `note-pad-0` its own claim and keeps that claim attached to the workload's identity.
+
+2. **Apply the StatefulSet and wait for it to be ready:**
+
+   ```bash
+   kubectl apply -f stateful-note.yaml
+   kubectl rollout status statefulset/note-pad
+   ```
+
+   This should create one Pod named `note-pad-0` and one PVC named something like `notes-note-pad-0`.
+
+3. **Inspect the objects Kubernetes created for you:**
+
+   ```bash
+   kubectl get statefulset,pod,pvc
+   ```
+
+   Notice that the Pod name is ordinal and stable. That is the first sign that a StatefulSet is not treating its Pods as interchangeable.
+
+4. **Write your own content into the mounted volume:**
+
+   ```bash
+   kubectl exec note-pad-0 -- sh -c 'printf "<h1>Persisted from YOUR_ONID</h1>\n<p>This file lives on a PVC.</p>\n" > /data/index.html && cat /data/index.html'
+   ```
+
+   Replace `YOUR_ONID` with your own identifier before you run the command. You are writing directly into the persistent storage mounted at `/data`.
+
+5. **Read that same file back through the Pod's stable DNS name:**
+
+   ```bash
+   kubectl exec note-pad-0 -- wget -qO- http://note-pad-0.note-pad:8080/
+   ```
+
+   The DNS name `note-pad-0.note-pad` comes from the StatefulSet plus the headless Service. That naming pattern is what lets clients target a specific replica when ordering matters.
+
+6. **Delete the Pod and watch the StatefulSet replace it:**
+
+   ```bash
+   kubectl delete pod note-pad-0
+   kubectl get pod note-pad-0 -w
+   ```
+
+   Wait until the replacement Pod returns to `Running`, then stop the watch with Ctrl+C.
+
+7. **Confirm that the file survived the Pod replacement:**
+
+   ```bash
+   kubectl exec note-pad-0 -- cat /data/index.html
+   ```
+
+   The Pod was replaced, but the file should still be there. That is the operational distinction between Pod identity and storage identity.
+
+</Steps>
+
+<Aside type="note" title="What this persistence does not guarantee">
+The PVC survives replacement of `note-pad-0` inside this cluster, but it does not make minikube highly available. If you delete the entire minikube cluster, you delete the node that is holding the local storage too. The lecture's point still holds: PVC-backed storage outlives a Pod, but the durability guarantees depend on the underlying storage system.
+</Aside>
+
+<ActivityQuestion>
+If `note-pad` had been a Deployment using only the container's writable layer, what specifically would have changed after `kubectl delete pod note-pad-0`? Which part of the behavior came from the StatefulSet, and which part came from the PVC?
+</ActivityQuestion>
+
+---
+
+## Watch the Control Loop Publish and Update Your App
+
+You now have both a stateless and a stateful workload running. This section makes the control loop visible: Pods get replaced, replica counts change, an HPA object targets the Deployment, and your Service is finally published through an Ingress so the page is reachable from your laptop's browser.
+
+### Self-Healing, Scaling, and Rollouts
+
+This is the shortest path from lecture idea to visible behavior. Delete one Pod, change the desired replica count, and then roll out a configuration change while Kubernetes keeps the Deployment available.
+
+<Steps>
+
+1. **Delete one web Pod and watch the Deployment heal the gap:**
+
+   ```bash
+   kubectl get pods -l app=orchestra-web
+   WEB_POD=$(kubectl get pods -l app=orchestra-web -o jsonpath='{.items[0].metadata.name}')
+   kubectl delete pod "$WEB_POD"
+   kubectl get pods -l app=orchestra-web -w
+   ```
+
+   One Pod disappears, then a replacement appears automatically. Stop the watch with Ctrl+C after you are back to the desired replica count.
+
+2. **Scale the Deployment manually to three replicas:**
+
+   ```bash
+   kubectl scale deployment orchestra-web --replicas=3
+   kubectl get pods -l app=orchestra-web
+   ```
+
+   This is still declarative. You are not starting a third Pod directly. You are changing the desired replica count and letting Kubernetes do the work.
+
+3. **Check that metrics-server is feeding live resource data:**
+
+   ```bash
+   kubectl top pods
+   ```
+
+   If you get a metrics API error, wait one minute and run the command again. The addon can take a short time to become ready after the cluster starts.
+
+4. **Create `web-edge.yaml` with an HPA and an Ingress:**
+
+   ```yaml
+   apiVersion: autoscaling/v2
+   kind: HorizontalPodAutoscaler
+   metadata:
+     name: orchestra-web
+     namespace: orchestration-lab
+   spec:
+     scaleTargetRef:
+       apiVersion: apps/v1
+       kind: Deployment
+       name: orchestra-web
+     minReplicas: 2
+     maxReplicas: 5
+     metrics:
+       - type: Resource
+         resource:
+           name: cpu
+           target:
+             type: Utilization
+             averageUtilization: 50
+   ---
+   apiVersion: networking.k8s.io/v1
+   kind: Ingress
+   metadata:
+     name: orchestra-web
+     namespace: orchestration-lab
+   spec:
+     ingressClassName: nginx
+     rules:
+       - http:
+           paths:
+             - path: /
+               pathType: Prefix
+               backend:
+                 service:
+                   name: orchestra-web
+                   port:
+                     number: 80
+   ```
+
+   The HPA describes how Kubernetes should automate replica changes later. The Ingress describes how HTTP traffic should reach the Service.
+
+5. **Apply the HPA and Ingress, then inspect the autoscaler object:**
+
+   ```bash
+   kubectl apply -f web-edge.yaml
+   kubectl get hpa
+   ```
+
+   The current utilization might be `0%`, very low, or temporarily unknown. The important point is the target: the HPA is now another controller watching the same Deployment.
+
+6. **Change the web message in `web-config.yaml`, then apply it again:**
+
+   Replace the ConfigMap message with this line:
+
+   ```text
+   Rolling updates keep this page online while the desired state changes.
+   ```
+
+   Then apply the file again:
+
+   ```bash
+   kubectl apply -f web-config.yaml
+   ```
+
+   Nothing visible changes yet because the init container only re-renders the page when a Pod starts.
+
+7. **Roll the Deployment so new Pods pick up the new desired content:**
+
+   ```bash
+   kubectl rollout restart deployment/orchestra-web
+   kubectl rollout status deployment/orchestra-web
+   ```
+
+   Because the Deployment strategy allows one surge Pod and zero unavailable Pods, Kubernetes can replace the old replicas without dropping the whole service at once.
+
+</Steps>
+
+<ActivityQuestion>
+Why is `kubectl delete pod` a useful way to test self-healing but not a real fix for an application bug? After you changed the ConfigMap, which part of the system still required an explicit change in desired state before users could see the new page?
+</ActivityQuestion>
+
+### Publish the Page Through Ingress
+
+The Service is still internal to the cluster. This last hands-on section publishes the web workload through the ingress controller so you can reach it from your own browser and see the personalized result clearly.
+
+<Steps>
+
+1. **Start the minikube tunnel in a second terminal and leave it running:**
+
+   ```bash
+   minikube tunnel
+   ```
+
+   Leave that command running while you finish this section. On macOS it may ask for your password because it needs permission to create network routes.
+
+2. **In your original terminal, wait for the Ingress to report an address:**
+
+   ```bash
+   kubectl get ingress
+   ```
+
+   On Linux you will usually see an IP address appear in the `ADDRESS` column. On macOS and Windows with Docker Desktop or another local VM-backed runtime, the documented access pattern is usually `127.0.0.1` while the tunnel is running.
+
+3. **Fetch the page through the Ingress endpoint:**
+
+   <Tabs syncKey="os">
+   <TabItem label="macOS / Windows">
+
+   ```bash
+   curl http://127.0.0.1/
+   ```
+
+   </TabItem>
+   <TabItem label="Linux">
+
+   ```bash
+   curl "http://$(kubectl get ingress orchestra-web -o jsonpath='{.status.loadBalancer.ingress[0].ip}')/"
+   ```
+
+   </TabItem>
+   </Tabs>
+
+   You should now see the same personalized HTML page you generated earlier, this time reached through the ingress controller rather than from inside the cluster.
+
+4. **Open the same URL in a browser and leave the page visible:**
+
+   The page should show your identifier and the updated rolling-update message. This is the clean, visible end state for the activity: a real page, served through Kubernetes, with your own text on it.
+
+</Steps>
+
+---
+
+## Going Further
+
+You now have the core Kubernetes object model running locally: namespaces, Services, Deployments, StatefulSets, PVCs, probes, an HPA, and an Ingress. The natural next step is to move one layer up the stack and start working with the ecosystem that grows around those raw manifests.
+
+If you want to keep going, repackage the three web manifest files as a [Helm chart](https://helm.sh/docs/intro/using_helm/) so the owner, message, and replica counts move into `values.yaml`. Build a separate staging overlay with [Kustomize](https://kubernetes.io/docs/tasks/manage-kubernetes-objects/kustomization/) so you can change the message and replica count without copying the whole manifest set. To see the operator pattern become concrete, install [cert-manager](https://cert-manager.io/docs/installation/) on a throwaway minikube cluster and compare `kubectl get crd` before and after the install. When the later lab arrives, take the same mental model to k3s on EC2 and pay attention to what changes: the control plane packaging, the storage defaults, the ingress controller, and the operational cost of exposing the cluster to real users.
