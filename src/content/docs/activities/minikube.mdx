@@ -734,7 +734,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
 
    ```bash
    kubectl patch service orchestra-web -p '{"spec":{"type":"NodePort"}}'
-   minikube service orchestra-web --url
+   minikube service orchestra-web -n orchestration-lab --url
    ```
 
    Copy the URL printed and curl it (on macOS/WSL with the Docker driver, `minikube service --url` may keep a tunnel open, so run the curl in a second terminal):
@@ -743,7 +743,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
    curl <the-url-from-above>/
    ```
 
-   You should see the HTML page. Notice the port number in the URL: it is in the 30000-32767 range, which is what the lecture describes as the default NodePort range. This is a usable but blunt entry point: every node exposes the same port, regardless of whether it is running one of the Pods.
+   You should see the HTML page. Pass `-n orchestration-lab` explicitly here rather than assuming minikube will reuse your current `kubectl` namespace. Notice the port number in the URL: it is in the 30000-32767 range, which is what the lecture describes as the default NodePort range. This is a usable but blunt entry point: every node exposes the same port, regardless of whether it is running one of the Pods.
 
 2. **Switch back to ClusterIP and use Ingress instead:**
 
@@ -795,6 +795,43 @@ The Service is still internal to the cluster. This section first shows you NodeP
    The page should show your identifier and the updated rolling-update message. This is the clean, visible end state for the activity: a real page, served through Kubernetes, with your own text on it.
 
 </Steps>
+
+---
+
+## Clean Up
+
+Once you have verified the Ingress page, remove the activity resources so your next minikube exercise starts from a known state. The fastest cleanup is to stop any helper tunnels, delete the namespace, and reset your default `kubectl` namespace.
+
+<Steps>
+
+1. **Stop any helper terminals you started for local access:**
+
+   If `minikube service ... --url` or `minikube tunnel` is still running in another terminal, press Ctrl+C there first.
+
+   This closes the local helper tunnel and releases any routes or forwarded ports it created.
+
+2. **Delete the activity namespace and everything in it:**
+
+   ```bash
+   kubectl delete namespace orchestration-lab --wait=true
+   ```
+
+   Kubernetes cascades that delete to the Deployment, StatefulSet, Service, PVC, ConfigMap, Secret, HPA, Ingress, and any completed Job objects you created in this activity.
+
+3. **Reset your current `kubectl` namespace to `default`:**
+
+   ```bash
+   kubectl config set-context --current --namespace=default
+   kubectl config view --minify -o 'jsonpath={..namespace}'; echo
+   ```
+
+   The final command should print `default`. This keeps later `kubectl` commands from pointing at a namespace that no longer exists.
+
+</Steps>
+
+<Aside type="note" title="Optional Full Shutdown">
+If you are done with minikube for the day and want the RAM back, run `minikube stop`. If you want to discard the whole local cluster and its storage, run `minikube delete` instead.
+</Aside>
 
 ---
 
