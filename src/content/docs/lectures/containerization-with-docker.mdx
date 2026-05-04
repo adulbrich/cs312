@@ -1,5 +1,5 @@
 ---
-title: Containerization with Docker
+title: Containerization
 description: "From bare metal to containers: how Linux namespaces and cgroups power container isolation, how Docker images are built and layered, how volumes and Compose manage state and multi-service applications, how container replacement makes version upgrades clean, how Podman and the OCI standard define the broader ecosystem, and how FreeBSD jails, Windows containers, and WebAssembly sandboxes approach the same isolation problem differently."
 sidebar:
   order: 5
@@ -62,7 +62,7 @@ As containers became mainstream, Linux introduced [**cgroups v2**](https://www.k
 
 The network namespace deserves special attention: each container gets its own list of network interfaces, its own IP address space, its own routing table, and its own firewall rules. This is what allows multiple containers on the same host to each bind to port 80 without conflicting: they have separate network namespaces, so port 80 inside each container is an independent socket.
 
-The PID namespace is equally important: the first process started inside a container becomes PID 1 within that namespace, even though the host kernel assigns it a different PID on the host. Other processes inside the same container receive their own namespace-local PIDs. Processes in the container cannot enumerate or signal processes outside their namespace. From inside, the system appears to have only the processes that belong to the container.
+The PID namespace is equally important: the first process started inside a container becomes PID 1 within that namespace, even though the host kernel assigns it a different PID on the host. Other processes inside the same container receive their own namespace-local PIDs. Processes in the container cannot enumerate or signal processes outside their namespace. From inside, the system appears to have only the processes that belong to the container. This matters operationally later when you stop a container: the runtime sends the stop signal to that container's main process, which is PID 1 inside the container even if it has a different PID on the host.
 
 **[LXC](https://linuxcontainers.org/lxc/introduction/) (Linux Containers):** Combining cgroups and namespaces, LXC appeared around 2008 as a way to run a full "virtual operating system" without a hypervisor. An LXC container might run Ubuntu inside even though the host runs Debian, while sharing the same host kernel. This makes LXC very resource-efficient, but because the kernel is shared, a kernel vulnerability could potentially be exploited across container boundaries.
 
@@ -223,6 +223,8 @@ The most commonly used flags:
 ## Container Lifecycle
 
 Containers move through a simple lifecycle: created, running, stopped, removed. Docker provides commands for each state:
+
+Stopping is not just a Docker concept; it is a Unix process-control concept. A **signal** is a small message the kernel delivers to a process to tell it that something has happened or that it should take an action. **`SIGTERM`** is the polite request to shut down: it gives the application a chance to finish in-flight work, close files, flush buffers, and exit cleanly. **`SIGKILL`** is the forced stop: the kernel terminates the process immediately, and the process cannot catch it, ignore it, or do cleanup after receiving it. Docker uses both in sequence because a clean shutdown is better for application correctness, but a container that refuses to exit still has to be stopped eventually.
 
 ```bash
 # View running containers
