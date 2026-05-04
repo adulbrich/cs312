@@ -2,11 +2,18 @@
 title: System Security and Hardening
 description: "Practical server hardening from first boot: threat models, least privilege, SSH keys, UFW firewalls, Fail2Ban, patching, and auditing."
 sidebar:
-  order: 12
+  order: 13
 draft: true
 ---
 
-{/* TODO: Reframe this lecture as a security retrospective across prior topics (Linux, networking, containers, cloud, IaC, configuration management, CI/CD) with a forward-look at cluster security concerns (RBAC, secrets, network policies) for Lab 7. Update title and description once the reframing is drafted. */}
+{/* TODO: Reframe this lecture as a security retrospective across prior topics (Linux, networking, containers, cloud, IaC, configuration management, CI/CD) with a forward-look at cluster security concerns for Lab 7. Update title and description once the reframing is drafted.
+
+  Cluster security topics that belong here (moved from container-orchestration lecture):
+  - Admission controllers: validating and mutating webhooks, built-in controllers (LimitRanger, PodSecurity), external policy engines (OPA Gatekeeper, Kyverno), sidecar injection via webhooks
+  - Detailed RBAC model: Role vs. ClusterRole, RoleBinding vs. ClusterRoleBinding; why a default cluster is not a secure cluster; Namespaces as an organizational boundary vs. a security boundary; multi-tenancy limits (cluster-scoped resources, open pod-to-pod traffic, kernel escape risks)
+  - Secrets hardening: RBAC least-privilege access, encryption at rest in etcd
+  - NetworkPolicy enforcement and CNI requirements
+*/}
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';

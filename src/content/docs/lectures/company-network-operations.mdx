@@ -2,7 +2,7 @@
 title: Building and Operating a Company Network
 description: "Design and operate a real company network: hierarchical topology, VLANs, DNS, DHCP, email, TLS certificates, reverse proxies, VPNs, multi-location connectivity, and systematic troubleshooting."
 sidebar:
-  order: 16
+  order: 12
 draft: true
 ---
 
@@ -12,17 +12,17 @@ import HistoricalNote from '/src/components/HistoricalNote.astro';
 {/* ai-summary
 type: lecture
 slug: company-network-operations
-order: 16
-covers: hierarchical design; VLAN trunking; enterprise Wi-Fi; internal DNS and DHCP; routing and firewall debugging; overlay vs underlay networking; VPNs; reverse proxies; TLS; network storage
-prereq_lectures: networking-fundamentals
-followup_lectures: site-reliability-and-capacity-planning
+order: 12
+covers: hierarchical design; VLAN trunking; enterprise Wi-Fi; internal DNS and DHCP; routing and firewall debugging; overlay vs underlay networking; VPNs; reverse proxies and load balancers; TLS certificates; network storage
+prereq_lectures: networking-fundamentals, container-orchestration
+followup_lectures: system-security-and-hardening
 paired_activities:
 supports_labs: cluster-operations
 */}
 
-Running a company network is never just one thing. You are simultaneously a network designer, a systems architect, a security enforcer, and a first responder. When a developer reports that the application is unreachable, you need to know whether to check the VLAN configuration, the firewall rules, the DNS records, or the TLS certificate. And you need to know how to distinguish between those quickly, without guessing.
+Running a company network is never just one thing. You are simultaneously a network designer, a systems architect, a security enforcer, and a first responder. When a developer reports that an application is unreachable, the failure could live anywhere in a stack that spans physical cables, VLAN assignments, routing tables, firewall rules, DNS records, TLS certificates, and application code. A sysadmin who built and understands the network does not guess; they work through the stack methodically until the failure reveals itself.
 
-When a developer reports that an application is unreachable, the failure could live anywhere in a stack that spans physical cables, VLAN assignments, routing tables, firewall rules, DNS records, TLS certificates, and application code. A sysadmin who built and understands the network does not guess; they work through the stack methodically until the failure reveals itself. Building on the Networking Fundamentals lecture, this lecture stays at the enterprise and operational layer: access versus trunk ports, split-horizon DNS, firewall policy layers, certificate renewal, and multi-site connectivity.
+Building on the Networking Fundamentals lecture, this lecture operates at the enterprise layer: hierarchical topology, VLAN segmentation, internal DNS and DHCP, firewall policy, TLS certificate management, reverse proxies, VPNs, and multi-site connectivity. These are the services that container clusters, applications, and the business all depend on. Understanding them alongside container orchestration concepts helps you reason about why Kubernetes networking behaves the way it does and what lies beneath the ingress controller, the CNI plugin, and the overlay network.
 
 ## A systematic troubleshooting methodology
 
@@ -558,6 +558,12 @@ server {
 
 The `upstream` block defines a pool of backends. `proxy_pass` forwards all requests to that pool in round-robin order by default. The `proxy_set_header` directives ensure the backend sees the original client IP and hostname rather than the proxy's own values, which matters for access logging and IP-based rate limiting on the backend.
 
+### Reverse proxies and Kubernetes Ingress
+
+In a Kubernetes cluster, an **Ingress controller** plays exactly the same role as a reverse proxy at the cluster edge. An Nginx Ingress controller is literally an Nginx deployment managed by Kubernetes: instead of hand-editing config files, you declare `Ingress` objects that specify routing rules, and the controller translates them into `upstream` and `server` blocks automatically. When you define an Ingress that routes traffic to `app-service` in the `production` namespace, the controller produces configuration nearly identical to the Nginx block above. TLS termination still happens at the proxy, backends are still cluster services, and the load balancing algorithm still distributes requests across pods.
+
+Understanding how Nginx works as a reverse proxy makes reading and debugging Kubernetes Ingress behavior much less opaque. The controller's behavior, its annotations, and its failure modes all trace back to the same Nginx concepts. Other controllers (Traefik, Envoy-based, HAProxy-based) follow the same pattern with different underlying software.
+
 ## TLS Certificates
 
 Networking Fundamentals already introduced the TLS handshake, the certificate chain, and the role of a Certificate Authority. The operational side is different: certificates have to be issued, renewed, logged, stapled, rotated, and debugged under production constraints. That is the focus here.
@@ -666,7 +672,7 @@ The design concepts and the troubleshooting concepts in this lecture are not sep
 
 A connectivity failure that once seemed opaque resolves into a stack of checkable layers: physical link state, VLAN assignment, IP addressing, DNS resolution, routing, firewall rules, and finally the application itself. Each layer either explains the problem or eliminates itself from consideration. The divide-and-conquer approach works because the layers are largely independent: a broken DHCP server has nothing to do with a misconfigured firewall rule, and a certificate expiry has nothing to do with a missing route. Every tool covered here, from `ip neighbor show` to `dig` to `openssl s_client` to `tcpdump`, targets a specific layer. The skill is knowing which layer to check first.
 
-The network topics here connect forward to infrastructure automation: Terraform will provision VPCs and security groups using the same conceptual model applied here with `iptables` and DHCP reservations; Ansible will configure Nginx and firewall rules idempotently across fleets of servers. Both tools depend on the same understanding of what a security group is, what a subnet boundary means, and why a firewall rule that works on a single server needs to be encoded in configuration management rather than set by hand.
+The infrastructure layer covered here connects in two directions. Looking backward, the Container Orchestration lecture introduced Kubernetes networking abstractions: overlay networks, CNI plugins, Services, and pod-to-pod routing. Those abstractions make more sense when you understand the underlay they sit on: the VLAN topology, the physical routing, and the DNS infrastructure that Kubernetes clusters inherit from or operate alongside. The Ingress controller's role as a reverse proxy is identical in concept to the Nginx upstream configuration above; only the control plane differs. Looking forward, the System Security and Hardening lecture will revisit firewalls, TLS, and access controls through a security-first lens, treating misconfigured firewall rules and expired certificates not as troubleshooting problems but as attack surfaces to be eliminated before they are exploited.
 
 ## Resources
 

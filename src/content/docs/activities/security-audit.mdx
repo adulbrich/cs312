@@ -2,11 +2,23 @@
 title: "Server Security Audit"
 description: "Run a structured security audit on a Linux EC2 instance using SSH config review, port scanning, auth log analysis, and firewall inspection."
 sidebar:
-  order: 12
+  order: 13
 draft: true
 ---
 
+{/* TODO: fully revisit */}
+
 import { Aside, Steps } from '@astrojs/starlight/components';
+
+{/* ai-summary
+type: activity
+slug: security-audit
+order: 13
+paired_lecture: system-security-and-hardening
+practices: SSH configuration hardening review (PasswordAuthentication, PermitRootLogin, AllowUsers); open port enumeration with ss and nmap; auth log review for failed login attempts with lastb and grep; UFW firewall rule inspection; active user account review with /etc/passwd and last; sudo privilege inspection
+prereq_activities: scripting
+output: a completed audit checklist with a finding and a remediation note for each check, run against the student's EC2 instance
+*/}
 
 A security audit is not a one-time event — it is a repeatable checklist you run whenever a new server is provisioned or after a configuration change. This activity walks you through a minimal audit on your own EC2 instance.
 

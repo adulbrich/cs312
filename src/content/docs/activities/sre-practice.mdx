@@ -1,0 +1,300 @@
+---
+title: "Chaos Engineering: Controlled Failures on Kubernetes"
+description: "Run three controlled chaos experiments on a Kubernetes deployment: inject pod failures, trigger an OOM kill, and verify the cluster recovers to steady state each time."
+sidebar:
+  order: 17
+draft: true
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
+
+{/* ai-summary
+type: activity
+slug: sre-practice
+order: 17
+paired_lecture: site-reliability-and-capacity-planning
+practices: steady-state definition before failure injection; pod deletion and Deployment controller recovery timing; full-deployment restart and recovery observation; memory limit enforcement and OOM kill cycle with kubectl describe forensics; blast radius scoping to a single namespace; post-experiment steady-state verification
+prereq_activities: local-kubernetes-with-minikube
+output: kubectl get all output showing the student's ONID-named deployment recovered to full steady state after three chaos experiments
+*/}
+
+This activity puts into practice the concepts from the [Site Reliability Engineering and Capacity Planning](/lectures/site-reliability-and-capacity-planning/) lecture. You will run three controlled chaos experiments on a Kubernetes deployment: delete a single pod, delete all pods at once, and trigger an OOM kill. At each step you will state a hypothesis before running the experiment and compare what you predicted to what you observe. By the end, you will have seen the Deployment controller, the kubelet restart policy, and the OOM killer each respond to a different failure mode under controlled conditions.
+
+## What You Will Need
+
+- Minikube installed and your cluster from the [Local Kubernetes with Minikube](/activities/local-kubernetes-with-minikube/) activity
+- Two terminal windows open side by side: one for watching, one for running commands
+- Your ONID
+
+---
+
+## Deploy the Test Environment
+
+Before injecting any failures, you need a known-good state to test against. This is what the lecture calls the steady-state definition: a measurable description of what normal looks like before you change anything.
+
+<Steps>
+
+1. Make sure your Minikube cluster is running:
+
+   ```bash
+   minikube status
+   ```
+
+   If you see `host: Running` and `kubelet: Running`, you are ready. If minikube is stopped, start it:
+
+   ```bash
+   minikube start
+   ```
+
+2. Create a dedicated namespace for this activity. Scoping the experiment to its own namespace limits the blast radius if something goes wrong:
+
+   ```bash
+   kubectl create namespace chaos-lab
+   ```
+
+3. Create a Deployment named with your ONID. Replace `<your-onid>` with your actual ONID:
+
+   ```bash
+   kubectl create deployment <your-onid>-web \
+     --image=nginx:alpine \
+     --replicas=3 \
+     -n chaos-lab
+   ```
+
+4. Expose the Deployment as a Service so it has a stable endpoint:
+
+   ```bash
+   kubectl expose deployment <your-onid>-web --port=80 -n chaos-lab
+   ```
+
+5. Wait for all three replicas to become ready:
+
+   ```bash
+   kubectl rollout status deployment/<your-onid>-web -n chaos-lab
+   ```
+
+   You will see:
+   ```
+   Waiting for deployment "<your-onid>-web" rollout to finish: 0 of 3 updated replicas are available...
+   deployment "<your-onid>-web" successfully rolled out
+   ```
+
+6. Confirm steady state:
+
+   ```bash
+   kubectl get pods -n chaos-lab
+   ```
+
+   All three pods should show `1/1 Running` and zero restarts:
+   ```
+   NAME                         READY   STATUS    RESTARTS   AGE
+   jdoe-web-7d5b9dbb4b-4xk2p   1/1     Running   0          30s
+   jdoe-web-7d5b9dbb4b-8qnrv   1/1     Running   0          30s
+   jdoe-web-7d5b9dbb4b-nwmpj   1/1     Running   0          30s
+   ```
+
+   Note the three pod names. You will use one of them in the next section.
+
+</Steps>
+
+---
+
+## Experiment 1: One Pod Fails
+
+In production, a single pod can die from a crash, a bug, or a node issue. Test whether the Deployment controller notices and replaces it.
+
+Before running this experiment, write your hypothesis in one sentence: how quickly do you expect a replacement pod to appear?
+
+<Steps>
+
+1. In your second terminal, start a live watch of the pods:
+
+   ```bash
+   watch kubectl get pods -n chaos-lab
+   ```
+
+   This refreshes every 2 seconds. Keep this window visible.
+
+2. In the first terminal, delete one of the three pods. Use one of the names you recorded above:
+
+   ```bash
+   kubectl delete pod <pod-name> -n chaos-lab
+   ```
+
+   The command returns as soon as the delete request is accepted, not when the replacement is ready.
+
+3. Watch the second terminal. The deleted pod enters `Terminating` and disappears within a few seconds. A new pod appears in `ContainerCreating`, then transitions to `Running`.
+
+4. Check the age of the replacement to confirm it is new:
+
+   ```bash
+   kubectl get pods -n chaos-lab --sort-by=.metadata.creationTimestamp
+   ```
+
+   The newest pod appears at the bottom with a much younger `AGE` than the other two.
+
+5. Compare the result to your hypothesis. Did recovery take longer or shorter than you expected?
+
+</Steps>
+
+<ActivityQuestion>
+The Deployment controller replaced the deleted pod, but it created a completely new pod rather than restarting the same one. What does this tell you about how Kubernetes models the relationship between a Deployment and its Pods? Why does this behavior matter for the blast-radius principle the lecture describes?
+</ActivityQuestion>
+
+---
+
+## Experiment 2: Total Deployment Failure
+
+A complete replica loss can happen from a bad rollout, a node pool restart, or accidental deletion. Test how the cluster behaves when every replica disappears at once.
+
+Write your hypothesis before running: will recovery from zero take longer than recovery from one? How long do you predict the Service will have no healthy endpoints?
+
+<Steps>
+
+1. Note the current time in your first terminal.
+
+2. Delete all pods in the namespace simultaneously:
+
+   ```bash
+   kubectl delete pods --all -n chaos-lab
+   ```
+
+3. Watch the second terminal. All three pods enter `Terminating` at the same time. New pods start appearing in `ContainerCreating` almost immediately; the Deployment controller does not wait for the old pods to finish terminating before requesting replacements.
+
+4. Time how long it takes from the delete command until all three replacement pods show `1/1 Running`. Record this number.
+
+5. Confirm the Service is still present and now points to the new pods:
+
+   ```bash
+   kubectl get endpoints -n chaos-lab
+   ```
+
+   You will see three IP addresses in the `ENDPOINTS` column, one for each new pod. The Service was never deleted; it selected the new pods by label as soon as they became ready.
+
+</Steps>
+
+<ActivityQuestion>
+During the gap between deleting all pods and the replacements becoming ready, the Service had no healthy endpoints. The lecture covers this as part of release safety and blast radius. Based on the timing you measured, how long was that window? If this deployment were serving real user traffic, what would users have experienced during that window?
+</ActivityQuestion>
+
+---
+
+## Experiment 3: Memory Saturation
+
+CPU pressure degrades performance gradually. Memory exhaustion kills a container abruptly. The OOM (out-of-memory) killer terminates containers that exceed their limit and leaves a specific trace you can inspect.
+
+<Steps>
+
+1. Apply a manifest that runs a container designed to allocate more memory than its limit allows. The `stress` tool allocates a fixed block of memory and holds it:
+
+   ```bash
+   kubectl apply -n chaos-lab -f - <<'EOF'
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: oom-demo
+   spec:
+     restartPolicy: Always
+     containers:
+     - name: oom-demo
+       image: polinux/stress
+       resources:
+         limits:
+           memory: "64Mi"
+       command: ["stress"]
+       args: ["--vm", "1", "--vm-bytes", "128M", "--vm-hang", "1"]
+   EOF
+   ```
+
+   This container is limited to 64 MiB but tries to allocate 128 MiB. Watch the second terminal.
+
+2. You will see the pod move through these states in quick succession:
+
+   - `ContainerCreating`: the image is being pulled and the container is starting
+   - `Running`: the stress tool is running and allocating memory
+   - `OOMKilled`: the kernel kills the container when it exceeds 64 MiB
+   - `CrashLoopBackOff`: kubelet backs off before restarting the container again
+
+   This entire cycle typically completes within 30 seconds.
+
+3. Once you see `OOMKilled` or `CrashLoopBackOff`, inspect the pod:
+
+   ```bash
+   kubectl describe pod oom-demo -n chaos-lab
+   ```
+
+   Look for the `Last State` block near the top of the output:
+
+   ```
+   Last State:     Terminated
+     Reason:       OOMKilled
+     Exit Code:    137
+     Started:      ...
+     Finished:     ...
+   ```
+
+   Exit code 137 is SIGKILL (128 + 9). The OOM killer sends SIGKILL directly: no graceful shutdown, no cleanup, no warning to the container process.
+
+4. Check how many times kubelet has restarted the container:
+
+   ```bash
+   kubectl get pod oom-demo -n chaos-lab
+   ```
+
+   The `RESTARTS` column shows the count. If the pod has been running long enough, you will see the count climbing as kubelet applies an exponential backoff before each restart attempt.
+
+5. Delete the oom-demo pod:
+
+   ```bash
+   kubectl delete pod oom-demo -n chaos-lab
+   ```
+
+</Steps>
+
+<ActivityQuestion>
+The lecture says memory saturation is sudden rather than gradual, while CPU saturation degrades performance slowly. Did you observe that distinction here? If `oom-demo` had been your WordPress database container instead of a stress tool, how would the user-visible effect have differed from a CPU-throttled container hitting the same load?
+</ActivityQuestion>
+
+---
+
+## Verify Steady State
+
+The last step of every chaos experiment is confirming the system returned to its defined steady state. After three experiments, check that the original deployment is healthy and the namespace is clean.
+
+<Steps>
+
+1. Confirm the deployment has its full replica count:
+
+   ```bash
+   kubectl rollout status deployment/<your-onid>-web -n chaos-lab
+   ```
+
+   You should see:
+   ```
+   deployment "<your-onid>-web" successfully rolled out
+   ```
+
+2. Check that all pods are running with low restart counts:
+
+   ```bash
+   kubectl get pods -n chaos-lab
+   ```
+
+   All three pods should show `1/1 Running`. The restart count may be non-zero if the Deployment replicas were restarted during the experiments, but all should be in `Running` state now.
+
+3. Get a full view of everything in the namespace:
+
+   ```bash
+   kubectl get all -n chaos-lab
+   ```
+
+   You will see the Deployment, ReplicaSet, three Pods, and the Service. Your ONID appears in the Deployment and Pod names, and all resources show healthy status.
+
+</Steps>
+
+## Going Further
+
+You have run three of the experiments the lecture lists as natural starting points for a chaos engineering practice: single pod failure, full replica loss, and memory limit enforcement. Each tested a failure mode Kubernetes is designed to handle.
+
+The next step is testing a failure mode it is not designed to handle automatically: network partition. [LitmusChaos](https://litmuschaos.io/) and [Chaos Mesh](https://chaos-mesh.org/) both run as Kubernetes controllers and can inject network latency, packet loss, and partition failures between specific pods, with blast radius controls and rollback built in. Install either in your cluster, then run one of their built-in network chaos experiments against your `<your-onid>-web` deployment. Observe whether the Service continues routing traffic around a partitioned pod, and check what the nginx access logs show for requests that hit the partitioned replica during the experiment window.

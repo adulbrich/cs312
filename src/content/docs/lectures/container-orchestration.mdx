@@ -3,7 +3,6 @@ title: Container Orchestration
 description: "From Docker Compose to clusters: how Kubernetes solves the single-host problem with declarative state, Pods, Deployments, Services, and a self-healing control loop, why it won the orchestration wars, and how its distributions and managed offerings fit into real infrastructure."
 sidebar:
   order: 11
-draft: true
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -158,7 +157,7 @@ flowchart LR
 
 **The container runtime** is responsible for the actual mechanics of starting and stopping containers. Kubernetes defines a standard interface called the **Container Runtime Interface (CRI)**; any runtime that implements CRI can be used. The most common today is **[containerd](https://containerd.io/)**, which handles pulling images, unpacking them, and calling into the OS kernel (via `runc` and libcontainer) to create the namespaces and cgroups. [**CRI-O**](https://cri-o.io/) is a minimal alternative used heavily on Red Hat platforms. Kubernetes itself does not care which CRI-compatible runtime you use.
 
-[**kube-proxy**](https://kubernetes.io/docs/reference/networking/virtual-ips/) usually runs on each node and maintains network rules (typically iptables or IPVS rules) that implement Services. Some clusters use a service-aware CNI or eBPF dataplane instead, in which case kube-proxy may be omitted.
+[**kube-proxy**](https://kubernetes.io/docs/reference/networking/virtual-ips/) usually runs on each node and maintains the network rules that make Services work. Some clusters let their networking layer handle that job instead, so kube-proxy is not always required.
 
 <Aside type="note" title="Standard Interfaces, Swappable Implementations">
 A consistent design theme in Kubernetes is stable interfaces with pluggable implementations. The **Container Runtime Interface (CRI)** decouples the kubelet from whatever actually creates containers, so a cluster can swap containerd for CRI-O without changing anything else. The **Container Network Interface (CNI)** does the same for pod networking: Flannel, Calico, and Cilium each implement the same contract, so the control plane does not care which is installed. The **Container Storage Interface (CSI)** lets cloud providers and storage vendors ship volume drivers without modifying Kubernetes itself.
@@ -248,7 +247,7 @@ Pods with no CPU or memory requests or limits fall into the `BestEffort` QoS cla
 
 Deployments assume their pods are interchangeable. That assumption breaks for stateful workloads: a database replica named `mysql-0` is not the same thing as `mysql-1`, and the storage attached to one is not interchangeable with the storage attached to another. A [**StatefulSet**](https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/) is the workload controller for that case.
 
-A StatefulSet gives each pod a stable, ordinal name (`mysql-0`, `mysql-1`, `mysql-2`) and a dedicated [**PersistentVolumeClaim**](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims) that follows the pod across restarts. When it is paired with its governing Service, it gets a stable DNS identity. Pods are started and stopped in order, so consensus systems and primary/replica databases can rely on predictable startup sequences. When `mysql-0` is rescheduled to a different node, it keeps its name and reattaches to the same volume.
+A StatefulSet gives each pod a stable, ordinal name (`mysql-0`, `mysql-1`, `mysql-2`) and a dedicated [**PersistentVolumeClaim (PVC)**](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims) that follows the pod across restarts. When it is paired with its governing Service, it gets a stable DNS identity. Pods are started and stopped in order, so consensus systems and primary/replica databases can rely on predictable startup sequences. When `mysql-0` is rescheduled to a different node, it keeps its name and reattaches to the same volume.
 
 What a StatefulSet does *not* do is keep application data in sync for you. Kubernetes is only providing the stable identities, ordering, and storage that a stateful workload needs; the actual replication is still the job of the application, an operator, or bootstrap logic. A PersistentVolumeClaim is not exclusive to StatefulSets; a Deployment can mount a PVC too. The difference is that a StatefulSet is the standard choice when each replica needs its own stable identity and its own persistent volume. In other words, the example below shows the identity-and-storage pattern, not a working PostgreSQL replication topology. If you applied it as written, you would get three independent PostgreSQL Pods with separate volumes, not an automatically replicated three-node database cluster.
 
@@ -288,7 +287,7 @@ spec:
 
 A `volumeClaimTemplate` is the StatefulSet's way of saying "every pod I manage gets its own PersistentVolumeClaim with this shape." The three replicas in this example produce three PVCs (`data-postgres-0`, `data-postgres-1`, `data-postgres-2`), each bound to a different underlying volume. The database files survive pod restarts, node reboots, and rescheduling, because the volume is bound to the StatefulSet's logical pod identity, not to the underlying host. Stateful workloads are also typically paired with Service-based DNS that gives each replica a stable name such as `postgres-0.postgres` or `postgres-1.postgres`, so other workloads can address a specific replica when ordering matters.
 
-This example assumes a Service named `postgres` already exists. Setting `clusterIP: None` makes it a **headless Service**, which means the Pods get their own DNS names instead of one shared ClusterIP.
+This example assumes a Service named `postgres` already exists. Setting `clusterIP: None` makes it a [**headless Service**](https://kubernetes.io/docs/concepts/services-networking/service/#headless-services), which means the Pods get their own DNS names instead of one shared ClusterIP.
 
 ### DaemonSets
 
@@ -671,9 +670,11 @@ A CRD by itself is only schema. The part that makes it useful is a controller wa
 
 ### Local and Lightweight Clusters
 
-For laptop and CI work, **[kind](https://kind.sigs.k8s.io/)** and **[minikube](https://minikube.sigs.k8s.io/)** are common choices. kind runs clusters as Docker containers, which makes it fast and disposable. minikube is more like a long-lived local cluster. For small servers, edge sites, and this course's orchestration work, **[k3s](https://k3s.io/)** is the most relevant lightweight distribution. It remains conformant Kubernetes, packages the control plane into a small binary, uses SQLite by default on a single-server install, and uses embedded etcd or an external datastore for HA. A default install bundles basics such as CoreDNS, metrics-server, local-path storage, and [Traefik](https://traefik.io/) as the Ingress controller.
+For laptop and CI work, **[kind](https://kind.sigs.k8s.io/)** and **[minikube](https://minikube.sigs.k8s.io/)** are common choices. kind runs clusters as Docker containers, which makes it fast and disposable. minikube is more like a long-lived local cluster. For small servers, edge sites, and this course's orchestration work, **[k3s](https://k3s.io/)** is the most relevant lightweight distribution. It remains conformant Kubernetes, packages the control plane into a small binary, uses SQLite by default on a single-server install, and uses embedded etcd or an external datastore for High-Availability (HA). A default install bundles basics such as CoreDNS, metrics-server, local-path storage, and [Traefik](https://traefik.io/) as the Ingress controller.
 
 Other distributions, including [k0s](https://k0sproject.io/), [MicroK8s](https://microk8s.io/), [Talos](https://www.talos.dev/), [OpenShift](https://www.redhat.com/en/technologies/cloud-computing/openshift), and [Rancher](https://www.rancher.com/)-based platforms, make different tradeoffs around footprint, security posture, and enterprise integrations. The object model largely carries across them. A Deployment is still a Deployment.
+
+For teams that want to assemble a self-managed cluster from first principles without a pre-packaged distribution, [**kubeadm**](https://kubernetes.io/docs/reference/setup-tools/kubeadm/) is the standard bootstrapping tool. It initializes the control plane on a first node, generates the required certificates and kubeconfig files, and produces join tokens that worker nodes use to register with the cluster. What kubeadm deliberately does not include is a CNI plugin, a storage provisioner, or an Ingress controller: those choices remain yours. Lightweight distributions like k3s bundle sensible defaults so you can have a working cluster in minutes; kubeadm gives you a correct cluster with no opinions, which suits environments where specific networking, storage, or compliance requirements make the bundled defaults unsuitable.
 
 ### Managed Kubernetes
 

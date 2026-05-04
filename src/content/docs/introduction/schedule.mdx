@@ -71,37 +71,37 @@ Terraform is introduced Tuesday so you have the full week to internalize IaC con
 
 Both lectures directly prepare you for Lab 6 the following week, giving you a full week to absorb Ansible and GitHub Actions before building the automated pipeline. The Terraform infrastructure from Lab 5 is exactly what Ansible and CI/CD will configure and deploy to in Lab 6.
 
-## Week 6: Kubernetes and Security Retrospective
+## Week 6: Kubernetes and Network Infrastructure
 
 | | |
 |---|---|
-| **Lecture 11** | Container Orchestration |
-| **Lecture 12** | System Security and Hardening |
+| **Lecture 11** | [Container Orchestration](/lectures/container-orchestration/) |
+| **Lecture 12** | Building and Operating a Company Network |
 | **Lab 6** | [Automated Configuration and Deployment (Ansible + GitHub Actions)](/labs/automated-configuration-and-deployment/) |
 | **Assignment 3** | **Sunday: [Ops 3: Infrastructure Automation](/assignments/minecraft-3-infrastructure-automation/)** |
 
-Kubernetes is introduced a full week and a half before Lab 7's k3s deployment so the orchestration concepts have time to settle before you apply them. The security lecture then revisits Linux, networking, containers, cloud, IaC, configuration management, and CI/CD through a security lens, and extends forward to the cluster security concerns (RBAC, secrets, network policies) that Lab 7 will begin to surface.
+Container Orchestration is introduced a full week and a half before Lab 7's k3s deployment so the orchestration concepts have time to settle before you apply them. The company network lecture follows immediately: reverse proxies, load balancers, DNS, TLS, VLANs, and overlay versus underlay networking are the infrastructure layer that Kubernetes clusters sit on. Covering them together makes the connection between Ingress controllers and ordinary reverse proxies, and between CNI overlays and physical network topology, concrete rather than abstract.
 
-## Week 7: Operating in Production
+## Week 7: Security and Observability
 
 | | |
 |---|---|
-| **Lecture 13** | Monitoring, Alerting, and Observability |
-| **Lecture 14** | Incident Response and Disaster Recovery |
+| **Lecture 13** | System Security and Hardening |
+| **Lecture 14** | Monitoring, Alerting, and Observability |
 | **Lab 7** | [First Container Orchestration Deployment (k3s)](/labs/first-container-orchestration-deployment/) |
 
-Monitoring, Alerting, and Observability lands one week before Lab 8's health-probe work so metrics, SLOs, and alert design concepts are fresh when you need them. Incident Response follows on Thursday, one week ahead of Lab 8's failure drills (bad images, OOM kills, rollbacks), so you arrive at those drills with the right mental model for triage and with the Kubernetes mitigation commands fresh in your head.
+System Security and Hardening revisits Linux, networking, containers, cloud, IaC, configuration management, and CI/CD through a security lens, and extends forward to cluster security concerns (RBAC, secrets, network policies) that Lab 7 will begin to surface. Monitoring, Alerting, and Observability lands the same week, one week before Lab 8's health-probe work, so metrics, SLOs, and alert design concepts are fresh when you need them.
 
-## Week 8: Diagnostics and Network Breadth
+## Week 8: Incident Response and Log Diagnostics
 
 | | |
 |---|---|
-| **Lecture 15** | Log Management and Incident Investigation |
-| **Lecture 16** | Building and Operating a Company Network |
+| **Lecture 15** | Incident Response and Disaster Recovery |
+| **Lecture 16** | Log Management and Incident Investigation |
 | **Lab 8** | [Cluster Operations: Health Probes, Rollouts, and Failure Drills (Kubernetes)](/labs/cluster-operations/) |
 | **Assignment 4** | **Sunday: [Ops 4: Container Orchestration](/assignments/minecraft-4-container-orchestration/)** |
 
-Log Management pairs with Lab 8 in real time: when a pod crashes or a rollout fails during a failure drill, logs are the first diagnostic tool you reach for. Building and Operating a Company Network then zooms out to the broader networking layer that your cluster sits on, giving you the context to reason about cluster networking in terms of the enterprise environment around it.
+Incident Response covers the lifecycle and mitigation commands you need directly during Lab 8's failure drills: rollback, cordon, drain, and port-forward are the tools you reach for when a deployment goes wrong. Log Management pairs with the same lab: when a pod crashes or a rollout fails, logs are the first diagnostic tool you reach for, and the structured investigation method from this lecture applies immediately.
 
 ## Week 9: Reliability and Server Breadth
 
