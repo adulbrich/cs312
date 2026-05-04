@@ -1,5 +1,5 @@
 ---
-title: "Local Kubernetes with Minikube"
+title: "Minikube"
 description: "Start a local Kubernetes cluster, deploy a personalized web workload with ConfigMaps and Secrets, watch Kubernetes heal and roll it out, and prove PVC-backed state survives pod replacement."
 sidebar:
   order: 11
@@ -11,12 +11,12 @@ import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 {/* ai-summary
 type: activity
-slug: local-kubernetes-with-minikube
+slug: minikube
 order: 11
 paired_lecture: container-orchestration
-practices: minikube as a local Kubernetes distribution; control plane and addon inspection; namespace scoping; ConfigMap and Secret projection; Pod anatomy with an init container and shared volume; Deployment and ReplicaSet hierarchy; Service selection and stable endpoints; StatefulSet identity with PVC-backed storage; readiness, liveness, and startup probes; rolling restart and rollout status; manual scaling and HPA inspection; Ingress on a local cluster
+practices: minikube as a local Kubernetes distribution; control plane and addon inspection; DaemonSet per-node scheduling; namespace scoping; ConfigMap and Secret projection; Pod anatomy with an init container and shared volume; Deployment and ReplicaSet hierarchy; QoS class inspection; Service selection and stable endpoints; StatefulSet identity with PVC-backed storage; readiness, liveness, and startup probes; Job lifecycle and the Succeeded phase; rolling restart, rollout status, and rollout undo; manual scaling and HPA inspection; NodePort exposure; Ingress on a local cluster
 prereq_activities: docker-image-exploration
-output: a personalized web page served through a Kubernetes Service and Ingress on your laptop, plus a stateful note that survives pod replacement
+output: a personalized web page served through a Kubernetes Ingress on your laptop, a Job that completes successfully, and a stateful note that survives pod replacement
 */}
 
 This activity puts into practice the concepts from the [Container Orchestration](/lectures/container-orchestration/) lecture. You will start a local Kubernetes cluster with minikube, deploy a personalized web service using ConfigMaps, Secrets, Deployments, Services, Ingress, and a small StatefulSet with persistent storage, then watch the control loop heal and roll out your changes. By the end, you will have a personalized page reachable through Kubernetes on your laptop and a stateful workload whose data survives pod replacement.
@@ -32,10 +32,6 @@ This activity puts into practice the concepts from the [Container Orchestration]
 
 <Aside type="note" title="Why minikube here?">
 This activity uses minikube because it is a good laptop cluster for one class session: quick to start, easy to discard, and able to expose addons like ingress and metrics-server locally. The later lab uses k3s on EC2 instead. The important part is that the Kubernetes objects you create here are the same API objects you will use there.
-</Aside>
-
-<Aside type="tip" title="What about kind?">
-You could run this activity with `kind` instead: it is fast, disposable, and especially nice for CI-style test clusters because the nodes themselves run as Docker containers. Minikube is the better fit for this class session because its addon workflow makes ingress and metrics-server simpler to expose on a student laptop, so the steps stay closer to one long-lived local cluster and farther from cluster bootstrapping details.
 </Aside>
 
 ---
@@ -101,10 +97,18 @@ Before you deploy anything, make the cluster itself visible. This section gives 
 
    `kube-system` is where Kubernetes and addon components live. Your own application objects should not go here.
 
+7. **Identify which pods are DaemonSet-managed:**
+
+   ```bash
+   kubectl get daemonset -A
+   ```
+
+   You should see at least `kube-proxy` in the list. A DaemonSet schedules exactly one Pod per matching node, which is why each DaemonSet shows one Pod in this single-node cluster but would show one Pod per node in a production cluster. Compare that with the Deployment-managed pods you saw above: those are placed wherever the scheduler finds capacity.
+
 </Steps>
 
 <ActivityQuestion>
-In the output from `kubectl get pods -A`, which pods represent the control plane or cluster services, and which of them would still exist even if you had not deployed an application yet? How does that reinforce the lecture's point that Kubernetes is an API platform first and a workload host second?
+In `kubectl get pods -A`, identify at least one pod managed by a DaemonSet and at least one managed by a Deployment. What is the operational difference between those two controllers? Why would a per-node log collector be deployed as a DaemonSet rather than a Deployment with the same replica count as there are nodes?
 </ActivityQuestion>
 
 ---
@@ -158,7 +162,7 @@ Now create the first pieces of desired state. You will make a dedicated namespac
      owner: YOUR_ONID
    ```
 
-   Replace `YOUR_ONID` with your own ONID or another short identifier before saving the file. The ConfigMap holds normal configuration text; the Secret holds the personal value you do not want committed into plain configuration by default.
+   Replace `YOUR_ONID` with your own ONID or another short identifier before saving the file. The ConfigMap holds normal configuration text; the Secret uses Kubernetes' secret-handling path inside the cluster, but this manifest file still contains the value in plain text on your machine until you remove or ignore it.
 
 4. **Apply the ConfigMap and Secret:**
 
@@ -330,16 +334,17 @@ The next step is the core stateless case that Kubernetes handles well. You will 
 
    You should see one Deployment, one ReplicaSet created by that Deployment, two Pods created by that ReplicaSet, and one ClusterIP Service selecting those Pods.
 
-4. **Capture one Pod name and inspect its owner and service account:**
+4. **Capture one Pod name and inspect its owner, service account, and QoS class:**
 
    ```bash
    WEB_POD=$(kubectl get pods -l app=orchestra-web -o jsonpath='{.items[0].metadata.name}')
    echo "$WEB_POD"
    kubectl get pod "$WEB_POD" -o jsonpath='{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}'
    kubectl get pod "$WEB_POD" -o jsonpath='{.spec.serviceAccountName}{"\n"}'
+   kubectl get pod "$WEB_POD" -o jsonpath='{.status.qosClass}{"\n"}'
    ```
 
-   The owner reference should point to a ReplicaSet, not directly to the Deployment. The service account should be `default`, which is the namespace identity the Pod is currently using.
+   The owner reference points to a ReplicaSet, not directly to the Deployment. The service account is `default`. The QoS class should be `Burstable`: the nginx container sets both requests and limits, but the limit values are higher than the requests. A Pod only reaches `Guaranteed` when every container's CPU and memory request equals its limit exactly.
 
 5. **Describe the Pod and look for the init container, probes, and volumes:**
 
@@ -360,10 +365,10 @@ The next step is the core stateless case that Kubernetes handles well. You will 
 7. **Inspect the Service's current backends:**
 
    ```bash
-   kubectl get endpoints orchestra-web
+   kubectl get endpointslice -l kubernetes.io/service-name=orchestra-web
    ```
 
-   The endpoints list should show two Pod IPs. Those are the current backends behind the stable Service name.
+   The EndpointSlice should show two Pod IPs. Those are the current backends behind the stable Service name. `Endpoints` is the older view of this data; new Kubernetes documentation prefers EndpointSlice.
 
 </Steps>
 
@@ -503,6 +508,71 @@ If `note-pad` had been a Deployment using only the container's writable layer, w
 
 ---
 
+## Run a One-Off Job
+
+Deployments and StatefulSets manage workloads that should always be running. Some work is finite: a database migration, a data import, a nightly report. A Job runs one or more Pods to completion and then stops. This section runs a Job so you can see what a Pod in the `Succeeded` phase looks like.
+
+<Steps>
+
+1. **Create `batch-job.yaml`:**
+
+   ```yaml
+   apiVersion: batch/v1
+   kind: Job
+   metadata:
+     name: hello-job
+     namespace: orchestration-lab
+   spec:
+     completions: 1
+     template:
+       spec:
+         restartPolicy: Never
+         containers:
+           - name: hello
+             image: busybox:1.36
+             command:
+               - sh
+               - -c
+               - 'echo "Job complete from YOUR_ONID"; sleep 2'
+   ```
+
+   Replace `YOUR_ONID` before saving. The `restartPolicy: Never` tells Kubernetes not to restart the container after it exits; the Job controller tracks completion separately. With `completions: 1`, the Job is finished when one Pod exits with status 0.
+
+2. **Apply the Job and watch the Pod move through its lifecycle:**
+
+   ```bash
+   kubectl apply -f batch-job.yaml
+   kubectl get pods -w
+   ```
+
+   You should see a Pod move through `Pending` → `Running` → `Completed`. Stop the watch with Ctrl+C once the Pod shows `Completed`.
+
+3. **Read the output and inspect the Job's final state:**
+
+   ```bash
+   kubectl logs job/hello-job
+   kubectl get job hello-job
+   kubectl get pod -l job-name=hello-job
+   ```
+
+   The log should show your message. The Job's `COMPLETIONS` column should read `1/1`. The Pod status `Completed` maps to the `Succeeded` phase from the lecture. Kubernetes keeps the completed Pod around by default so you can read its logs.
+
+4. **Delete the Job:**
+
+   ```bash
+   kubectl delete job hello-job
+   ```
+
+   Deleting a Job cascades to its Pods. In production, the `ttlSecondsAfterFinished` field on a Job spec can automate this cleanup; without it, completed Pods accumulate until you remove them manually.
+
+</Steps>
+
+<ActivityQuestion>
+A Deployment replaces a Pod whenever it exits, whether the exit was clean or a crash. Why would you not want a Job to do the same thing? What changes if you use `restartPolicy: OnFailure` instead of `restartPolicy: Never` in a Job Pod template?
+</ActivityQuestion>
+
+---
+
 ## Watch the Control Loop Publish and Update Your App
 
 You now have both a stateless and a stateful workload running. This section makes the control loop visible: Pods get replaced, replica counts change, an HPA object targets the Deployment, and your Service is finally published through an Ingress so the page is reachable from your laptop's browser.
@@ -522,7 +592,7 @@ This is the shortest path from lecture idea to visible behavior. Delete one Pod,
    kubectl get pods -l app=orchestra-web -w
    ```
 
-   One Pod disappears, then a replacement appears automatically. Stop the watch with Ctrl+C after you are back to the desired replica count.
+   One Pod disappears, then a replacement appears automatically. Stop the watch with Ctrl+C after you are back to the desired replica count. During termination, Kubernetes marks the old backend as terminating and not ready for normal Service traffic while the Pod shuts down. If you want to inspect that flow directly, open another terminal and compare `kubectl get endpointslice -l kubernetes.io/service-name=orchestra-web -w` with `kubectl get pods -l app=orchestra-web -w` during the delete.
 
 2. **Scale the Deployment manually to three replicas:**
 
@@ -608,7 +678,7 @@ This is the shortest path from lecture idea to visible behavior. Delete one Pod,
    kubectl apply -f web-config.yaml
    ```
 
-   Nothing visible changes yet because the init container only re-renders the page when a Pod starts.
+   Nothing visible changes yet because the init container only re-renders the page when a Pod starts. The Deployment template has not changed, so there is no automatic rollout from this ConfigMap update by itself.
 
 7. **Roll the Deployment so new Pods pick up the new desired content:**
 
@@ -619,19 +689,71 @@ This is the shortest path from lecture idea to visible behavior. Delete one Pod,
 
    Because the Deployment strategy allows one surge Pod and zero unavailable Pods, Kubernetes can replace the old replicas without dropping the whole service at once.
 
+8. **Now make one Pod-template change that the Deployment can actually roll back:**
+
+   Edit `web-deployment.yaml` and change the nginx image from `nginx:1.27-alpine` to `nginx:1.28-alpine`, then apply it again:
+
+   ```bash
+   kubectl apply -f web-deployment.yaml
+   kubectl rollout status deployment/orchestra-web
+   ```
+
+   This creates a new Deployment revision because the pod template changed. Unlike the ConfigMap edit above, this change is tracked in the ReplicaSet history.
+
+9. **Roll back to the previous revision:**
+
+   ```bash
+   kubectl rollout undo deployment/orchestra-web
+   kubectl rollout status deployment/orchestra-web
+   ```
+
+   Kubernetes reverts the Deployment's pod template to the previous ReplicaSet. The same rolling strategy applies in reverse: new Pods from the older spec replace the current ones while keeping the Deployment available throughout.
+
+10. **Confirm the image rolled back and the page still shows the updated message:**
+
+    ```bash
+    kubectl get deployment orchestra-web -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
+    kubectl run curl-test --rm -i --restart=Never --image=busybox:1.36 -- wget -qO- http://orchestra-web
+    ```
+
+    The image should be back to `nginx:1.27-alpine`, while the page should still show the updated rolling-update message. The rollback changed the Deployment template, but it did not revert the separate ConfigMap object.
+
 </Steps>
 
 <ActivityQuestion>
-Why is `kubectl delete pod` a useful way to test self-healing but not a real fix for an application bug? After you changed the ConfigMap, which part of the system still required an explicit change in desired state before users could see the new page?
+After `kubectl rollout undo`, Kubernetes pointed the Deployment at an older ReplicaSet rather than creating a brand-new one. Why does Kubernetes keep previous ReplicaSets around instead of deleting them after each update? And why did the rollback not revert the ConfigMap to its earlier text?
 </ActivityQuestion>
 
 ### Publish the Page Through Ingress
 
-The Service is still internal to the cluster. This last hands-on section publishes the web workload through the ingress controller so you can reach it from your own browser and see the personalized result clearly.
+The Service is still internal to the cluster. This section first shows you NodePort, the blunt alternative the lecture describes, then replaces it with the ingress controller for a cleaner HTTP entry point.
 
 <Steps>
 
-1. **Start the minikube tunnel in a second terminal and leave it running:**
+1. **Temporarily expose the Service as a NodePort:**
+
+   ```bash
+   kubectl patch service orchestra-web -p '{"spec":{"type":"NodePort"}}'
+   minikube service orchestra-web --url
+   ```
+
+   Copy the URL printed and curl it (on macOS/WSL with the Docker driver, `minikube service --url` may keep a tunnel open, so run the curl in a second terminal):
+
+   ```bash
+   curl <the-url-from-above>/
+   ```
+
+   You should see the HTML page. Notice the port number in the URL: it is in the 30000-32767 range, which is what the lecture describes as the default NodePort range. This is a usable but blunt entry point: every node exposes the same port, regardless of whether it is running one of the Pods.
+
+2. **Switch back to ClusterIP and use Ingress instead:**
+
+   ```bash
+   kubectl patch service orchestra-web -p '{"spec":{"type":"ClusterIP"}}'
+   ```
+
+   Ingress is the cleaner production pattern: one external entry point, path-based or hostname-based routing to many Services, and no high-numbered ports visible to clients. The steps below set that up.
+
+3. **Start the minikube tunnel in a second terminal and leave it running:**
 
    ```bash
    minikube tunnel
@@ -639,15 +761,15 @@ The Service is still internal to the cluster. This last hands-on section publish
 
    Leave that command running while you finish this section. On macOS it may ask for your password because it needs permission to create network routes.
 
-2. **In your original terminal, wait for the Ingress to report an address:**
+4. **In your original terminal, wait for the Ingress to report an address:**
 
    ```bash
    kubectl get ingress
    ```
 
-   On Linux you will usually see an IP address appear in the `ADDRESS` column. On macOS and Windows with Docker Desktop or another local VM-backed runtime, the documented access pattern is usually `127.0.0.1` while the tunnel is running.
+   On Linux you will usually see an IP address appear in the `ADDRESS` column. On macOS and Windows with Docker Desktop or another local VM-backed runtime, the documented access pattern is usually `127.0.0.1` while the tunnel is running, so the `ADDRESS` column is not the success condition you should rely on there.
 
-3. **Fetch the page through the Ingress endpoint:**
+5. **Fetch the page through the Ingress endpoint:**
 
    <Tabs syncKey="os">
    <TabItem label="macOS / Windows">
@@ -668,7 +790,7 @@ The Service is still internal to the cluster. This last hands-on section publish
 
    You should now see the same personalized HTML page you generated earlier, this time reached through the ingress controller rather than from inside the cluster.
 
-4. **Open the same URL in a browser and leave the page visible:**
+6. **Open the same URL in a browser and leave the page visible:**
 
    The page should show your identifier and the updated rolling-update message. This is the clean, visible end state for the activity: a real page, served through Kubernetes, with your own text on it.
 
