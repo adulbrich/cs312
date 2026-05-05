@@ -1,0 +1,308 @@
+---
+title: Network Reference
+description: Quick-lookup tables for network troubleshooting commands, routing protocols, common ports, subnetting, and VLAN design patterns.
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page is a reference you scan while working, not a page you read front to back. Use it alongside the lectures when you need a specific command flag, port number, subnet size, or VLAN pattern without going back to a lecture to find it.
+
+{/* EDITORIAL NOTE — Routing protocols
+The on-premises-infrastructure.mdx lecture currently explains OSPF and BGP in two moderately sized prose paragraphs each. Once this reference page exists, those paragraphs could be trimmed to one sentence each ("OSPF is the standard interior routing protocol for enterprise LANs; BGP is used at the edge and for cloud connectivity") with a link here for the comparison table. The lecture explanation of *why* you need routing protocols and what problem each solves should stay in the lecture; the protocol-by-protocol comparison belongs here.
+*/}
+
+## Routing Protocols
+
+The four protocols you are most likely to encounter in enterprise and cloud environments, and when each applies.
+
+| Protocol | Type | Scope | When You'll Encounter It |
+|---|---|---|---|
+| **RIP v2** | Distance-vector | Interior | Legacy and educational environments; almost never deployed in new networks |
+| **OSPF** | Link-state | Interior | Standard choice for campus and data center LANs; supported on every enterprise router and layer-3 switch |
+| **EIGRP** | Hybrid (Cisco proprietary) | Interior | Cisco-only environments; functionally similar to OSPF but not interoperable with non-Cisco gear |
+| **BGP** | Path-vector | Exterior (and interior) | Edge routers, ISP multi-homing, AWS Direct Connect / Azure ExpressRoute, Kubernetes CNI plugins that advertise pod CIDRs |
+
+**Interior vs. exterior**: OSPF, RIP, and EIGRP are IGPs (Interior Gateway Protocols) — they route within a single organization's network. BGP is an EGP (Exterior Gateway Protocol) designed for routing between autonomous systems, but it also appears inside organizations for inter-data-center routing and cloud connectivity.
+
+**Convergence** refers to how quickly all routers agree on the topology after a change. OSPF and EIGRP converge in seconds; RIP converges in minutes. BGP convergence is intentionally slow and configurable, because the internet's stability depends on it.
+
+---
+
+{/* EDITORIAL NOTE — Common ports
+networking-fundamentals.mdx includes a partial ports table covering the most common services. That table should remain in the lecture as a teaching tool. This section extends it to the full set of ports students encounter in the labs. Consider replacing the lecture table with a shorter inline list and linking here for the rest. Do not duplicate the full table in both places.
+*/}
+
+## Common Ports and Protocols
+
+| Port | Protocol | Service | Notes |
+|---|---|---|---|
+| 20 | TCP | FTP data | Avoid FTP; use SFTP (port 22) instead |
+| 21 | TCP | FTP control | See above |
+| 22 | TCP | SSH / SFTP / SCP | All encrypted remote access over SSH |
+| 25 | TCP | SMTP | Server-to-server mail; use 587 for client submission |
+| 53 | TCP/UDP | DNS | UDP for queries; TCP for zone transfers and responses over 512 bytes |
+| 67 | UDP | DHCP server | Server listens here; relay agents forward to this port |
+| 68 | UDP | DHCP client | Client sends from and receives to this port |
+| 80 | TCP | HTTP | Unencrypted; redirect to 443 in production |
+| 110 | TCP | POP3 | Email retrieval; deprecated in favor of IMAP |
+| 123 | UDP | NTP | Time synchronization; critical for Kerberos, TLS, and log correlation |
+| 143 | TCP | IMAP | Email retrieval |
+| 179 | TCP | BGP | BGP peer sessions |
+| 389 | TCP/UDP | LDAP | Directory services; use LDAPS (636) on untrusted networks |
+| 443 | TCP | HTTPS | TLS-encrypted HTTP |
+| 465 | TCP | SMTPS | SMTP with implicit TLS (older; prefer 587) |
+| 514 | UDP | Syslog | Log forwarding; use TCP/TLS syslog for reliability |
+| 587 | TCP | SMTP submission | Authenticated client mail submission with STARTTLS |
+| 636 | TCP | LDAPS | LDAP over TLS |
+| 993 | TCP | IMAPS | IMAP over TLS |
+| 2376 | TCP | Docker daemon (TLS) | Docker remote API with TLS |
+| 2379/2380 | TCP | etcd | Kubernetes control plane; client/peer ports |
+| 3306 | TCP | MySQL / MariaDB | |
+| 5432 | TCP | PostgreSQL | |
+| 6443 | TCP | Kubernetes API server | kube-apiserver; standard port for `kubectl` |
+| 8080 | TCP | HTTP alternate | Common for dev servers, internal proxies, Jenkins |
+| 8443 | TCP | HTTPS alternate | Common for internal HTTPS services |
+| 10250 | TCP | Kubelet API | Node agent; API server communicates here |
+
+---
+
+{/* EDITORIAL NOTE — Troubleshooting commands
+network-services-and-application-delivery.mdx and networking-fundamentals.mdx both embed individual command examples inline with explanations. That structure is correct for teaching — the prose around the command is what makes it land. But students doing the labs need to look up a flag quickly without re-reading a lecture. This section does not replace the in-lecture commands; it supplements them as a cheatsheet. Lectures should keep their command examples and prose. If anything, they could add a one-line callout linking here: "For a full cheatsheet of flags, see the Network Reference practicality page."
+
+One specific candidate for trimming: network-services-and-application-delivery.mdx has a moderately long tcpdump section showing multiple invocations. The explanatory prose belongs in the lecture; the flag listing could be shortened and point here instead.
+*/}
+
+## Network Troubleshooting Commands
+
+### `ip` — interface and routing state
+
+```bash
+# Show IP addresses on all interfaces
+ip addr show
+
+# Show the routing table
+ip route show
+
+# Show the ARP cache (layer-2 neighbor table)
+ip neighbor show
+
+# Show interface link state (up/down, speed, driver)
+ip link show
+
+# Add a temporary route (not persistent)
+sudo ip route add 10.0.2.0/24 via 10.0.1.1
+```
+
+`ip neighbor show` is your first stop when a host can reach its subnet switch but not the gateway. A `FAILED` state for the gateway IP means layer-2 connectivity to the gateway is broken, which points to a VLAN mismatch or bad cable rather than an IP configuration issue.
+
+### `dig` — DNS queries
+
+```bash
+# Query default resolver for an A record
+dig example.com
+
+# Query a specific nameserver directly
+dig @10.0.1.2 app.example.com
+
+# Query a specific record type
+dig MX example.com
+dig TXT example.com
+dig AAAA example.com
+dig CAA example.com
+
+# Show only the answer (no headers)
+dig +short example.com
+
+# Full iterative trace from root servers down
+dig +trace example.com
+
+# Check remaining TTL on a cached record
+dig +ttlunits example.com
+```
+
+### `traceroute` — path tracing
+
+```bash
+# Default (UDP probes; often blocked by firewalls)
+traceroute example.com
+
+# TCP SYN probe on port 443 (traverses most firewalls that allow HTTPS)
+sudo traceroute -T -p 443 example.com
+
+# ICMP probe (requires root; blocked less often than UDP)
+sudo traceroute -I example.com
+```
+
+A `* * *` at a hop means that router is not sending ICMP TTL-exceeded replies. It does not necessarily mean the path is broken; the next hop may still respond. Only conclude the path is broken when `* * *` continues to the end.
+
+### `ss` — socket statistics
+
+```bash
+# Show all listening TCP sockets with process name and PID
+sudo ss -tlnp
+
+# Check whether a specific port is open
+sudo ss -tlnp | grep :443
+
+# Show established connections to a port
+ss -an | grep :80
+
+# Show UDP sockets (useful for DNS, NTP, DHCP diagnostics)
+sudo ss -ulnp
+```
+
+`ss` replaces the older `netstat`. If a port shows `LISTEN` in `ss` output but connections are still timing out, the issue is a firewall rule, not the application.
+
+### `tcpdump` — packet capture
+
+```bash
+# Capture all traffic on an interface (very noisy; always filter)
+sudo tcpdump -i eth0
+
+# Filter by host
+sudo tcpdump -i eth0 host 10.0.1.50
+
+# Filter by port
+sudo tcpdump -i eth0 port 53
+sudo tcpdump -i eth0 port 80
+
+# Show packet contents in ASCII (useful for HTTP)
+sudo tcpdump -i eth0 port 80 -A
+
+# Disable DNS reverse lookups (faster on busy hosts)
+sudo tcpdump -i eth0 -n port 443
+
+# Write to a .pcap file for Wireshark analysis
+sudo tcpdump -i eth0 -w /tmp/capture.pcap
+```
+
+TCP flag reference for reading `tcpdump` output:
+
+| Flag | Meaning |
+|---|---|
+| `[S]` | SYN — connection initiation |
+| `[S.]` | SYN-ACK — server's response |
+| `[.]` | ACK — acknowledgment only |
+| `[P.]` | PSH-ACK — data being pushed |
+| `[F.]` | FIN — connection teardown |
+| `[R]` | RST — connection reset (abrupt close or firewall drop with reject) |
+
+If you see incoming `[S]` packets but no `[S.]` responses, the server is receiving the SYN but something is blocking the response — usually a local firewall rule. If you see no packets at all, the traffic is being dropped upstream.
+
+### `openssl s_client` — TLS diagnostics
+
+```bash
+# Test a TLS connection and print the certificate chain
+openssl s_client -connect example.com:443
+
+# Show only the certificate (not the full handshake)
+openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -text
+
+# Check expiry dates quickly
+openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -dates
+
+# Check Subject Alternative Names (hostnames the cert covers)
+openssl s_client -connect example.com:443 2>/dev/null \
+  | openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
+
+# Test a specific SNI hostname (for virtual hosting)
+openssl s_client -connect 203.0.113.5:443 -servername app.example.com
+```
+
+Common `Verify return code` values:
+
+| Code | Meaning | Common cause |
+|---|---|---|
+| `0 (ok)` | Certificate valid and trusted | |
+| `10` | Certificate has expired | Missed auto-renewal; certbot timer not running |
+| `18` | Self-signed certificate | Not trusted by default; needs explicit trust store addition |
+| `20` | Unable to get local issuer certificate | Missing intermediate CA in the server's certificate chain |
+| `62` | Hostname mismatch | Certificate does not cover the name the client connected to |
+
+---
+
+{/* EDITORIAL NOTE — Subnetting
+networking-fundamentals.mdx explains how subnetting works conceptually (network/host bit split, broadcast address, CIDR notation) and that content should stay in the lecture. The table here is a lookup tool for students who already understand subnetting and just need to know how many hosts fit in a /27 while building out a lab network. The lecture could link here with: "For a subnet size quick reference, see the Network Reference practicality page."
+*/}
+
+## Subnet Quick Reference
+
+### CIDR sizes
+
+| Prefix | Total addresses | Usable hosts | Common use |
+|---|---|---|---|
+| `/24` | 256 | 254 | Standard VLAN for a user or server segment |
+| `/25` | 128 | 126 | Split a /24 in half |
+| `/26` | 64 | 62 | Medium-density VLAN |
+| `/27` | 32 | 30 | Small group or IoT segment |
+| `/28` | 16 | 14 | Small device cluster |
+| `/29` | 8 | 6 | Tiny segment with room to spare |
+| `/30` | 4 | 2 | Point-to-point router link |
+| `/31` | 2 | 2 | Point-to-point link per RFC 3021 (no broadcast) |
+| `/32` | 1 | 1 | Single host, loopback address |
+
+Usable hosts = total addresses minus 2 (network address and broadcast address). Exception: /31 and /32 are special cases defined in [RFC 3021](https://datatracker.ietf.org/doc/html/rfc3021) and [RFC 4632](https://datatracker.ietf.org/doc/html/rfc4632).
+
+### Private address ranges (RFC 1918)
+
+| Range | CIDR | Total addresses | Typical use |
+|---|---|---|---|
+| 10.0.0.0 – 10.255.255.255 | `10.0.0.0/8` | ~16.7 million | Large enterprise, cloud VPCs |
+| 172.16.0.0 – 172.31.255.255 | `172.16.0.0/12` | ~1 million | Medium enterprise, Docker default bridge |
+| 192.168.0.0 – 192.168.255.255 | `192.168.0.0/16` | ~65,000 | Home and small office networks |
+
+<Aside type="note" title="169.254.x.x — Link-Local">
+Addresses in `169.254.0.0/16` (APIPA) are self-assigned by a host when DHCP fails. If you see a `169.254.x.x` address on a server interface, the host did not receive a DHCP lease. Check whether the DHCP server is reachable, the address pool is exhausted, or a relay agent is missing.
+</Aside>
+
+---
+
+{/* EDITORIAL NOTE — VLAN design patterns
+on-premises-infrastructure.mdx covers access ports, trunk ports, and SSID-to-VLAN mapping in lecture prose. That explanation should stay in the lecture; the prose is what builds the mental model. This section is a quick lookup for students who already understand VLANs and need to recall the configuration pattern mid-lab or during the Cisco Packet Tracer activity. The lecture could link to this section with: "For access/trunk port patterns at a glance, see the Network Reference practicality page."
+
+A specific thing to add here that the lecture does not: a recommended VLAN numbering convention (10/20/30 for data/voice/management is common and worth standardizing for the lab environment), and the native VLAN note (untagged traffic on a trunk goes into the native VLAN, default VLAN 1 on Cisco, which is a security footgun unless explicitly configured).
+*/}
+
+## VLAN Design Patterns
+
+### Port mode reference
+
+| Port mode | What it does | Connected to | Tag behavior |
+|---|---|---|---|
+| **Access** | Assigns all traffic to one VLAN | End device (server, PC, printer, WAP) | Frames leaving the port are untagged; frames entering are tagged internally |
+| **Trunk** | Carries multiple VLANs | Another switch or router | Frames carry 802.1Q tags; native VLAN traffic may be untagged |
+| **Routed port** | Layer-3 interface, no VLANs | Router or another layer-3 device | No tagging; plain IP packet forwarding |
+
+### Native VLAN
+
+The **native VLAN** on a trunk port is the VLAN that carries untagged traffic. On Cisco equipment the default is VLAN 1. A mismatch between the native VLAN on two ends of a trunk causes untagged traffic to be silently dropped or placed in the wrong VLAN. Always configure native VLAN explicitly and avoid using VLAN 1 for production traffic.
+
+```
+switchport trunk native vlan 99
+```
+
+### Recommended VLAN numbering convention
+
+A consistent numbering scheme reduces configuration errors and makes port assignments self-documenting.
+
+| VLAN ID | Purpose | Example subnet |
+|---|---|---|
+| 10 | Servers | 10.0.10.0/24 |
+| 20 | User workstations | 10.0.20.0/24 |
+| 30 | VoIP phones | 10.0.30.0/24 |
+| 40 | Printers and IoT | 10.0.40.0/24 |
+| 50 | Guest Wi-Fi | 10.0.50.0/24 |
+| 99 | Management (switches, APs, BMCs) | 10.0.99.0/24 |
+
+### SSID-to-VLAN mapping
+
+When a wireless access point serves multiple SSIDs, each SSID maps to a VLAN on the wired uplink. The AP trunk-tags frames from each SSID with the corresponding VLAN ID before sending them to the distribution switch.
+
+| SSID | VLAN | Access policy |
+|---|---|---|
+| `corp-wifi` | VLAN 20 (users) | Full internal access |
+| `corp-voip` | VLAN 30 (VoIP) | QoS priority; restricted to voice servers |
+| `guest-wifi` | VLAN 50 (guest) | Internet only; no access to internal subnets |
+
+The access point itself needs a management IP in the management VLAN (99) reachable from the distribution switch. This is separate from the SSIDs it broadcasts. A common mistake is placing the AP's management interface in the same VLAN as a client SSID, which means changing that VLAN's firewall policy also affects AP reachability.

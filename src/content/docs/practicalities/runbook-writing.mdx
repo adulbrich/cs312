@@ -1,103 +1,730 @@
 ---
-title: "Runbook Writing"
-description: "Write an operator-grade runbook for a service you have deployed this term, covering verification, restart, rollback, and three failure scenarios."
+title: Runbook Writing
+description: A practical reference for documenting how to provision, verify, restart, recover, and maintain deployed services.
 draft: true
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-A runbook is the document an on-call engineer reaches for at 2 AM when a service is down and they are not the person who built it. If the runbook is missing, ambiguous, or wrong, the outage lasts longer. This activity asks you to write one for real.
+If you deploy a service and only you know how to recover it, the service is not really operational. A runbook turns a person-dependent setup into something another operator can verify, restart, and recover without guesswork.
 
-## Choose Your Service
+This page explains what a runbook is, what belongs in one, and how to write one that is actually usable.
 
-Pick any service you have deployed this term:
-- Your WordPress stack (Docker Compose or Kubernetes)
-- Your Minecraft server (any assignment iteration)
-- Your Terraform + Ansible provisioned EC2 setup
-- Your k3s cluster with nginx + WordPress
+<Aside type="tip">
+Write the runbook while you build the service, not after you are finished. If you wait until the end, you will forget commands, skip assumptions, and accidentally document a recovery path you never tested.
+</Aside>
 
-The service must currently exist (or be recreatable within a few minutes) so that you can verify your own runbook is accurate.
+## What a Runbook Is
 
-## The Runbook Template
+A **runbook** is an operational reference document. It tells an operator how to perform a specific task on a system safely and consistently. Typical tasks include:
 
-Write a runbook following this structure. Every section must contain commands you have actually run and verified. Do not write steps you think might work.
+- verifying that a deployed service is healthy
+- provisioning or rebuilding a service
+- restarting a failed process or container
+- rolling back to the last known-good version
+- restoring service after an instance reboot
+- checking logs, ports, and endpoints during troubleshooting
+- shutting down infrastructure when it is not needed
 
----
+The key idea is that a runbook is written for **real operation**, not explanation alone. It should be procedural, precise, and testable.
 
-**Runbook: [Service Name]**
+If a document says "restart the service if it fails" but does not name the exact service, the exact command, the expected output, and the post-restart verification step, it is not a useful runbook.
 
-**Author:** [Your full name]
+## What a Runbook Is Not
 
-**Date:** [Today's date]
+Runbooks sit near several other document types, but they are not the same thing.
 
-**Service URL / endpoint:** [public IP or URL]
+| Document type | Primary purpose | Typical audience | Example |
+|---|---|---|---|
+| Runbook | Execute routine or emergency operational tasks safely | Operator, on-call engineer, teammate | Restart WordPress container stack and verify database connectivity |
+| Playbook | Coordinate a broader response process across people and decisions | Incident commander, team lead, responders | Respond to a site outage involving database, DNS, and customer communication |
+| Tutorial | Teach a person how to learn a tool or workflow | Learner | Learn Docker Compose by building a local stack |
+| Design document | Explain architecture and engineering choices | Developers, reviewers | Why a service uses nginx + WordPress + MariaDB on one EC2 instance |
+| README | Introduce a project and explain normal usage | Developer, maintainer | How to clone the repo and start the dev environment |
 
----
+- A **tutorial** teaches.
+- A **design document** explains.
+- A **playbook** coordinates.
+- A **runbook** tells someone exactly what to do.
 
-### Service Description
-Two to three sentences: what does this service do, how is it deployed, and what depends on it?
+## Bootstrap vs. Day-2 Runbooks
 
-### Prerequisites
-What does an operator need before using this runbook? (SSH key location, AWS credentials, which directory to `cd` into, etc.)
+A useful way to think about runbooks is by the starting state they assume.
 
-### Health Check: Is the Service Running?
+- A **bootstrap runbook** assumes a blank host or newly provisioned environment. It explains how to go from fresh EC2 to a working service.
+- A **day-2 operations runbook** assumes the service already exists and focuses on health checks, restarts, updates, rollback, backup and restore, and failure response.
+- A **rebuild runbook** assumes infrastructure and configuration are automated and points the operator to the Terraform, Ansible, CI/CD, and restore steps that recreate the system safely.
 
-Provide the exact commands to verify:
-1. The process or container is running
-2. The service is responding to requests (e.g., `curl`, `nmap`, or a health endpoint)
-3. The expected output when everything is healthy
+One document can combine all three, but the starting point should be obvious.
 
-### How to Restart the Service
+## Why Every Deployed Service Needs One
 
-Step-by-step commands to perform a clean restart. Include any ordering requirements (e.g., "restart the database before the application").
+Runbooks are useful any time service recovery depends on memory.
 
-### How to Roll Back to the Previous Version
+A runbook helps you:
 
-Step-by-step commands to revert to the last known-good version. Include how to identify what the previous version was.
+- recover faster when something breaks between work sessions
+- avoid re-discovering commands you already figured out once
+- hand off operational knowledge to another operator or teammate
+- notice hidden assumptions in your deployment process
+- test whether your deployment is repeatable and understandable
 
-### Failure Scenarios
+If you cannot explain how to tell whether your service is healthy, you probably do not yet have a strong operational model of your own system.
 
-For each of the three scenarios below, provide:
-- How to detect this failure (what does it look like in logs, metrics, or health checks?)
-- The most likely cause
-- The exact recovery steps
+## Audience
 
-**Scenario 1: The service process has crashed and is not restarting automatically.**
+The most common runbook mistake is writing for yourself as if future-you will remember everything.
 
-**Scenario 2: The service is running but returning errors (e.g., 500 Internal Server Error or "Error establishing a database connection").**
+Assume the reader:
 
-**Scenario 3: The EC2 instance rebooted unexpectedly and the service did not come back.**
+- understands basic Linux and cloud concepts
+- did **not** build the service
+- may be tired, rushed, or responding to a failure
+- needs exact commands, not hints
+- should not have to infer missing prerequisites
 
-### Cost Controls
+Avoid vague instructions such as:
 
-What should an operator do to minimize AWS cost when this service is not needed? (e.g., stop the instance, run `terraform destroy`, etc.)
+- "restart the app"
+- "check the logs"
+- "go to the server folder"
+- "use your key to SSH in"
 
----
+Replace them with specific instructions such as:
 
-## Verify Your Own Runbook
+```bash
+ssh -i ~/.ssh/prod-key.pem ubuntu@203.0.113.10
+sudo systemctl status nginx --no-pager
+docker compose ps
+kubectl get pods -n wordpress
+curl -I http://203.0.113.10
+```
 
-After writing the runbook, test it:
-1. Stop your service using a method other than the one in your runbook.
-2. Follow your own restart procedure and confirm the service comes back.
-3. Note any step that was incorrect or missing.
+Also say what healthy output looks like.
 
-Take a screenshot showing the service responding after you followed your restart procedure.
+## Characteristics of a Good Runbook
 
-## Questions
+A good runbook is:
 
-1. What is the difference between a runbook and a playbook in operational documentation?
-2. Your runbook includes the SSH key path as `~/Downloads/cs312-key.pem`. Why might this cause the runbook to fail for a different operator?
-3. After testing, did you find any gaps or inaccuracies in your runbook? What did you correct?
-
-## Deliverable
-
-Submit a PDF to Canvas containing:
-- The completed runbook with your name as Author
-- The screenshot of the service responding after you followed your own restart steps
-- Answers to the three questions
-
-Your **full name and student ID** must appear in the PDF header.
+- **specific**: it names the system, service, directory, namespace, compose file, or instance involved
+- **procedural**: it gives ordered actions, not general advice
+- **verifiable**: it includes health checks and expected results
+- **safe**: it warns about destructive commands and ordering requirements
+- **tested**: the documented steps have been run recently
+- **maintained**: it is updated when deployment details change
+- **portable**: it does not depend on one person's laptop paths or unstated shell aliases
 
 <Aside type="caution">
-A runbook that has never been tested is a liability, not an asset. An untested runbook may give false confidence and slow down recovery when it fails mid-incident. Always test your runbooks.
+An untested runbook is a liability. During an outage, a wrong recovery step wastes time and may make the incident worse.
+</Aside>
+
+## When to Write or Update One
+
+Write or update a runbook whenever you do any of the following:
+
+- deploy a new service to EC2
+- containerize an application with Docker Compose
+- move a service into Kubernetes or k3s
+- add a database, reverse proxy, or persistent volume
+- change the startup method from manual commands to systemd, Compose, or Kubernetes
+- change how a service is exposed, such as moving from an IP address to a domain name
+- discover a failure mode that was not previously documented
+
+You do not need a separate runbook for every tiny command, but you should have at least one current runbook per meaningful deployed service.
+
+## What to Include
+
+The exact format can vary, but most useful runbooks contain the following sections.
+
+### 1. Metadata
+
+Start with:
+
+- service name
+- author or owner
+- last updated date
+- environment, such as `lab`, `staging`, or `production`
+- endpoint, IP address, domain name, or SSH target
+- where the source of truth lives, such as a GitHub repo or Terraform directory
+
+### 2. Service Description
+
+Briefly explain:
+
+- what the service does
+- where it runs
+- what major components it depends on
+- what users or other systems depend on it
+
+Keep this short.
+
+### 3. Prerequisites and Access
+
+List what the operator needs before starting:
+
+- SSH access method
+- cloud account or AWS CLI profile
+- repository location
+- required working directory
+- required tools, such as `docker`, `kubectl`, `terraform`, or `ansible`
+- secrets or environment files that must already exist
+
+Avoid machine-specific assumptions. For example:
+
+```text
+Use ~/Downloads/key.pem to connect.
+```
+
+That only works for the person who saved the key there. Better alternatives include:
+
+- describing the key as a placeholder, such as `PATH_TO_SSH_KEY`
+- documenting team conventions, such as `~/.ssh/prod-key.pem`
+- telling the operator how to confirm the correct key path before proceeding
+
+### 4. Bootstrap / Fresh-Environment Setup
+
+Some runbooks start from an already deployed service. Others start from nothing except access, source code, and credentials.
+
+When the operator may need to recreate the service from a blank host, include:
+
+- the assumed starting state, such as AMI or distribution, instance type, storage, and security group posture
+- the exact provisioning or launch entrypoint
+- first-login commands and package update steps
+- runtime installation commands, such as Java, Docker, AWS CLI, or other prerequisites
+- user creation, directory layout, permissions, and ownership
+- configuration file creation or edits
+- service manager, Compose, or deployment manifest setup
+- first-start tasks such as accepting a license, generating initial config, or pulling a pinned image
+- validation checkpoints after each major phase
+
+If setup is long, split it into phases.
+
+### 5. Health Checks
+
+Every runbook should answer the question: **How do I know whether the service is healthy?**
+
+A service can be "running" and still unusable, so include more than one check:
+
+- process or container is present
+- port is listening
+- endpoint responds
+- dependency is reachable
+- logs show normal startup or steady-state behavior
+
+For non-HTTP services, use a protocol-appropriate check rather than forcing everything into `curl`. For example:
+
+```bash
+nmap -sV -Pn -p T:25565 PUBLIC_ENDPOINT
+```
+
+Explain what successful output looks like.
+
+Examples by environment:
+
+```bash
+# systemd-managed service
+sudo systemctl status nginx --no-pager
+sudo ss -tulpn | grep ':80'
+curl -I http://127.0.0.1
+```
+
+```bash
+# Docker Compose stack
+docker compose ps
+docker compose logs --tail=50 wordpress
+curl -I http://PUBLIC_IP
+```
+
+```bash
+# Kubernetes deployment
+kubectl get pods -n wordpress
+kubectl get svc -n wordpress
+kubectl logs deployment/wordpress -n wordpress --tail=50
+curl -I http://LOAD_BALANCER_OR_NODE_IP
+```
+
+Your runbook should also say what success looks like. For example:
+
+- `systemctl status` shows `active (running)`
+- `docker compose ps` shows all containers in `Up` state
+- `kubectl get pods` shows Pods as `Running` and `READY 1/1`
+- `curl -I` returns `HTTP/1.1 200 OK` or an expected redirect
+
+### 6. Restart Procedure
+
+Document the clean, intended restart path.
+
+Include:
+
+- the exact command
+- the order of operations
+- whether dependencies must start first
+- how long startup normally takes
+- what verification to run immediately afterward
+
+Examples:
+
+```bash
+sudo systemctl restart nginx
+sudo systemctl status nginx --no-pager
+curl -I http://127.0.0.1
+```
+
+```bash
+docker compose restart db
+docker compose restart wordpress
+docker compose ps
+curl -I http://PUBLIC_IP
+```
+
+```bash
+kubectl rollout restart deployment/wordpress -n wordpress
+kubectl rollout status deployment/wordpress -n wordpress
+kubectl get pods -n wordpress
+```
+
+If the service depends on a database, queue, or mounted volume, say so plainly. A restart section that ignores dependencies is incomplete.
+
+### 7. Rollback Procedure
+
+Rollback sections often become vague because the deployment was never versioned clearly enough to reverse.
+
+A usable rollback section should answer:
+
+- what counts as the current version
+- how the previous version is identified
+- how the older version is redeployed
+- how success is verified afterward
+
+Examples of version identifiers:
+
+- Git commit SHA
+- Docker image tag
+- Kubernetes manifest revision
+- Terraform state plus a Git revision of configuration
+
+If you cannot roll back safely, say so and document the real recovery path.
+
+### 8. Failure Scenarios
+
+Include the failure modes you reasonably expect.
+
+For each scenario, document:
+
+- **symptoms**: what the operator sees
+- **likely causes**: the most probable reasons, not every possible reason
+- **detection steps**: commands, logs, metrics, or status checks
+- **recovery steps**: exact actions in order
+- **verification**: how to confirm recovery
+
+Good starter scenarios include:
+
+- service process crashed and is not restarting
+- service returns `500` or database connection errors
+- EC2 instance rebooted and application did not return
+- container is restarting repeatedly
+- Kubernetes Pod is `CrashLoopBackOff`
+- disk is full and writes are failing
+- reverse proxy is up but upstream app is down
+
+### 9. Logs and Diagnostics
+
+A strong runbook tells the operator where to look next if the first restart does not work.
+
+Useful examples:
+
+```bash
+# systemd / OS logs
+sudo journalctl -u nginx -n 100 --no-pager
+sudo tail -n 100 /var/log/syslog
+```
+
+```bash
+# Docker Compose logs
+docker compose logs --tail=100 wordpress
+docker compose logs --tail=100 db
+```
+
+```bash
+# Kubernetes logs and events
+kubectl logs deployment/wordpress -n wordpress --tail=100
+kubectl describe pod POD_NAME -n wordpress
+kubectl get events -n wordpress --sort-by=.lastTimestamp
+```
+
+### 10. Cost Controls and Shutdown
+
+If a service is not needed continuously, say how to stop it safely and how to bring it back later.
+
+Examples:
+
+- stop the EC2 instance
+- scale a deployment to zero if that is acceptable
+- destroy infrastructure with Terraform when the environment is no longer needed
+- snapshot data before teardown if state must be preserved
+
+Do not assume the operator already knows the difference between stopping, terminating, and destroying resources. Say it clearly.
+
+### 11. Change History
+
+If the service changes meaningfully, note it:
+
+- migration from manual startup to `systemd`
+- shift from Docker Compose to Kubernetes
+- new database host or credentials source
+- new domain name or load balancer
+
+This can be brief. The point is to stop the runbook from silently drifting out of date.
+
+## How to Write a Runbook Well
+
+### Start From Real Commands
+
+Do not write what you think should work. Write what you actually ran.
+
+This matters especially for:
+
+- service names in `systemctl`
+- container names or Compose service names
+- namespaces and deployment names in Kubernetes
+- file paths for manifests, environment files, or compose files
+- cloud resource identifiers
+
+Small naming errors are enough to make a runbook fail under pressure.
+
+### Prefer Copy-Pasteable Commands
+
+An operator should be able to copy a command from the runbook and run it with minimal modification.
+
+Good:
+
+```bash
+cd ~/services/app
+docker compose up -d
+docker compose ps
+```
+
+Less good:
+
+```text
+Go to the project directory and start the containers.
+```
+
+### Use Placeholders Intentionally
+
+If a value varies by operator or environment, use a clearly named placeholder:
+
+```bash
+ssh -i PATH_TO_SSH_KEY ubuntu@PUBLIC_IP
+curl -I http://SERVICE_URL
+kubectl get pods -n NAMESPACE
+```
+
+Then define those placeholders near the top of the runbook.
+
+### Include Expected Output
+
+Show the operator what "normal" looks like.
+
+Example:
+
+```bash
+docker compose ps
+```
+
+Expected healthy state:
+
+```text
+NAME                IMAGE              STATE    PORTS
+wordpress-app       wordpress:latest   Up       0.0.0.0:80->80/tcp
+wordpress-db        mariadb:11         Up       3306/tcp
+```
+
+### Separate Detection From Recovery
+
+Do not blur "how to notice the problem" with "how to fix it." A clean structure helps the operator reason under time pressure.
+
+For example:
+
+- **Detection**: `curl -I` returns `500`, logs show database connection failures
+- **Recovery**: verify DB container, restart DB, restart app, re-run health check
+
+### Write for Minimum Surprise
+
+If a command is destructive or disruptive, say so before the command appears.
+
+Examples:
+
+- restarting the service disconnects active users
+- `terraform destroy` removes the whole environment
+- deleting a Pod is safe because the Deployment will recreate it
+- rebooting the instance takes several minutes and may change a public IP if no elastic IP is attached
+
+### Test Immediately After Writing
+
+As soon as you finish a section, use it. The shortest feedback loop produces the best runbook.
+
+For example:
+
+1. stop the service using some other method
+2. follow your written restart procedure exactly
+3. note every missing assumption
+4. update the document immediately
+
+## Common Command Patterns
+
+The exact tools vary by deployment style, but the following command families appear often.
+
+| Goal | Single host / systemd | Docker Compose | Kubernetes |
+|---|---|---|---|
+| Check status | `systemctl status SERVICE` | `docker compose ps` | `kubectl get pods -n NAMESPACE` |
+| Restart service | `systemctl restart SERVICE` | `docker compose restart SERVICE` | `kubectl rollout restart deployment/NAME -n NAMESPACE` |
+| View logs | `journalctl -u SERVICE -n 100` | `docker compose logs --tail=100 SERVICE` | `kubectl logs deployment/NAME -n NAMESPACE --tail=100` |
+| Confirm network listener | `ss -tulpn` | `docker compose ps` / `docker port` | `kubectl get svc -n NAMESPACE` |
+| Test HTTP response | `curl -I URL` | `curl -I URL` | `curl -I URL` |
+| Inspect processes | `ps aux | grep NAME` | `docker ps` | `kubectl describe pod POD -n NAMESPACE` |
+
+Use them as building blocks, not a substitute for service-specific instructions.
+
+## Bootstrap Template
+
+Use this when another operator may need to go from a fresh EC2 instance to a working service.
+
+```md
+# Runbook: SERVICE_NAME
+
+- Owner: YOUR_NAME
+- Last updated: YYYY-MM-DD
+- Environment: lab | staging | production
+- Public endpoint: PUBLIC_IP_OR_DNS
+- SSH target: USER@HOST
+- Source repo or artifact source: REPOSITORY_URL_OR_DOWNLOAD_SOURCE
+
+## Starting State
+- Expected Linux distribution and version
+- Expected EC2 size and storage
+- Required credentials, key paths, and tools
+- Any required AWS-side setup already completed
+
+## Provision and Access
+1. Launch or identify the instance.
+2. Confirm network and security group settings.
+3. SSH into the host.
+4. Update the package index and install prerequisites.
+
+## Base Host Setup
+1. Create required users and groups.
+2. Create directories with correct ownership.
+3. Install runtime dependencies.
+4. Record where persistent data will live.
+
+## Service Installation and First Start
+1. Download or pull the service artifact.
+2. Create configuration files.
+3. Perform any first-run tasks such as EULA acceptance.
+4. Define and enable the managed service.
+5. Start the service.
+
+## Verify First Successful Startup
+- `systemctl status ...` or equivalent
+- `nmap -sV -Pn -p T:25565 PUBLIC_ENDPOINT` or other protocol-appropriate check
+- expected healthy log lines
+
+## How to Connect
+- Admin access path
+- Client or player connection path
+- Any firewall or DNS notes
+
+## Normal Operations
+- start, stop, restart
+- health checks
+- log locations
+- update procedure
+
+## Failure Scenarios
+- service process crashed
+- service reachable failure
+- instance reboot and service did not return
+
+## Cost Controls
+- when to stop the instance
+- when to destroy the environment
+- any persistence warnings
+```
+
+## Operations Template
+
+Use this when you need a clean starting point for a single deployed service.
+
+```md
+# Runbook: SERVICE_NAME
+
+- Owner: YOUR_NAME
+- Last updated: YYYY-MM-DD
+- Environment: lab | staging | production
+- Service URL: SERVICE_URL
+- Host / cluster: HOSTNAME, PUBLIC_IP, or CLUSTER_NAME
+- Source repo: REPOSITORY_URL_OR_PATH
+
+## Service Description
+What the service does, where it runs, and what it depends on.
+
+## Prerequisites
+- Required access and credentials
+- Required tools
+- Working directory
+- Placeholder values used in this document
+
+## Bootstrap / Setup
+- Starting assumptions
+- Fresh-environment setup steps if relevant
+- First successful startup verification
+
+## Health Check
+1. Check that the process, container, or Pod is running.
+2. Check that the service is listening or exposed.
+3. Check the public or internal endpoint.
+4. State the expected healthy output.
+
+## Restart Procedure
+1. Command to restart.
+2. Any dependency ordering.
+3. Post-restart verification commands.
+
+## Rollback Procedure
+1. How to identify the previous version.
+2. Commands to redeploy or restore it.
+3. Verification steps.
+
+## Failure Scenarios
+### Scenario: Service process crashed
+- Symptoms
+- Detection commands
+- Likely causes
+- Recovery steps
+- Verification
+
+### Scenario: Service returns errors
+- Symptoms
+- Detection commands
+- Likely causes
+- Recovery steps
+- Verification
+
+### Scenario: Instance rebooted and service stayed down
+- Symptoms
+- Detection commands
+- Likely causes
+- Recovery steps
+- Verification
+
+## Logs and Diagnostics
+- Key log locations or commands
+- Metrics or dashboards if available
+
+## Cost Controls
+- How to stop resources safely
+- When to destroy resources entirely
+- Any data preservation warnings
+```
+
+## Typical Failure Scenarios to Document
+
+You do not need to predict every possible outage. Start with likely, high-signal failures.
+
+### Service Process or Container Crashed
+
+- how to tell it is no longer running
+- whether it should have restarted automatically
+- how to bring it back manually
+- how to verify that it stays up
+
+### Service Is Running but Returning Errors
+
+- the user-visible symptom, such as `500 Internal Server Error`
+- dependency checks, such as database reachability
+- relevant application logs
+- whether configuration, secrets, migrations, or upstream services changed recently
+
+### Instance Rebooted and the Service Did Not Return
+
+- whether services are configured to start on boot
+- whether volumes reattached correctly
+- whether a changed public IP broke DNS or hard-coded configuration
+- how to restore normal startup behavior if it failed
+
+### Reverse Proxy Healthy, Upstream Unhealthy
+
+Common symptom: port 80 or 443 responds, but the application behind nginx or Apache is failing.
+
+Document how to distinguish between:
+
+- the proxy process being healthy
+- the application process being healthy
+- the database being healthy
+
+### Persistent Storage Problem
+
+Examples:
+
+- WordPress cannot write uploads
+- database fails due to missing volume or permissions
+- application state vanished after container recreation
+
+Document where state lives and how to verify it before performing recovery steps.
+
+## Common Mistakes
+
+### "Check the service"
+
+This is too vague. Say which service and how.
+
+### Machine-Specific Local Paths
+
+Avoid documenting assumptions like `~/Downloads/key.pem` unless the runbook is explicitly personal and disposable.
+
+### Missing Expected Results
+
+Commands alone are not enough. State what success looks like.
+
+### No Ordering Information
+
+If the database must be healthy before the app starts, document that.
+
+### Untested Rollback Section
+
+Do not invent a rollback process because it seems like the document should have one. Either test it or honestly state the current limitation.
+
+### Hidden Prerequisites
+
+If the operator needs a specific `.env` file, AWS profile, kubeconfig, or SSH key, say so.
+
+### Stale Names
+
+Runbooks break when service names change and the document does not. Keep names synchronized with reality.
+
+## Testing and Maintenance
+
+Treat the runbook as part of the service, not as decoration.
+
+Good habits:
+
+- update the runbook whenever deployment steps change
+- retest the restart section after meaningful architecture changes
+- retest the rollback section after changing versioning or image tags
+- add a new failure scenario when you discover one the hard way
+- record the date of the last successful validation
+
+One useful habit is to add a short footer note such as:
+
+```text
+Last tested restart: 2026-04-30
+Last tested rollback: 2026-04-30
+Validated by: Your Name
+```
+
+That makes freshness visible.
+
+<Aside type="note">
+The best indicator that a runbook is working is that it reduces improvisation. During recovery, the operator should spend less time remembering and more time verifying.
 </Aside>
