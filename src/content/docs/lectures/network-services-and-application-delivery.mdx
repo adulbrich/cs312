@@ -1,6 +1,6 @@
 ---
 title: "Network Services and Application Delivery"
-description: "The network services applications depend on: DNS, email authentication, firewalls, TLS certificates, reverse proxies, load balancers, VPNs, and systematic connectivity troubleshooting."
+description: "How DNS, email authentication, firewalls, TLS, reverse proxies, load balancers, CDNs, and VPNs shape application delivery and troubleshooting."
 sidebar:
   order: 12
 draft: true
@@ -13,73 +13,34 @@ import HistoricalNote from '/src/components/HistoricalNote.astro';
 type: lecture
 slug: network-services-and-application-delivery
 order: 12
-covers: systematic troubleshooting methodology; DNS record types and TTL; split-horizon DNS; email authentication (SPF/DKIM/DMARC); firewall placement and debugging; iptables/nftables; packet capture with tcpdump; ARP security; overlay vs underlay networking; VPNs and multi-site connectivity; reverse proxies and load balancers; TLS certificate issuance and diagnostics
+covers: DNS ops (TTL, split-horizon, AAAA); mail routing/auth; firewalls and tcpdump; Kubernetes delivery; VPN/WAN patterns; reverse proxies and L4/L7 balancing; CDNs; TLS automation and diagnostics
 prereq_lectures: networking-fundamentals, container-orchestration
 followup_lectures: system-security-and-hardening
 paired_activities:
 supports_labs: cluster-operations
 */}
 
-A developer reports that an application is unreachable. The failure could live anywhere in a stack that spans routing tables, firewall rules, DNS records, TLS certificates, and application code. A sysadmin who understands the services that underpin application delivery does not guess; they work through the stack methodically until the failure reveals itself.
+A developer reports that an application is unreachable. The failure could live anywhere in a stack that spans routing tables, firewall rules, DNS records, TLS certificates, and the load balancer distributing requests across backends. Each of these layers is independently configurable, independently breakable, and independently debuggable. A sysadmin who understands how they compose does not guess when something breaks; they know which layer to test first.
 
-Building on the Networking Fundamentals lecture, this lecture focuses on the services that applications, containers, and users depend on once the network is built: DNS, firewalls, TLS certificates, reverse proxies, VPNs, and multi-site connectivity. These are the pieces you adjust most often when deploying, securing, and debugging a production service. Understanding them alongside container orchestration concepts helps you reason about why Kubernetes networking behaves the way it does, what lies beneath the ingress controller, and why cluster connectivity failures often require checking multiple layers before the cause is visible.
-
-## A systematic troubleshooting methodology
-
-The Networking Fundamentals lecture establishes the bottom-up and divide-and-conquer diagnostic approaches. Those same strategies apply here, but now you read each tool's output in the context of a system you built and documented. A `* * *` at hop 3 in `traceroute` names a specific router you can log into. A `FAILED` ARP entry is not just an abstraction; it points to a specific layer-2 failure you can trace from switch logs or a cloud console.
-
-The practical addition at the service level is scope narrowing: if nothing on the network works, suspect layers 1 through 3. If only one service is broken, suspect layers 4 through 7 (DNS, firewall rules, application configuration). Every tool in this lecture targets a specific layer, and knowing which layer to test first turns a vague "network is down" report into a bounded search.
-
-<Aside type="tip" title="Narrowing the Search Space">
-If *nothing* on the network works, suspect layers 1 through 3. If only *one service* is broken, suspect layers 4 through 7 (DNS, firewall rules, application configuration).
-</Aside>
+Building on the Networking Fundamentals lecture, this lecture covers the services that applications, containers, and users depend on once the network is built: DNS record management, email authentication, firewalls, reverse proxies, load balancers, content delivery networks, VPNs, and TLS certificate management. The Networking Fundamentals lecture established the bottom-up diagnostic approach and the "if only one service is broken, suspect layers 4 through 7" scope-narrowing rule; that framing applies throughout everything here.
 
 ## DNS configuration and troubleshooting
 
-Networking Fundamentals already introduced DNS, the common record types, and the first-pass use of `dig`. The operational questions here are narrower and more consequential: which resolver a host is actually using, how long bad data can remain cached, how internal and external answers differ, and which DNS records quietly control email delivery or certificate issuance.
+Networking Fundamentals introduced DNS, the common record types, and the first-pass use of `dig`. The operational questions here are narrower and more consequential: which resolver a host is actually using, how long bad data can remain cached, how internal and external answers differ, and which DNS records quietly control email delivery or certificate issuance.
 
 ### Resolver configuration and direct queries
 
-On a Linux server, `/etc/resolv.conf` (or its `systemd-resolved` equivalent) tells the host which resolver to query and which `search` domains to append to short names. Workstations usually receive this from DHCP; servers with static addressing or custom resolver settings often need it checked explicitly. In practice, the first DNS troubleshooting step is confirming which resolver the machine is asking, then querying that resolver directly instead of treating "DNS" as a single black box.
-
-The `dig` command is the most versatile DNS troubleshooting tool because it shows the response code, answer section, authority section, and timing. `nslookup` remains useful for quick interactive checks, especially on Windows, but `dig` exposes the most detail during an outage.
+On a Linux server, `/etc/resolv.conf` (or its `systemd-resolved` equivalent) tells the host which resolver to query and which `search` domains to append to short names. Workstations usually receive this from DHCP; servers with static addressing often need it checked explicitly. The first DNS troubleshooting step is confirming which resolver the machine is actually asking, then querying that resolver directly instead of treating "DNS" as a single black box.
 
 ```bash
-# Query the resolver configured on this host
-dig app.example.com
-
-# Query a specific internal resolver directly
+# Query a specific resolver directly, bypassing the local cache
 dig @10.0.1.2 app.example.com
 
-# Get just the answer section
-dig +short app.example.com
-```
-
-### DNS record types in depth
-
-Networking Fundamentals covered the common record types at the conceptual level. The additions here are the records and behaviors that tend to matter during outages, change windows, and external integrations.
-
-**PTR and SOA records** become operationally important the moment mail delivery or reverse lookups fail. Missing or mismatched PTR records are strong spam signals, and reverse DNS is published by whoever controls the IP block rather than by whoever runs the application. When a PTR lookup returns NXDOMAIN, the SOA record in the authority section still tells you which zone answered negatively: `MNAME` names the primary nameserver, and `RNAME` encodes the responsible mailbox for the zone administrator. That is often the contact path you need when asking whoever controls the reverse zone to create or fix a PTR record.
-
-**TXT records** carry arbitrary text data and are widely used for domain verification and email authentication. SPF, DKIM, and DMARC are all published as TXT records. SaaS providers also use TXT tokens to prove you control a domain before enabling a service.
-
-**CAA (Certification Authority Authorization) records** tell compliant public Certificate Authorities which issuers are authorized to mint certificates for a domain. A CAA record of `0 issue "letsencrypt.org"` tells a CA that it should issue only if it is Let's Encrypt or otherwise explicitly authorized. CAA reduces accidental or unauthorized issuance by honest public CAs. It works best alongside Certificate Transparency monitoring.
-
-```bash
-# Query specific record types
-dig A example.com
-dig AAAA example.com
-dig MX example.com
-dig TXT example.com
-
-# Check CAA policy
-dig CAA example.com
-
-# Full trace showing the resolution chain from root servers down
+# Full iterative resolution from root servers, showing each delegation
 dig +trace example.com
 ```
 
-The `dig +trace` flag performs a full iterative resolution starting from the root servers, showing each delegation in the chain. The diagram below shows that path: each tier delegates authority downward until the authoritative nameserver for the zone answers with the actual record.
+The `dig +trace` flag performs a full iterative resolution starting from the root servers, showing each delegation in the chain. Each tier delegates authority downward until the authoritative nameserver for the zone answers with the actual record.
 
 ```mermaid
 sequenceDiagram
@@ -99,63 +60,56 @@ sequenceDiagram
   R-->>C: 203.0.113.42 (cached for 3600s)
 ```
 
+### DNS record types in depth
+
+Networking Fundamentals covered the common record types conceptually. Several types matter specifically at the operational and integration layer.
+
+**A and AAAA records** map hostnames to IPv4 and IPv6 addresses. In a dual-stack deployment, meaning one that serves both IPv4 and IPv6, a stale AAAA record can break only the subset of clients that prefer IPv6, making the outage look intermittent even though IPv4 tests succeed. SMTP has a subtle dependency here too: if a domain has no MX record, many mail senders fall back to the domain's A or AAAA records, which is why domains that should not receive mail sometimes publish a NULL MX record to say so explicitly.
+
+**PTR and SOA records** become important the moment mail delivery or reverse lookups fail. Missing or mismatched PTR records are strong spam signals, and reverse DNS is published by whoever controls the IP block, not whoever runs the application. When a PTR lookup returns NXDOMAIN, the SOA record in the authority section tells you which zone answered negatively: `MNAME` names the primary nameserver, and `RNAME` encodes the responsible mailbox for the zone administrator. That is often the contact path you need when asking whoever controls the reverse zone to create or fix a PTR record.
+
+**TXT records** carry arbitrary text data. SPF, DKIM, and DMARC are all published as TXT records. SaaS providers also use TXT tokens to prove you control a domain before enabling a service.
+
+**CAA (Certification Authority Authorization) records** tell compliant public Certificate Authorities which issuers are authorized to mint certificates for a domain. A CAA record of `0 issue "letsencrypt.org"` tells a CA it should only issue if it is Let's Encrypt or otherwise explicitly authorized. CAA reduces accidental or unauthorized issuance and works best alongside Certificate Transparency monitoring.
+
 ### TTL strategy
 
-Every DNS record has a TTL (Time To Live), the number of seconds resolvers may cache the answer before querying again. TTL is one of the most consequential settings in DNS configuration because it controls how quickly changes propagate worldwide.
+Every DNS record has a TTL (Time To Live): the number of seconds resolvers may cache the answer before querying again. TTL is one of the most consequential settings in DNS because it controls how quickly changes propagate worldwide.
 
-A record with `TTL 86400` (one day) can be cached by every resolver on the internet for up to 24 hours. If you change that A record, users whose resolvers cached the old answer will keep getting the old IP for up to a day. Before making any DNS change that needs to propagate quickly, reduce the TTL to 300 seconds (5 minutes) at least 24 hours in advance. Once the old TTL has expired everywhere, make the change. After it propagates, raise the TTL back to a longer value.
+A record with `TTL 86400` (one day) can be cached by every resolver on the internet for up to 24 hours. If you change that A or AAAA record, users whose resolvers cached the old answer will keep getting the old IP for up to a day. The standard practice before any DNS change that needs to propagate quickly is to reduce TTL to 300 seconds at least 24 hours in advance. Once the old TTL has expired everywhere, make the change, then raise the TTL back.
 
-Short TTLs increase DNS query volume and add a small latency cost for every cache miss. Large sites like Google use short TTLs (60-300 seconds) on their A records so they can shift traffic between data centers within minutes. Smaller organizations typically use 3600 seconds (1 hour) for records that rarely change and 300 seconds for anything actively managed.
+Short TTLs increase DNS query volume. Large sites use short TTLs (60-300 seconds) on their A and AAAA records so they can shift traffic between data centers within minutes. Smaller organizations typically use 3600 seconds for records that rarely change and 300 seconds for anything actively managed.
 
 ### Common DNS failures
 
-DNS failures are rarely obvious because the symptom is always the same: "I can't reach the server." Identifying which part of the resolution chain is at fault requires checking each link.
+DNS failures are rarely obvious because the symptom is always the same: "I cannot reach the server." Comparing what different resolvers return isolates which link in the resolution chain is at fault. If the internal resolver returns the old address but a public resolver returns the new one, you have a caching or zone propagation problem. If both return NXDOMAIN, the record was deleted or never created. If `dig` succeeds but the application still fails, DNS resolved correctly and the problem is in a higher layer.
 
-The resolver is unreachable. If the DNS server's IP address is wrong in `/etc/resolv.conf`, or if the DNS server itself is down, all queries time out. Test by pinging the nameserver IP directly.
-
-The record is missing or stale. If someone deleted the A record for `app.example.com`, or if a cached record has the wrong IP, users get NXDOMAIN or are sent to the wrong server. Use `dig` to compare results from different resolvers.
-
-```bash
-# Compare your local resolver with a public one
-dig app.example.com @10.0.1.2
-dig app.example.com @8.8.8.8
-```
-
-The search domain is misconfigured. If `/etc/resolv.conf` has the wrong search domain, short hostnames resolve to the wrong fully qualified domain name, or fail entirely.
-
-The TTL is too long. A record was changed but resolvers are still returning the old cached answer. `dig` will show the remaining TTL in the answer section; if it is still counting down from a large number, you are looking at a caching problem, not a zone file problem.
+The `search` domain in `/etc/resolv.conf` appends a suffix to unqualified hostnames, so `ping app01` tries `app01.corp.example.com` before querying bare `app01`. A misconfigured search domain causes short hostnames to resolve to the wrong fully qualified name or fail entirely. The TTL in the answer section tells you whether you are looking at a caching problem (large remaining value) or a zone file problem.
 
 ### Internal DNS and split-horizon
 
 Most organizations run an internal DNS server that answers queries for private hostnames that should never appear in public DNS. For example, `db.corp.example.com` might resolve to `10.0.1.200` for internal clients, while external DNS has no record for it at all.
 
-**Split-horizon DNS** (also called split-brain DNS) takes this further: the same hostname resolves to different addresses depending on where the query originates. `app.company.com` might resolve to `10.0.1.100` for internal clients (going directly to the backend) and to `203.0.113.5` (the public load balancer) for external clients. The internal answer avoids the round-trip through the internet and eliminates a dependency on the load balancer for internal traffic.
+**Split-horizon DNS** (also called split-brain DNS) takes this further: the same hostname resolves to different addresses depending on where the query originates. `app.company.com` might resolve to `10.0.1.100` for internal clients (going directly to the backend) and to `203.0.113.5` (the public load balancer) for external clients. The internal answer avoids the round-trip through the internet and eliminates a dependency on the load balancer for internal traffic. The tradeoff is behavioral drift: internal users may bypass the public CDN, WAF, or load balancer path entirely, so they may not see the same authentication redirects, rate limits, access logs, or certificate behavior that external users do.
 
 ```mermaid
 flowchart LR
   Internal["Internal client\n10.0.0.5"]
   External["External client"]
-  InDNS["Internal DNS\napp.company.com\n→ 10.0.1.100"]
-  ExtDNS["External DNS\napp.company.com\n→ 203.0.113.5"]
+  InDNS["Internal DNS\napp.company.com → 10.0.1.100"]
+  ExtDNS["External DNS\napp.company.com → 203.0.113.5"]
 
   Internal -->|"DNS query"| InDNS
   External -->|"DNS query"| ExtDNS
 ```
 
-On Linux servers, `/etc/resolv.conf` (or its systemd-resolved equivalent) controls which DNS server handles queries:
+When troubleshooting internal name resolution failures, always check `/etc/resolv.conf` first (is the nameserver IP correct? is the search domain right?), then query the internal DNS server directly with `dig @<nameserver-ip> hostname` to bypass any caching layer.
 
-```bash
-# View the current resolver configuration
-cat /etc/resolv.conf
-# Typical output for a server:
-# nameserver 10.0.1.2       <- internal DNS server
-# nameserver 10.0.1.3       <- secondary internal DNS
-# search corp.example.com   <- appended to short hostnames
-```
+## Routing and gateway issues
 
-The `search` directive appends a domain suffix to unqualified hostnames. If you type `ping app01`, the resolver automatically tries `app01.corp.example.com` before querying bare `app01`. This is why servers on the same internal domain can reach each other by short name rather than fully qualified hostname.
+The Networking Fundamentals lecture covers routing tables, default gateways, and `traceroute` in depth, including the TTL-decrementing mechanism, what `* * *` means, and how to compare UDP versus TCP probes to distinguish routing failures from firewall policy. The operational addition at this layer is **asymmetric routing**.
 
-When troubleshooting internal name resolution failures, always check `/etc/resolv.conf` first: is the nameserver IP correct? Is the search domain right? Then use `dig @<nameserver-ip> hostname` to query the internal DNS server directly and bypass any caching layer.
+Asymmetric routing occurs when traffic takes a different path in each direction: the request might reach the server through Router A, but the response leaves through Router B. Stateful firewalls that expect to see both sides of a connection can drop traffic in this scenario. If a firewall on Router A's path sees the outgoing SYN but never sees the returning SYN-ACK because it came back through Router B, it may drop subsequent packets from that connection. The failure appears intermittent or one-sided, and packet captures at multiple points in the network are often necessary to confirm it.
 
 ## Email infrastructure
 
@@ -163,34 +117,17 @@ Email is rarely set up from scratch today; most organizations use hosted service
 
 ### How email routing works
 
-When you send an email to `user@example.com`, your mail server performs a DNS **MX record** lookup for `example.com`. The MX record returns the hostname (not IP) of the mail server that accepts mail for that domain, along with a priority number. Lower values are preferred; if the primary is unreachable, the sender falls back to higher-priority values.
-
-```bash
-# Look up the mail servers for a domain
-dig MX oregonstate.edu
-```
-
-Typical output:
-```
-oregonstate.edu.  3600  IN  MX  10  smtp.oregonstate.edu.
-```
-
-The number `10` is the priority. With multiple MX records at different priorities, the sending server tries the lowest number first.
+When you send an email to `user@example.com`, your mail server performs a DNS **MX record** lookup for `example.com`. The MX record returns the hostname (not IP) of the mail server that accepts mail for that domain, along with a priority number. Lower priority values are preferred; if the primary is unreachable, the sender falls back to higher values. If a domain has no MX record at all, SMTP traditionally falls back to that domain's A or AAAA record unless the domain publishes a NULL MX record to say it does not accept mail.
 
 ### Email authentication: SPF, DKIM, and DMARC
 
 Spam and phishing attacks forge the `From:` address in emails. Three DNS-based mechanisms allow receiving mail servers to verify that an email genuinely came from where it claims.
 
-**SPF (Sender Policy Framework)** is a DNS TXT record that lists the IP addresses authorized to send email for a domain. A receiving server checks whether the sending server's IP is in the SPF record; if not, the email fails SPF and is more likely to be rejected or marked as spam.
+**SPF (Sender Policy Framework)** is a DNS TXT record that authorizes which servers may send email for the domain used in the SMTP envelope, the `MAIL FROM` or `Return-Path` domain. A receiving server checks whether the sending host is authorized for that envelope domain; if not, the email fails SPF and is more likely to be rejected or marked as spam. SPF by itself does not prove that the visible `From:` header matches that sending domain.
 
-```bash
-# Check a domain's SPF record
-dig TXT example.com | grep spf
-```
+**DKIM (DomainKeys Identified Mail)** adds a cryptographic signature to every outgoing email. The public key is published in DNS. The receiving server uses it to verify that the email was not modified in transit and was sent by someone who holds the domain's private key.
 
-**DKIM (DomainKeys Identified Mail)** adds a cryptographic signature to every outgoing email. The public key is published in DNS. The receiving server uses it to verify that the email was not modified in transit and was authorized by the domain's private key.
-
-**DMARC (Domain-based Message Authentication, Reporting and Conformance)** ties SPF and DKIM together with a policy (`p=none` for monitoring only, `p=quarantine`, or `p=reject`) and instructs receiving servers where to send aggregate reports. A `p=reject` policy effectively blocks forged email from your domain.
+**DMARC (Domain-based Message Authentication, Reporting and Conformance)** ties SPF and DKIM to the visible `From:` domain by requiring alignment between that header and at least one passing authentication mechanism. It adds a policy: `p=none` for monitoring only, `p=quarantine`, or `p=reject`, and it instructs receiving servers where to send aggregate reports. A `p=reject` policy effectively blocks forged email from your domain.
 
 <Aside type="tip" title="Configure Email Authentication Before Sending">
 When setting up email for a new domain, configure SPF, DKIM, and DMARC before sending any bulk email. Major providers (Gmail, Microsoft) increasingly reject or silently drop mail from domains that lack these records.
@@ -198,45 +135,33 @@ When setting up email for a new domain, configure SPF, DKIM, and DMARC before se
 
 ### Why you probably should not run your own mail server
 
-Running a mail server requires a static IP with proper reverse DNS, maintaining a clean sending reputation, staying off spam blacklists, managing TLS certificates, implementing SPF/DKIM/DMARC, and monitoring for abuse 24/7. A misconfigured server that gets blacklisted silently stops delivering email to most recipients. Hosted solutions like Google Workspace or Microsoft 365 handle all of this for a per-user monthly fee and are the right choice for almost every organization. The main reasons to self-host are specific compliance requirements, very high volume that makes hosted costs prohibitive, or strict data sovereignty requirements.
-
-## Routing and gateway issues
-
-As covered in the Networking Fundamentals lecture, every host sends non-local traffic to a default gateway and the routing table maps destinations to next hops. The later-stage question is not "what is a default route?" but "does this route table match the network you intended to build?" The diagnostic starting point is still `ip route show`, but now you read it against a known topology.
-
-```bash
-ip route show
-```
-
-Once you confirm the routing table looks correct on the originating host, the question becomes whether packets are actually traversing the expected path through the network.
-
-### Diagnosing routing problems
-
-`traceroute` reveals the path packets take hop by hop. The Networking Fundamentals lecture explains the TTL-decrementing mechanism that generates each hop's reply. What matters operationally is reading that output in the context of a network you know. A `* * *` at a given hop points to a specific router you can log into and inspect directly. Check its interface states, routing table, and whether it has a route to the destination subnet.
-
-```bash
-# Default UDP probe (blocked by many firewalls)
-traceroute app.example.com
-
-# TCP probe on port 443 (traverses most firewalls that permit HTTPS)
-sudo traceroute -T -p 443 app.example.com
-```
-
-When a trace reaches the destination over TCP but not over UDP, the difference is firewall policy rather than a routing failure. When a TCP trace also stops, the routing problem is at or in front of that hop. Comparing both results narrows whether you are looking at a routing issue or an access control issue.
-
-### Asymmetric routing
-
-Asymmetric routing occurs when traffic takes a different path in each direction. The request might reach the server through Router A, but the response leaves through Router B. This can cause problems with stateful firewalls that expect to see both sides of a connection. If a firewall on Router A's path sees the outgoing SYN but never sees the returning SYN-ACK (because it came back through Router B), it may drop subsequent packets.
-
-Asymmetric routing is notoriously difficult to diagnose because the problem appears intermittent or one-sided. Packet captures at multiple points in the network are often necessary to confirm it.
+Running a mail server requires a static IP with proper reverse DNS, maintaining a clean sending reputation, staying off spam blacklists, managing TLS certificates, implementing SPF/DKIM/DMARC, and monitoring for abuse around the clock. A misconfigured server that gets blacklisted silently stops delivering email to most recipients. Hosted solutions like Google Workspace or Microsoft 365 handle all of this for a per-user monthly fee. This is the same build-versus-buy tradeoff that appears throughout infrastructure decisions: the marginal cost of self-hosting is ongoing operations work, not just upfront infrastructure cost. The main reasons to self-host are specific compliance requirements, very high volume that makes hosted costs prohibitive, or strict data sovereignty requirements.
 
 ## Firewalls
 
-Networking Fundamentals already covered what firewalls, ports, and cloud security groups do. A firewall is only useful for the traffic that actually crosses it: this placement question shapes everything else about how firewall policy is designed and debugged.
+Networking Fundamentals already covered what firewalls, ports, and cloud security groups do at the conceptual level. A firewall is only useful for the traffic that actually crosses it, so the placement question shapes everything else about how firewall policy is designed and debugged.
 
-### Placement and scope
+### Placement and zone design
 
-A perimeter firewall sits between the internal network and the internet, so every external packet passes through it. Internal firewalls segment environments inside the organization, for example corporate from production or user networks from server networks. A Web Application Firewall (WAF) sits specifically in front of HTTP services to inspect web traffic for attacks like SQL injection or cross-site scripting, while an endpoint firewall runs on the host itself and protects that device even when traffic never crosses a central appliance.
+Different firewall positions protect different perimeters. A **perimeter firewall** sits between the internal network and the internet, so every external packet passes through it. A **DMZ (Demilitarized Zone)** is a network segment between the perimeter firewall and the internal network, used to host internet-facing services (web servers, mail relays) that should not have direct access to internal systems. An **internal firewall** segments zones inside the organization: separating the DMZ from the application tier, or corporate systems from production servers. A **WAF (Web Application Firewall)** sits in front of HTTP services to inspect web traffic for application-layer attacks like SQL injection or cross-site scripting. An **endpoint firewall** runs on the host itself and protects the device regardless of whether traffic crosses a central appliance.
+
+```mermaid
+flowchart TB
+  Internet(["Internet"])
+  PF["Perimeter Firewall\nIP/port filtering, NAT\nstateful inspection"]
+  DMZ["DMZ\nPublic-facing services\nweb servers, mail relay"]
+  WAF["WAF\nLayer 7 HTTP inspection\nSQL injection, XSS filtering"]
+  IF["Internal Firewall\nSegmentation: DMZ to app tier"]
+  App["Application tier\nprivate subnet"]
+  DB["Database tier\nprivate subnet"]
+
+  Internet --> PF
+  PF --> DMZ
+  DMZ --> WAF
+  WAF --> IF
+  IF --> App
+  App --> DB
+```
 
 <Aside type="note" title="Lateral Traffic and Firewall Blindspots">
 Firewalls only inspect traffic that passes through them. Traffic that stays entirely within an unmanaged switch never hits a firewall unless endpoint firewalls are involved. This is a frequently overlooked gap in network designs.
@@ -244,114 +169,65 @@ Firewalls only inspect traffic that passes through them. Traffic that stays enti
 
 ### Firewall technologies
 
-Modern firewalls combine several inspection techniques rather than relying on a single one. At the simplest end, packet filtering allows or denies traffic based on source or destination IP, protocol, and port. Stateful inspection adds connection awareness, which is why return traffic for an established session is automatically allowed. More advanced devices can proxy connections, inspect payloads with Deep Packet Inspection, or understand application protocols like HTTP and DNS well enough to make layer-7 policy decisions. Many platforms also integrate Intrusion Prevention System behavior, using signatures or anomaly detection to block exploit traffic. The trade-off is consistent across all of these features: richer inspection gives you better control and better detection, but costs CPU, latency, and operational complexity.
+Modern firewalls combine several inspection techniques. **Packet filtering** allows or denies traffic based on source or destination IP, protocol, and port. **Stateful inspection** adds connection awareness, which is why return traffic for an established session is automatically allowed without a matching inbound rule. More advanced devices can proxy connections, inspect payloads with Deep Packet Inspection (DPI), or understand application protocols like HTTP and DNS well enough to make layer-7 policy decisions. IPS (Intrusion Prevention System) behavior adds signature-based or anomaly-based detection to block exploit traffic inline. The tradeoff is consistent across all of these features: richer inspection gives better control and better detection, but costs CPU, latency, and operational complexity.
 
 ### Common firewall terminology
 
-Firewall interfaces and vendor documentation reuse a small vocabulary constantly. Learning these terms makes rule sets much easier to read and compare across products.
+Firewall interfaces and vendor documentation reuse a small vocabulary constantly. Learning these terms makes rule sets much easier to read across products.
 
 | Term | Meaning |
-|------|---------|
-| **Hosts** | Sets of computers, often grouped by subnet or interface |
-| **Zones** | Logical groupings of devices/subnets sharing the same security policy (e.g., "LAN", "DMZ", "WAN") |
-| **Policies** | Sets of rules governing access control and behavior for a zone |
-| **Rules** | Specific instructions within a policy: allow or deny traffic matching source, destination, protocol, port, and optionally time of day |
-| **DMZ (Demilitarized Zone)** | A network segment isolated from the internal network by a firewall, used to host internet-facing services (web servers, mail relays) that should not have direct access to internal systems |
-| **Traffic shaping** | Rate limiting and prioritization of traffic; can alleviate the impact of denial-of-service attacks and ensure critical services get bandwidth |
+|---|---|
+| **Zones** | Logical groupings of devices or subnets sharing the same security policy (e.g., "LAN", "DMZ", "WAN") |
+| **Policies** | Sets of rules governing access control and behavior for traffic between zones |
+| **Rules** | Specific instructions within a policy: allow or deny traffic matching source, destination, protocol, port |
+| **Traffic shaping** | Rate limiting and prioritization; can limit the impact of denial-of-service attacks |
 
 ### Linux firewalls: iptables and nftables
 
-On Linux, the kernel's netfilter framework handles packet filtering. The traditional interface is `iptables`; the modern replacement is `nftables`. Both organize rules into chains (INPUT for incoming traffic, OUTPUT for outgoing, FORWARD for routed traffic).
+On Linux, the kernel's netfilter framework handles packet filtering. The traditional interface is `iptables`; the modern replacement is `nftables`. Both organize rules into chains: `INPUT` for incoming traffic, `OUTPUT` for outgoing, and `FORWARD` for traffic being routed through the host.
 
 ```bash
 # List current iptables rules with line numbers
 sudo iptables -L -n --line-numbers
 
-# Check if a specific port is allowed
-sudo iptables -L INPUT -n | grep 80
-
-# Temporarily allow HTTP traffic for testing
-sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
+# List all nftables rules
+sudo nft list ruleset
 ```
 
 <Aside type="caution" title="iptables Rules Are Not Persistent">
-Changes made with `iptables` commands are not persistent by default. They disappear on reboot. Use `iptables-save` and `iptables-restore` (or your distribution's firewall management tool) to persist rules.
+Changes made with `iptables` commands are not persistent by default. They disappear on reboot. Use `iptables-save` and `iptables-restore`, or your distribution's firewall management tool, to persist rules.
 </Aside>
 
-With `nftables`, the syntax is different but the concepts are the same.
-
-```bash
-# List all nftables rules
-sudo nft list ruleset
-
-# Add a rule to accept HTTP traffic
-sudo nft add rule inet filter input tcp dport 80 accept
-```
+Higher-level tools like `ufw` (Ubuntu) and `firewalld` (RHEL/Fedora) manage netfilter rules through a simpler interface and handle persistence automatically. Configuration management tools like Ansible can manage firewall rules idempotently across a fleet, which is how large deployments keep firewall policy consistent without per-host manual changes.
 
 ### Cloud security groups
 
-In AWS, the two common virtual firewall layers are security groups and network ACLs. Azure and GCP expose comparable controls with different names and scopes, so translate the concept rather than assuming the AWS labels apply everywhere. A common AWS misconfiguration is allowing inbound traffic on port 443 but forgetting to allow the health check path or port that the load balancer uses. The application works when accessed directly but fails behind the load balancer.
+In AWS, the two common virtual firewall layers are security groups and network ACLs. Security groups are stateful (return traffic is automatically allowed); network ACLs are stateless (you must explicitly allow return traffic in both directions). A common misconfiguration is allowing client traffic on port 443 while misconfiguring the target group's health check path, protocol, or port, or blocking health check traffic with a security group or network ACL. The application works when accessed directly but fails behind the load balancer because the health probe never gets a success response and the backend is marked unhealthy.
 
-When troubleshooting in AWS, always check both the security group rules and any network ACLs applied to the subnet. Security groups are stateful (return traffic is automatically allowed), while network ACLs are stateless (you must explicitly allow return traffic).
+Azure and GCP expose comparable controls with different names and scopes: translate the concept rather than assuming AWS labels apply everywhere.
 
 ### Systematic firewall debugging
 
-When you suspect a firewall issue, follow this process. First, verify the service is listening on the expected port.
-
-```bash
-# Check listening ports
-sudo ss -tlnp | grep 80
-# Expected output shows the web server listening:
-# LISTEN  0  128  *:80  *:*  users:(("nginx",pid=1234,fd=6))
-```
-
-Next, test connectivity from the client side. If `curl` times out but the server shows the port is open, a firewall between the two is likely dropping the traffic.
-
-```bash
-# Test from the client
-curl -v --connect-timeout 5 http://app.example.com
-```
-
-If the connection times out (as opposed to being refused), the packets are being silently dropped, which is characteristic of a firewall rule. A "connection refused" error means the packets reached the server but nothing is listening, which is a different problem entirely.
+When you suspect a firewall is blocking traffic, the distinction between a timeout and a refused connection is a clue, not proof. A "connection refused" error usually means the packets reached a host that actively rejected the connection because nothing is listening, but a reject rule in a firewall or a middlebox can produce the same symptom. A connection that hangs until it times out often means packets are being silently dropped somewhere, which is characteristic of a firewall drop rule, but it is still only a hint. Confirm the service is listening on the server, then test connectivity from the client side. If the service is listening but the client times out, run a packet capture on the server to verify whether traffic is arriving at all. If no packets arrive, the block is upstream. If packets arrive but get no response, a local firewall rule, asymmetric routing, or a server-side stack problem is more likely.
 
 ## Packet capture with tcpdump
 
-When higher-level tools do not reveal the problem, packet capture lets you see exactly what is happening on the wire. The `tcpdump` utility is available on virtually every Linux system and is invaluable for network troubleshooting.
+When higher-level tools do not reveal the problem, packet capture lets you see exactly what is happening on the wire. The `tcpdump` utility is available on virtually every Linux system.
 
 ```bash
-# Capture all traffic on eth0 (stop with Ctrl+C)
-sudo tcpdump -i eth0
-
-# Capture only traffic to or from a specific host
+# Capture traffic to or from a specific host
 sudo tcpdump -i eth0 host 10.0.1.50
 
 # Capture only DNS traffic
 sudo tcpdump -i eth0 port 53
 
-# Capture HTTP traffic and show packet contents in ASCII
-sudo tcpdump -i eth0 port 80 -A
-
 # Write capture to a file for later analysis in Wireshark
 sudo tcpdump -i eth0 -w /tmp/capture.pcap
 ```
 
-Each line of tcpdump output represents a single packet. A typical TCP exchange looks like this:
+Reading `tcpdump` output requires understanding the TCP flags. `[S]` is a SYN (connection initiation). `[S.]` is a SYN-ACK. `[.]` is a plain ACK. `[P.]` means data is being pushed. `[R]` is a RST (immediate connection reset). `[F.]` is FIN (graceful teardown).
 
-```
-10:23:45.123456 IP 10.0.1.100.54321 > 10.0.1.50.80: Flags [S], seq 1234567
-10:23:45.123789 IP 10.0.1.50.80 > 10.0.1.100.54321: Flags [S.], seq 7654321, ack 1234568
-10:23:45.124012 IP 10.0.1.100.54321 > 10.0.1.50.80: Flags [.], ack 7654322
-```
-
-The flags tell you what is happening. `[S]` is a SYN (connection initiation). `[S.]` is a SYN-ACK (the server's response). `[.]` is a plain ACK. `[P.]` means data is being pushed. `[F.]` is a FIN (connection teardown). `[R]` is a RST (connection reset).
-
-When the service is running, DNS resolves correctly, and the routing table looks correct, but the application is still unreachable, run a capture on the server's port to narrow it further.
-
-```bash
-sudo tcpdump -i eth0 port 80 -n
-```
-
-If you see incoming SYN packets but no SYN-ACK responses, the server is receiving the requests but not responding. This could be a local firewall rule dropping the traffic before it reaches the application. If you see no packets at all, the traffic is being dropped upstream, and you need to capture at the next hop.
+When a service is running, DNS resolves correctly, and the routing table looks correct, but the application is still unreachable, a packet capture on the server's port is the next step. If you see incoming SYN packets but no SYN-ACK responses, the server is receiving the requests but not completing the handshake. A local firewall rule is one common cause, but so are asymmetric routing, policy-routing mistakes, or a process that is not actually listening the way you expect. If you see no packets at all, the traffic is being dropped upstream, and you need to capture at the next hop toward the client.
 
 <Aside type="tip" title="Always Filter on Production Servers">
 When capturing on a busy server, always use filters to limit the output. Capturing all traffic on a production server can generate enormous amounts of data and may itself cause performance problems.
@@ -359,70 +235,88 @@ When capturing on a busy server, always use filters to limit the output. Capturi
 
 ## ARP security
 
-The Networking Fundamentals lecture covers how ARP maps IP addresses to MAC addresses within a broadcast domain and how `ip neighbor show` reveals those mappings, including the `FAILED` state that indicates a layer-2 problem such as a VLAN mismatch or bad cable. In a managed network, ARP has an additional security dimension that becomes relevant at the access layer.
+The Networking Fundamentals lecture covers how ARP maps IP addresses to MAC addresses within a broadcast domain and how `ip neighbor show` reveals those mappings, including the `FAILED` state that indicates a layer-2 problem. In a managed network, ARP has an additional security dimension that becomes relevant at the access layer.
 
-**ARP spoofing** (also called ARP poisoning) exploits the fact that ARP has no authentication. Any host on a broadcast domain can send a gratuitous ARP reply claiming any IP address, including the default gateway's. A malicious host that does this causes other devices on the segment to update their ARP caches and send traffic intended for the gateway to the attacker instead. The result is a man-in-the-middle position or a denial of service, and neither is visible at the IP layer.
+**ARP spoofing** (also called ARP poisoning) exploits the fact that ARP has no authentication. Any host on a broadcast domain can send a gratuitous ARP reply claiming any IP address, including the default gateway's. A malicious host that does this causes other devices on the segment to update their ARP caches and send traffic intended for the gateway to the attacker instead, creating a man-in-the-middle position or a denial of service. Neither is visible at the IP layer.
 
 Managed switches mitigate this with **Dynamic ARP Inspection (DAI)**. The switch builds a trusted binding table from DHCP snooping (recording which IP addresses were leased to which MAC addresses on which ports) and validates every ARP reply against it. A reply claiming that `10.0.1.1` belongs to a MAC address not in the binding table is dropped. Servers with statically configured addresses must have manual bindings added to the DAI table, or their own ARP packets will be dropped as untrusted. DAI is a standard hardening step on access layer switches in environments where unauthorized devices could plug into switch ports.
 
-## Network overlays and cluster connectivity
+## Kubernetes application delivery
 
-The network infrastructure you operate, the switches, routers, and WAN links, is the **underlay**: the ordinary IP network that actually moves packets. Systems such as SD-WAN and many container network plugins build an **overlay** on top, encapsulating traffic or advertising extra routes so a logical network can span many physical segments.
+Understanding what lies beneath Kubernetes networking abstractions is necessary when debugging application delivery failures that are not visible from inside the cluster.
 
-Kubernetes east-west traffic is the clearest example. Depending on the CNI plugin, pod traffic may ride a VXLAN overlay, where pod packets are wrapped inside UDP packets and decoded at the destination node, or it may require the underlay to route pod CIDRs directly through BGP or static routes. When cluster networking breaks, a good operator asks first whether the overlay is broken or whether the underlay never had a valid path in the first place. A VXLAN overlay cannot function if the nodes cannot reach each other on the UDP port VXLAN uses; a BGP-based CNI cannot function if the physical network refuses to propagate pod CIDRs.
+A Kubernetes Ingress controller is a layer-7 reverse proxy (usually Nginx, Traefik, or an Envoy-based variant) managed by Kubernetes. Instead of hand-editing config files, you declare `Ingress` objects specifying routing rules, and the controller translates them into upstream blocks automatically. The controller itself depends on multiple external conditions: DNS records pointing to the right external IP, firewall rules (or cloud security groups) allowing traffic on the correct ports, and TLS certificates covering the expected hostnames. A pod that is `Running`, a Service that is `Ready`, and an Ingress that has an address assigned can all look healthy in `kubectl` while users are unable to reach the application, because the failure lives in DNS, in the cloud security group, or in a certificate with a hostname mismatch. Debugging Ingress failures always requires checking those external layers, not just the Kubernetes configuration.
 
-This distinction also explains why Kubernetes Ingress configuration occasionally fails in ways that appear unrelated to the cluster itself: the ingress controller is a Layer 7 load balancer that depends on Layer 3 connectivity from the outside world, Layer 4 ports being open in cloud security groups, and DNS records pointing to the right external IP. Debugging Ingress failures requires checking all of those layers, not just the Kubernetes configuration.
+Not every Kubernetes edge exposure uses Ingress. A `Service` of type `LoadBalancer` can publish a TCP or UDP service more directly, and the newer Gateway API gives clusters a more expressive way to describe north-south routing than classic Ingress in many environments. The abstractions change, but the operational dependencies do not: DNS still has to point at the advertised address, firewall policy still has to admit the traffic, and health checks still have to pass before users see a working service.
 
-## Virtual Private Networks (VPNs)
+The CNI plugin that handles pod-to-pod networking adds another dependency. Depending on the plugin, pod traffic may ride a VXLAN overlay (pod packets encapsulated inside UDP packets and decoded at the destination node) or rely on the physical network to route pod CIDRs directly via BGP. A VXLAN overlay cannot function if nodes cannot reach each other on the UDP port VXLAN uses (4789 by default). A BGP-based CNI cannot function if the physical network refuses to accept pod CIDR advertisements. When cluster networking breaks, the right first question is whether the failure is in the overlay or in the physical network beneath it.
 
-A VPN creates an encrypted tunnel between two endpoints over an untrusted network (typically the internet). All traffic inside the tunnel is encrypted, appearing as ordinary encrypted packets to anyone observing the network.
+## Virtual Private Networks
 
-Three common deployment patterns:
+A VPN creates an encrypted tunnel between two endpoints over an untrusted network, typically the internet. All traffic inside the tunnel is encrypted, appearing as ordinary encrypted packets to anyone observing the network.
 
-- **Site-to-site VPN**: Connects two or more geographically separate offices, allowing their internal networks to communicate securely as if they were on the same LAN. The VPN is configured on the routers/firewalls at each site.
-- **Remote-access VPN (client-to-site)**: Allows individual devices (remote workers' laptops) to securely connect to the corporate network. The user runs a VPN client; the organization runs a VPN server.
-- **Service-specific remote access**: Some organizations expose only selected internal applications rather than the full routed network. Traditional VPN products can enforce this with policy, while many newer products frame it as zero-trust network access instead of a full-network VPN.
+### Deployment patterns
 
-Common VPN protocols:
+**Site-to-site VPN** connects two or more geographically separate offices, allowing their internal networks to communicate securely as if they were on the same LAN. The VPN is configured on the routers or firewalls at each site.
 
-- **IPsec** (Internet Protocol Security, a suite of protocols that encrypts and authenticates each IP packet): Built into most hardware routers and firewalls; leverages hardware acceleration for high throughput. Widely used in enterprise site-to-site deployments.
-- **OpenVPN**: Open-source, flexible, and easier to configure than IPsec. Runs over TCP or UDP; easy to tunnel through firewalls.
-- **[WireGuard](https://www.wireguard.com/)**: A modern VPN protocol that uses state-of-the-art cryptography and a much smaller code base than IPsec or OpenVPN, making it easier to audit and often faster in benchmarks. Less legacy hardware support, but increasingly adopted in new deployments.
+```mermaid
+flowchart LR
+  subgraph Portland ["Portland (10.1.0.0/24)"]
+    PA["Hosts"]
+    PR["Router / VPN endpoint"]
+    PA --> PR
+  end
+
+  Internet(["Internet"])
+
+  subgraph Seattle ["Seattle (10.2.0.0/24)"]
+    SR["Router / VPN endpoint"]
+    SB["Hosts"]
+    SR --> SB
+  end
+
+  PR <-->|"Encrypted tunnel\nIPsec / WireGuard"| Internet
+  Internet <--> SR
+```
+
+**Remote-access VPN (client-to-site)** allows individual devices to securely connect to the full corporate routed network from anywhere. The user runs a VPN client on their device; the organization runs a VPN server at the edge. This differs from service-specific remote access tools (sometimes marketed as zero-trust network access) that expose only selected applications rather than the full routed network.
+
+### VPN protocols
+
+The three protocols you will encounter most often each make different tradeoffs:
+
+**IPsec** is a suite of standards built into most enterprise routers and firewalls, and it benefits from hardware acceleration for high throughput. It is the default for site-to-site enterprise deployments, though its configuration is verbose compared to newer alternatives.
+
+**OpenVPN** is open-source and flexible. Running over TCP or UDP, it is easy to tunnel through restrictive firewalls and has a long track record in remote-access deployments.
+
+**[WireGuard](https://www.wireguard.com/)** uses modern cryptography and a much smaller code base than IPsec or OpenVPN, making it easier to audit and often faster in benchmarks. It has less legacy hardware support but is increasingly adopted in new deployments. Its simplicity has made it the default in many modern VPN products.
 
 ### Connecting multiple locations
 
-A company with offices in Portland and Seattle needs those networks to communicate securely without traffic crossing the public internet in plaintext. A site-to-site VPN between the two offices' routers creates a permanent encrypted tunnel; from an end device's perspective, the remote office subnet is just another local subnet.
+**Site-to-site VPN** is the standard for a small number of offices. IPsec or WireGuard tunnels between routers, combined with a routing protocol advertising internal subnets across the tunnel, is inexpensive and sufficient for two to five locations.
 
-Three approaches are common at different scales:
+**MPLS (Multiprotocol Label Switching)** is a carrier-provided service where the ISP manages the WAN between your sites. Traffic enters the provider's private WAN at one site and emerges at another without using the public internet directly. Organizations buy MPLS for provider-managed routing, traffic classes, and service-level agreements around latency, loss, or availability. MPLS is expensive; teams choose it for predictable operational characteristics, not because the label itself magically guarantees performance.
 
-**Site-to-site VPN** is the standard for a small number of offices. IPsec or WireGuard tunnels are configured between the routers at each site. Routing protocols (usually OSPF or static routes) advertise internal subnets across the tunnel. This is inexpensive and sufficient for two to five locations.
-
-**MPLS (Multiprotocol Label Switching)** is a carrier-provided service where the ISP manages the WAN between your sites. Traffic enters the MPLS cloud at one site and emerges at another without passing through the internet. MPLS provides guaranteed bandwidth and low latency but is expensive. Large enterprises and service providers use it for predictable performance on time-sensitive traffic.
-
-**SD-WAN (Software-Defined Wide Area Network)** is a newer approach that creates an overlay network across multiple underlay connections (broadband internet, LTE, MPLS). A centralized controller defines routing policy; the SD-WAN devices at each site intelligently select the best path per application. A video call might use the low-latency MPLS link while bulk backups use cheap broadband. SD-WAN has largely displaced pure MPLS for new deployments because it delivers similar reliability at lower cost.
+**SD-WAN (Software-Defined Wide Area Network)** creates an overlay network across multiple underlay connections: broadband internet, LTE, MPLS. A centralized controller defines routing policy; the SD-WAN devices at each site select the best path per application. A video call might use a managed low-latency link while bulk backups use cheap broadband. SD-WAN has reduced dependence on pure MPLS in many new deployments, but many organizations still run hybrid WANs that mix MPLS and internet links when the application mix or existing contracts justify it.
 
 <HistoricalNote title="From Frame Relay to MPLS to SD-WAN">
-Enterprise WAN connectivity has gone through two major technology transitions in thirty years. Through the 1990s, the dominant technology was Frame Relay: a packet-switched carrier service where customers paid for a Committed Information Rate and occasional bursts were allowed when spare capacity existed. Frame Relay was inexpensive relative to leased lines but offered no latency guarantees. ATM (Asynchronous Transfer Mode) competed for bandwidth-intensive applications, using fixed 53-byte cells and hardware-enforced quality of service. Both were displaced by MPLS in the early 2000s. MPLS let carriers accept IP packets at one site, label them with a short identifier, and switch them across the backbone using the label rather than performing a full IP route lookup at every hop. This provided ATM-like predictability over an IP infrastructure and at IP prices. MPLS became the standard enterprise WAN technology for roughly a decade. SD-WAN has been displacing it since the 2010s by achieving comparable reliability through intelligent traffic steering across multiple cheaper connections rather than a single expensive carrier service.
+Enterprise WAN connectivity has gone through two major technology transitions in thirty years. Through the 1990s, the dominant technology was Frame Relay: a packet-switched carrier service where customers paid for a Committed Information Rate. Frame Relay and ATM (Asynchronous Transfer Mode) were both displaced by MPLS in the early 2000s. MPLS let carriers accept IP packets at one site, label them with a short identifier, and switch them across the backbone using the label rather than performing a full IP route lookup at every hop, providing ATM-like predictability at IP prices. SD-WAN has been displacing MPLS since the 2010s by achieving comparable reliability through intelligent traffic steering across multiple cheaper connections rather than a single expensive carrier service.
 </HistoricalNote>
 
-**Cloud connectivity**: when one of your "sites" is an AWS VPC or Azure VNet, you have two options. A **VPN Gateway** creates an IPsec tunnel from your office router to the cloud VPC, which is inexpensive but limited in bandwidth and latency. **AWS Direct Connect** or **Azure ExpressRoute** are dedicated private fiber connections from your office to the cloud provider's colocation facility: higher cost, but predictable latency and no traffic on the public internet.
-
-<Aside type="note" title="Cloud-First Network Design">
-In cloud-first environments, the "company network" increasingly means a hub VPC in AWS or Azure with VPN or Direct Connect back to any physical offices, rather than a traditional office-centric design. The same networking concepts apply; the hardware is just abstracted into APIs.
-</Aside>
+**Cloud connectivity**: when one of your "sites" is an AWS VPC or Azure VNet, a **VPN Gateway** creates an IPsec tunnel from your office router to the cloud VPC, which is inexpensive but limited in bandwidth and latency. **AWS Direct Connect** or **Azure ExpressRoute** are dedicated private fiber connections from your office to the cloud provider's colocation facility: higher cost, but predictable latency and no traffic on the public internet. In cloud-first environments, the "company network" increasingly means a hub VPC with VPN or Direct Connect back to any physical offices, where the same networking concepts apply but the hardware is abstracted into APIs and declared in Terraform rather than configured on physical appliances.
 
 ## Reverse proxies and load balancers
 
-A **reverse proxy** is a server that sits in front of one or more backend servers and forwards client requests to them. From the client's perspective it is communicating with the reverse proxy directly; the backend servers are invisible. This contrasts with a **forward proxy**, which sits in front of clients and forwards their requests outward (commonly used for caching or content filtering in corporate networks).
+A **reverse proxy** is a server that sits in front of one or more backend servers and forwards client requests to them. From the client's perspective, it is communicating with the reverse proxy directly; the backend servers are invisible. This contrasts with a **forward proxy**, which sits in front of clients and forwards their requests outward, commonly used for caching or content filtering in corporate networks.
 
 ### Why use a reverse proxy
 
-Reverse proxies solve several operational problems at once. They centralize TLS termination so certificates are managed in one place, provide a single entry point for access logging and rate limiting, route requests to different backends based on hostname or path, and hide the backend topology from clients. That combination is why reverse proxies show up in almost every serious web deployment even before traffic volume is high enough to demand load balancing.
+Reverse proxies solve several operational problems at once. They centralize TLS termination so certificates are managed in one place. They provide a single entry point for access logging, rate limiting, and header injection. They route requests to different backends based on hostname or path. And they hide the backend topology from clients. That combination is why reverse proxies appear in almost every serious web deployment even before traffic volume is high enough to demand load balancing.
 
 ```mermaid
 flowchart LR
   Client["Client"]
-  RP["Reverse proxy\nnginx\nTLS termination\nLoad balancing"]
+  RP["Reverse proxy\nTLS termination\nPath routing\nLoad balancing"]
   B1["Backend 1\n10.0.1.10:3000"]
   B2["Backend 2\n10.0.1.11:3000"]
 
@@ -433,101 +327,112 @@ flowchart LR
 
 ### Load balancers
 
-A **load balancer** is a reverse proxy that distributes incoming requests across multiple backend instances. When a single server cannot handle traffic volume, you run multiple identical instances and let the load balancer spread the load.
-
-Common distribution algorithms:
+A **load balancer** is a reverse proxy that distributes incoming requests across multiple backend instances. When a single server cannot handle traffic volume, you run multiple identical instances and let the load balancer spread the load. Common distribution algorithms:
 
 | Algorithm | How it works | When to use it |
-|-----------|-------------|----------------|
+|---|---|---|
 | Round-robin | Requests cycle across backends in sequence | General purpose; assumes requests are roughly equal in cost |
 | Least connections | Each request goes to the backend with the fewest active connections | Long-lived or variable-cost requests (file uploads, streaming) |
 | IP hash | The client's IP determines which backend handles the request | Session-sticky applications that store state locally on the server |
 
-### Layer 4 vs. Layer 7 load balancing
+Session stickiness is sometimes necessary for legacy applications that keep session state in process memory, but it is usually a compatibility workaround rather than the desired end state. Modern designs prefer stateless backends or a shared session store so any healthy instance can serve any request.
 
-Load balancers operate at different OSI layers, and that determines what they can use when making routing decisions. A Layer 4 load balancer looks only at network and transport information such as IP addresses and TCP or UDP ports, so it forwards raw connections quickly but cannot make decisions based on HTTP content. A Layer 7 load balancer parses the application protocol itself, which lets it route by hostname or path, inject headers, rewrite URLs, and terminate TLS. The cost of that flexibility is additional processing overhead.
+### Layer 4 vs. Layer 7
 
-In AWS, the **Network Load Balancer (NLB)** operates at Layer 4 and the **Application Load Balancer (ALB)** operates at Layer 7. Most web applications use an ALB.
+Load balancers operate at different OSI layers, and that determines what information they can use when making routing decisions.
 
-### Nginx as a reverse proxy
+```mermaid
+flowchart TB
+  subgraph L4 ["Layer 4 — Network Load Balancer"]
+    l4in["Incoming: TCP/UDP connection\nsrc/dst IP and port only"]
+    l4out["Backend pool (round-robin)"]
+    l4in --> l4out
+  end
 
-[Nginx](https://nginx.org/) is one of the most widely deployed reverse proxies and load balancers. A minimal configuration that proxies requests to two backend servers looks like this:
-
-```nginx
-upstream app_servers {
-    server 10.0.1.10:3000;
-    server 10.0.1.11:3000;
-}
-
-server {
-    listen 80;
-
-    location / {
-        proxy_pass         http://app_servers;
-        proxy_set_header   Host $host;
-        proxy_set_header   X-Real-IP $remote_addr;
-    }
-}
+  subgraph L7 ["Layer 7 — Application Load Balancer"]
+    l7in["Incoming: HTTP request\nmethod, path, Host header, cookies"]
+    l7api["API backends\n/api/*"]
+    l7web["Web backends\n/*"]
+    l7in -->|"path-based routing"| l7api
+    l7in -->|"path-based routing"| l7web
+  end
 ```
 
-The `upstream` block defines a pool of backends. `proxy_pass` forwards all requests to that pool in round-robin order by default. The `proxy_set_header` directives ensure the backend sees the original client IP and hostname rather than the proxy's own values, which matters for access logging and IP-based rate limiting on the backend.
+A Layer 4 load balancer makes decisions using IP addresses, ports, and connection state rather than HTTP semantics: it is fast and protocol-agnostic, but it cannot do path-based or header-based routing. Some Layer 4 products can still terminate TLS, but they do not become HTTP-aware proxies just because the handshake ends there. A Layer 7 load balancer parses the application protocol, allowing routing by path, hostname, or header value, header injection, URL rewriting, and TLS termination. Most web applications use an ALB (AWS Application Load Balancer). An NLB (AWS Network Load Balancer) is appropriate when you need to load-balance non-HTTP protocols, preserve the client's source IP address at the packet layer, use static IP addresses, or minimize processing overhead. An ALB usually conveys client identity to the backend in headers such as `X-Forwarded-For` instead.
 
-### Reverse proxies and Kubernetes Ingress
+### Software options
 
-In a Kubernetes cluster, an **Ingress controller** plays exactly the same role as a reverse proxy at the cluster edge. An Nginx Ingress controller is literally an Nginx deployment managed by Kubernetes: instead of hand-editing config files, you declare `Ingress` objects that specify routing rules, and the controller translates them into `upstream` and `server` blocks automatically. When you define an Ingress that routes traffic to `app-service` in the `production` namespace, the controller produces configuration nearly identical to the Nginx block above. TLS termination still happens at the proxy, backends are still cluster services, and the load balancing algorithm still distributes requests across pods.
+Several mature software implementations cover different deployment contexts:
 
-Understanding how Nginx works as a reverse proxy makes reading and debugging Kubernetes Ingress behavior much less opaque. The controller's behavior, its annotations, and its failure modes all trace back to the same Nginx concepts. Other controllers (Traefik, Envoy-based, HAProxy-based) follow the same pattern with different underlying software.
+**Nginx** is one of the most widely deployed reverse proxies and load balancers. Its configuration model is explicit and highly flexible. Certificate management requires a separate tool such as certbot, which adds operational overhead that must be managed (timers, renewal hooks, post-renew reloads).
+
+**Caddy** handles TLS certificate issuance and renewal automatically via ACME, without a separate certbot process. Its configuration syntax is simpler. The automatic HTTPS behavior makes it a natural fit for deployments where certificate automation matters more than fine-grained configuration control.
+
+**Traefik** is designed for container-native environments. It auto-discovers services from Docker labels or Kubernetes annotations and generates routing configuration dynamically, without manual config file edits. This makes it common in Docker Compose and smaller Kubernetes deployments where backends come and go frequently.
+
+**HAProxy** is a battle-tested load balancer known for fine-grained control over health checks, connection queuing, and per-backend statistics. It is frequently chosen as a dedicated load balancer in front of databases or other TCP-based services.
+
+### Kubernetes Ingress
+
+In a Kubernetes cluster, an Ingress controller plays exactly the same role as a reverse proxy at the cluster edge. The controller (Nginx, Traefik, Envoy-based, or HAProxy-based) translates `Ingress` object declarations into proxy configuration automatically. Understanding how any of these work as a reverse proxy makes reading and debugging Kubernetes Ingress behavior much less opaque: the controller's annotations, its failure modes, and its behavior under backend failure all trace back to the same proxy concepts described above.
+
+## Content delivery networks
+
+A **CDN (Content Delivery Network)** is a geographically distributed network of edge servers that caches and serves content from locations close to users. A request from a user in Berlin hitting an origin server in Oregon would normally travel across the Atlantic for every resource. With a CDN, static resources (and often dynamically generated responses) are served from an edge PoP (Point of Presence) in Frankfurt, reducing latency by an order of magnitude.
+
+CDNs do more than caching. They terminate TLS at the edge PoP, so the TLS handshake latency is between the user and the nearest edge server rather than between the user and the origin. They absorb DDoS traffic at scale: a distributed CDN can absorb hundreds of gigabits per second before it reaches the origin. Most major CDNs also offer integrated WAF and bot mitigation, making the CDN the first layer of HTTP-aware security in the request path.
+
+```mermaid
+flowchart LR
+  User["User (Berlin)"]
+  Edge["CDN edge PoP (Frankfurt)\nTLS termination, cache, WAF"]
+  Origin["Origin: load balancer\n+ app servers (Oregon)"]
+
+  User -->|"HTTPS"| Edge
+  Edge -->|"cache hit: serve locally"| User
+  Edge -->|"cache miss: forward"| Origin
+  Origin --> Edge
+```
+
+Cloudflare, AWS CloudFront, Fastly, and Akamai are the major CDN providers. Cloudflare is distinctive because it combines authoritative DNS with a reverse-proxy CDN: pointing your domain's nameservers at Cloudflare allows its DNS to return Cloudflare edge addresses for proxied records, so web traffic reaches Cloudflare's edge first and can have caching, WAF, and DDoS protection applied before the request is forwarded to the origin.
+
+Cache invalidation is one of the harder operational problems with CDNs. `Cache-Control` headers control how long the CDN caches content. Deploying a new version of a static asset requires either cache purging (a CDN API call to invalidate specific paths) or cache-busting (including a content hash in the filename so new deployments get new URLs that the CDN has never seen). CI/CD pipelines can automate both patterns: a Terraform-managed CloudFront distribution can have its cache invalidated as a deployment step, treating the CDN configuration as just another infrastructure resource alongside the compute.
 
 ## TLS certificates
 
-Networking Fundamentals already introduced the TLS handshake, the certificate chain, and the role of a Certificate Authority. The operational side is different: certificates have to be issued, renewed, logged, stapled, rotated, and debugged under production constraints. That is the focus here. The System Security and Hardening lecture revisits TLS through a security lens, covering trust store management, internal CA design, and the attack surfaces that misconfigured certificates create.
+Networking Fundamentals already introduced the TLS handshake, the certificate chain, and the role of a Certificate Authority. The operational side is different: certificates have to be issued, renewed, logged, stapled, rotated, and debugged under production constraints. The System Security and Hardening lecture revisits TLS through a security lens, covering trust store management, internal CA design, and the attack surfaces that misconfigured certificates create.
 
 ### Certificate types
 
-Not all certificates offer the same level of identity verification. Commercial CAs sell certificates at three levels of validation:
+Commercial CAs sell certificates at three levels of validation.
 
-**DV (Domain Validated)** certificates verify only that the requester controls the domain, typically by serving a challenge file over HTTP or adding a DNS record. Issuance is fully automated and takes seconds. [Let's Encrypt](https://letsencrypt.org/) issues only DV certificates. DV is appropriate for the vast majority of web services.
+**DV (Domain Validated)** certificates verify only that the requester controls the domain, by serving a challenge file over HTTP or adding a DNS TXT record. Issuance is fully automated and takes seconds. [Let's Encrypt](https://letsencrypt.org/) issues only DV certificates. DV is appropriate for the vast majority of web services.
 
-**OV (Organization Validated)** certificates additionally verify the legal existence and identity of the organization through documentation review. The organization's name appears in the certificate's subject field. OV issuance takes hours to days and costs money. Banks and large enterprises sometimes use OV to provide additional assurance to users.
+**OV (Organization Validated)** certificates additionally verify the legal existence and identity of the organization through documentation review. The organization's name appears in the certificate's subject field. OV issuance takes hours to days. Banks and large enterprises sometimes use OV to provide additional assurance to users.
 
-**EV (Extended Validation)** certificates require the most thorough identity verification and historically triggered the green address bar in browsers. Most browsers have removed the visual distinction, significantly reducing the practical benefit of EV. EV certificates have largely fallen out of common use.
+**EV (Extended Validation)** certificates require the most thorough identity verification and historically triggered a green address bar in browsers. Most browsers have removed the visual distinction, significantly reducing the practical benefit. EV certificates have largely fallen out of common use.
 
 ### Certificate Transparency
 
-Since 2018, [Certificate Transparency (CT)](https://certificate.transparency.dev/) has been required for publicly trusted certificates. Every CA must log issued certificates in public, append-only CT logs, and browsers expect proof that this logging happened before they trust the certificate. The practical benefit is visibility: if an unexpected certificate is issued for your domain, CT monitoring services can usually detect it quickly because the certificate has to be publicly logged. You can query CT logs directly to see the certificates that have been issued for a domain.
+Since 2018, [Certificate Transparency (CT)](https://certificate.transparency.dev/) has been required for publicly trusted certificates. Every CA must log issued certificates in public, append-only CT logs, and browsers expect proof of logging before trusting the certificate. The practical benefit is visibility: if an unexpected certificate is issued for your domain, CT monitoring can detect it quickly because the certificate has to be publicly logged. You can query CT logs directly to see the certificates that have been issued for a domain, which is useful for auditing what has been authorized.
 
 ### Let's Encrypt and automated certificate management
 
-Before 2016, obtaining a certificate required purchasing one from a commercial CA and manually renewing it every one to two years. Let's Encrypt changed this by providing free DV certificates via an automated protocol called [ACME (Automated Certificate Management Environment)](https://datatracker.ietf.org/doc/html/rfc8555). The dominant ACME client is **certbot**:
+Before 2016, obtaining a certificate required purchasing one from a commercial CA and manually renewing it every one to two years. Let's Encrypt changed this by providing free DV certificates via an automated protocol called [ACME (Automated Certificate Management Environment, RFC 8555)](https://datatracker.ietf.org/doc/html/rfc8555). The dominant ACME client is **certbot**, which proves domain ownership either by temporarily serving a challenge file on port 80 (HTTP-01 challenge) or by adding a DNS TXT record (DNS-01 challenge). On many Linux installs, a systemd timer or cron job runs `certbot renew` several times per day; certificates are renewed automatically when they have less than 30 days remaining. The 90-day certificate lifetime is intentional: it forces automation and limits the exposure window if a private key is compromised.
 
-```bash
-# Install certbot on Ubuntu
-sudo apt install certbot python3-certbot-nginx
-
-# Obtain and install a certificate for a domain (Nginx)
-sudo certbot --nginx -d example.com -d www.example.com
-
-# Certificates renew automatically via a systemd timer
-sudo systemctl status certbot.timer
-```
-
-Certbot contacts Let's Encrypt, proves domain ownership either by temporarily serving a challenge file on port 80 (HTTP-01 challenge) or by adding a DNS TXT record (DNS-01 challenge), receives a certificate valid for 90 days, and installs it. A systemd timer runs `certbot renew` twice daily; certificates are renewed automatically when they have less than 30 days remaining. The 90-day lifetime is intentional: it forces automation and limits the window of exposure if a private key is compromised.
+Caddy manages the full ACME lifecycle automatically: no certbot, no systemd timers, no cron jobs. It requests, stores, and renews certificates without operator intervention. The tradeoff is less visibility and control over the certificate lifecycle compared to managing certbot explicitly, which matters in regulated environments that require audit trails for certificate operations.
 
 ### HSTS and OCSP stapling
 
 Two mechanisms improve the security posture of a TLS-enabled site after the certificate is in place.
 
-**HSTS (HTTP Strict Transport Security)** instructs browsers to always connect to a domain over HTTPS, never HTTP, for a specified period. Once a browser has seen the `Strict-Transport-Security` header, it will refuse to make an unencrypted connection to that domain for the duration of the `max-age` directive, even if the user types `http://`. This eliminates the window during which a user's first unencrypted request could be intercepted and downgraded. A typical configuration in Nginx:
+**HSTS (HTTP Strict Transport Security)** instructs browsers to always connect to a domain over HTTPS, never HTTP, for a specified period. Once a browser has seen the `Strict-Transport-Security` header, it refuses to make an unencrypted connection to that domain for the duration of the `max-age` directive. This prevents downgrade attacks on later visits. To protect the very first visit as well, the domain has to be included in the browser preload list.
 
-```nginx
-add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-```
-
-**OCSP Stapling** solves the problem of certificate revocation. When a CA revokes a certificate (because the private key was compromised), clients need a way to find out. The traditional mechanism, OCSP (Online Certificate Status Protocol), requires the browser to query the CA's OCSP responder during every TLS handshake, adding latency and leaking browsing behavior to the CA. With OCSP stapling, the server periodically fetches a signed OCSP response from the CA and includes it in the TLS handshake. The client gets revocation status without an extra network round trip and without the CA learning which sites the user visits.
+**OCSP Stapling** improves certificate revocation checking. The traditional OCSP mechanism requires the browser to query the CA's OCSP responder during every TLS handshake, adding latency and leaking browsing behavior to the CA. With OCSP stapling, the server periodically fetches a signed OCSP response from the CA and includes it in the TLS handshake. The client gets revocation status without an extra network round trip and without the CA learning which sites the user visits.
 
 ### Internal certificates
 
-For internal services, the deciding question is not whether the server is private but whether the name is publicly delegated and can be validated. A public CA can issue a certificate for a privately hosted service under a public domain you control, often using DNS-01, even if the service itself is not exposed to the public internet. When the name is private or purely internal, you typically use one of two approaches:
+For internal services, a public CA can issue a certificate for a privately hosted service under a public domain you control, using DNS-01, even if the service is not exposed to the public internet. When the name is private or purely internal, you typically use one of two approaches.
 
 **Self-signed certificates** are generated locally without any CA involvement. They encrypt traffic but browsers do not trust them by default. Suitable for testing or for services where you control all clients and can manually add the certificate to the trust store.
 
@@ -535,13 +440,15 @@ For internal services, the deciding question is not whether the server is privat
 
 ### Diagnosing TLS failures
 
-The most common operational failures, and how to identify each:
+The Networking Fundamentals lecture covers what each `openssl s_client` verify return code means. The operational question is what to do when each appears.
 
-**Expired certificate**: `openssl s_client -connect host:443` will show `Verify return code: 10 (certificate has expired)`. The `notAfter` field in the certificate tells you when it expired. Check whether the automated renewal job (certbot timer, ACME renewal cron) is actually running.
+An **expired certificate** means the automated renewal job is not running or is failing silently. Check whether the renewal mechanism, whether systemd timer, cron job, or platform-managed automation, is active and whether the last renewal attempt succeeded.
 
-**Missing intermediate CA**: The server sends its leaf certificate but not the intermediate. `openssl s_client` reports `Verify return code: 20 (unable to get local issuer certificate)`. On Nginx, ensure the certificate file contains the full chain (leaf plus intermediates concatenated), not just the leaf.
+A **missing intermediate CA** means the server is sending its leaf certificate without the chain. The certificate file on the server should contain the full chain (leaf plus intermediates concatenated), not just the leaf. This is a common mistake when manually installing certificates from a commercial CA.
 
-**Hostname mismatch**: The certificate's `subject` or `subjectAltName` fields do not include the hostname the client connected to. `openssl s_client` reports `Verify return code: 62 (hostname mismatch)`. This happens when a certificate is issued for `example.com` but the client connects to `www.example.com` (or vice versa), and the certificate does not include both names.
+A **hostname mismatch** means the certificate's `subjectAltName` fields do not include the hostname the client connected to. This happens when a certificate is issued for `example.com` but the client connects to `www.example.com`, and the certificate does not include both names.
+
+A related failure is an **SNI mismatch** on a shared reverse proxy or load balancer. The TLS terminator may present the wrong certificate because the client did not send the expected server name or because the default virtual host is configured with the wrong certificate. This is common when many hostnames share one edge proxy.
 
 ```bash
 # Check what names a certificate covers
@@ -549,20 +456,51 @@ openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -tex
 ```
 
 <Aside type="caution" title="Wildcard Certificates">
-A wildcard certificate (`*.company.com`) covers all immediate subdomains with a single certificate. This is operationally convenient but concentrates risk: if the private key is compromised, every subdomain is affected simultaneously. The standard recommendation is per-service certificates with automated renewal, which removes the operational overhead that makes wildcards tempting.
+A wildcard certificate (`*.company.com`) covers all immediate subdomains with a single certificate. This is operationally convenient but concentrates risk: if the private key is compromised, every subdomain is affected simultaneously. Per-service certificates with automated renewal are generally preferable when the tooling is in place, though wildcards remain a reasonable choice when managing many services from a shared certificate store.
 </Aside>
 
 ## Takeaways
 
-The services in this lecture form the plumbing that application traffic flows through. DNS tells clients where to go. Firewalls decide whether they get there. TLS ensures the conversation is private and authenticated. Reverse proxies distribute that traffic across backends and hide the internal topology. VPNs extend the network to remote offices and cloud providers. Each layer is largely independent of the others: a misconfigured firewall rule has nothing to do with a certificate expiry, and a DNS failure has nothing to do with load balancer algorithm selection. The skill is knowing which layer to test first.
+The services in this lecture form the plumbing that application traffic flows through, composed in a specific order.
 
-The tools this lecture introduces are not specialized; they are the ones you reach for on any server in any environment. `dig` reveals what DNS thinks is happening. `traceroute` shows where packets stop. `ss` confirms whether a service is actually listening. `curl` tests application-layer connectivity. `tcpdump` shows exactly what crosses the wire when all the other tools disagree. Each maps to a specific OSI layer, and working through them in order turns an opaque failure into a located, fixable problem.
+```mermaid
+flowchart LR
+  User["User"]
+  DNS["DNS\nname to IP"]
+  CDN["CDN edge\ncache, WAF, TLS"]
+  FW["Firewall\npermit / deny"]
+  LB["Load balancer\nL4 or L7"]
+  RP["Reverse proxy\npath routing\nTLS termination"]
+  B1["Backend 1"]
+  B2["Backend 2"]
 
-Looking backward, the Container Orchestration lecture introduced Kubernetes networking abstractions: overlay networks, CNI plugins, Services, and pod-to-pod routing. Those abstractions sit on top of exactly the infrastructure this lecture describes. The Ingress controller's role as a reverse proxy is identical in concept to the Nginx upstream configuration above; only the control plane differs. Pod networking failures frequently trace to DNS, firewall, or cloud security group issues that are visible only when you look below the Kubernetes layer. Looking forward, the System Security and Hardening lecture will revisit firewalls, TLS, and access controls through a security-first lens, treating misconfigured firewall rules and expired certificates not as troubleshooting problems but as attack surfaces to be eliminated before they are exploited.
+  User -->|"1. resolve"| DNS
+  DNS -->|"2. IP address"| User
+  User -->|"3. HTTPS"| CDN
+  CDN -->|"cache miss"| FW
+  FW --> LB
+  LB --> RP
+  RP --> B1
+  RP --> B2
+```
+
+Each layer is independently breakable and independently testable. DNS failures present as NXDOMAIN or wrong-IP resolution before any TCP connection is attempted. Firewall failures present as silent timeouts where packets arrive but produce no response. TLS failures present as handshake errors before any application data is exchanged. Load balancer failures present as intermittent errors when healthy and unhealthy backends mix. Reverse proxy failures present as wrong-backend responses or unexpected path behavior. The skill is not memorizing each tool: it is knowing which layer to test first given the symptom.
+Each layer is independently breakable and independently testable. DNS failures present as NXDOMAIN, stale answers, or dual-stack mismatches before any TCP connection is attempted. Firewall failures often present as silent timeouts or active refusals, depending on whether traffic is dropped or rejected and where the policy lives. TLS failures present as handshake errors or wrong-certificate warnings before any application data is exchanged. Load balancer failures present as intermittent errors when healthy and unhealthy backends mix. Reverse proxy failures present as wrong-backend responses or unexpected path behavior. The skill is not memorizing each tool: it is knowing which layer to test first given the symptom.
+
+None of this exists in isolation from the rest of the course. The IaC lecture shows how Terraform declares load balancers, DNS records, and certificate resources alongside the compute that uses them: an ALB listener rule is as declarative as an EC2 instance, and the same plan-and-apply workflow governs them. The Configuration Management lecture shows how Ansible applies nginx configuration and manages certbot timers idempotently across a fleet. The CI/CD lecture connects to CDN cache invalidation and DNS cutover as steps in a deployment pipeline. Looking forward, the System Security and Hardening lecture revisits firewalls, TLS, and access controls through a security-first lens, treating misconfigured rules and expired certificates not as troubleshooting problems but as attack surfaces to eliminate. The Container Orchestration lecture's Ingress controllers, CNI plugins, and pod network policies are all applications of the same proxy, firewall, and routing concepts: the abstraction layer changes, but the underlying model does not.
 
 ## Resources
 
-- <a href="https://www.youtube.com/@NetworkDirection" target="_blank" rel="noopener noreferrer">Network Direction (YouTube Channel)</a>
-- <a href="https://www.youtube.com/watch?v=J7QQe5JnZFg" target="_blank" rel="noopener noreferrer">Packet Traveling: How Packets Move Through a Network (YouTube)</a>
-- <a href="https://www.cloudflare.com/learning/network-layer/what-is-bgp/" target="_blank" rel="noopener noreferrer">What Is BGP? Border Gateway Protocol Explained (Cloudflare, Article)</a>
-- <a href="https://www.youtube.com/watch?v=cNwEVYkx2Kk" target="_blank" rel="noopener noreferrer">Cabling Devices: Network Fundamentals Part 1 (YouTube)</a>
+The references below are useful for refreshing protocol details and for seeing production-oriented examples of the services this lecture connects together.
+
+- <a href="https://www.cloudflare.com/learning/dns/what-is-dns/" target="_blank" rel="noopener noreferrer">What is DNS? How DNS works (Cloudflare Learning, Article)</a>
+- <a href="https://www.cloudflare.com/learning/cdn/what-is-a-cdn/" target="_blank" rel="noopener noreferrer">What is a CDN? (Cloudflare Learning, Article)</a>
+- <a href="https://www.cloudflare.com/learning/network-layer/what-is-a-firewall/" target="_blank" rel="noopener noreferrer">What is a Firewall? (Cloudflare Learning, Article)</a>
+- <a href="https://letsencrypt.org/how-it-works/" target="_blank" rel="noopener noreferrer">How Let's Encrypt Works (Let's Encrypt, Article)</a>
+- <a href="https://certificate.transparency.dev/" target="_blank" rel="noopener noreferrer">Certificate Transparency (Google, Article)</a>
+- <a href="https://www.wireguard.com/" target="_blank" rel="noopener noreferrer">WireGuard: Fast, Modern, Secure VPN Tunnel (wireguard.com)</a>
+- <a href="https://www.youtube.com/watch?v=j9QmMEWmcfo" target="_blank" rel="noopener noreferrer">DNS Records Explained (ByteByteGo, YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=C7HP2KYqVKg" target="_blank" rel="noopener noreferrer">Load Balancing Explained (ByteByteGo, YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=RqfaTIWc3LQ" target="_blank" rel="noopener noreferrer">WireGuard Explained (Fireship, YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=7eqHGPLEHaA" target="_blank" rel="noopener noreferrer">VPN, SD-WAN, and MPLS: Enterprise WAN Explained (Network Direction, YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=xBSabeYoLyI" target="_blank" rel="noopener noreferrer">NGINX Explained in 100 Seconds (Fireship, YouTube)</a>
