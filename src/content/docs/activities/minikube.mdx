@@ -35,7 +35,7 @@ This activity uses minikube because it is a good laptop cluster for one class se
 
 ## Start the Cluster
 
-Before you deploy anything, make the cluster itself visible. This section gives you a working node, the two addons this activity depends on, and a first look at which components belong to the control plane, which belong to cluster services, and which will eventually belong to you.
+Before you deploy anything, make the cluster itself visible. You will start minikube, enable the two addons this activity depends on, then inspect what Kubernetes placed on the node so you can tell the difference between cluster infrastructure and the application workloads you are about to add.
 
 <Steps>
 
@@ -82,12 +82,13 @@ Before you deploy anything, make the cluster itself visible. This section gives 
    kubectl get nodes -o wide
    kubectl get pods -A
    kubectl get ns
+   kubectl get node -o 'jsonpath={.items[0].status.nodeInfo.containerRuntimeVersion}'; echo
    docker ps --filter name=minikube --format 'table {{.Names}}\t{{.Status}}'
    ```
 
-   You should see one node in `Ready` state. The pod list will show around ten pods, but `docker ps` shows only one container on your host: the minikube node itself. Every pod runs inside that single container. Minikube uses the Docker driver to create a node that looks like a real VM to Kubernetes, but from your host it is just a Docker container. The pods inside it are managed by `containerd`, which is the container runtime the kubelet talks to inside the node. Docker on your host is only responsible for the node container, not the workloads inside it.
+   You should see one node in `Ready` state. The pod list will show a handful of system pods, but `docker ps` shows only one container on your host: the minikube node itself. Every pod runs inside that node rather than as a sibling host container. Minikube uses the Docker driver to create a node that looks like a real VM to Kubernetes, but from your host it is just a Docker container. The `containerRuntimeVersion` command shows which runtime Kubernetes sees inside that node. You can change it with `minikube start --container-runtime=cri-o` or `--container-runtime=containerd` if you want to see a different runtime in action.
 
-   Two pods will show `Completed` status: these are Jobs the ingress addon ran once to configure its admission webhook. They finished cleanly, and Kubernetes keeps them so you can read their logs. You will create your own Job later in this activity and see the same lifecycle.
+   You may also see one or more pods in `Completed` status. In many setups, these are Jobs an addon ran once, such as ingress admission setup. They finished cleanly, and Kubernetes keeps them so you can read their logs. You will create your own Job later in this activity and see the same lifecycle.
 
 6. **Look specifically at the system namespace:**
 
@@ -115,7 +116,7 @@ Before you deploy anything, make the cluster itself visible. This section gives 
 
 ## Create a Namespace and Configuration
 
-Now create the first pieces of desired state. You will make a dedicated namespace for this activity, then store one non-sensitive value in a ConfigMap and one personal identifier in a Secret so the web workload can render both into its page.
+Now create the first pieces of desired state. A namespace scopes all the objects you are about to create to one named bucket, which makes cleanup at the end a single command. A ConfigMap and a Secret store the two values the web workload will render into its page.
 
 <Steps>
 
@@ -138,7 +139,7 @@ Now create the first pieces of desired state. You will make a dedicated namespac
    kubectl config view --minify -o 'jsonpath={..namespace}'; echo
    ```
 
-   The final command should print `cs312-minikube`. From now on, `kubectl` commands in this terminal target that namespace unless you override it.
+   The final command should print `cs312-minikube`. From now on, `kubectl` commands that use this current context and do not specify `-n` target that namespace until you change the context again. Kubernetes also automatically creates a `default` ServiceAccount in the new namespace; every Pod runs as some service account even when you do not specify one.
 
    <Aside type="note" title="Other clusters in kubectl config view?">
    `~/.kube/config` is a cumulative file: every Kubernetes tool you have ever set up on this machine (Rancher Desktop, Docker Desktop's built-in Kubernetes, a previous minikube cluster) adds its own entry and those entries stay there. If you run `kubectl config view` and see extra clusters, that is normal. What matters is the `current-context` field, which should say `minikube`. You can confirm with `kubectl config current-context`. The `--minify` flag used above filters the output down to only the active context, which is why it shows less than the full config.
@@ -186,13 +187,6 @@ Now create the first pieces of desired state. You will make a dedicated namespac
 
    The first secret lookup prints the base64-encoded form. The second decodes it back to the original text. A Kubernetes Secret is an access-control boundary, not encryption: anyone who can read the Secret object can decode the value in one command. The real protection comes from RBAC limiting which service accounts and users can read which Secrets, and from optional encryption at rest in etcd.
 
-6. **Inspect the namespace's service accounts:**
-
-   ```bash
-   kubectl get serviceaccount
-   ```
-
-   You should see a `default` service account. Every Pod runs as some service account, even when you have not created a custom one yet.
 
 </Steps>
 
@@ -204,7 +198,7 @@ Why is the `owner` value safer in a Secret than in a ConfigMap or hardcoded into
 
 ## Deploy a Stateless Web Workload
 
-The next step is the core stateless case that Kubernetes handles well. You will deploy a web application with two replicas, generate its page in an init container, expose it with a ClusterIP Service, and inspect how the Deployment, ReplicaSet, Pods, labels, probes, and shared volumes fit together.
+With namespace and configuration in place, you can now create the web workload itself. A Deployment keeps two replica Pods running at all times, an init container inside each Pod renders a personal HTML page from the ConfigMap and Secret, and a ClusterIP Service gives the group a stable address inside the cluster. You will also inspect how the Deployment, ReplicaSet, Pods, probes, and volumes fit together.
 
 <Steps>
 
@@ -319,7 +313,7 @@ The next step is the core stateless case that Kubernetes handles well. You will 
          targetPort: 80
    ```
 
-   The Pod in this Deployment has two phases: the init container renders the HTML file from the ConfigMap and Secret into an `emptyDir`, then the nginx container serves that generated file. Both containers are in the same Pod because they need the same shared storage and lifecycle.
+   The Pod in this Deployment has two phases: the init container renders the HTML file from the ConfigMap and Secret into an `emptyDir` volume, then the nginx container serves that file. An `emptyDir` is scratch space tied to the Pod's lifetime: it is created when the Pod starts and deleted when it is removed, which is fine here because the init container regenerates it from durable config objects on each start. The rolling update strategy sets `maxUnavailable: 0` (never drop below the desired replica count during an update) and `maxSurge: 1` (allow one extra Pod above the desired count while the new version starts up).
 
 2. **Apply the Deployment and wait for it to become ready:**
 
@@ -386,7 +380,7 @@ Docker Compose also let services reach each other by name on one machine. What n
 
 ## Make Stateful Storage Visible
 
-Stateless frontends are only half the story. This section creates a tiny stateful workload with a PersistentVolumeClaim so you can see the exact difference between a Pod being replaced and the workload's data being lost.
+Stateless workloads can be replaced freely because they carry no persistent data. Stateful ones need storage that survives a Pod restart. This section adds a second workload backed by a PersistentVolumeClaim (PVC) so you can prove that deleting a Pod does not destroy the data on its volume.
 
 <Steps>
 
@@ -450,7 +444,7 @@ Stateless frontends are only half the story. This section creates a tiny statefu
                storage: 100Mi
    ```
 
-   The headless Service (`clusterIP: None`) gives the StatefulSet stable DNS names. The volume claim template gives replica `note-pad-0` its own claim and keeps that claim attached to the workload's identity.
+   Setting `clusterIP: None` makes this a headless Service: it does not get a virtual ClusterIP, so DNS queries resolve directly to individual Pod IPs instead of a load-balanced virtual address. Combined with the StatefulSet's stable pod names, each replica gets a predictable DNS name in the form `<pod-name>.<service-name>`, here `note-pad-0.note-pad`. The `volumeClaimTemplates` field tells Kubernetes to create one PVC per replica and bind it to that replica's ordinal identity, so `note-pad-0` always reattaches to the same volume even after rescheduling. On stock minikube, the default StorageClass and local provisioner usually bind this claim automatically. If the PVC stays `Pending`, inspect `kubectl get storageclass` and `kubectl describe pvc notes-note-pad-0` before continuing.
 
 2. **Apply the StatefulSet and wait for it to be ready:**
 
@@ -574,14 +568,14 @@ Deployments and StatefulSets manage workloads that should always be running. Som
 </Steps>
 
 <ActivityQuestion>
-A Deployment replaces a Pod whenever it exits, whether the exit was clean or a crash. Why would you not want a Job to do the same thing? What changes if you use `restartPolicy: OnFailure` instead of `restartPolicy: Never` in a Job Pod template?
+A Deployment is for workloads that should keep serving, while a Job is for work that should finish successfully and stop. Why would a database migration or report generator be a poor fit for a Deployment? What changes if you use `restartPolicy: OnFailure` instead of `restartPolicy: Never` in a Job Pod template?
 </ActivityQuestion>
 
 ---
 
 ## Watch the Control Loop Publish and Update Your App
 
-You now have both a stateless and a stateful workload running. This section makes the control loop visible: Pods get replaced, replica counts change, a Horizontal Pod Autoscaler (HPA) object targets the Deployment, and your Service is finally published through an Ingress so the page is reachable from your laptop's browser. An HPA watches a metric (CPU utilization by default) and automatically adjusts a Deployment's replica count to keep that metric within a target range.
+You now have a stateless and a stateful workload running in the cluster. This section makes the control loop visible: you will delete Pods and watch them heal, change replica counts, roll out and roll back an update, add an HPA, and finally publish the page through an Ingress so it is reachable from your browser.
 
 ### Self-Healing, Scaling, and Rollouts
 
@@ -598,7 +592,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
    kubectl get pods -l app=orchestra-web -w
    ```
 
-   One Pod disappears, then a replacement appears automatically. Stop the watch with Ctrl+C after you are back to the desired replica count. During termination, Kubernetes marks the old backend as terminating and not ready for normal Service traffic while the Pod shuts down. If you want to inspect that flow directly, open another terminal and compare `kubectl get endpointslice -l kubernetes.io/service-name=orchestra-web -w` with `kubectl get pods -l app=orchestra-web -w` during the delete.
+   One Pod disappears, then a replacement appears automatically. Stop the watch with Ctrl+C after the replica count returns to the desired number. When deletion begins, Kubernetes marks the Pod unready for normal Service traffic and updates EndpointSlice conditions so load balancers stop using it as a ready backend while it is shutting down. Applications that need connection draining still need to handle shutdown gracefully.
 
 2. **Scale the Deployment manually to three replicas:**
 
@@ -659,7 +653,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
                      number: 80
    ```
 
-   The HPA describes how Kubernetes should automate replica changes later. The Ingress describes how HTTP traffic should reach the Service.
+   An HPA (Horizontal Pod Autoscaler) watches a metric and automatically increases or decreases a Deployment's replica count to keep that metric near a target. Here the target is 50% average CPU utilization, with a floor of 2 replicas and a ceiling of 5. The Ingress object declares how HTTP traffic entering the cluster should be routed to the Service.
 
 5. **Apply the HPA and Ingress, then inspect the autoscaler object:**
 
@@ -670,15 +664,15 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
    The current utilization might be `0%`, very low, or temporarily unknown. The important point is the target: the HPA is now another controller watching the same Deployment.
 
-6. **Change the web message in `web-config.yaml`, then apply it again:**
+6. **Update the web message and apply it:**
 
-   Replace the ConfigMap message with this line:
+   Open `web-config.yaml` and replace the `message` value with:
 
    ```text
    Rolling updates keep this page online while the desired state changes.
    ```
 
-   Then apply the file again:
+   Then apply:
 
    ```bash
    kubectl apply -f web-config.yaml
@@ -749,7 +743,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
    curl <the-url-from-above>/
    ```
 
-   You should see the HTML page. Notice the port number in the URL: NodePort always allocates from the 30000-32767 range. This is a usable but blunt entry point: every node in the cluster exposes that port whether or not it is running one of the Pods, and clients need to know both the node address and the high-numbered port.
+   You should see the HTML page. Notice the port number in the URL: by default, NodePort allocates from the 30000-32767 range. This is a usable but blunt entry point: every node in the cluster exposes that port whether or not it is running one of the Pods, and clients need to know both the node address and the high-numbered port.
 
 2. **Switch back to ClusterIP and use Ingress instead:**
 
@@ -773,7 +767,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
    kubectl get ingress
    ```
 
-   On Linux you will usually see an IP address appear in the `ADDRESS` column. On macOS and Windows with Docker Desktop or another local VM-backed runtime, the documented access pattern is usually `127.0.0.1` while the tunnel is running, so the `ADDRESS` column is not the success condition you should rely on there.
+   On Linux, an IP address will appear in the `ADDRESS` column within a few seconds. On macOS, the `ADDRESS` column may stay empty even while the tunnel is working correctly; the address to use in the next step is `127.0.0.1` regardless.
 
 5. **Fetch the page through the Ingress endpoint:**
 
