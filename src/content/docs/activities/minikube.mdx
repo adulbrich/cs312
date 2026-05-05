@@ -5,6 +5,8 @@ sidebar:
   order: 11
 ---
 
+{/* TODO: activity was a little too long, check below comments and decide what to cut */}
+
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
@@ -107,6 +109,8 @@ Before you deploy anything, make the cluster itself visible. You will start mini
    You should see at least `kube-proxy` in the list. A DaemonSet schedules exactly one Pod per matching node, which is why each DaemonSet shows one Pod in this single-node cluster but would show one Pod per node in a production cluster. Compare that with the Deployment-managed pods you saw above: those are placed wherever the scheduler finds capacity.
 
 </Steps>
+
+{/* PROPOSED CUT: Step 7 above (DaemonSet inspection). The DaemonSet concept is already covered in the lecture and the ActivityQuestion below asks about it. Removing this step saves ~3 minutes and the ActivityQuestion still works because students can answer from the `kubectl get pods -A` output they already saw. The DaemonSet could be demoed by the instructor verbally rather than as a student step. */}
 
 <ActivityQuestion>
 `kubectl get pods -A` showed around ten pods, but `docker ps` showed only one container on your host. Where are those pods actually running, and what component inside the minikube node manages them instead of Docker? Given that `kube-proxy` appears once in the pod list for this one-node cluster, how many times would you expect it to appear in a five-node cluster, and what does that tell you about the controller managing it?
@@ -332,17 +336,15 @@ With namespace and configuration in place, you can now create the web workload i
 
    You should see one Deployment, one ReplicaSet created by that Deployment, two Pods created by that ReplicaSet, and one ClusterIP Service selecting those Pods.
 
-4. **Capture one Pod name and inspect its owner, service account, and QoS class:**
+4. **Capture one Pod name and confirm its owner:**
 
    ```bash
    WEB_POD=$(kubectl get pods -l app=orchestra-web -o jsonpath='{.items[0].metadata.name}')
    echo "$WEB_POD"
    kubectl get pod "$WEB_POD" -o jsonpath='{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}'
-   kubectl get pod "$WEB_POD" -o jsonpath='{.spec.serviceAccountName}{"\n"}'
-   kubectl get pod "$WEB_POD" -o jsonpath='{.status.qosClass}{"\n"}'
    ```
 
-   The owner reference points to a ReplicaSet, not directly to the Deployment. The service account is `default`. The QoS class should be `Burstable`: the nginx container sets both requests and limits, but the limit values are higher than the requests. A Pod only reaches `Guaranteed` when every container's CPU and memory request equals its limit exactly.
+   The owner reference points to a ReplicaSet, not directly to the Deployment. That is the Deployment/ReplicaSet/Pod hierarchy made concrete: the Deployment manages the ReplicaSet, and the ReplicaSet manages the Pods.
 
 5. **Describe the Pod and look for the init container, probes, and volumes:**
 
@@ -362,13 +364,6 @@ With namespace and configuration in place, you can now create the web workload i
 
    You should see the HTML page including your personal identifier. The workload is reachable by Service name, not by hardcoded Pod IP.
 
-7. **Inspect the Service's current backends:**
-
-   ```bash
-   kubectl get endpointslice -l kubernetes.io/service-name=orchestra-web
-   ```
-
-   The EndpointSlice should show two Pod IPs. Those are the current backends behind the stable Service name. `Endpoints` is the older view of this data; new Kubernetes documentation prefers EndpointSlice.
 
 </Steps>
 
@@ -378,6 +373,14 @@ Docker Compose also let services reach each other by name on one machine. What n
 
 ---
 
+{/* PROPOSED CUT: Entire "Make Stateful Storage Visible" section (StatefulSet + PVC + headless Service, 7 steps + ActivityQuestion + Aside).
+
+Why cut: This section introduces StatefulSet, PVCs, headless Services, and ordinal pod identity as a complete, self-contained topic. That is a second full major concept layered on top of an already-dense activity. Students who are still orienting to the Deployment/Service/Ingress arc will be pulled in two directions at once.
+
+Where it belongs: The k3s lab is a natural home. StatefulSet persistence is far more meaningful on a real node where the storage class uses an actual disk, and the lab format gives students time to experiment with the "delete pod, check data survives" loop without instructor time pressure.
+
+If you want a lighter touch here: replace the section with a single `kubectl explain statefulset` or `kubectl get statefulset -n kube-system` observation (showing any system StatefulSets that minikube ships) to make the concept visible without adding 7 steps. The ActivityQuestion can be adapted to ask about the conceptual difference without requiring the student to build one.
+*/}
 ## Make Stateful Storage Visible
 
 Stateless workloads can be replaced freely because they carry no persistent data. Stateful ones need storage that survives a Pod restart. This section adds a second workload backed by a PersistentVolumeClaim (PVC) so you can prove that deleting a Pod does not destroy the data on its volume.
@@ -508,6 +511,12 @@ If `note-pad` had been a Deployment using only the container's writable layer, w
 
 ---
 
+{/* PROPOSED CUT: Entire "Run a One-Off Job" section (4 steps + ActivityQuestion).
+
+Why cut: The Job section is conceptually clean and short, but it introduces a third workload type (after Deployment and StatefulSet) late in an already-long activity. By the time students reach it, attention is stretched and the section will feel rushed. The ActivityQuestion is good but requires understanding the Job spec well enough to reason about restartPolicy: OnFailure, which assumes a level of engagement that may not exist this late in the session.
+
+Where it belongs: A future dedicated activity on batch workloads (CronJobs, init containers for migrations, Job retry behavior) would give it proper space. Alternatively, fold a one-command Job observation into the k3s lab: `kubectl get jobs -A` at cluster startup usually shows system Jobs already, so the lifecycle concept can be pointed out without adding steps.
+*/}
 ## Run a One-Off Job
 
 Deployments and StatefulSets manage workloads that should always be running. Some work is finite: a database migration, a data import, a nightly report. A Job runs one or more Pods to completion and then stops. This section runs a Job so you can see what a Pod in the `Succeeded` phase looks like.
@@ -720,10 +729,15 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 </Steps>
 
+{/* PROPOSED CUT: Step 4 above (HPA portion of web-edge.yaml) and step 5 (kubectl get hpa). The HPA always shows ~0% CPU utilization in this activity because there is no load generator, so students see a controller that does nothing visible. The concept is better demonstrated with a brief load test or left to the lecture. If you keep only the Ingress in web-edge.yaml, rename the file to web-ingress.yaml, drop step 5 entirely, and the section reads more cleanly. The manual scale in step 2 above already shows the scaling concept without requiring the autoscaler infrastructure. */}
+
+{/* PROPOSED CUT: Steps 8-10 above (image bump + rollback sequence). These three steps demonstrate rollback, which is a good concept, but they come after the ConfigMap update and rollout restart already made the rolling-update point. Adding a second rollout for a different reason (image tag change) right after the first dilutes the lesson. The ActivityQuestion about ReplicaSet retention is still answerable from the rolling restart in step 7 alone. If you want to keep rollback visible, consider folding it into the lecture as a live demo rather than making it a student-paced step. */}
+
 <ActivityQuestion>
 After `kubectl rollout undo`, Kubernetes pointed the Deployment at an older ReplicaSet rather than creating a brand-new one. Why does Kubernetes keep previous ReplicaSets around instead of deleting them after each update? And why did the rollback not revert the ConfigMap to its earlier text?
 </ActivityQuestion>
 
+{/* PROPOSED CUT: Steps 1-2 of this subsection (NodePort detour). The NodePort steps add two steps and a second terminal just to show a pattern the activity then immediately discards ("this is a blunt entry point, use Ingress instead"). The concept of NodePort is well-covered in the lecture; demonstrating it for 3-5 minutes only to then patch the service back to ClusterIP is disruptive to the flow and adds setup risk (the minikube service --url tunnel may or may not work cleanly on macOS). Going straight to Ingress is cleaner and the section introduction can mention NodePort in one sentence. If removed, renumber the remaining steps starting at 1. */}
 ### Publish the Page Through Ingress
 
 The Service is still internal to the cluster. This section first shows you NodePort, which opens a port directly on the node's IP address, then replaces it with the ingress controller for a cleaner HTTP entry point.
