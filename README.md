@@ -34,6 +34,13 @@ This repository contains the source code for the CS312 website.
 ### Content and Tooling Backlog
 
 - [ ] Add references to other HashiCorp tools where they genuinely fit, such as Vault, Nomad, and Consul.
+- [ ] Revisit the First Container Orchestration Deployment (k3s) lab and change the MariaDB example to use a PVC-backed deployment in a future iteration.
+- [ ] Build a small reusable To-Do application for future activities, using a frontend plus a Flask backend with Postgres, and optionally nginx as a reverse proxy.
+- [ ] Keep the To-Do app intentionally small: create, list, update, complete, and delete tasks, with a health endpoint and environment-variable configuration.
+- [ ] Package the To-Do app so it can appear in multiple activities: local development, containerization, reverse proxying, CI/CD, and Kubernetes deployment.
+- [ ] Decide whether the frontend should be server-rendered in Flask or a separate lightweight frontend so the app stays simple enough for intro infrastructure work.
+- [ ] Add seeded demo data and a reset path so activities can start from a known-good state without long setup.
+- [ ] Prepare a progression path for the To-Do app across the course: run locally, containerize, add Postgres persistence, put nginx in front, deploy to Kubernetes, then add monitoring and logging.
 - [ ] Decide whether GitOps should be required, optional, or discussed as one possible operating model.
 - [ ] Decide whether and where to cover email as part of operations work, especially alert delivery or scheduled job output.
 - [ ] Add the DNS exercise back from 2024.
