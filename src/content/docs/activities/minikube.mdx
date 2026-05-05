@@ -3,7 +3,6 @@ title: "Minikube"
 description: "Start a local Kubernetes cluster, deploy a personalized web workload with ConfigMaps and Secrets, watch Kubernetes heal and roll it out, and prove PVC-backed state survives pod replacement."
 sidebar:
   order: 11
-draft: true
 ---
 
 import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -26,8 +25,6 @@ This activity puts into practice the concepts from the [Container Orchestration]
 - A working Docker environment from the earlier Docker activity, or an equivalent local Docker Engine or Docker Desktop setup that already passes `docker version`
 - `minikube` installed before class using the [official minikube start guide](https://minikube.sigs.k8s.io/docs/start/) and verified with `minikube version`
 - `kubectl` installed before class using the [official Kubernetes tools guide](https://kubernetes.io/docs/tasks/tools/) and verified with `kubectl version --client`
-- A terminal with `bash` or `zsh` available. Windows students should use WSL rather than PowerShell for this activity.
-- A text editor
 - Enough free RAM to run Docker plus a small local cluster comfortably
 
 <Aside type="note" title="Why minikube here?">
@@ -85,9 +82,12 @@ Before you deploy anything, make the cluster itself visible. This section gives 
    kubectl get nodes -o wide
    kubectl get pods -A
    kubectl get ns
+   docker ps --filter name=minikube --format 'table {{.Names}}\t{{.Status}}'
    ```
 
-   You should see one node in `Ready` state. In the pod list, look for `coredns`, `etcd`, `kube-apiserver`, and the ingress controller pods. Those are cluster components, not application workloads.
+   You should see one node in `Ready` state. The pod list will show around ten pods, but `docker ps` shows only one container on your host: the minikube node itself. Every pod runs inside that single container. Minikube uses the Docker driver to create a node that looks like a real VM to Kubernetes, but from your host it is just a Docker container. The pods inside it are managed by `containerd`, which is the container runtime the kubelet talks to inside the node. Docker on your host is only responsible for the node container, not the workloads inside it.
+
+   Two pods will show `Completed` status: these are Jobs the ingress addon ran once to configure its admission webhook. They finished cleanly, and Kubernetes keeps them so you can read their logs. You will create your own Job later in this activity and see the same lifecycle.
 
 6. **Look specifically at the system namespace:**
 
@@ -108,7 +108,7 @@ Before you deploy anything, make the cluster itself visible. This section gives 
 </Steps>
 
 <ActivityQuestion>
-In `kubectl get pods -A`, identify at least one pod managed by a DaemonSet and at least one managed by a Deployment. What is the operational difference between those two controllers? Why would a per-node log collector be deployed as a DaemonSet rather than a Deployment with the same replica count as there are nodes?
+`kubectl get pods -A` showed around ten pods, but `docker ps` showed only one container on your host. Where are those pods actually running, and what component inside the minikube node manages them instead of Docker? Given that `kube-proxy` appears once in the pod list for this one-node cluster, how many times would you expect it to appear in a five-node cluster, and what does that tell you about the controller managing it?
 </ActivityQuestion>
 
 ---
@@ -125,20 +125,24 @@ Now create the first pieces of desired state. You will make a dedicated namespac
    apiVersion: v1
    kind: Namespace
    metadata:
-     name: orchestration-lab
+     name: cs312-minikube
    ```
 
-   A namespace gives this activity its own naming scope. The name `orchestration-lab` will appear on every object you create from here on.
+   A namespace gives this activity its own naming scope. The name `cs312-minikube` will appear on every object you create from here on.
 
 2. **Apply the namespace and make it your current default:**
 
    ```bash
    kubectl apply -f namespace.yaml
-   kubectl config set-context --current --namespace=orchestration-lab
+   kubectl config set-context --current --namespace=cs312-minikube
    kubectl config view --minify -o 'jsonpath={..namespace}'; echo
    ```
 
-   The final command should print `orchestration-lab`. From now on, `kubectl` commands in this terminal target that namespace unless you override it.
+   The final command should print `cs312-minikube`. From now on, `kubectl` commands in this terminal target that namespace unless you override it.
+
+   <Aside type="note" title="Other clusters in kubectl config view?">
+   `~/.kube/config` is a cumulative file: every Kubernetes tool you have ever set up on this machine (Rancher Desktop, Docker Desktop's built-in Kubernetes, a previous minikube cluster) adds its own entry and those entries stay there. If you run `kubectl config view` and see extra clusters, that is normal. What matters is the `current-context` field, which should say `minikube`. You can confirm with `kubectl config current-context`. The `--minify` flag used above filters the output down to only the active context, which is why it shows less than the full config.
+   </Aside>
 
 3. **Create `web-config.yaml`:**
 
@@ -147,7 +151,7 @@ Now create the first pieces of desired state. You will make a dedicated namespac
    kind: ConfigMap
    metadata:
      name: orchestra-web-config
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    data:
      message: |
        This page is coming from a Deployment behind a Service.
@@ -156,7 +160,7 @@ Now create the first pieces of desired state. You will make a dedicated namespac
    kind: Secret
    metadata:
      name: orchestra-web-owner
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    type: Opaque
    stringData:
      owner: YOUR_ONID
@@ -180,7 +184,7 @@ Now create the first pieces of desired state. You will make a dedicated namespac
    kubectl get secret orchestra-web-owner -o jsonpath='{.data.owner}' | base64 --decode; echo
    ```
 
-   The first secret lookup prints the base64-encoded form. The second decodes it back to the original text, which is why the lecture is careful to say that a Secret is an access-control boundary, not encryption by itself.
+   The first secret lookup prints the base64-encoded form. The second decodes it back to the original text. A Kubernetes Secret is an access-control boundary, not encryption: anyone who can read the Secret object can decode the value in one command. The real protection comes from RBAC limiting which service accounts and users can read which Secrets, and from optional encryption at rest in etcd.
 
 6. **Inspect the namespace's service accounts:**
 
@@ -211,7 +215,7 @@ The next step is the core stateless case that Kubernetes handles well. You will 
    kind: Deployment
    metadata:
      name: orchestra-web
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    spec:
      replicas: 2
      strategy:
@@ -305,7 +309,7 @@ The next step is the core stateless case that Kubernetes handles well. You will 
    kind: Service
    metadata:
      name: orchestra-web
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    spec:
      type: ClusterIP
      selector:
@@ -352,7 +356,7 @@ The next step is the core stateless case that Kubernetes handles well. You will 
    kubectl describe pod "$WEB_POD"
    ```
 
-   Scroll until you find the `Init Containers`, `Containers`, `Mounts`, `Liveness`, `Readiness`, and `Startup` sections. This is where the lecture's abstract Pod model becomes concrete.
+   Scroll until you find the `Init Containers`, `Containers`, `Mounts`, `Liveness`, `Readiness`, and `Startup` sections. This is the Pod model made concrete: you can see exactly which containers Kubernetes created, which volumes are mounted where, and how each probe is configured.
 
 6. **Prove the Service works from inside the cluster by DNS name:**
 
@@ -360,7 +364,9 @@ The next step is the core stateless case that Kubernetes handles well. You will 
    kubectl run curl-test --rm -i --restart=Never --image=busybox:1.36 -- wget -qO- http://orchestra-web
    ```
 
-   You should see the HTML page, including your personal identifier. The workload is reachable by Service name, not by hardcoded Pod IP.
+   This command starts a temporary Pod named `curl-test` running `busybox`, executes `wget -qO- http://orchestra-web` inside it, prints the output to your terminal, and then deletes the Pod. The flags do the following: `--rm` deletes the Pod when it exits, `-i` connects your terminal to the Pod's output, `--restart=Never` makes it a one-shot Pod rather than one that Kubernetes would restart on exit, and `--` separates `kubectl` arguments from the command to run inside the container. The URL `http://orchestra-web` works because CoreDNS resolves short Service names within the same namespace.
+
+   You should see the HTML page including your personal identifier. The workload is reachable by Service name, not by hardcoded Pod IP.
 
 7. **Inspect the Service's current backends:**
 
@@ -391,7 +397,7 @@ Stateless frontends are only half the story. This section creates a tiny statefu
    kind: Service
    metadata:
      name: note-pad
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    spec:
      clusterIP: None
      selector:
@@ -404,7 +410,7 @@ Stateless frontends are only half the story. This section creates a tiny statefu
    kind: StatefulSet
    metadata:
      name: note-pad
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    spec:
      serviceName: note-pad
      replicas: 1
@@ -499,7 +505,7 @@ Stateless frontends are only half the story. This section creates a tiny statefu
 </Steps>
 
 <Aside type="note" title="What this persistence does not guarantee">
-The PVC survives replacement of `note-pad-0` inside this cluster, but it does not make minikube highly available. If you delete the entire minikube cluster, you delete the node that is holding the local storage too. The lecture's point still holds: PVC-backed storage outlives a Pod, but the durability guarantees depend on the underlying storage system.
+The PVC survives replacement of `note-pad-0` inside this cluster, but it does not make minikube highly available. If you delete the entire minikube cluster, you delete the node holding the local storage too. PVC-backed storage outlives a Pod, but how durable that storage actually is depends entirely on what is underneath it: local disk on one node is very different from a replicated network volume on a cloud provider.
 </Aside>
 
 <ActivityQuestion>
@@ -521,7 +527,7 @@ Deployments and StatefulSets manage workloads that should always be running. Som
    kind: Job
    metadata:
      name: hello-job
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    spec:
      completions: 1
      template:
@@ -555,7 +561,7 @@ Deployments and StatefulSets manage workloads that should always be running. Som
    kubectl get pod -l job-name=hello-job
    ```
 
-   The log should show your message. The Job's `COMPLETIONS` column should read `1/1`. The Pod status `Completed` maps to the `Succeeded` phase from the lecture. Kubernetes keeps the completed Pod around by default so you can read its logs.
+   The log should show your message. The Job's `COMPLETIONS` column should read `1/1`. The Pod status `Completed` means all containers exited cleanly with status 0, which Kubernetes calls the `Succeeded` phase. Kubernetes keeps the completed Pod around by default so you can read its logs.
 
 4. **Delete the Job:**
 
@@ -575,11 +581,11 @@ A Deployment replaces a Pod whenever it exits, whether the exit was clean or a c
 
 ## Watch the Control Loop Publish and Update Your App
 
-You now have both a stateless and a stateful workload running. This section makes the control loop visible: Pods get replaced, replica counts change, an HPA object targets the Deployment, and your Service is finally published through an Ingress so the page is reachable from your laptop's browser.
+You now have both a stateless and a stateful workload running. This section makes the control loop visible: Pods get replaced, replica counts change, a Horizontal Pod Autoscaler (HPA) object targets the Deployment, and your Service is finally published through an Ingress so the page is reachable from your laptop's browser. An HPA watches a metric (CPU utilization by default) and automatically adjusts a Deployment's replica count to keep that metric within a target range.
 
 ### Self-Healing, Scaling, and Rollouts
 
-This is the shortest path from lecture idea to visible behavior. Delete one Pod, change the desired replica count, and then roll out a configuration change while Kubernetes keeps the Deployment available.
+This section puts the control loop directly in front of you. Delete one Pod, change the desired replica count, and roll out a configuration change while Kubernetes keeps the Deployment available throughout.
 
 <Steps>
 
@@ -618,7 +624,7 @@ This is the shortest path from lecture idea to visible behavior. Delete one Pod,
    kind: HorizontalPodAutoscaler
    metadata:
      name: orchestra-web
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    spec:
      scaleTargetRef:
        apiVersion: apps/v1
@@ -638,7 +644,7 @@ This is the shortest path from lecture idea to visible behavior. Delete one Pod,
    kind: Ingress
    metadata:
      name: orchestra-web
-     namespace: orchestration-lab
+     namespace: cs312-minikube
    spec:
      ingressClassName: nginx
      rules:
@@ -726,7 +732,7 @@ After `kubectl rollout undo`, Kubernetes pointed the Deployment at an older Repl
 
 ### Publish the Page Through Ingress
 
-The Service is still internal to the cluster. This section first shows you NodePort, the blunt alternative the lecture describes, then replaces it with the ingress controller for a cleaner HTTP entry point.
+The Service is still internal to the cluster. This section first shows you NodePort, which opens a port directly on the node's IP address, then replaces it with the ingress controller for a cleaner HTTP entry point.
 
 <Steps>
 
@@ -734,7 +740,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
 
    ```bash
    kubectl patch service orchestra-web -p '{"spec":{"type":"NodePort"}}'
-   minikube service orchestra-web -n orchestration-lab --url
+   minikube service orchestra-web -n cs312-minikube --url
    ```
 
    Copy the URL printed and curl it (on macOS/WSL with the Docker driver, `minikube service --url` may keep a tunnel open, so run the curl in a second terminal):
@@ -743,7 +749,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
    curl <the-url-from-above>/
    ```
 
-   You should see the HTML page. Pass `-n orchestration-lab` explicitly here rather than assuming minikube will reuse your current `kubectl` namespace. Notice the port number in the URL: it is in the 30000-32767 range, which is what the lecture describes as the default NodePort range. This is a usable but blunt entry point: every node exposes the same port, regardless of whether it is running one of the Pods.
+   You should see the HTML page. Notice the port number in the URL: NodePort always allocates from the 30000-32767 range. This is a usable but blunt entry point: every node in the cluster exposes that port whether or not it is running one of the Pods, and clients need to know both the node address and the high-numbered port.
 
 2. **Switch back to ClusterIP and use Ingress instead:**
 
@@ -813,7 +819,7 @@ Once you have verified the Ingress page, remove the activity resources so your n
 2. **Delete the activity namespace and everything in it:**
 
    ```bash
-   kubectl delete namespace orchestration-lab --wait=true
+   kubectl delete namespace cs312-minikube --wait=true
    ```
 
    Kubernetes cascades that delete to the Deployment, StatefulSet, Service, PVC, ConfigMap, Secret, HPA, Ingress, and any completed Job objects you created in this activity.
