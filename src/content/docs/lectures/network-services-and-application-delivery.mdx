@@ -17,7 +17,7 @@ covers: DNS ops (TTL, negative caching, split-horizon, AAAA); mail routing/auth 
 prereq_lectures: networking-fundamentals, container-orchestration
 followup_lectures: system-security-and-hardening
 paired_activities:
-supports_labs: cluster-operations
+supports_labs: first-container-orchestration-deployment, cluster-operations
 */}
 
 A developer reports that an application is unreachable. The failure could live anywhere in a stack that spans routing tables, firewall rules, Domain Name System (DNS) records, Transport Layer Security (TLS) certificates, and the load balancer distributing requests across backends. Each of these layers is independently configurable, independently breakable, and independently debuggable. A sysadmin who understands how they compose does not guess when something breaks; they know which layer to test first.
@@ -30,9 +30,9 @@ The **Domain Name System (DNS)** is the distributed database that translates hum
 
 ### Resolver Configuration and Direct Queries
 
-On most modern Linux systems, name resolution is configured automatically. The **Dynamic Host Configuration Protocol (DHCP)** server hands out resolver and search-domain values when the machine joins a network, NetworkManager (or the cloud instance's metadata service) applies them, and `systemd-resolved` exposes a local stub resolver on `127.0.0.53` that applications query. Manual edits to `/etc/resolv.conf` are the exception, reserved for cases where the automatic configuration is wrong or insufficient: a server with static addressing on a network without DHCP, a system that needs to override the DHCP-supplied resolver, or a container that needs a specific upstream baked in.
+On many systemd-based Linux distributions, name resolution is configured automatically. The **Dynamic Host Configuration Protocol (DHCP)** server hands out resolver and search-domain values when the machine joins a network, NetworkManager (or the cloud instance's metadata service) applies them, and `systemd-resolved` exposes a local stub resolver on `127.0.0.53` that applications query. Other Linux environments use different resolvers or write `/etc/resolv.conf` directly, especially minimal containers and non-systemd distributions. Manual edits to `/etc/resolv.conf` are the exception, reserved for cases where the automatic configuration is wrong or insufficient: a server with static addressing on a network without DHCP, a system that needs to override the DHCP-supplied resolver, or a container that needs a specific upstream baked in.
 
-A resolver configuration has two parts that matter operationally. The **nameserver** is the IP address of the recursive resolver to query: usually the local `systemd-resolved` stub on `127.0.0.53`, sometimes the gateway's DNS forwarder, sometimes a public resolver like `1.1.1.1`. The **search domain** is a suffix appended to short, unqualified names. With `search corp.example.com` configured, the command `ssh app01` first queries `app01.corp.example.com`, falling back to bare `app01` only if that fails. Search domains save typing inside an organization but cause confusing failures when a machine moves between networks: a host that resolved correctly on the corporate LAN may suddenly point at a different machine after a search-domain change because the same short name now expands to a different fully qualified name.
+A resolver configuration has two parts that matter operationally. The **nameserver** is the IP address of the recursive resolver to query: often the local `systemd-resolved` stub on `127.0.0.53` on systems that use it, sometimes the gateway's DNS forwarder, sometimes a public resolver like `1.1.1.1`. The **search domain** is a suffix appended to short, unqualified names. With `search corp.example.com` configured, the command `ssh app01` first queries `app01.corp.example.com`, falling back to bare `app01` only if that fails. Search domains save typing inside an organization but cause confusing failures when a machine moves between networks: a host that resolved correctly on the corporate LAN may suddenly point at a different machine after a search-domain change because the same short name now expands to a different fully qualified name.
 
 The first DNS troubleshooting step is confirming which resolver the machine is actually asking, then querying that resolver directly instead of treating "DNS" as a single black box.
 
@@ -174,11 +174,11 @@ Hosted solutions like Google Workspace or Microsoft 365 absorb all of this for a
 
 ## Firewalls
 
-A **firewall** is a policy enforcement point on a network: it inspects each packet (or each connection) against a set of rules and decides whether to allow, deny, or log it. Firewalls operate at every position from the device itself (an endpoint firewall on a single laptop or server) up to the perimeter where an organization meets the public internet, and increasingly inside the network as well to segment trust zones. Their effectiveness is bounded by their position: a firewall is only useful for the traffic that actually crosses it, so the placement question shapes everything else about how firewall policy is designed and debugged.
+A **[firewall](https://www.cloudflare.com/learning/network-layer/what-is-a-firewall/)** is a policy enforcement point on a network: it inspects each packet (or each connection) against a set of rules and decides whether to allow, deny, or log it. Firewalls operate at every position from the device itself (an endpoint firewall on a single laptop or server) up to the perimeter where an organization meets the public internet, and increasingly inside the network as well to segment trust zones. Their effectiveness is bounded by their position: a firewall is only useful for the traffic that actually crosses it, so the placement question shapes everything else about how firewall policy is designed and debugged.
 
 ### Placement and Zone Design
 
-Different firewall positions protect different perimeters. A **perimeter firewall** sits between the internal network and the internet, so every external packet passes through it. A **DMZ (Demilitarized Zone)** is a network segment between the perimeter firewall and the internal network, used to host internet-facing services (web servers, mail relays) that should not have direct access to internal systems. An **internal firewall** segments zones inside the organization: separating the DMZ from the application tier, or corporate systems from production servers. A **WAF (Web Application Firewall)** sits in front of web services to inspect traffic for application-layer attacks like Structured Query Language (SQL) injection or cross-site scripting. An **endpoint firewall** runs on the host itself and protects the device regardless of whether traffic crosses a central appliance. One common multi-tier design looks like this, though real environments often collapse or rearrange these roles.
+Different firewall positions protect different perimeters. A **perimeter firewall** sits between the internal network and the internet, so every external packet passes through it. A **DMZ (Demilitarized Zone)** is a network segment between the perimeter firewall and the internal network, used to host internet-facing services (web servers, mail relays) that should not have direct access to internal systems. An **internal firewall** segments zones inside the organization: separating the DMZ from the application tier, or corporate systems from production servers. A **WAF (Web Application Firewall)** sits in front of web services to inspect traffic for application-layer attacks like Structured Query Language (SQL) injection or cross-site scripting. An **endpoint firewall** runs on the host itself and protects the device regardless of whether traffic crosses a central appliance. One common multi-tier web design looks like this, though real environments often collapse or rearrange these roles.
 
 In the diagram below, hexagons mark **firewall components** (policy-enforcement points) and rectangles mark **network resources** (the things firewalls protect or expose). Endpoint firewalls are shown attached to each server in the internal network rather than as a separate node in the traffic path: they enforce policy locally on the host, regardless of which network firewalls a packet has already traversed.
 
@@ -188,8 +188,8 @@ flowchart TB
   PF{{"Perimeter firewall\nstateful inspection, NAT"}}
 
   subgraph DMZNet ["DMZ network"]
-    DMZSvc["Public-facing services\nweb servers, mail relay"]
     WAF{{"WAF\nLayer 7: SQLi, XSS filtering"}}
+    DMZSvc["Public web tier\nweb servers, app gateways"]
   end
 
   IF{{"Internal firewall\nzone segmentation"}}
@@ -204,9 +204,9 @@ flowchart TB
   end
 
   Internet --> PF
-  PF --> DMZSvc
-  DMZSvc --> WAF
-  WAF --> IF
+  PF --> WAF
+  WAF --> DMZSvc
+  DMZSvc --> IF
   IF --> App
   App --> DB
 ```
@@ -350,6 +350,8 @@ A **load balancer** is a reverse proxy that distributes incoming requests across
 | Least connections | Each request goes to the backend with the fewest active connections | Long-lived or variable-cost requests (file uploads, streaming) |
 | IP hash | The client's IP determines which backend handles the request | Session-sticky applications that store state locally on the server |
 
+Distribution is only half of a load balancer's job. In production, the device also runs **health checks** against each backend, marks instances unhealthy after repeated failures, and often supports **connection draining** so in-flight requests can finish before a backend is removed during a deployment. That is why a broken probe path, wrong host header, wrong port, or mismatched TLS expectation can take down an otherwise healthy service: the load balancer stops sending traffic because the health check is wrong, not because the application itself is dead.
+
 Session stickiness is sometimes necessary for legacy applications that keep session state in process memory, but it is usually a compatibility workaround rather than the desired end state. Modern designs prefer stateless backends or a shared session store so any healthy instance can serve any request.
 
 ### Layer 4 vs. Layer 7
@@ -388,9 +390,53 @@ Several mature software implementations cover different deployment contexts:
 
 **[HAProxy](https://www.haproxy.org/)** is a battle-tested load balancer known for fine-grained control over health checks, connection queuing, and per-backend statistics. It is frequently chosen as a dedicated load balancer in front of databases or other TCP-based services.
 
+### Public and Internal Load Balancers in a VPC
+
+The patterns above describe load balancers as components in isolation. In a typical Amazon Web Services (AWS) deployment, two of them work together to separate the public-internet entry point from the private application network. A **public-facing load balancer** (most often an Application Load Balancer (ALB) configured with the `internet-facing` scheme) lives in **public subnets** and has internet-routable addresses. The **app servers** live in **private subnets** with no public IPs at all. The public ALB is the only entry point: requests from the internet hit the ALB, which terminates TLS and forwards over the VPC's private network to the app servers' private addresses. Security groups enforce that the app servers accept inbound traffic only from the ALB's security group, not from the internet directly, which means a misconfigured app server cannot accidentally become reachable.
+
+One tier deeper, an **internal-scheme load balancer** (an ALB or NLB with `scheme=internal`) is common wherever one private service calls another. An order service in the application tier might talk to a payments service through an internal ALB rather than every order replica needing to know the addresses of every payments replica. Internal load balancers have private IPs only and are reachable only through private connectivity into the VPC, whether from resources in the VPC itself or from attached private networks such as peered VPCs, Transit Gateway paths, or VPN-connected sites. They are typically only TLS-terminated when the internal traffic is sensitive enough to warrant it. The database tier is usually fronted not by another load balancer but by a managed service endpoint: [Amazon Relational Database Service (RDS)](https://aws.amazon.com/rds/) publishes a DNS hostname that resolves to the active primary, with read replicas reachable through their own endpoints. In the private-subnet pattern shown here, those endpoints stay on the private side of the architecture rather than creating another public entry point.
+
+```mermaid
+flowchart TB
+  Internet(["Internet"])
+
+  subgraph VPC ["AWS VPC"]
+    direction TB
+
+    subgraph PubSub ["Public subnets"]
+      PubALB["Public ALB\nscheme: internet-facing\nTLS termination, L7 routing"]
+    end
+
+    subgraph PrivApp ["Private subnets: application tier"]
+      App1["App server 1\nprivate IP only"]
+      App2["App server 2\nprivate IP only"]
+    end
+
+    subgraph PrivData ["Private subnets: services and data tier"]
+      IntALB["Internal ALB\nscheme: internal"]
+      Pay1["Payments service 1"]
+      Pay2["Payments service 2"]
+      RDS[("Amazon RDS\nmanaged endpoint")]
+    end
+
+    PubALB --> App1
+    PubALB --> App2
+    App1 --> IntALB
+    App2 --> IntALB
+    IntALB --> Pay1
+    IntALB --> Pay2
+    App1 --> RDS
+    App2 --> RDS
+  end
+
+  Internet --> PubALB
+```
+
+The Cloud Computing lecture covers VPCs, subnets, and security groups in depth. This subsection's contribution is showing where the reverse-proxy and load-balancer concepts from this lecture sit inside that topology. The same architectural pattern applies on Azure (with Azure Load Balancer or Application Gateway in front, an internal load balancer behind) and Google Cloud Platform (with Cloud Load Balancing in front, an internal load balancer behind) under different names.
+
 ## Content Delivery Networks
 
-A **content delivery network (CDN)** is a geographically distributed network of edge servers that caches and serves content from locations close to users. A request from a user in Berlin hitting an origin server in Oregon would normally travel across the Atlantic for every resource. With a CDN, static resources (and often dynamically generated responses) are served from an edge PoP (Point of Presence) in Frankfurt, reducing latency by an order of magnitude.
+A **[content delivery network (CDN)](https://www.cloudflare.com/learning/cdn/what-is-a-cdn/)** is a geographically distributed network of edge servers that caches and serves content from locations close to users. A request from a user in Berlin hitting an origin server in Oregon would normally travel across the Atlantic for every resource. With a CDN, static resources (and often dynamically generated responses) are served from an edge PoP (Point of Presence) in Frankfurt, reducing latency by an order of magnitude.
 
 CDNs do more than caching. They terminate TLS at the edge PoP, so the TLS handshake latency is between the user and the nearest edge server rather than between the user and the origin. They also help absorb very large distributed denial-of-service (DDoS) floods at a scale that no single origin server can usually match. Most major CDNs also offer integrated WAF and bot mitigation, making the CDN the first layer of HTTP-aware security in the request path.
 
@@ -418,7 +464,7 @@ Cache invalidation is one of the harder operational problems with CDNs. `Cache-C
 
 Commercial CAs sell certificates at three levels of validation.
 
-**DV (Domain Validated)** certificates verify only that the requester controls the domain, by serving a challenge file over HTTP or adding a DNS TXT record. Issuance is fully automated and takes seconds. [Let's Encrypt](https://letsencrypt.org/) issues only DV certificates. DV is appropriate for the vast majority of web services.
+**DV (Domain Validated)** certificates verify only that the requester controls the domain, by serving a challenge file over HTTP or adding a DNS TXT record. Issuance is fully automated and takes seconds. [Let's Encrypt](https://letsencrypt.org/how-it-works/) issues only DV certificates. DV is appropriate for the vast majority of web services.
 
 **OV (Organization Validated)** certificates additionally verify the legal existence and identity of the organization through documentation review. The organization's name appears in the certificate's subject field. OV issuance takes hours to days. Banks and large enterprises sometimes use OV to provide additional assurance to users.
 
@@ -438,13 +484,15 @@ Caddy manages the full ACME lifecycle automatically: no certbot, no systemd time
 
 Two mechanisms improve the security posture of a TLS-enabled site after the certificate is in place.
 
-**HSTS (HTTP Strict Transport Security)** instructs browsers to always connect to a domain over HTTPS, never HTTP, for a specified period. Once a browser has seen the `Strict-Transport-Security` header, it refuses to make an unencrypted connection to that domain for the duration of the `max-age` directive. This prevents downgrade attacks on later visits. To protect the very first visit as well, the domain has to be submitted to the [browser preload list](https://hstspreload.org/) maintained by the Chromium project and consumed by every major browser. Concretely, an HSTS-enabled response includes a header like the following:
+**HSTS (HTTP Strict Transport Security)** instructs browsers to always connect to a domain over HTTPS, never HTTP, for a specified period. Once a browser has seen the `Strict-Transport-Security` header, it refuses to make an unencrypted connection to that domain for the duration of the `max-age` directive. This prevents downgrade attacks on later visits. To protect the very first visit as well, the domain has to be submitted to the [browser preload list](https://hstspreload.org/) maintained by the Chromium project and consumed by every major browser.
+
+Preloading is an explicit opt-in, not a default recommendation. The Chromium preload list requires at least `max-age=31536000`, `includeSubDomains`, and `preload`, plus working HTTPS on every subdomain, including internal ones. Removal is slow, and modern browsers already auto-upgrade many HTTP navigations on their own, so most teams should deploy ordinary HSTS first, ramp `max-age` upward carefully, and add `preload` only when they are certain the domain can remain HTTPS-only long-term. Concretely, an HSTS-enabled response can include a header like the following:
 
 ```
 Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
 ```
 
-The `max-age=63072000` tells the browser to remember this for two years (the minimum value required by the preload list). `includeSubDomains` extends the policy to every subdomain. `preload` is the operator's signal that the domain is eligible for the preload list. In Nginx the configuration is one line inside the relevant `server` block:
+The `max-age=63072000` tells the browser to remember this for two years. That is a common strong value, not the minimum preload requirement. `includeSubDomains` extends the policy to every subdomain. `preload` is the operator's signal that the domain is asking to be included in the preload list. In Nginx the configuration is one line inside the relevant `server` block:
 
 ```nginx
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
@@ -452,18 +500,19 @@ add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; prelo
 
 The `always` flag ensures the header is sent on error responses too, which matters because a 4xx or 5xx response without HSTS would silently leave that browser session unprotected.
 
-**Online Certificate Status Protocol (OCSP) stapling** improves certificate revocation checking. The traditional OCSP mechanism requires the browser to query the CA's OCSP responder during every TLS handshake, adding latency and leaking browsing behavior to the CA. With OCSP stapling, the server periodically fetches a signed OCSP response from the CA and includes ("staples") it in the TLS handshake. The client gets revocation status without an extra network round trip and without the CA learning which sites the user visits. In Nginx the configuration is three directives inside the relevant `server` block:
+**Online Certificate Status Protocol (OCSP) stapling** improves certificate revocation checking. The traditional OCSP mechanism requires the browser to query the CA's OCSP responder during every TLS handshake, adding latency and leaking browsing behavior to the CA. With OCSP stapling, the server periodically fetches a signed OCSP response from the CA and includes ("staples") it in the TLS handshake. The client gets revocation status without an extra network round trip and without the CA learning which sites the user visits. In Nginx, stapling also needs a working DNS resolver because the server has to look up the CA's OCSP responder hostname. A minimal configuration looks like this:
 
 ```nginx
+resolver 1.1.1.1 1.0.0.1 valid=300s;
 ssl_stapling on;
 ssl_stapling_verify on;
 ssl_trusted_certificate /etc/letsencrypt/live/example.com/chain.pem;
 ```
 
-`ssl_stapling_verify on` makes Nginx validate the OCSP response signature against the chain file before serving it, which prevents the server from stapling a malformed or stale response to clients. Caddy enables OCSP stapling by default with no configuration. You can confirm stapling is working with `openssl`:
+`ssl_stapling_verify on` makes Nginx validate the OCSP response signature against the chain file before serving it, which prevents the server from stapling a malformed or stale response to clients. `ssl_trusted_certificate` must include the issuer chain Nginx needs for that verification. Caddy generally handles stapling automatically when the certificate issuer supports it. You can confirm stapling is working with `openssl`:
 
 ```bash
-echo | openssl s_client -connect example.com:443 -status 2>/dev/null | grep -A1 "OCSP Response Status"
+echo | openssl s_client -connect example.com:443 -servername example.com -status 2>/dev/null | grep -A1 "OCSP Response Status"
 ```
 
 A successful staple shows `OCSP Response Status: successful` followed by `Cert Status: good`.
@@ -478,7 +527,7 @@ For internal services, a public CA can issue a certificate for a privately hoste
 
 ### Diagnosing TLS Failures
 
-The `openssl s_client -connect host:443` command opens a TLS connection from the command line and prints the certificate chain plus a verify return code (`0` means OK; non-zero codes correspond to specific failure modes such as an expired certificate, an unknown issuer, or a hostname mismatch). The operational question is what to do when each failure code appears.
+The `openssl s_client` command is a diagnostic tool, not a browser. It opens a TLS connection and prints the certificate chain and session details, which makes it excellent for inspection but easy to misread if you treat it like a strict verifier. On shared reverse proxies you should usually send explicit SNI with `-servername host` so the correct virtual host certificate is selected. If you want to test hostname validation rather than just inspect the chain, add `-verify_hostname host`; if you want verification failures to abort the handshake instead of being printed and ignored, add `-verify_return_error`. The operational question is what to do when each failure mode appears once you have run the right variant of the command.
 
 An **expired certificate** means the automated renewal job is not running or is failing silently. Check whether the renewal mechanism, whether systemd timer, cron job, or platform-managed automation, is active and whether the last renewal attempt succeeded.
 
@@ -490,7 +539,7 @@ A related failure is a **Server Name Indication (SNI) mismatch** on a shared rev
 
 ```bash
 # Check what names a certificate covers
-openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
+openssl s_client -connect example.com:443 -servername example.com 2>/dev/null | openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
 ```
 
 <Aside type="caution" title="Wildcard Certificates">
@@ -543,14 +592,6 @@ None of this exists in isolation from the rest of the course. The IaC lecture sh
 
 The references below are useful for refreshing protocol details and for seeing production-oriented examples of the services this lecture connects together.
 
-- <a href="https://www.cloudflare.com/learning/dns/what-is-dns/" target="_blank" rel="noopener noreferrer">What is DNS? How DNS works (Cloudflare Learning, Article)</a>
-- <a href="https://www.cloudflare.com/learning/cdn/what-is-a-cdn/" target="_blank" rel="noopener noreferrer">What is a CDN? (Cloudflare Learning, Article)</a>
-- <a href="https://www.cloudflare.com/learning/network-layer/what-is-a-firewall/" target="_blank" rel="noopener noreferrer">What is a Firewall? (Cloudflare Learning, Article)</a>
-- <a href="https://letsencrypt.org/how-it-works/" target="_blank" rel="noopener noreferrer">How Let's Encrypt Works (Let's Encrypt, Article)</a>
-- <a href="https://certificate.transparency.dev/" target="_blank" rel="noopener noreferrer">Certificate Transparency (Google, Article)</a>
-- <a href="https://www.wireguard.com/" target="_blank" rel="noopener noreferrer">WireGuard: Fast, Modern, Secure VPN Tunnel (wireguard.com)</a>
-- <a href="https://www.youtube.com/watch?v=j9QmMEWmcfo" target="_blank" rel="noopener noreferrer">DNS Records Explained (ByteByteGo, YouTube)</a>
-- <a href="https://www.youtube.com/watch?v=C7HP2KYqVKg" target="_blank" rel="noopener noreferrer">Load Balancing Explained (ByteByteGo, YouTube)</a>
-- <a href="https://www.youtube.com/watch?v=RqfaTIWc3LQ" target="_blank" rel="noopener noreferrer">WireGuard Explained (Fireship, YouTube)</a>
-- <a href="https://www.youtube.com/watch?v=7eqHGPLEHaA" target="_blank" rel="noopener noreferrer">VPN, SD-WAN, and MPLS: Enterprise WAN Explained (Network Direction, YouTube)</a>
-- <a href="https://www.youtube.com/watch?v=xBSabeYoLyI" target="_blank" rel="noopener noreferrer">NGINX Explained in 100 Seconds (Fireship, YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=w0SQGCt-6Ro" target="_blank" rel="noopener noreferrer">Networking Concepts Every DevOps Engineer Must Know (TechWorld with Nana) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=xo5V9g9joFs" target="_blank" rel="noopener noreferrer">Proxy vs Reverse Proxy vs Load Balancer (TechWorld with Nana) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=K4ilFsm2GvA" target="_blank" rel="noopener noreferrer">Firewall Fundamentals Explained | Network Security for Beginners (Antisyphon Training) (YouTube)</a>
