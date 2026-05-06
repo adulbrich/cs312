@@ -14,12 +14,12 @@ type: activity
 slug: log-analysis
 order: 16
 paired_lecture: log-management-and-analysis
-practices: journalctl filtering by tag and time window; reading syslog-style and JSON logs with grep, awk, tail, and regex; scoping, narrowing, and broadening an investigation across web, application, database, and node logs; comparing current pod logs, previous pod logs, and Kubernetes events; forcing log rotation with logrotate; reading Fluent Bit collection config and a basic LogQL query
+practices: journalctl filtering by tag and time window; reading syslog-style and JSON logs with grep, awk, tail, and regex; scoping, narrowing, and broadening an investigation across web, application, database, and node logs; comparing current pod logs, previous pod logs, and Kubernetes events; forcing log rotation with logrotate; tracing a Fluent Bit collection path; reading a label-first LogQL query for centralized search
 prereq_activities:
 output: an incident-summary.txt file containing your name, host, root cause, and supporting evidence from the logs
 */}
 
-This activity puts into practice the concepts from the [Log Management and Incident Investigation](/lectures/log-management-and-analysis/) lecture. You will build a small incident bundle on a Linux server, investigate it the way an on-call engineer would, and compare journal entries, plain-text logs, structured JSON logs, and saved Kubernetes command output. By the end, you will have a short incident summary backed by evidence from each layer of the stack.
+This activity puts into practice the concepts from the [Log Management and Incident Investigation](/lectures/log-management-and-analysis/) lecture. You will build a small incident bundle on a Linux server, investigate it the way an on-call engineer would, and connect local evidence to the centralized logging path described in the lecture. By the end, you will have a short incident summary backed by evidence from each layer of the stack.
 
 ## What You Will Need
 
@@ -361,7 +361,7 @@ If you had only the current log and the event stream, what important detail woul
 
 ## Rotate the Log and Inspect the Collection Path
 
-An incident response mindset is not enough by itself. Logs have to survive long enough to investigate, and in container environments they need to be shipped off the node before the pod disappears.
+An incident response mindset is not enough by itself. Logs have to survive long enough to investigate, and in container environments they need to be shipped off the node before the pod disappears. This section forces a local rotation first, then connects that node-local evidence to the label-first Loki model from the lecture.
 
 <Steps>
 
@@ -405,6 +405,15 @@ An incident response mindset is not enough by itself. Logs have to survive long 
    ```
 
    The Fluent Bit config shows where a node-level agent reads pod logs and which labels it forwards. The LogQL query shows how those labels become the starting point for centralized searching later.
+
+6. **Split the LogQL query into its two parts:**
+
+   ```bash
+   grep -oE '\{[^}]+\}' bundle/logql-query.txt
+   grep -oE '\|= ".*"' bundle/logql-query.txt
+   ```
+
+   The first line is the stream selector: it narrows the search by indexed labels such as namespace, pod, and container. The second line is the content filter: it searches only within the already narrowed stream. That is the operational tradeoff the lecture described. Loki stays cheaper because it indexes labels instead of every word in every log line.
 
 </Steps>
 

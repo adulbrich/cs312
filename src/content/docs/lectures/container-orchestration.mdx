@@ -682,7 +682,11 @@ At larger scale, the painful part is usually not writing manifests but operating
 
 ### Packaging Layers
 
-Plain manifests are the foundation, but teams rarely stop there. **[Helm](https://helm.sh/)** packages templated applications as installable charts, and **[Kustomize](https://kustomize.io/)** keeps a shared base of manifests with environment-specific patches. Both are ways of keeping declarative configuration manageable as the number of services and environments grows.
+Plain manifests are the foundation, but teams rarely stop there. Once an application grows beyond a handful of YAML files, two higher-level patterns usually appear: packaging and overlaying. **[Helm](https://helm.sh/)** is the most common packaging tool in the Kubernetes ecosystem. A **chart** is a versioned package of Kubernetes objects, a **release** is one installed copy of that package in a cluster, and a **values** file supplies the inputs that customize it for a particular environment. This is why Helm shows up so often around shared infrastructure such as ingress controllers, cert-manager, and monitoring stacks: these systems involve many related objects that need to be installed, upgraded, and rolled back together.
+
+**[Kustomize](https://kustomize.io/)** solves a nearby but different problem. Kustomize starts from manifests you already own and applies environment-specific patches to them. Helm is stronger when you want a reusable package with defaults and a configurable interface; Kustomize is stronger when you already understand the raw manifests and want a disciplined way to vary them between development, staging, and production. In practice, teams often use both, but for different ownership boundaries.
+
+The main risk with Helm is abstraction. A chart can make installation easier while also hiding what is actually running if you treat it as a black box. A competent operator should still be able to answer basic questions about any chart they install: what objects did it create, which values are operationally important, what changes on upgrade, and how would you roll it back if the new release caused trouble.
 
 ### GitOps on Declarative Platforms
 
