@@ -13,7 +13,7 @@ import HistoricalNote from '/src/components/HistoricalNote.astro';
 type: lecture
 slug: on-premises-infrastructure
 order: 19
-covers: hierarchical three-tier network design; VLANs and 802.1Q trunking; enterprise Wi-Fi and 802.1X; DHCP relay and reservations; OSPF; BGP; link aggregation; underlay vs overlay; server CPU platforms (EPYC/Xeon); NUMA; custom silicon (ARM Graviton/Cobalt/Axion, Grace Hopper, TPU, Trainium); ECC/RDIMM memory; storage interfaces (SATA/SAS/NVMe/NVMe-oF); DAS/NAS/SAN; NFS/SMB; RAID and ZFS; server specialization; spine-leaf topology; data center design
+covers: hierarchical three-tier network design; VLANs and 802.1Q trunking; ARP security and Dynamic ARP Inspection; enterprise Wi-Fi and 802.1X; DHCP relay and reservations; OSPF; BGP; link aggregation; underlay vs overlay; server CPU platforms (EPYC/Xeon); NUMA; custom silicon (ARM Graviton/Cobalt/Axion, Grace Hopper, TPU, Trainium); ECC/RDIMM memory; storage interfaces (SATA/SAS/NVMe/NVMe-oF); DAS/NAS/SAN; NFS/SMB; RAID and ZFS; server specialization; spine-leaf topology; data center design
 prereq_lectures: hardware-fundamentals, virtualization-basics, container-orchestration, networking-fundamentals
 followup_lectures: documentation-teamwork-wrap-up
 paired_activities: cisco-packet-tracer, storage-planning
@@ -83,6 +83,14 @@ ip neighbor show
 If the gateway entry is missing or marked `FAILED`, the server cannot reach it at layer 2. That points to a VLAN mismatch, a bad cable, or a misconfigured switch port before you ever touch IP configuration.
 
 To route traffic between VLANs, you need a layer-3 device, either a router or a layer-3 switch, configured with an interface or sub-interface in each VLAN. Without inter-VLAN routing, hosts on different VLANs simply cannot communicate regardless of their IP configuration.
+
+## ARP Security and Dynamic ARP Inspection
+
+The Networking Fundamentals lecture introduced the Address Resolution Protocol (ARP) as the layer-2 mapping that lets a host send a packet to an IP address on its own broadcast domain. The protocol works because every host on the segment trusts every other host's announcements at face value. That same trust gives ARP a security dimension that becomes operational at the access layer, where unauthorized devices may plug into switch ports.
+
+**ARP spoofing** (also called ARP poisoning) exploits the fact that ARP has no authentication. Any host on a broadcast domain can send a gratuitous ARP reply claiming any IP address, including the default gateway's. A malicious host that does this causes other devices on the segment to update their ARP caches and send traffic intended for the gateway to the attacker instead, creating a man-in-the-middle position or a denial of service. Neither is visible at the IP layer: routing tables look fine, `ping` succeeds, traffic just silently passes through an extra host.
+
+Managed switches mitigate this with **Dynamic ARP Inspection (DAI)**. The switch builds a trusted binding table from DHCP snooping (the switch watching DHCP exchanges to record which IP addresses were leased to which MAC addresses on which ports), and validates every ARP reply against it. A reply claiming that `10.0.1.1` belongs to a MAC address not in the binding table is dropped. Servers with statically configured addresses must have manual bindings added to the DAI table, or their own ARP packets will be dropped as untrusted: this is one of the more common DAI rollout footguns, where a newly hardened access switch breaks specific servers that nobody remembered were not using DHCP. DAI is a standard hardening step on access-layer switches in environments where unauthorized devices could plug into switch ports, paired with **port security** (limiting how many MAC addresses a port will learn) and **802.1X authentication** (requiring devices to authenticate before being granted access to a VLAN at all).
 
 ## Wireless networking
 

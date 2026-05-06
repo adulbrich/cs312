@@ -206,7 +206,7 @@ sudo dhclient enp3s0
 
 **DNS** translates human-readable names like `wiki.example.com` into IP addresses like `93.184.216.34`. Without DNS, users would need to type IP addresses into their browsers and every configuration file would break whenever a server moved to a new address. DNS is hierarchical: a local DNS server knows about internal names and forwards everything else to an upstream resolver (such as Google's `8.8.8.8` or Cloudflare's `1.1.1.1`), which in turn queries the global DNS infrastructure.
 
-The most common record types are **A records** (mapping a name to an IPv4 address), **AAAA records** (mapping to IPv6), **CNAME records** (aliases pointing one name to another), and **MX records** (mail routing). Two others appear less often but are important to recognize. **PTR records** are the reverse of A records: given an IP address, they return a hostname. Reverse DNS lookups use PTR records and are published by whoever owns the IP block, typically the ISP. You will see them (or their absence) when troubleshooting email deliverability or tracing where an IP address belongs. **SOA (Start of Authority) records** mark the beginning of a DNS zone and contain administrative metadata: the primary nameserver, a contact email, and parameters controlling how long secondary nameservers cache zone data. When a reverse DNS lookup returns `NXDOMAIN`, the SOA record in the authority section still reveals which organization controls that IP block. When a DNS lookup fails, the symptom is usually "the internet is down" even though the network is perfectly functional; the user simply cannot resolve names to addresses.
+The most common record types are **A records** (mapping a name to an IPv4 address), **AAAA records** (mapping to IPv6), **CNAME records** (aliases pointing one name to another), and **MX records** (mail routing). Two others appear less often but are important to recognize. **PTR records** are the reverse of A records: given an IP address, they return a hostname. Reverse DNS lookups use PTR records and are published by whoever owns the IP block, typically the ISP. You will see them (or their absence) when troubleshooting email deliverability or tracing where an IP address belongs. **SOA (Start of Authority) records** mark the beginning of a DNS zone and contain administrative metadata: the primary nameserver, a contact email, and parameters controlling how long secondary nameservers cache zone data. When a DNS query returns `NXDOMAIN` (the response code meaning "this name does not exist in the queried zone"), the SOA record in the authority section still reveals which organization controls that zone. When a DNS lookup fails, the symptom is usually "the internet is down" even though the network is perfectly functional; the user simply cannot resolve names to addresses.
 
 **DNS operates over two different protocols.** DNS queries and regular lookups use UDP port 53 because the small request and response packets do not need TCP's reliability guarantees. Zone transfers (called AXFR transfers) use TCP port 53 to ensure large data transfers are reliable. A zone transfer replicates all records from an authoritative nameserver to a secondary nameserver, ensuring that multiple nameservers hold identical copies of the zone data. This is how DNS is made redundant: when the primary nameserver goes down, secondary nameservers can still answer queries for that domain. In practice, DNS queries over UDP are by far more common; TCP is used only for zone transfers between nameservers and for unusually large responses that would exceed UDP's 512-byte limit.
 
@@ -626,6 +626,27 @@ Three possible states, and the distinction between them matters operationally. `
 
 <Aside type="tip" title="Authorized Use Only">
 `nmap` is a standard tool for testing your own infrastructure. Running it against machines you own or have explicit written authorization to test is normal practice. Running it against systems you do not own may violate computer access laws.
+</Aside>
+
+### tcpdump: Reading Packets on the Wire
+
+When higher-level tools do not reveal the problem, packet capture lets you see exactly what is happening on the wire. The `tcpdump` utility is available on virtually every Linux system and reads frames directly from a network interface, optionally filtered by host, port, or protocol.
+
+```bash
+# Capture traffic to or from a specific host
+sudo tcpdump -i eth0 host 10.0.1.50
+
+# Capture only DNS traffic
+sudo tcpdump -i eth0 port 53
+
+# Write capture to a file for later analysis in Wireshark
+sudo tcpdump -i eth0 -w /tmp/capture.pcap
+```
+
+Reading `tcpdump` output requires understanding the common TCP flags. `[S]` starts a connection, `[S.]` accepts and acknowledges it, `[.]` is a plain acknowledgment, `[P.]` means data is being pushed, `[R]` resets the connection immediately, and `[F.]` begins a graceful finish. A connection that never completes its handshake shows up as repeated `[S]` packets with no matching `[S.]` reply, which is a strong signal that something between the two hosts is dropping or rejecting the traffic.
+
+<Aside type="tip" title="Always Filter on Production Servers">
+When capturing on a busy server, always use filters to limit the output. Capturing all traffic on a production server can generate enormous amounts of data and may itself cause performance problems.
 </Aside>
 
 ## A Systematic Diagnostic Workflow
