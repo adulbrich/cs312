@@ -11,6 +11,17 @@ import FigureWithCaption from '/src/components/FigureWithCaption.astro';
 
 import StorageLayers from './hardware-components/StorageLayers.astro';
 
+{/* ai-summary
+type: lecture
+slug: hardware-fundamentals
+order: 1
+covers: motherboard/CPU platform; memory (DDR, ECC); storage (SATA, NVMe, PCIe); PSU and ATX; cooling and form factors; POST and first-boot diagnostics
+prereq_lectures:
+followup_lectures: virtualization-basics, linux-server-planning-and-configuration
+paired_activities: hardware-build-spec
+supports_labs: the-bare-metal
+*/}
+
 A server randomly reboots under load: is it the PSU, faulty RAM, or a thermal issue? A new workstation will not POST (Power-On Self-Test, the firmware's initial hardware check that must succeed before the OS loads). A storage upgrade doubles cost but only marginally improves throughput because the bottleneck is elsewhere in the system. As a system administrator, these are the hardware situations that will land on your desk. You do not need to be a hardware engineer, but you do need enough understanding of how the components fit together to diagnose failures, spec appropriate machines, and have an informed conversation with vendors or your operations team.
 
 Modern computers are built from a small set of well-defined parts that must match one another in socket, speed, and power budget. In this lecture you will learn how the motherboard, CPU, memory, storage, graphics card, power supply, and cooling fit together and what "compatibility" really means in practice. We will favor plain language first, then introduce the necessary terms (socket, chipset, PCIe lanes, TDP) with short glosses. By the end you should be able to read a spec sheet, choose parts that make sense for a given goal (a quiet student workstation, a home lab server, a cost-optimized cloud instance), and assemble a system that boots on the first try. Building on this foundation, later lectures on networking and operating systems assume you can reliably bring bare metal to life.

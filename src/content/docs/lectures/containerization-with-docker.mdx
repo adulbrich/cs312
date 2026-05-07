@@ -8,6 +8,17 @@ sidebar:
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
+{/* ai-summary
+type: lecture
+slug: containerization-with-docker
+order: 5
+covers: namespaces and cgroups; Docker architecture, images, and layers; Dockerfiles and build cache; container lifecycle and networking; volumes and bind mounts; Compose and registries
+prereq_lectures: virtualization-basics, linux-server-planning-and-configuration
+followup_lectures: ci-cd, container-orchestration, network-services-and-application-delivery
+paired_activities: docker-image-exploration
+supports_labs: containerizing-a-web-application, image-registry-and-version-switching
+*/}
+
 A dependency version your application needs conflicts with the one another service requires on the same server. A build that passes every test in CI fails on the first deploy because the server is running a different OS version. A traffic spike demands twenty identical application instances in under a minute, but each one takes ten minutes to configure by hand. These are the problems containers solve.
 
 A container packages an application together with everything it needs to run: libraries, runtime, and configuration. It does this in a portable artifact that usually behaves the same from a developer's laptop to a production server to a cloud instance, as long as the target environment provides a compatible CPU architecture and kernel. Unlike a virtual machine, a container shares the host kernel and often starts in under a second. Unlike a bare-metal deployment, it is isolated from other processes and carries no dependency on the host's user-space software.

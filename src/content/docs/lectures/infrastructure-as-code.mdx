@@ -8,6 +8,17 @@ sidebar:
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
+{/* ai-summary
+type: lecture
+slug: infrastructure-as-code
+order: 7
+covers: declarative vs imperative automation; Terraform providers, resources, data, and state; plan/apply workflow; lifecycle and dependencies; modules; drift and IaC as engineering practice
+prereq_lectures: cloud-computing
+followup_lectures: configuration-management, ci-cd, container-orchestration
+paired_activities: terraform-configuration
+supports_labs: first-infrastructure-stack, automated-configuration-and-deployment
+*/}
+
 Imagine you need to deploy a web server. You log into the AWS console, click through a dozen screens, choose an AMI (Amazon Machine Image, a pre-built OS snapshot used to launch instances), configure a security group, attach a key pair, and launch the instance. A week later a colleague needs an identical server in a different region. Can you reproduce exactly what you did? Probably not with perfect fidelity, and certainly not quickly.
 
 This scenario illustrates the core problem that Infrastructure as Code (IaC) solves. When infrastructure is provisioned by hand, three risks emerge: configuration drift (two servers that should be identical slowly diverge as engineers apply ad-hoc changes to one but not the other), lack of reproducibility (if a disaster strikes, you are relying on memory and wiki pages to rebuild from scratch), and lack of an audit trail (a manual change in a cloud console leaves no pull request, no diff, and no approval record). IaC addresses all three by expressing infrastructure in source files that live in version control. Changes go through code review, environments can be rebuilt from a single command, and drift is detected automatically. [Terraform](https://developer.hashicorp.com/terraform/docs) is one of the most widely adopted IaC tools and the focus of this lecture, but the concepts apply across the entire ecosystem.

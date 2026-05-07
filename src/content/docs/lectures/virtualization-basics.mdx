@@ -8,6 +8,17 @@ sidebar:
 import { Aside, LinkCard } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
+{/* ai-summary
+type: lecture
+slug: virtualization-basics
+order: 2
+covers: hypervisors and guests; full, paravirtual, and hardware-assisted virtualization; Type 1 vs Type 2; virtual hardware sizing; snapshots and live migration; VMs vs containers/serverless
+prereq_lectures: hardware-fundamentals
+followup_lectures: linux-server-planning-and-configuration, containerization-with-docker, cloud-computing
+paired_activities: vm-setup
+supports_labs: cloud-environment-setup
+*/}
+
 Suppose you need to test a risky kernel upgrade before touching your production server. Or you need three environments (Ubuntu with `apt`, AlmaLinux with `dnf`, and Arch Linux with `pacman`) to verify your deployment scripts work across distributions with genuinely different package managers and release models. Or you want to give each developer on your team an isolated sandbox so that a misconfiguration in one environment cannot affect another. Buying separate physical hardware for every scenario is slow and expensive; rebuilding from scratch after every mistake wastes hours. Virtualization solves all three problems by letting you run multiple isolated operating systems on the same physical machine simultaneously, and roll back any of them to a clean state in seconds.
 
 Virtualization inserts a thin control layer called a hypervisor between software and hardware. Instead of dedicating a whole server to one workload, you carve the machine into slices of CPU time, memory, storage, and network interfaces that each guest believes are "its" hardware. This multiplies flexibility: you can prototype quickly, recover from mistakes by rolling back snapshots, and drive hardware utilization closer to what you paid for.

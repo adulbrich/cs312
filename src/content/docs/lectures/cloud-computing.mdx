@@ -8,6 +8,17 @@ sidebar:
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
+{/* ai-summary
+type: lecture
+slug: cloud-computing
+order: 6
+covers: cloud service models; regions/AZs and shared responsibility; EC2; VPCs, subnets, routes, and security groups; EBS vs S3; IAM roles/policies; ECR and cost awareness
+prereq_lectures: virtualization-basics, networking-fundamentals, containerization-with-docker
+followup_lectures: infrastructure-as-code, configuration-management, ci-cd
+paired_activities: aws-console-tour
+supports_labs: image-registry-and-version-switching, first-infrastructure-stack
+*/}
+
 An EC2 instance is the most visible unit of AWS infrastructure, but it is not the most important one to understand. The majority of cloud security incidents and production failures trace back not to compute, but to the layers underneath: a misconfigured network that exposes a database to the internet, a missing IAM role that forces engineers to hardcode credentials in application code, a storage choice that performs poorly for the actual access pattern, or a container image published to a public registry by accident. These are architectural and configuration problems, and they occur before an instance ever runs.
 
 This lecture examines four foundational layers of AWS infrastructure that underpin virtually every workload: virtual networking (VPCs, subnets, and security groups), identity and access management (IAM), storage (EBS and S3), and container registries (ECR). Understanding these as a system, rather than as isolated features, is what separates engineers who provision cloud resources from engineers who design and operate cloud infrastructure.

@@ -8,6 +8,17 @@ sidebar:
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
 
+{/* ai-summary
+type: lecture
+slug: shell-scripting-and-automation-basics
+order: 8
+covers: script structure and shebang; variables, quoting, args, and environment; exit codes, pipes, and I/O; conditionals, loops, and functions; safe Bash defaults; regex and cron
+prereq_lectures: linux-server-planning-and-configuration
+followup_lectures: configuration-management, ci-cd, site-reliability-and-capacity-planning
+paired_activities: scripting
+supports_labs: image-registry-and-version-switching, automated-configuration-and-deployment
+*/}
+
 Every system administrator eventually faces tasks that must be done repeatedly: rotating log files, copying backups to a remote server, provisioning user accounts. When you perform these by hand, three problems emerge. First, the work is tedious; Google's SRE team calls this kind of repetitive, automatable operational work [*toil*](https://sre.google/sre-book/eliminating-toil/). Second, manual work is inconsistent; you will eventually forget a step or mistype a path. Third, manual processes are not repeatable in any verifiable way.
 
 Shell scripts solve all three problems. A script encodes the exact sequence of commands, runs them the same way every time, and serves as living documentation. This lecture covers the anatomy of a well-structured Bash script: how variables and quoting prevent subtle failures, how the Unix I/O model's exit code contract governs how scripts detect and propagate failure, how conditionals and loops let a script react to system state, how functions organize reusable logic, and how a handful of safe-scripting defaults catch the majority of bugs at the point of failure. The lecture also covers scheduling with cron, regular expressions and the tools that use them, and the point at which Bash's strengths run out and a more capable language should take over. The mechanics of pipes, redirection, and stream handling are covered in the [Terminal and Shell practicality](/practicalities/terminal-and-shell/); this lecture focuses on what those primitives mean for script design.
