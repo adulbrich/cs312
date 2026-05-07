@@ -1,6 +1,6 @@
 ---
 title: "Log Management and Incident Investigation"
-description: "Where logs come from, how to search them under pressure, how container logging works in Kubernetes, and how organizations scale from one log file to centralized logging across hundreds of services."
+description: "Where logs come from across every kind of infrastructure, how log collection and forwarding work, how to search logs under pressure, and how to reconstruct what happened during an incident."
 sidebar:
   order: 14
 draft: true
@@ -13,26 +13,26 @@ import HistoricalNote from '/src/components/HistoricalNote.astro';
 type: lecture
 slug: log-management-and-analysis
 order: 14
-covers: why logs complement metrics; log anatomy (severity levels, sources, timestamps); systemd journal and /var/log; container log architecture in Kubernetes (stdout/stderr, containerd, kubelet, kubectl logs, --previous flag); kubectl events vs container logs; syslog and JSON structured log formats; grep/journalctl/awk/tail for log search; regex for log analysis; investigation method (scope, narrow, broaden); log rotation and logrotate; centralized logging pipeline; Fluent Bit collection; ELK stack; Grafana LGTM stack (Loki, LogQL); cloud-managed logging
+covers: log sources across Linux, hardware, and Kubernetes; structured logging and centralized pipelines; practical search and timeline reconstruction; security logging and retention
 prereq_lectures: monitoring-and-performance
 followup_lectures: incident-response-fundamentals
 paired_activities: log-analysis
 supports_labs: observability-workshop, cluster-operations
 */}
 
-When an alert fires, you know something is wrong. Metrics tell you that the error rate is climbing, that a pod has restarted six times in ten minutes, that memory is running out. What they cannot tell you is why. The answer to "why" is almost always waiting in a log file.
+Logs exist everywhere. A Kubernetes pod writes to stdout. A bare metal server sends authentication events to syslog. A network switch stores interface errors in a local log buffer. A hardware storage controller records disk failures in a firmware event log that persists across reboots. A database engine writes a transaction log that is separate from anything the operating system sees. The formats differ, the tools differ, and the collection architectures differ, but the underlying fact does not change: every system that processes requests or manages state leaves a record of what it did, and that record is the primary evidence for understanding what went wrong and why.
 
-Log management is the practice of collecting, storing, and querying the timestamped records that systems and applications write as they run. Every request, every error, every configuration change, every authentication attempt leaves a trace. When an incident happens, those traces become the raw material for reconstruction: you are building a timeline of what happened, working backward from a symptom to its cause. This lecture covers where logs come from, what they look like, how to search them effectively under time pressure, how container logging in Kubernetes works differently from traditional Linux logging, and how organizations scale from one log file on one server to centralized logging across hundreds of services.
+Log management is the practice of collecting, storing, and querying those records systematically. When an alert fires and metrics tell you that the error rate is elevated, the answer to "why" is almost always waiting in a log. This lecture covers where logs come from across the full range of infrastructure environments, how log collection and forwarding work at both small and large scale, how to search logs effectively under time pressure, how container logging in Kubernetes works differently from traditional Linux logging, and how to use logs to reconstruct the sequence of events during an incident.
 
 ## Why Logs Are Different from Metrics
 
 Metrics and logs are complementary. You cannot replace one with the other, and understanding why helps you know which to reach for first.
 
-Metrics are collected at regular, predetermined intervals regardless of whether anything interesting is happening. Every 15 seconds, Prometheus scrapes memory usage, CPU utilization, and request counts. The result is a dense, uniform time series: every interval of the past week has a data point, even the ones where nothing was wrong. This uniformity is what makes metrics cheap to store, fast to query, and well-suited for dashboards and alerting. A graph of request latency over the past 48 hours is meaningful because there is a data point for every scrape interval, including the ones where latency was normal.
+Metrics are collected at regular, predetermined intervals regardless of whether anything interesting is happening. Every 15 seconds, Prometheus scrapes memory usage, CPU utilization, and request counts. The result is a dense, uniform time series: every interval of the past week has a data point, even the ones where nothing was wrong. This uniformity is what makes metrics cheap to store, fast to query, and well-suited for dashboards and alerting.
 
 Logs are event-driven. A log entry is written when something happens: a request completes, an error is thrown, a configuration file is reloaded, a user authenticates. Between events, nothing is written. A quiet system writes few logs; a system under heavy load or under attack writes many. This variable density is the first thing that distinguishes log analysis from metrics analysis.
 
-The more important difference is cardinality. Each log line may contain values that are unique or nearly unique: a specific user ID, a particular request path, an error message with a line number, a transaction ID that traces through multiple services. This richness is what makes logs irreplaceable for diagnosis. A metric that says "error rate is 5%" tells you something is wrong. A log line that says "connection refused at postgres-prod.internal:5432 from worker-node-3 after 30 second timeout" tells you exactly what is wrong, which system is involved, and where the failure occurred.
+The more important difference is cardinality. Each log line may contain values that are unique or nearly unique: a specific user ID, a particular request path, an error message with a line number, a transaction ID that traces through multiple services. This richness is what makes logs irreplaceable for diagnosis. A metric that says "error rate is 5%" tells you something is wrong. A log line that says "connection refused at postgres-prod.internal:5432 from worker-node-3 after 30-second timeout" tells you exactly what is wrong, which system is involved, and where the failure occurred.
 
 In practice: metrics detect problems and quantify their scope. Logs explain what specifically happened and why. In a well-instrumented system, an alert fires from a metric, and the investigation begins in the logs.
 
@@ -40,9 +40,9 @@ In practice: metrics detect problems and quantify their scope. Logs explain what
 
 Before you can search logs effectively, you need to understand their structure. Regardless of source or format, every useful log entry carries the same core information.
 
-The **timestamp** is the single most important field. Without it, you cannot reconstruct a sequence of events or determine whether a log entry predates or follows an alert. Timestamps should be precise (millisecond or microsecond resolution in busy systems), include the timezone or use UTC explicitly, and conform to a standard format such as [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html): for example, `2026-03-15T03:04:12.841Z`. Systems without accurate clock synchronization via NTP (Network Time Protocol, which keeps system clocks accurate by querying reference time servers) produce timestamps that cannot be reliably correlated across machines. If server A's clock is 5 seconds ahead of server B's, the logs from both servers will tell a misleading causal story.
+The **timestamp** is the single most important field. Without it, you cannot reconstruct a sequence of events or determine whether a log entry predates or follows an alert. Timestamps should be precise (millisecond or microsecond resolution in busy systems), include the timezone or use UTC explicitly, and conform to a standard format such as [ISO 8601](https://www.iso.org/iso-8601-date-and-time-format.html): for example, `2026-03-15T03:04:12.841Z`. Systems without accurate clock synchronization via NTP produce timestamps that cannot be reliably correlated across machines. If server A's clock is 5 seconds ahead of server B's, the logs from both servers will tell a misleading causal story.
 
-The **severity level** classifies the importance of the event. The [syslog standard](https://datatracker.ietf.org/doc/html/rfc5424) defines eight levels numbered 0 through 7, from EMERG (the system is unusable, immediate action required) at the top to DEBUG (fine-grained detail intended for development use) at the bottom. Most application frameworks use a simplified subset: DEBUG, INFO, WARN, ERROR, and FATAL or CRITICAL. In production, most services should log at INFO or WARN and above. Running at DEBUG in production generates enormous volume, can expose sensitive data in log output, and obscures the signals you actually need when investigating an incident.
+The **severity level** classifies the importance of the event. The [syslog standard](https://datatracker.ietf.org/doc/html/rfc5424) defines eight levels numbered 0 through 7, from EMERG (the system is unusable) at the top to DEBUG (fine-grained detail intended for development use) at the bottom. Most application frameworks use a simplified subset: DEBUG, INFO, WARN, ERROR, and FATAL or CRITICAL. In production, most services should log at INFO or WARN and above. Running at DEBUG in production generates enormous volume, can expose sensitive data in log output, and obscures the signals you need when investigating an incident.
 
 | Level | Name | Meaning |
 |---|---|---|
@@ -55,91 +55,47 @@ The **severity level** classifies the importance of the event. The [syslog stand
 | 6 | INFO | Routine informational message |
 | 7 | DEBUG | Fine-grained detail for development |
 
-The **source** identifies which process, service, or component wrote the entry: the hostname, the process name, the container name, or a structured service identifier. In an environment where many services write logs to the same centralized store, source identification is essential for filtering. When you are investigating a database connection error, you want the logs from the application server, not the logs from the monitoring sidecar or the load balancer running on the same node.
+The **source** identifies which process, service, or component wrote the entry: the hostname, the process name, the container name, or a structured service identifier. In an environment where many services write logs to the same centralized store, source identification is essential for filtering.
 
-The **message body** is the human-readable (or machine-parseable) description of the event. A good message is specific: "database connection refused at postgres-prod:5432 after 30 second timeout, transaction ID 7e4a2b" is useful. "Connection error" is not. Messages that appear during incidents often become search strings, so specificity matters operationally.
+The **message body** is the human-readable or machine-parseable description of the event. A good message is specific: "database connection refused at postgres-prod:5432 after 30-second timeout, transaction ID 7e4a2b" is useful. "Connection error" is not. Messages that appear during incidents often become search strings, so specificity matters operationally.
+
+### Correlation IDs
+
+In a system where a single user action triggers requests across multiple services, individual log entries from each service are difficult to connect without a shared identifier. A **correlation ID** (also called a request ID or trace ID) is a UUID generated at the entry point of a request and propagated through all downstream calls via HTTP headers (typically `X-Request-ID` or `X-Correlation-ID`). Every log entry emitted while processing that request includes the correlation ID as a structured field.
+
+This single practice transforms multi-service incident investigation. Instead of correlating log entries from five services by timestamp (approximate and error-prone), you can filter all five services' logs in Loki by a single ID: `{namespace="production"} | json | request_id="7e4a2b93-..."`. The correlation ID is the practical bridge between logs and traces: it provides trace-like capability (following a request across services) without requiring a full distributed tracing infrastructure.
 
 <Aside type="tip" title="Verify Logging Before You Need It">
-Whenever you deploy a new service, confirm that it is actually writing logs before you need them. Discovering that your application writes to `/dev/null` or that its log directory was never created is a particularly painful lesson to learn during an incident. A quick `kubectl logs <pod>` or `journalctl -u <service>` immediately after deployment confirms that logging is working.
+Whenever you deploy a new service, confirm that it is actually writing logs before you need them. Discovering that your application writes to `/dev/null` or that its log directory was never created is a painful lesson to learn during an incident. A quick `kubectl logs <pod>` or `journalctl -u <service>` immediately after deployment confirms that logging is working.
 </Aside>
 
-## Where Logs Live on Linux
+## Syslog: Protocol, Daemon, and Ecosystem
 
-On a modern Linux system using systemd, most logs flow through two channels: the systemd journal and traditional log files under `/var/log`.
+Syslog is frequently described as a log format, but it is more accurately a protocol, a daemon ecosystem, and a convention that predates Linux itself. Understanding all three layers helps you reason about how logs flow in traditional environments and why the cloud-native logging stack was built the way it was.
 
-The **systemd journal** is a structured, binary log database managed by `systemd-journald`. It captures output from all systemd-managed services, kernel messages, and anything sent through the syslog socket. You query it with `journalctl`. The journal's defining advantage over plain text log files is indexing: entries are indexed by unit (the service that wrote them), priority (severity level), timestamp, and other metadata, so filtering is fast even on a busy system with thousands of entries per second. This matters during incident investigation, when you need to see only errors from a specific service in a specific 10-minute window.
+### The Syslog Protocol
 
-```bash
-journalctl -u nginx.service -p err --since "2026-03-15 02:50:00" --until "2026-03-15 03:10:00"
-```
+[RFC 5424](https://datatracker.ietf.org/doc/html/rfc5424) defines syslog as a network protocol for forwarding log messages from a sender to a receiver. Each message includes a priority value (encoding both facility and severity), a timestamp, a hostname, an application name, a process ID, and a message body. The message is transmitted over the network either as UDP datagrams or over a TCP connection.
 
-The journal is stored in `/var/log/journal/` when persistent storage is configured (preferred for production, because it survives reboots) or in `/run/log/journal/` for volatile storage (which resets on reboot).
+UDP syslog (port 514) is fire-and-forget: the sender emits a datagram and does not wait for acknowledgment. This is fast and low-overhead, but log messages are silently dropped if the receiver is unavailable or if the network is congested. For non-critical log data where some loss is acceptable, UDP is still widely used. TCP syslog (also port 514 by convention, or 6514 for TLS-encrypted transport) is more reliable because TCP retransmits lost segments and exposes broken connections. That still is not an end-to-end delivery guarantee at the syslog application layer: if the connection breaks, the sender may not know exactly which messages the receiver actually committed. For security and audit logs where loss must be minimized, TCP or TLS-encrypted TCP is the normal choice.
 
-The **/var/log directory** remains the traditional home for plain-text log files. Many services still write here even on systemd systems. A typical listing includes:
+### rsyslog and syslog-ng
 
-- `/var/log/syslog` (Debian/Ubuntu) or `/var/log/messages` (RHEL/CentOS): general system messages
-- `/var/log/auth.log` (Debian) or `/var/log/secure` (RHEL): authentication events, SSH sessions, sudo usage
-- `/var/log/kern.log`: kernel messages
-- `/var/log/nginx/`: Nginx access and error logs
-- `/var/log/mysql/` or `/var/log/postgresql/`: database logs
+On modern Linux systems, the syslog protocol is implemented by a daemon: most commonly [rsyslog](https://www.rsyslog.com/) (Rocket-fast System for Log processing) or [syslog-ng](https://www.syslog-ng.com/). Both daemons receive log entries from local sources (the kernel, systemd, application processes writing to the syslog socket at `/dev/log`), apply rules for filtering and routing, and deliver the results to configured destinations.
 
-Plain-text log files are readable with `cat`, `less`, `grep`, and `awk` without special tooling. That simplicity is a durability advantage: you can process log files from a decade ago with the same tools you use today.
+The routing capabilities of rsyslog and syslog-ng are what distinguish them from simple log files. A ruleset might say: entries with facility `auth` and severity `warning` or higher go to `/var/log/auth.log` and are also forwarded over TCP to the central syslog server; entries from the web server process go to `/var/log/nginx/error.log`; everything else goes to `/var/log/syslog`. This granular routing is how traditional Linux environments have handled log aggregation for decades without agents like Fluent Bit.
 
-## How Container Logs Work in Kubernetes
+### Traditional Centralized Log Forwarding
 
-When you SSH into a Linux server and read `/var/log/nginx/access.log`, you are reading a file that the Nginx process wrote directly to disk. The process and the log file have a direct, visible relationship. In a containerized, Kubernetes-managed environment, this relationship changes fundamentally. Understanding the change is essential for effective troubleshooting, because the behavior of `kubectl logs` is surprising until you understand the mechanism behind it.
+The standard centralized logging architecture in traditional (pre-container) Linux environments uses syslog forwarding: each host runs rsyslog, which forwards log entries in real time over TCP to a central syslog aggregator. The aggregator writes to disk, feeds into a log management platform, or both.
 
-Containers are expected to write their log output to **standard output (stdout) and standard error (stderr)**. This is a deliberate design decision in the container ecosystem: it makes log routing and centralization the responsibility of the infrastructure rather than the application. The application does not need to know where its logs go or what format the logging system expects; it writes to stdout/stderr, and the container runtime handles the rest. This also makes containers portable: the same image behaves consistently whether it runs locally, in a cloud VM, or in a managed Kubernetes cluster.
+This architecture works well at moderate scale and requires no third-party agents beyond the rsyslog daemon that is already running on every host. Its limitations become visible at large scale: high-volume hosts can saturate the aggregator, TCP connections must be maintained from every host to the central server, and adding metadata (Kubernetes namespace, service name, environment label) requires rsyslog configuration rather than automated enrichment. These limitations are why purpose-built collection agents like Fluent Bit emerged and why container environments generally use agent-based collection rather than syslog forwarding.
 
-The container runtime (containerd, which k3s uses) intercepts stdout/stderr from each container and writes it to log files on the node's filesystem, typically at `/var/log/pods/<namespace>_<pod-name>_<pod-uid>/<container-name>/0.log`. Each container has its own log file. The runtime rotates these files as they grow, according to its configuration.
+<HistoricalNote title="The Origins of Syslog and Centralized Logging (1980–2010s)">
+Syslog was invented by Eric Allman in 1980 as part of the sendmail project: a simple way to write mail server events without mixing them into the application's main output. It was later formalized in RFC 3164 (2001) and RFC 5424 (2009). For decades, the standard approach to log management was syslog daemons writing log files to disk, with administrators SSHing in to `grep` them when something went wrong. As applications scaled to hundreds of servers in the mid-2000s, this approach broke down: an incident might require grepping logs on 50 servers simultaneously. The ELK stack (Elasticsearch, Logstash, Kibana), assembled from 2010 to 2013, became one of the first widely-adopted open-source centralized log management stacks for web-scale infrastructure; commercial platforms such as Splunk predated it. Loki, introduced by Grafana Labs in 2018, took a different approach: instead of indexing log content (expensive at scale), it indexes only metadata labels and compresses log content aggressively, dramatically reducing storage cost.
+</HistoricalNote>
 
-The **kubelet** manages these log files and exposes them through the Kubernetes API. When you run `kubectl logs <pod-name>`, you are not SSHing into the node and reading a file directly. You are making an API request to the Kubernetes API server, which forwards the request to the kubelet running on the node where the pod is scheduled, which reads from the container's log file in `/var/log/pods/` and streams the content back. This indirection is what makes `kubectl logs` work from any machine with API access to the cluster, without needing node-level SSH access.
-
-### The --previous Flag
-
-When a container crashes and Kubernetes restarts it, the restarted container is a new process writing to a new log file. The log from the crashed container is not in the current container's log stream. The kubelet saves a copy of the terminated container's log for a brief period, and the `--previous` flag tells `kubectl logs` to retrieve that saved log rather than the current one:
-
-```bash
-kubectl logs <pod-name> --previous
-```
-
-Without `--previous`, you see only the logs from the currently running container, which started fresh after the restart and has no entries before it began. The error that caused the crash is in the previous container's log. This behavior surprises engineers who are used to traditional log files that accumulate indefinitely: in Kubernetes, the current and previous container logs are separate, and you must know which one you are asking for.
-
-The `--since` flag limits output to entries within a time window, which is useful for busy services that generate many log lines:
-
-```bash
-kubectl logs <pod-name> --since=1h
-```
-
-The `-f` flag streams new log entries in real time, equivalent to `tail -f` on a traditional log file. The `-c` flag specifies which container to query in a multi-container pod. Combining these flags gives you flexible access to the exact log data you need.
-
-### kubectl events vs. Container Logs
-
-Container logs capture what the application wrote to stdout and stderr. Kubernetes events capture what the cluster's control plane observed: the scheduler assigning a pod to a node, the kubelet pulling a container image, the OOM killer terminating a container, a readiness probe failing repeatedly. These are two separate channels of information, and during incident investigation you often need both.
-
-`kubectl describe pod <pod-name>` is frequently the fastest path to root cause for pod-level failures. The Events section at the bottom of the output shows the cluster's record of what happened to the pod: image pull errors, resource limit violations, liveness probe failures, and evictions all appear here. These are infrastructure-level events that the application itself cannot see and therefore cannot log. An image pull failure appears in the Events section before any application logs exist, because the container never started.
-
-```bash
-kubectl events --for pod/<pod-name>
-```
-
-Kubernetes events have a default retention window of approximately one hour. After that window, they are deleted from the cluster's etcd store. If you are investigating an incident that happened hours ago, the events may no longer be available even if the pod still exists. This is one of the practical reasons for centralized logging: a logging agent that ships events to a durable store preserves them beyond the Kubernetes retention window.
-
-<Aside type="note" title="Container Logs Are Also Ephemeral">
-Container log files in `/var/log/pods/` are deleted when a pod is removed from the node. If you delete a pod, or if the node it ran on is replaced, its logs are gone unless they have been shipped to a centralized logging system. This is not a limitation of Kubernetes specifically; it is a property of ephemeral compute. Logging agents that run as DaemonSets exist precisely to collect and preserve these logs before the pod is gone.
-</Aside>
-
-## Log Formats
-
-Understanding the format of a log file is a prerequisite to searching it effectively. Two dominant formats appear in practice, each with different strengths.
-
-**Syslog format** is the traditional convention on Linux systems. Each line contains a timestamp, a hostname, a process name (sometimes with a PID), and a free-form message body. A typical entry from an Nginx error log:
-
-```
-2026-03-15T03:04:12 web-prod-01 nginx[2847]: upstream timed out (110: Connection timed out) while reading response header from upstream, client: 203.0.113.45, server: example.com, request: "GET /api/orders HTTP/1.1", upstream: "http://10.0.1.23:3000/"
-```
-
-The format is immediately readable by a human scanning a terminal, and standard tools like `grep` and `awk` work on it without any parsing step. The tradeoff is that the message body is unstructured: extracting a specific field (such as the upstream IP address) requires text processing that is fragile to small format variations between different applications or even different versions of the same application.
+## JSON Structured Logging
 
 **JSON structured logging** has become the standard in cloud-native environments, particularly for applications running in containers. Instead of a flat string, each log entry is a JSON object with named fields:
 
@@ -148,6 +104,7 @@ The format is immediately readable by a human scanning a terminal, and standard 
   "timestamp": "2026-03-15T03:04:12.841Z",
   "level": "error",
   "service": "order-api",
+  "request_id": "7e4a2b93-f1c2-4d8e-a391-b2c3d4e5f678",
   "message": "upstream connection timeout",
   "upstream_host": "10.0.1.23",
   "upstream_port": 3000,
@@ -159,27 +116,172 @@ The format is immediately readable by a human scanning a terminal, and standard 
 
 Structured logs are trivial to parse programmatically and work naturally with centralized logging systems. A log aggregation system can index every field and support queries like "find all entries where `upstream_host` is `10.0.1.23` and `duration_ms` is greater than 5000." The tradeoff is that JSON entries are harder to read at a glance than a compact syslog line, especially when many fields are present.
 
-In practice, many production systems use structured logging for the log data pipeline (so that centralized storage can index and filter efficiently) while supporting a human-readable format in development environments. A logging library like [Zap](https://pkg.go.dev/go.uber.org/zap) (for Go) or [structlog](https://www.structlog.org/) (for Python) typically supports both output modes with a configuration flag.
+In practice, many production systems use structured logging for the data pipeline (so centralized storage can index and filter efficiently) while supporting a human-readable format in development environments. A logging library configured with an environment variable can switch between formats without code changes.
+
+## Application Logging Frameworks
+
+Log entries do not appear spontaneously. They are produced by logging frameworks embedded in application code, and those frameworks make consequential decisions about what gets written, at what level, in which format, and to which destination.
+
+[Log4j](https://logging.apache.org/log4j/) (Java) is the most widely known logging framework in enterprise software. Log4j2 (the current version) supports appenders (destinations: file, stdout, syslog socket, network endpoint), layouts (text, JSON, pattern-based), and filters (include or exclude entries matching conditions). Log4j2 also supports dynamic log level adjustment via a JMX API or an HTTP endpoint: an operator can change the log level of a running application from INFO to DEBUG without a restart, capture what they need, and return it to INFO. This is valuable for diagnosing issues that are difficult to reproduce in non-production environments.
+
+[Python's `logging` module](https://docs.python.org/3/library/logging.html), [Go's `zap`](https://pkg.go.dev/go.uber.org/zap) and [logrus](https://github.com/sirupsen/logrus), [Node.js's Winston](https://github.com/winstonjs/winston), and [PHP's Monolog](https://github.com/Seldaek/monolog) follow the same conceptual model: a logger hierarchy, severity level filtering, multiple output handlers, and configurable formatters. The configuration layer is what lets operators change log verbosity and destination without redeploying.
+
+Understanding the logging framework in use for a given application matters during incidents. If a service is producing no log output during a known error condition, the first question is whether the log level is set too high (suppressing the relevant entries) or whether the framework's output handler is misconfigured (sending logs to a file that is being rotated, or to a network destination that is unreachable).
+
+<Aside type="caution" title="Log4Shell: A Logging Framework as Attack Surface">
+In December 2021, CVE-2021-44228 (Log4Shell) disclosed that Log4j2's message lookup feature would evaluate arbitrary expressions embedded in log input, including JNDI lookups that could load and execute remote Java classes. Any application that logged user-controlled input (HTTP headers, usernames, form fields) and used Log4j2 was potentially exploitable. The vulnerability affected millions of applications worldwide and required emergency patching across entire industries. It remains the most significant example of a logging framework as a critical attack surface, and a reminder that the software you use to record events has its own attack surface.
+</Aside>
+
+## Log Verbosity, Performance, and What Not to Log
+
+Log verbosity has a direct performance cost. Each log entry requires serialization (converting the in-memory object to text or JSON), a write system call, and potentially a network transmission if logs are forwarded in real time. A high-traffic service logging at DEBUG level can double or triple its I/O write throughput and consume significant CPU for serialization alone. On a server with limited I/O bandwidth, excessive logging can become a performance bottleneck that affects the service it is instrumenting.
+
+Production services should run at INFO or WARN level by default. DEBUG level should be enabled only temporarily, for specific components or request paths, when diagnosing a problem that cannot be reproduced at a lower verbosity. Modern logging frameworks support scoped level adjustment: you can set one package or class to DEBUG while the rest of the application stays at INFO, minimizing the performance impact.
+
+### What Not to Log
+
+Some data must never appear in logs, regardless of log level:
+
+**Passwords and authentication credentials** of any kind, including plaintext passwords during failed authentication attempts. Many naive authentication log implementations inadvertently log the submitted password alongside the username in failure messages.
+
+**Session tokens, API keys, and secrets.** A session token in a log entry is a session token that can be stolen by anyone with access to the logs. Log storage, centralized logging platforms, and SIEM systems are typically accessible to many engineers; logs are not a secret store.
+
+**Full credit card numbers, social security numbers, and other regulated PII.** PCI-DSS, HIPAA, GDPR, and most other compliance frameworks explicitly prohibit logging regulated identifiers in plaintext. Logging masked or tokenized versions (last four digits of a card number, a hash of a SSN) is generally acceptable; logging the full value is not.
+
+**Full request bodies** when those bodies may contain sensitive form fields. Logging request paths and response codes is standard practice; logging the full request body is usually not, because form submissions, API payloads, and file uploads often contain sensitive data you did not anticipate.
+
+The operational principle is to log identifiers that let you find and correlate records (user IDs, request IDs, transaction IDs) without logging the sensitive values those identifiers protect (passwords, tokens, regulated PII). This distinction keeps logs useful for investigation while keeping them safe for broad access.
+
+## Where Logs Live on Linux
+
+On a modern Linux system using systemd, most logs flow through two channels: the systemd journal and traditional log files under `/var/log`.
+
+The **systemd journal** is a structured, binary log database managed by `systemd-journald`. It captures output from all systemd-managed services, kernel messages, and anything sent through the syslog socket. You query it with `journalctl`. The journal's defining advantage over plain text log files is indexing: entries are indexed by unit, priority, timestamp, and other metadata, so filtering is fast even on a busy system. The journal is stored in `/var/log/journal/` when persistent storage is configured (preferred for production, because it survives reboots) or in `/run/log/journal/` for volatile storage (which resets on reboot).
+
+The **/var/log directory** remains the traditional home for plain-text log files. A typical listing includes:
+
+- `/var/log/syslog` (Debian/Ubuntu) or `/var/log/messages` (RHEL/CentOS): general system messages
+- `/var/log/auth.log` (Debian) or `/var/log/secure` (RHEL): authentication events, SSH sessions, sudo usage
+- `/var/log/kern.log`: kernel messages
+- `/var/log/nginx/`: Nginx access and error logs
+- `/var/log/mysql/` or `/var/log/postgresql/`: database logs
+
+Plain-text log files are readable with `cat`, `less`, `grep`, and `awk` without special tooling. That simplicity is a durability advantage: you can process log files from a decade ago with the same tools you use today.
+
+## auditd: The Kernel Audit Subsystem
+
+The systemd journal and `/var/log` capture events that processes choose to emit. The Linux kernel audit subsystem, managed by [auditd](https://man7.org/linux/man-pages/man8/auditd.8.html), captures events at the system call level regardless of whether any application has been configured to log them. This distinction is fundamental: an application can be compromised and its own logging disabled, but kernel-mediated audit records can still capture actions the application would never choose to report. That does not make audit logs magically tamper-proof. A sufficiently privileged attacker can change rules or disable auditing unless the system has been configured to prevent that, which is why sensitive systems ship audit records off-host quickly.
+
+You configure the audit subsystem using `auditctl` rules. Common rules include watching specific files for access or modification, recording all executions of privileged commands, and logging privilege escalation events:
+
+```bash
+# Log all writes to the sudoers file
+auditctl -w /etc/sudoers -p wa -k sudoers-change
+
+# Log all executions of su
+auditctl -w /usr/bin/su -p x -k privilege-escalation
+
+# Log all file opens in /etc by non-root users
+auditctl -a always,exit -F arch=b64 -S open -F dir=/etc -F auid>=1000 -k etc-access
+```
+
+The audit log at `/var/log/audit/audit.log` records structured entries for each matched event, including the timestamp, the user who triggered it, the process name and PID, and the specific system call and arguments. This is the log that compliance auditors typically request: PCI-DSS requires audit trails for access to cardholder data systems, HIPAA requires audit logs for access to protected health information, and FedRAMP requires system-level audit logging with specific retention periods.
+
+`ausearch` and `aureport` are the command-line tools for querying the audit log. `ausearch -k sudoers-change --start today` returns all audit events tagged with the `sudoers-change` key since midnight, making it easy to answer "who changed /etc/sudoers and when?"
+
+Unlike application logs, audit logs are intended for accountability and compliance rather than operational telemetry. They should be shipped to a centralized, append-only store as quickly as possible: a compromised host with root access can modify `/var/log/audit/audit.log`, but audit entries that have already been shipped to a centralized store are preserved.
+
+## Hardware and Firmware Logs
+
+Some failures appear in logs that exist below the operating system level. Hardware components maintain their own event logs independently of whether the OS is running, and these logs can contain early warnings that precede OS-level symptoms by hours or days.
+
+The **Baseboard Management Controller (BMC)** is a small embedded processor on server motherboards that operates independently of the main CPU and OS. It maintains a **System Event Log (SEL)**: a persistent record of hardware events including power supply failures, fan speed anomalies, temperature threshold crossings, CPU errors, and memory errors. On Dell hardware this interface is called iDRAC; on HPE it is iLO; on most other hardware it is accessible via the IPMI protocol.
+
+```bash
+# Read the System Event Log via IPMI
+ipmitool sel list
+```
+
+ECC (Error-Correcting Code) memory corrects single-bit errors automatically, but it records them. A server whose memory is generating increasing numbers of correctable ECC errors is approaching hardware failure; the ECC error rate is visible in the kernel log (`journalctl -k | grep "EDAC"`) and in the BMC SEL long before the memory fails catastrophically and causes an OS crash. Catching this signal early allows planned hardware replacement instead of emergency response.
+
+Disk controllers similarly maintain their own logs and expose health data through S.M.A.R.T. (Self-Monitoring, Analysis and Reporting Technology). The `smartctl -a /dev/sda` command reads a drive's health data including reallocated sector count, uncorrectable error count, and temperature history. Reallocated sectors are a leading indicator of imminent drive failure: the drive is mapping failed sectors to spare areas, which is a mechanism with a finite capacity.
+
+These hardware-layer signals are not visible in application logs or even in the systemd journal until the hardware degradation causes an OS-level symptom. An operator who only reads application logs will miss early warning signs that would allow proactive intervention.
+
+## fail2ban: Logs Driving Automated Action
+
+Log data does not only inform human decisions; it can drive automated operational responses. [fail2ban](https://www.fail2ban.org/) is the canonical example: a daemon that parses log files in real time, matches patterns using configurable regular expressions, and executes actions when thresholds are crossed.
+
+The default use case is SSH brute-force protection. fail2ban watches `/var/log/auth.log` (or the systemd journal unit for sshd), counts failed authentication attempts per source IP address within a rolling time window, and when an IP exceeds the configured threshold (typically 5 to 10 failures), executes a firewall action, often by adding iptables or nftables rules that block traffic from that IP for a configured duration (typically 10 minutes to 1 hour).
+
+```ini
+[sshd]
+enabled  = true
+port     = ssh
+filter   = sshd
+logpath  = /var/log/auth.log
+maxretry = 5
+bantime  = 3600
+findtime = 600
+```
+
+fail2ban ships with filters for dozens of common applications: Nginx, Apache, Postfix, Dovecot, vsftpd, and others. You can also write custom filters using Python regular expressions to match any log pattern specific to your application. A web application that logs failed login attempts in a structured format can have a fail2ban filter that blocks IPs after repeated authentication failures against the application's own authentication system, not just SSH.
+
+The broader principle that fail2ban illustrates is that logs are a real-time stream that can drive operational behavior, not just a historical record to consult after the fact. This same principle underlies log-based alerting in Loki and complex event processing in SIEM systems.
+
+## How Container Logs Work in Kubernetes
+
+When you SSH into a Linux server and read `/var/log/nginx/access.log`, you are reading a file that Nginx wrote directly to disk. In a containerized, Kubernetes-managed environment, this relationship changes fundamentally. The [Kubernetes logging architecture](https://kubernetes.io/docs/concepts/cluster-administration/logging/) separates application output, node-level collection, and centralized aggregation. Understanding that split is essential for effective troubleshooting, because the behavior of `kubectl logs` is surprising until you understand the mechanism behind it.
+
+Containers are expected to write their log output to **standard output (stdout) and standard error (stderr)**. This is a deliberate design decision: it makes log routing and centralization the responsibility of the infrastructure rather than the application. The application does not need to know where its logs go; it writes to stdout/stderr, and the container runtime handles the rest. This also makes containers portable: the same image behaves consistently whether it runs locally, on a VM, or in a Kubernetes cluster.
+
+The container runtime (containerd, which k3s uses) intercepts stdout/stderr from each container and writes it to log files on the node's filesystem, typically at `/var/log/pods/<namespace>_<pod-name>_<pod-uid>/<container-name>/0.log`. Each container has its own log file. The runtime rotates these files as they grow, according to its configuration.
+
+The **kubelet** manages these log files and exposes them through the Kubernetes API. When you run `kubectl logs <pod-name>`, you are making an API request to the Kubernetes API server, which forwards the request to the kubelet running on the node where the pod is scheduled. The kubelet reads from the container's log file and streams the content back. This indirection is what makes `kubectl logs` work from any machine with API access to the cluster, without needing node-level SSH access.
+
+### The --previous Flag
+
+When a container crashes and Kubernetes restarts it, the restarted container is a new process writing to a new log file. The log from the crashed container is not in the current container's log stream. The kubelet saves a copy of the terminated container's log for a brief period, and `--previous` retrieves that saved log:
+
+```bash
+kubectl logs <pod-name> --previous
+```
+
+Without `--previous`, you see only the logs from the currently running container, which started fresh after the restart. The error that caused the crash is in the previous container's log. This behavior surprises engineers used to traditional log files that accumulate indefinitely: in Kubernetes, the current and previous container logs are separate, and you must know which you are asking for.
+
+Additional flags: `--since` limits output to entries within a time window (`kubectl logs <pod-name> --since=1h`), `-f` streams new log entries in real time (equivalent to `tail -f`), and `-c` specifies which container to query in a multi-container pod.
+
+### kubectl events vs. Container Logs
+
+Container logs capture what the application wrote to stdout and stderr. Kubernetes events capture what the cluster's control plane observed: the scheduler assigning a pod to a node, the kubelet pulling a container image, the OOM killer terminating a container, a readiness probe failing repeatedly. These are two separate channels of information.
+
+`kubectl describe pod <pod-name>` is frequently the fastest path to root cause for pod-level failures. The Events section at the bottom shows the cluster's record of what happened to the pod: image pull errors, resource limit violations, liveness probe failures, and evictions all appear here. These are infrastructure-level events that the application cannot see and therefore cannot log. An image pull failure appears in the Events section before any application logs exist, because the container never started.
+
+Kubernetes events are short-lived by default. On many clusters the kube-apiserver keeps them for about one hour, because the default `--event-ttl` is `1h`, though operators can change that. If you are investigating an incident that happened hours ago, the events may no longer be available even if the pod still exists. This is one of the practical reasons to export events or persist them in a centralized observability system.
+
+<Aside type="note" title="Container Logs Are Ephemeral">
+Container log files in `/var/log/pods/` are deleted when a pod is removed from the node. If you delete a pod, or if the node it ran on is replaced, its logs are gone unless they have been shipped to a centralized logging system. Logging agents running as DaemonSets exist precisely to collect and preserve these logs before the pod disappears.
+</Aside>
 
 ## Searching Logs: The Core Toolkit
 
-The fastest path to a specific log entry on a Linux system is a small set of command-line tools. They are worth knowing well even if you use a centralized logging platform in production, because the platform will not always be available when you are debugging a fresh EC2 instance, a newly provisioned VM, or a node that has lost connectivity.
+The fastest path to a specific log entry on a Linux system is a small set of command-line tools. They are worth knowing well even when you use a centralized logging platform in production, because the platform will not always be available when you are debugging a fresh instance, a newly provisioned VM, or a node that has lost connectivity.
 
 ### grep
 
-`grep` searches for lines matching a pattern and outputs the matching lines. For case-insensitive search across a log file:
+`grep` searches for lines matching a pattern. For case-insensitive search:
 
 ```bash
 grep -i "error" /var/log/nginx/error.log
 ```
 
-To show context around each match, the `-B` flag adds lines before and `-A` adds lines after. This is useful when you want to see what immediately preceded an error:
+To show context around each match, `-B` adds lines before and `-A` adds lines after:
 
 ```bash
 grep -B2 -A2 "Connection refused" /var/log/nginx/error.log
 ```
 
-To search for lines that do *not* match a pattern, useful for filtering out known-good noise like health check requests:
+To exclude matching lines, useful for filtering out health check requests:
 
 ```bash
 grep -v "GET /healthz" /var/log/nginx/access.log
@@ -187,37 +289,33 @@ grep -v "GET /healthz" /var/log/nginx/access.log
 
 ### journalctl
 
-`journalctl` queries the systemd journal and supports rich filtering that makes it far more precise than grepping a flat file. Filtering simultaneously by service unit, severity level, and time window eliminates the need to manually scroll through irrelevant output:
+[`journalctl`](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html) queries the systemd journal with rich filtering. Filtering simultaneously by service unit, severity level, and time window:
 
 ```bash
 journalctl -u nginx.service -p err --since "2026-03-15 02:50:00" --until "2026-03-15 03:10:00"
 ```
 
-To follow new entries in real time (useful when actively reproducing a problem):
+To follow new entries in real time:
 
 ```bash
 journalctl -u myapp.service -f
 ```
 
-### tail -f
+### tail and awk
 
-For plain-text log files, `tail -f` streams new lines as they are written. Piping it to `grep` lets you watch for a specific pattern in the real-time stream:
+For plain-text log files, `tail -f` streams new lines as they are written. Piping to `grep` watches for a specific pattern in the real-time stream:
 
 ```bash
 tail -f /var/log/nginx/access.log | grep " 500 "
 ```
 
-### awk
-
-`awk` excels at extracting and summarizing fields from structured text. Nginx access logs use a space-delimited format where the HTTP status code is the ninth field. To count how many times each status code appeared over a 24-hour window:
+`awk` excels at extracting and summarizing fields from structured text. To count how many times each status code appeared in an Nginx access log (the status code is the ninth field in the default log format):
 
 ```bash
 awk '{print $9}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head
 ```
 
-This pipeline: extracts the ninth field with `awk`, sorts the values, counts consecutive identical values with `uniq -c`, sorts the counts in descending order, and shows the top 10. The result is a frequency histogram of status codes that reveals patterns invisible in raw log output.
-
-To find the top client IP addresses generating 500 errors:
+To find the top client IPs generating 500 errors:
 
 ```bash
 awk '$9 == 500 {print $1}' /var/log/nginx/access.log | sort | uniq -c | sort -rn | head
@@ -227,37 +325,41 @@ This tells you immediately whether 500 errors are coming from all clients (sugge
 
 ### Regular Expressions for Log Analysis
 
-Regular expressions extend `grep`'s ability to match patterns rather than literal strings. A few patterns cover the majority of log investigation tasks.
-
-To match any HTTP 5xx response in an Nginx access log:
+Regular expressions extend `grep`'s ability to match patterns. To match any HTTP 5xx response:
 
 ```bash
 grep -E '" [5][0-9]{2} ' /var/log/nginx/access.log
 ```
 
-To match log entries containing timestamps within a specific minute, useful when you know the approximate time of an event:
-
-```bash
-grep "^2026-03-15T03:04:" /var/log/nginx/error.log
-```
-
-To extract and count usernames from failed SSH authentication attempts, revealing brute-force attack patterns:
+To extract and count usernames from failed SSH authentication attempts:
 
 ```bash
 grep "Failed password for" /var/log/auth.log | grep -oP 'for \K\S+' | sort | uniq -c | sort -rn
 ```
 
+The difference between a long list of failed passwords for `root`, `admin`, and `test` from many different IPs (an automated brute-force scan, probably not targeted) versus focused failed attempts for actual employee usernames from a single unfamiliar IP (potentially credential stuffing) is visible in this output within seconds.
+
 <Aside type="caution" title="Verify Your Matches">
 After running a regex search, always sample several of the matched lines before drawing conclusions. A pattern that is slightly too broad can match unrelated entries and give you a misleading count or a false lead during an investigation under time pressure.
 </Aside>
 
+## Log Sampling
+
+At 100,000 requests per second, logging every request is impractical. The storage cost alone would be significant; the write I/O would affect application performance. Log sampling addresses this by recording a representative subset of events rather than all of them.
+
+**Head-based sampling** makes the decision at the start of a request: log this request with probability P, discard it otherwise. This is simple to implement but has a significant limitation: errors and anomalous requests are sampled at the same rate as normal requests. At a 1% sample rate, you will miss 99% of your errors.
+
+**Tail-based sampling** defers the decision until after the request completes: always log requests that resulted in errors, were slow, or otherwise met criteria for interest, and sample the remainder at a configurable rate. Tail-based sampling preserves the interesting events while discarding the routine ones, which is the correct tradeoff for operational observability. Distributed tracing systems like Jaeger support tail-based sampling at the trace level; implementing it for plain logs requires either an in-process buffer or a sampling proxy in the logging pipeline.
+
+A pragmatic alternative that does not require sampling infrastructure is log level filtering: log all errors at ERROR level (always captured), log slow requests at WARN level (captured in production), and log routine requests at DEBUG level (suppressed in production). This is not sampling but achieves similar results for the most common case.
+
 ## The Investigation Method
 
-Effective log investigation is less about memorizing commands and more about having a systematic approach. Three phases structure most successful investigations, regardless of whether the incident is on a single server or across a Kubernetes cluster.
+Effective log investigation is less about memorizing commands and more about having a systematic approach. Three phases structure most successful investigations regardless of whether the incident is on a single server or across a Kubernetes cluster.
 
 **Scope the problem first.** Before opening a log file, define exactly what you are looking for. What is the symptom: HTTP 500 errors, a pod that will not start, slow database queries? Which service or component is exhibiting it? When did it start? Scoping forces precision and prevents you from aimlessly searching large log files without a hypothesis. The more specifically you can state the symptom, the more precisely you can filter the logs.
 
-**Narrow the time window.** Log files for busy services can contain millions of entries per day. Searching the full file is slow and returns too many results. Use timestamps to focus on the window around when the symptom appeared. If errors started at 03:01:44, look at logs from 02:55:00 to 03:05:00. The cause precedes the effect; look earlier than the symptom, not later.
+**Narrow the time window.** Log files for busy services can contain millions of entries per day. Use timestamps to focus on the window around when the symptom appeared. The cause precedes the effect; look earlier than the symptom, not later.
 
 Before reading individual lines, start with a count. A per-minute frequency histogram reveals when errors began and whether the pattern is continuous or bursty:
 
@@ -265,55 +367,71 @@ Before reading individual lines, start with a count. A per-minute frequency hist
 awk '{print $4}' /var/log/nginx/access.log | cut -d: -f1-3 | sort | uniq -c
 ```
 
-Patterns that are invisible in a wall of raw log text become obvious in a histogram. A sudden spike at one timestamp, or a gradual climb over 10 minutes, are both patterns that change your investigation strategy.
+Patterns invisible in a wall of raw log text become obvious in a histogram. A sudden spike at one timestamp suggests a discrete event (a deployment, a process crash, a configuration change). A gradual climb over 10 minutes suggests degradation (a memory leak, a slow query worsening over time). The pattern changes your investigation strategy.
 
 **Broaden across sources.** Once you have a hypothesis from the first log you examined, test it against adjacent sources. If the nginx error log says "upstream connection refused," check the application server's log for the same timestamp. If the application server shows "database connection timeout," check the database log and the system journal on the database host. Root causes almost always appear in a log one level removed from the symptom.
 
-Cross-referencing is where the most important discoveries happen. A database timeout in the application log should have a corresponding entry (a slow query, a connection limit exceeded) in the database log. If the database log shows nothing at the same timestamp, the problem is probably the network between them, not the database itself. Following the data flow from symptom to cause, one log source at a time, is the core skill of log-based incident investigation.
+Cross-referencing is where the most important discoveries happen. A database timeout in the application log should have a corresponding entry in the database log. If the database log shows nothing at the same timestamp, the problem is probably the network between them, not the database itself.
 
-### A Worked Investigation
+## A Worked Investigation
 
-A concrete walkthrough of the three phases illustrates how they work together. At 03:07, an alert fires: the order API error rate has exceeded 5% for the past three minutes.
+A concrete walkthrough illustrates how the three phases work together. At 03:07, an alert fires: the order API error rate has exceeded 5% for the past three minutes.
 
-First, scope the problem. The alert tells you which service and approximately when. Before reading any log file, you know to focus on the order API process, and you know the error window started around 03:04.
+**Scope:** The alert identifies the service and approximate time. The symptom window started around 03:04.
 
-Second, narrow the window. Rather than reading the full access log, start with a per-minute count of errors:
+**Narrow:** Start with a per-minute count of errors rather than reading raw log output:
 
 ```bash
 awk '$9 >= 500 {print $4}' /var/log/nginx/access.log | cut -d: -f1-2 | sort | uniq -c | tail -20
 ```
 
-The output shows 0 errors at 03:03, then 847 errors at 03:04. The symptom started abruptly at 03:04:00, not gradually. Abrupt starts suggest a discrete event (a deployment, a process crash, a configuration change) rather than gradual degradation (a memory leak, a slow query degrading over time). Now look at the 5 minutes before 03:04:
+The output shows 0 errors at 03:03, then 847 errors at 03:04. The symptom started abruptly, suggesting a discrete event rather than gradual degradation. Look at the 5 minutes before 03:04:
 
 ```bash
 journalctl -u order-api.service --since "03:00:00" --until "03:04:00" -p err
 ```
 
-This returns three entries between 03:01:17 and 03:03:58: all `database connection timeout` errors with the same upstream host (`postgres-prod:5432`). The database connection is timing out. The application error at 03:04 is a consequence, not the cause.
+Three entries between 03:01:17 and 03:03:58: all `database connection timeout` errors with the same upstream host (`postgres-prod:5432`). The database connection is timing out. The application error at 03:04 is a consequence, not the cause.
 
-Third, broaden to the database. Check the PostgreSQL log for the same window:
+**Broaden:** Check the PostgreSQL log for the same window:
 
 ```bash
 grep "03:01\|03:02\|03:03" /var/log/postgresql/postgresql.log | grep -i "error\|fatal\|deadlock\|lock"
 ```
 
-This returns a stream of `FATAL: remaining connection slots are reserved for non-replication superuser connections` entries starting at 03:01:04. PostgreSQL hit its maximum connection limit. The application began timing out when it could not acquire connections from the pool.
+A stream of `FATAL: remaining connection slots are reserved for non-replication superuser connections` entries starting at 03:01:04. PostgreSQL hit its maximum connection limit.
 
-Now the question shifts: why did PostgreSQL run out of connections? Check the system journal on the database host for the 30 minutes before the connection limit was hit:
+Now check why: look at the system journal on the database host for the 30 minutes before:
 
 ```bash
 journalctl -p warning --since "02:30:00" --until "03:01:00" | grep -i "connection\|memory\|postgres"
 ```
 
-The journal shows a scheduled data export job started at 02:58:23. That job opened 90 long-running database connections for a batch export, consuming the remaining headroom in the connection pool. The order API could not acquire additional connections for its own requests.
+The journal shows a scheduled data export job started at 02:58:23. That job opened 90 long-running database connections for a batch export, consuming the remaining connection pool headroom. The order API could not acquire connections for its own requests.
 
 Root cause: a scheduled export job consumed available database connections, leaving none for the application, causing timeouts and a spike in error rate. The entire investigation, from alert to root cause, took approximately 8 minutes and used four log sources: the nginx access log, the application service journal, the PostgreSQL log, and the system journal on the database host.
 
-The investigation succeeded because each source was checked in order of proximity to the symptom (nginx first, then the application, then the database, then the system environment around the database), and each source narrowed the hypothesis until only one explanation remained.
+The investigation succeeded because each source was checked in order of proximity to the symptom, and each source narrowed the hypothesis until only one explanation remained.
 
-<HistoricalNote title="The Origins of Syslog and Centralized Logging (1980s–2010s)">
-Syslog was invented by Eric Allman in 1980 as part of the sendmail project, as a simple way to write mail server events to a file without mixing them into the application's main output. The protocol was later formalized in RFC 3164 (2001) and RFC 5424 (2009). For decades, the standard approach to log management was syslog daemons (syslogd, rsyslog, syslog-ng) running on each machine, writing log files to disk, with administrators occasionally SSHing in to `grep` them. As applications scaled to hundreds of servers in the mid-2000s, this approach broke down: an incident might require grepping log files on 50 servers simultaneously. The ELK stack (Elasticsearch, Logstash, Kibana), assembled from 2010 to 2013, became the first widely-adopted centralized log management solution for web-scale infrastructure. Loki, introduced by Grafana Labs in 2018, took a different approach: instead of indexing log content (which is expensive at scale), it indexes only metadata labels and compresses log content aggressively, dramatically reducing storage cost.
-</HistoricalNote>
+## Incident Timeline Reconstruction
+
+When an incident is complex or multi-stage, working from logs toward an explanation is not enough: you need to construct an explicit timeline that integrates evidence from all sources. A timeline reconstruction answers the question "in exactly what order did these things happen?" and reveals causal chains that are invisible when reading any single source in isolation.
+
+Effective timeline reconstruction draws from at least four source types simultaneously: metric graphs (when did the error rate begin climbing?), log entries with precise timestamps from each involved service, Kubernetes events from `kubectl describe` (when did the pod restart? when did the probe fail?), and deployment or configuration change records (what changed in the 30 minutes before the incident?).
+
+A useful format is a simple table ordered by timestamp:
+
+| Time | Source | Event |
+|------|--------|-------|
+| 02:58:23 | system journal (db host) | Export job started, opened 90 connections |
+| 03:01:04 | PostgreSQL log | Connection limit reached |
+| 03:01:17 | order-api journal | First database timeout recorded |
+| 03:04:00 | nginx access log | Error rate crosses 5% threshold |
+| 03:07:00 | Alertmanager | Alert fires |
+
+This table makes the causal chain explicit and unambiguous. It also reveals the gap between cause (03:01:04) and detection (03:07:00): six minutes during which users experienced errors before anyone was notified. That gap is the MTTD for this incident, and the timeline makes it visible in a way that invites a concrete question: could alerting have fired earlier?
+
+Timeline reconstruction is also the foundation of the blameless postmortem: the Incident Response and Disaster Recovery lecture covers postmortem structure in detail, but the timeline is always its core artifact.
 
 ## Log Rotation and Retention
 
@@ -337,53 +455,51 @@ On Linux, `logrotate` is the standard tool. It runs daily via a systemd timer or
 }
 ```
 
-This rotates logs daily, keeps 14 days of history, and compresses old files (with a one-day delay, so tools still reading yesterday's log can finish before compression). The `postrotate` step sends the USR1 signal to Nginx, which causes the process to close its current file handle and open a new one. Without this signal, Nginx would continue writing to the old, renamed file while the new file remains empty.
+This rotates logs daily, keeps 14 days of history, and compresses old files with a one-day delay (so tools still reading yesterday's log can finish before compression). The `postrotate` step sends the USR1 signal to Nginx, causing it to close its current file handle and open a new one. Without this signal, Nginx would continue writing to the old, renamed file.
 
-Retention decisions balance operational usefulness against storage cost. For active incident investigation, logs from the past two weeks are usually sufficient. For compliance and security auditing, regulations often require one year or longer. For detecting intrusions (where you may not know an attack occurred for weeks or months), longer retention is valuable but expensive. Most organizations use tiered storage: recent logs on fast local disk, older logs compressed in object storage, very old logs archived or deleted on a schedule.
+Retention decisions balance operational usefulness against storage cost. For active incident investigation, logs from the past two weeks are usually sufficient. For compliance and security auditing, regulations often require one year or longer. Most organizations use tiered storage: recent logs on fast local disk, older logs compressed in object storage, very old logs archived or deleted on a schedule.
 
-<Aside type="note" title="Logs as Tamper-Evident Records">
-Local log files are not suitable as audit records for security incidents. An attacker with root access can modify or delete `/var/log/auth.log`. Logs shipped to a centralized, append-only store before the attacker arrives are preserved even if the local copies are tampered with. This is one of the reasons centralized logging matters beyond operational convenience: it provides evidence that survives a compromised host.
+<Aside type="note" title="Logs as Durable Evidence">
+Local log files are not suitable as audit records for security incidents. An attacker with root access can modify or delete `/var/log/auth.log`. Logs shipped to a centralized, append-only store before the attacker arrives are preserved even if the local copies are tampered with. This is one reason centralized logging matters beyond operational convenience: it provides evidence that survives a compromised host.
 </Aside>
 
 ## The Centralized Logging Pipeline
 
 Reading logs on individual servers scales to a handful of machines. Once you have dozens of servers, hundreds of containers, or a Kubernetes cluster running many pods, you need a system that collects logs from every source and makes them searchable from a single interface. The architecture is consistent across implementations.
 
-**Collection agents** run on each node or as sidecar containers, reading log files or tapping into syslog sockets and forwarding entries to a central destination. In a Kubernetes environment, a DaemonSet is the standard deployment pattern for collection agents: it ensures that one copy of the agent runs on every node in the cluster, with access to the node's `/var/log/pods/` directory where the container runtime writes container logs.
+**Collection agents** run on each node or as sidecar containers, reading log files or tapping into syslog sockets and forwarding entries to a central destination. In a Kubernetes environment, a DaemonSet is the standard deployment pattern: it ensures one copy of the agent runs on every node, with access to the node's `/var/log/pods/` directory where the container runtime writes container logs.
 
-**Processing** enriches and normalizes log data before storage. This includes parsing syslog or JSON formats, adding Kubernetes metadata (pod name, namespace, label values), filtering noisy entries that do not need to be stored, and routing different log streams to different destinations (for example, security-relevant logs to a SIEM and application logs to a general-purpose log store).
+**Processing** enriches and normalizes log data before storage. This includes parsing syslog or JSON formats, adding Kubernetes metadata (pod name, namespace, label values), filtering noisy entries, and routing different log streams to different destinations.
 
 **Storage** writes processed logs to a durable, queryable system indexed for the queries you will need to run: full-text search for error messages, label-based filtering for container and namespace, and time-range filtering for incident investigation windows.
 
-**Analysis and alerting** sits on top of storage. Engineers query the stored logs to investigate incidents. Automated systems apply rules that detect patterns (a sudden appearance of the string "FATAL" in a service's log) and trigger notifications. Dashboards display log-derived metrics alongside time-series metrics from Prometheus.
+**Analysis and alerting** sits on top of storage. Engineers query stored logs to investigate incidents. Automated rules detect patterns (the sudden appearance of "FATAL" in a service's log) and trigger notifications.
 
 ### Fluent Bit
 
-[Fluent Bit](https://fluentbit.io/) is the most widely deployed log collection agent in Kubernetes environments. It is a small binary (under 1 MB) written in C, designed for low memory and CPU overhead in resource-constrained environments like container sidecars and DaemonSets. Fluent Bit reads from containerd log files on the node, parses them, enriches them with Kubernetes metadata from the API server, and forwards them to a configured destination. It supports outputs to Loki, Elasticsearch, Kafka, and most managed cloud logging services, and it handles parsing of common log formats (JSON, Nginx access logs, syslog) with built-in parsers. For most Kubernetes environments, Fluent Bit is the first choice for the collection stage of the logging pipeline.
+[Fluent Bit](https://fluentbit.io/) is one of the most widely deployed log collection agents in Kubernetes environments. It is a small C-based collector designed for low memory and CPU overhead in resource-constrained environments like DaemonSets. Fluent Bit reads container log files on the node, parses them, enriches them with Kubernetes metadata from the API server, and forwards them to a configured destination. It supports outputs to Loki, Elasticsearch, Kafka, and most managed cloud logging services, and handles parsing of common log formats with built-in parsers.
 
 ## Centralized Logging Stacks
 
-Two major open-source stacks serve the centralized logging role in most environments. Understanding both helps you evaluate them for a given situation and interpret documentation that references either one.
-
 ### The Elastic Stack
 
-The Elastic Stack (historically called ELK for its three original components) is the longest-established open-source log management solution. **[Elasticsearch](https://www.elastic.co/elasticsearch)** stores and indexes log data using an inverted index: the same data structure used in search engines, where every term in every field is indexed separately, enabling fast full-text search across arbitrarily large log collections. **[Kibana](https://www.elastic.co/kibana)** provides the web interface for querying, visualizing, and building dashboards over indexed data. **Logstash** handles log transformation pipelines, though it is often replaced by lighter-weight [Beats](https://www.elastic.co/beats) agents (Filebeat for log files, Metricbeat for metrics) deployed on each host, with Logstash reserved for complex aggregation or enrichment.
+The Elastic Stack (historically called ELK) is the longest-established open-source log management solution. [Elasticsearch](https://www.elastic.co/elasticsearch) stores and indexes log data using an inverted index: the same data structure used in search engines, where every term in every field is indexed separately, enabling fast full-text search across arbitrarily large log collections. [Kibana](https://www.elastic.co/kibana) provides the web interface for querying, visualizing, and building dashboards. Logstash handles log transformation pipelines, though it is often replaced by lighter-weight Beats agents (Filebeat for log files) with Logstash reserved for complex aggregation.
 
-Elasticsearch's full-text index is its defining strength. Any term in any log entry is searchable in milliseconds regardless of data volume, because every field has already been indexed. The cost is resources: Elasticsearch is memory-intensive, and large log volumes require careful JVM heap tuning and storage capacity planning. It is a powerful system and correspondingly demanding to operate.
+Elasticsearch's full-text index is its defining strength. Any term in any log entry is searchable in milliseconds regardless of data volume, because every field has already been indexed. The cost is resources: Elasticsearch is memory-intensive, and large log volumes require careful JVM heap tuning and storage capacity planning.
 
 ### The Grafana LGTM Stack
 
-The LGTM stack (Loki, Grafana, Tempo, Mimir) is a cloud-native alternative built around the same Grafana interface that many Kubernetes environments already use for metrics dashboards. Its architecture reflects a deliberate tradeoff against the Elastic Stack.
+The LGTM stack (Loki, Grafana, Tempo, Mimir) is a cloud-native alternative built around the same Grafana interface that many Kubernetes environments already use for metrics. Its architecture reflects a deliberate tradeoff against the Elastic Stack.
 
-**[Loki](https://grafana.com/oss/loki/)** is the log aggregation component. Its defining architectural decision is that it indexes only metadata labels rather than the full text of log entries. The labels attached at collection time (pod name, namespace, container name, environment, and any Kubernetes labels you choose to forward) are indexed. The log message body is stored compressed and retrieved in its entirety only when you run a query. This label-index approach dramatically reduces storage cost and ingestion overhead compared to Elasticsearch. The tradeoff is query performance: a full-text search in Elasticsearch finds a specific phrase across billions of entries in milliseconds. The same search in Loki requires scanning the compressed log files that match the label filter. For most operational queries (where you already know approximately which service and time window to examine), Loki's performance is adequate, and the storage savings are substantial.
+[Loki](https://grafana.com/oss/loki/) indexes only metadata labels rather than the full text of log entries. The labels attached at collection time (pod name, namespace, container name, and any Kubernetes labels you choose to forward) are indexed. The log message body is stored compressed and retrieved in its entirety only when you run a query. This label-index approach dramatically reduces storage cost and ingestion overhead compared to Elasticsearch. The tradeoff is query performance: a full-text search in Elasticsearch finds a specific phrase across billions of entries in milliseconds; the same search in Loki requires scanning the compressed log files that match the label filter.
 
-**LogQL** is Loki's query language. A basic query has two parts: a log stream selector (label filters in curly braces) and optional filter expressions. To find all log entries from the WordPress container in the default namespace containing the string "connection refused":
+[LogQL](https://grafana.com/docs/loki/latest/query/) is Loki's query language. A basic query has two parts: a log stream selector (label filters in curly braces) and optional filter expressions:
 
 ```text
 {namespace="default", container="wordpress"} |= "connection refused"
 ```
 
-To filter to errors only and extract a specific field from structured JSON log lines:
+To filter to errors and extract fields from structured JSON log lines:
 
 ```text
 {namespace="default", container="order-api"} | json | level="error" | line_format "{{.message}} ({{.duration_ms}}ms)"
@@ -391,88 +507,68 @@ To filter to errors only and extract a specific field from structured JSON log l
 
 The `| json` parser extracts fields from JSON log entries, and subsequent filter expressions operate on those fields. For teams already using Grafana for metrics, Loki integrates naturally: you can display Prometheus metric panels and Loki log panels on the same dashboard, zooming from a spike in an error-rate graph directly into the log entries from that time window without switching tools.
 
-**[Tempo](https://grafana.com/oss/tempo/)** collects distributed traces in Jaeger, Zipkin, or OpenTelemetry format, completing the observability stack alongside Loki's logs and Prometheus's metrics. **[Mimir](https://grafana.com/oss/mimir/)** is a horizontally scalable, Prometheus-compatible long-term metrics store for environments where Prometheus's local TSDB would grow too large. Together, the four LGTM components cover all three observability pillars in a single operational model.
-
 ### Comparing ELK and Loki
 
-The choice between ELK and Loki is primarily a tradeoff between query flexibility and resource cost. Elasticsearch's full-text index gives you maximum query power: any term in any log field is indexed and searchable in milliseconds regardless of data volume, without requiring you to know in advance which service or time window to look at. Loki's label index requires you to narrow by label first, then scan the compressed log content within that set. For structured, cloud-native environments where you always know which namespace, service, or container you are investigating, Loki's tradeoff is usually acceptable. For security and compliance use cases where you might need to search for a specific string (a CVE identifier, an IP address, a username) across all services and all time, Elasticsearch's full-text index is more appropriate.
+The choice between ELK and Loki is primarily a tradeoff between query flexibility and resource cost. Elasticsearch's full-text index gives you maximum query power: any term in any log field is searchable in milliseconds without knowing in advance which service or time window to look at. Loki requires you to narrow by label first, then scan the compressed log content within that set.
 
-Both systems support log-based alerting: rules that trigger notifications when a log pattern is detected, in addition to metric-based alerts. In Loki, alerting rules use LogQL and are managed by Grafana's unified alerting system. An alert that fires when the word "FATAL" appears in a service's log stream is a complement to metric-based alerting: some failure modes produce log entries before they produce metric changes (a single fatal error before a crash loop begins, for example), and log-based alerts can catch these earlier.
+For structured, cloud-native environments where you always know which namespace, service, or container you are investigating, Loki's tradeoff is usually acceptable, and the storage savings are substantial. For security and compliance use cases where you might search for a specific string (a CVE identifier, an IP address, a username) across all services and all time, Elasticsearch's full-text index is more appropriate.
 
-The practical starting point for most Kubernetes environments is the kube-prometheus-stack (for metrics) alongside Loki with Fluent Bit as the collection agent. This combination provides both observability pillars in a consistent operational model, with Grafana as the single query interface. For organizations that are already deep in the Elastic ecosystem (perhaps using it for application search in addition to logging), adding log shipping to an existing Elasticsearch cluster may be simpler than operating a separate Loki deployment.
+### Log-Based Alerting
 
-### Cloud-Managed Services
+Both Loki and Elasticsearch support log-based alerting rules: rules that fire when a pattern appears in a log stream, in addition to metric-based alerts. In Loki, alerting rules use LogQL and are managed through Grafana's unified alerting system.
 
-AWS CloudWatch Logs, Google Cloud Logging, and Azure Monitor Logs offer fully managed log ingestion, storage, and search as cloud services. The appeal is operational simplicity: no clusters to run, no storage to provision, no software versions to upgrade. Fluent Bit can forward logs to all three. The costs are vendor lock-in, per-GB pricing that becomes significant at high log volumes, and limited flexibility compared to self-hosted stacks. For organizations already running primarily in one cloud provider and without a strong reason to maintain a self-hosted stack, managed logging is often the pragmatic choice.
+A log-based alert that fires when the word "FATAL" appears in a service's log stream:
 
-<Aside type="note" title="SIEM Platforms">
-Security Information and Event Management (SIEM) systems are a specialized category of centralized logging aimed at security use cases. Platforms like Splunk Enterprise Security, Microsoft Sentinel, and IBM QRadar aggregate logs from firewalls, authentication systems, IDS/IPS, and application servers simultaneously, applying rule-based or machine-learning detection to identify threats across sources. SIEMs are designed for the compliance-driven and security-investigation use cases where you need to correlate events across many systems and maintain tamper-evident audit trails. They are heavier and more expensive than general-purpose log management, but they are the standard tooling in enterprise security operations centers.
-</Aside>
+```text
+count_over_time({namespace="production", container="order-api"} |= "FATAL" [5m]) > 0
+```
+
+Log-based alerting is a complement to metric-based alerting, not a replacement. Some failure modes produce log entries before they produce metric changes: a single fatal error before a crash loop begins, a configuration parsing failure at startup, a one-time data corruption event. Log-based alerts can catch these earlier than metrics-based alerts, which require the problem to accumulate over a scrape interval.
+
+## Cloud-Managed Services
+
+AWS CloudWatch Logs, Google Cloud Logging, and Azure Monitor Logs offer fully managed log ingestion, storage, and search as cloud services. The appeal is operational simplicity: no clusters to run, no storage to provision, no software versions to upgrade. Fluent Bit can forward logs to all three. The costs are vendor lock-in, per-GB pricing that becomes significant at high log volumes, and limited flexibility compared to self-hosted stacks. For organizations running primarily in one cloud provider and without a reason to maintain a self-hosted stack, managed logging is often the pragmatic choice.
 
 ## Security Logging and Audit Trails
 
-Logs serve an operational role (diagnosing incidents) and a security role (detecting and investigating breaches). The two roles require different data, different retention policies, and different access controls.
+Logs serve both an operational role (diagnosing incidents) and a security role (detecting and investigating breaches). The two roles require different data, different retention policies, and different access controls.
 
-For security investigations, the most valuable logs are authentication events (`/var/log/auth.log` or the systemd journal for SSH and sudo), firewall logs (which record connection attempts that were blocked), and application-level access logs (which record who requested what and when). These logs are the evidence trail for answering questions like: did this user account authenticate to this server at 2 AM? Did a process make network connections to an unexpected external IP? Did a file in `/etc/` change at an unusual time?
+For security investigations, the most valuable logs are authentication events (`/var/log/auth.log`, the systemd journal for SSH and sudo, and `auditd` records for privilege escalation), firewall logs (which record connection attempts that were blocked), and application-level access logs. These are the evidence trail for answering questions like: did this user account authenticate to this server at 2 AM? Did a process make network connections to an unexpected external IP? Did a file in `/etc/` change at an unusual time?
 
-`osquery` is an open-source tool that takes a different approach to system visibility. Instead of reading log files, osquery exposes operating system state as a set of SQL tables. You can write a SQL query to find all processes currently running from deleted binaries (a common indicator of malware that has replaced or hidden its binary on disk), all network connections to unusual ports, all files modified in `/etc/` within the past hour, and all recently created user accounts. The query interface makes osquery particularly suited to security investigations and compliance auditing: it answers "what is the current state of this system?" rather than "what happened to this system?"
+**osquery** is an open-source tool that exposes operating system state as a set of SQL tables. You can write a SQL query to find all processes running from deleted binaries (a common indicator of malware that has replaced its binary on disk), all network connections to unusual ports, and all files modified in `/etc/` within the past hour:
 
 ```sql
 SELECT name, pid, path FROM processes WHERE on_disk = 0;
 ```
 
-This query returns processes whose binary has been deleted from disk while the process is still running. It is a common indicator of a compromised system: malicious processes sometimes delete their own binary after execution to reduce forensic evidence. osquery also supports scheduled queries that can be forwarded to a centralized logging system, providing continuous visibility into system state without manual intervention.
-
-For authentication logs specifically, the combination of `grep` and `awk` on `/var/log/auth.log` gives you rapid security answers on a single server:
+For authentication logs, the combination of `grep` and `awk` on `/var/log/auth.log` gives rapid answers on a single server:
 
 ```bash
 # Failed login attempts by username, sorted by frequency
 grep "Failed password for" /var/log/auth.log | grep -oP 'for \K\S+' | sort | uniq -c | sort -rn | head -20
 
-# Successful logins with timestamps
-grep "Accepted" /var/log/auth.log | tail -30
-
 # All unique source IPs that attempted login
 grep "Failed password\|Invalid user" /var/log/auth.log | grep -oP 'from \K[0-9.]+' | sort | uniq -c | sort -rn | head -20
 ```
 
-The difference between a long list of failed passwords for `root`, `admin`, and `test` from many different IP addresses (an automated brute-force scan, almost certainly benign in intent but worth noting) versus a focused set of failed attempts for your actual employee usernames from a single unfamiliar IP (potentially targeted credential stuffing) is visible in this output within seconds. This is the practical meaning of "security through visibility": having the data available makes the difference between detecting a breach quickly and discovering it months later.
-
-## Notable Tools in the Ecosystem
-
-Beyond the major stacks described above, several tools appear frequently in production environments and are worth knowing about.
-
-**[Graylog](https://graylog.org/)** is an open-source log management platform built on Elasticsearch. It provides a more opinionated and user-friendly interface than Kibana, with built-in alerting, dashboards, and access control. Graylog occupies a middle ground between the full DIY ELK stack and a managed SaaS platform.
-
-**[Splunk](https://www.splunk.com/)** is a widely-used commercial platform for log search, monitoring, and security analytics. Splunk's query language (SPL, Search Processing Language) is powerful, and the platform is common in enterprise and government environments where compliance reporting and security investigations drive the tooling decisions. Splunk's per-GB pricing can be significant at high log volumes, which is why many organizations use it for security-critical data and cheaper alternatives for high-volume application logs.
-
-**[Datadog](https://www.datadoghq.com/)** is a SaaS observability platform that unifies logs, metrics, and traces under a single interface. Its agent handles collection from most common sources automatically, which reduces setup overhead significantly. Datadog's integrated approach is appealing for teams that prefer a managed solution over operating their own logging infrastructure, at the cost of vendor dependency and per-host pricing.
-
-**[New Relic](https://newrelic.com/)** is another full-stack SaaS platform covering application performance monitoring (APM), infrastructure metrics, and log management. New Relic's APM capability is particularly strong for identifying performance issues within application code, making it useful when logs and metrics are not sufficient to explain why a specific code path is slow.
-
-For most course-scale projects and many production environments, the open-source Prometheus/Grafana/Loki stack is the right starting point. The decision between self-hosted open-source and managed SaaS comes down to operational capacity (running distributed storage systems at scale is a non-trivial responsibility), cost structure, and whether vendor lock-in is acceptable. Both paths are legitimate in industry; knowing what each offers makes the tradeoff analysis straightforward.
+**SIEM (Security Information and Event Management)** systems are a specialized category of centralized logging aimed at security use cases. Platforms like Splunk Enterprise Security, Microsoft Sentinel, and IBM QRadar aggregate logs from firewalls, authentication systems, IDS/IPS, and application servers simultaneously, applying rule-based or machine-learning detection to identify threats across sources. SIEMs are designed for compliance-driven and security-investigation use cases where you need to correlate events across many systems and maintain centrally managed audit trails. They are heavier and more expensive than general-purpose log management but are the standard tooling in enterprise security operations centers.
 
 ## Takeaways
 
-Log management and incident investigation are two sides of the same discipline. You invest in log infrastructure before incidents happen: configuring collection agents, defining retention policies, building centralized search. You collect the dividends when an incident occurs and the data you need already exists and is findable within seconds rather than hours.
+Log management and incident investigation are two sides of the same discipline. You invest in log infrastructure before incidents happen: configuring collection agents, defining retention policies, establishing centralized search. You collect the dividends when an incident occurs and the data you need already exists and is findable within seconds rather than hours.
 
-The relationship between metrics and logs in operational practice is complementary. Metrics surface the problem and alert the team. Logs provide the evidentiary record for understanding why it happened. In a Kubernetes environment, this relationship has a specific shape: Prometheus and kube-state-metrics give you the metrics picture, `kubectl logs` and `kubectl events` give you the container and cluster event record, and a centralized logging stack like Loki gives you a persistent, searchable history that survives pod restarts and node replacements.
+The landscape of log sources is broader than application stdout. Hardware and BMC logs capture signals that appear below the OS layer. The kernel audit subsystem (auditd) captures privileged actions at the kernel boundary, which complements application logging and is especially useful for accountability and compliance. The syslog protocol and its daemon ecosystem (rsyslog, syslog-ng) have forwarded logs across traditional Linux environments for decades and still underpin many production systems. Understanding all of these layers means you know where to look for evidence when the obvious sources yield nothing.
 
-Understanding how container logging works in Kubernetes is essential for effective troubleshooting. Containers write to stdout/stderr, the runtime writes those streams to files on the node, the kubelet exposes them via the API, and `kubectl logs` queries that API. When a container crashes, the current container's log stream is empty because it just started. The crashed container's log is accessible only via `--previous`, and only for a limited time. This behavior is different from traditional log files, and the difference has direct operational consequences.
+The investigation method, scope the symptom, narrow the time window, broaden across log sources, applies whether you are using grep on a single server or querying a Loki cluster with LogQL. The tools change as scale changes; the reasoning process does not. Building intuition for which log to read first, which time window to examine, and which adjacent sources to cross-reference is the skill that turns a long investigation into a short one. The incident timeline table is the artifact that makes the causal chain explicit and sets the foundation for the postmortem process.
 
-The investigation method, scope the symptom, narrow the time window, broaden across log sources, applies whether you are using grep on a single server or querying a Loki cluster with LogQL. The tools change as the scale changes; the reasoning process does not. Building intuition for which log to read, which time window to examine, and which adjacent sources to cross-reference is the skill that turns a long investigation into a short one.
+Container logging in Kubernetes has a specific shape that differs from traditional log files: containers write to stdout/stderr, the runtime captures to node-level files, the kubelet exposes them via the API, and centralized agents ship them before ephemeral pods disappear. Knowing this mechanism makes `kubectl logs` predictable rather than mysterious, and knowing the `--previous` flag makes the difference between finding the error that caused a crash and seeing only an empty log from the container that replaced it.
 
-The Postmortems and Communications lecture extends this investigation capability into the formal process of documenting what happened, why, and what will change to prevent recurrence.
+The Incident Response and Disaster Recovery lecture extends this investigation capability into the formal process of coordinating a response, communicating during an outage, and running the postmortem that prevents recurrence.
 
 ## Resources
 
-- <a href="https://kubernetes.io/docs/concepts/cluster-administration/logging/" target="_blank" rel="noopener noreferrer">Cluster-Level Logging Architecture (Kubernetes Documentation)</a>
-- <a href="https://grafana.com/docs/loki/latest/query/" target="_blank" rel="noopener noreferrer">LogQL Query Language Reference (Grafana Documentation)</a>
-- <a href="https://grafana.com/oss/loki/" target="_blank" rel="noopener noreferrer">Loki Overview (Grafana)</a>
-- <a href="https://fluentbit.io/documentation/" target="_blank" rel="noopener noreferrer">Fluent Bit Documentation</a>
-- <a href="https://www.elastic.co/what-is/elk-stack" target="_blank" rel="noopener noreferrer">What Is the ELK Stack? (Elastic)</a>
-- <a href="https://www.freedesktop.org/software/systemd/man/latest/journalctl.html" target="_blank" rel="noopener noreferrer">journalctl Man Page (freedesktop.org)</a>
-- <a href="https://sre.google/sre-book/monitoring-distributed-systems/" target="_blank" rel="noopener noreferrer">Monitoring Distributed Systems (Google SRE Book)</a>
-- <a href="https://www.youtube.com/watch?v=oS5bkj0BKQE" target="_blank" rel="noopener noreferrer">Getting Started with Grafana Loki (Grafana YouTube)</a>
-- <a href="https://opentelemetry.io/docs/concepts/" target="_blank" rel="noopener noreferrer">OpenTelemetry Concepts (OpenTelemetry Documentation)</a>
-- <a href="https://datatracker.ietf.org/doc/html/rfc5424" target="_blank" rel="noopener noreferrer">The Syslog Protocol, RFC 5424 (IETF)</a>
+- <a href="https://12factor.net/logs" target="_blank" rel="noopener noreferrer">Logs (Adam Wiggins) (Deep-Dive Article)</a>
+- <a href="https://betterstack.com/community/guides/logging/logging-best-practices/" target="_blank" rel="noopener noreferrer">Logging Best Practices: 12 Dos and Don'ts (Ayooluwa Isaiah) (Deep-Dive Article)</a>
+- <a href="https://betterstack.com/community/guides/logging/structured-logging/" target="_blank" rel="noopener noreferrer">Why Structured Logging is Fundamental to Observability (Ayooluwa Isaiah) (Deep-Dive Article)</a>
+- <a href="https://stripe.com/blog/canonical-log-lines" target="_blank" rel="noopener noreferrer">Fast and Flexible Observability with Canonical Log Lines (Brandur Leach) (Deep-Dive Article)</a>
+- <a href="https://sre.google/sre-book/monitoring-distributed-systems/" target="_blank" rel="noopener noreferrer">Monitoring Distributed Systems (Rob Ewaschuk) (Book Chapter)</a>
