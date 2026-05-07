@@ -1,9 +1,8 @@
 ---
 title: "Network Services Exploration"
-description: "Observe DNS TTL, negative caching, and record behavior live, read email authentication and TLS records on real domains, trace CDN edge behavior through HTTP headers, and build a path-routing reverse proxy with Docker Compose."
+description: "Observe DNS TTL, negative caching, and record behavior live, read email authentication and TLS records on real domains, trace CDN edge behavior through HTTP headers, and build a path-routing reverse proxy that load-balances across multiple replicas with Docker Compose."
 sidebar:
   order: 12
-draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
@@ -14,19 +13,17 @@ type: activity
 slug: network-services-exploration
 order: 12
 paired_lecture: network-services-and-application-delivery
-practices: DNS record types (A, AAAA, MX, TXT), TTL propagation, and negative caching; authoritative vs. recursive resolver distinction; email authentication records (SPF, DMARC, MX, NULL MX); CDN edge behavior and HTTP cache headers; TLS certificate chain inspection and Certificate Transparency log queries; reverse proxy Layer 7 path-based routing; L4 vs. L7 load balancer distinction
+practices: DNS record types (A, AAAA, MX, TXT, SOA), TTL propagation, and negative caching observed from the SOA attached to an NXDOMAIN response; authoritative vs. recursive resolver distinction; email authentication records (SPF, DKIM via selectors, DMARC, MX, NULL MX); CDN edge behavior and HTTP cache headers including Cache-Control; TLS certificate chain inspection, Certificate Transparency log queries, HSTS header, and OCSP stapling; reverse proxy Layer 7 path-based routing; Layer 7 load balancing across multiple backend replicas; L4 vs. L7 load balancer distinction
 prereq_activities: network-detective, docker-image-exploration
-output: a working Docker Compose reverse proxy routing /api/ and / paths to separate backends, with the student's ONID visible in the web backend response
+output: a working Docker Compose reverse proxy doing both path-based routing (/api/ vs /) and round-robin load balancing across three identical web replicas, with the student's ONID visible in the web backend response
 */}
 
-This activity puts into practice the concepts from the [Network Services and Application Delivery](/lectures/network-services-and-application-delivery/) lecture. You will manipulate DNS records live to see TTL and negative-caching behavior, read email authentication and TLS certificate records on real domains, trace CDN behavior through HTTP headers, and build a path-routing reverse proxy with Docker Compose. By the end, you will have directly observed each major layer of the application delivery stack in action.
+This activity puts into practice the concepts from the [Network Services and Application Delivery](/lectures/network-services-and-application-delivery/) lecture. You will manipulate DNS records live to see TTL and negative-caching behavior, read email authentication and TLS certificate records on real domains, trace CDN behavior through HTTP headers, and build a reverse proxy with Docker Compose that does both path-based routing and round-robin load balancing across multiple replicas. By the end, you will have directly observed each major layer of the application delivery stack in action.
 
 ## What You Will Need
 
 - A terminal with `dig`, `curl`, and `openssl` available. If you are using the Arch Linux VM from the [Network Detective](/activities/network-detective/) activity, you already installed them there
 - Docker installed from the [Docker Image Exploration](/activities/docker-image-exploration/) activity
-- A browser open to [messwithdns.net](https://messwithdns.net/) before class
-- Internet access
 
 <Aside type="caution" title="Keep the Mess with DNS tab open">
 Mess with DNS stores your personal subdomain in browser local storage. Closing the tab or clearing storage loses it and you will need to start the DNS section over.
@@ -39,15 +36,15 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 [Mess with DNS](https://messwithdns.net/) gives you a personal subdomain where you control all the records. You can add, remove, and modify records through a web interface and immediately query the results with `dig`. This makes TTL propagation and record types directly observable rather than abstract.
 
 <Steps>
-1. Open [messwithdns.net](https://messwithdns.net/) in a browser. The site assigns you a random subdomain such as `fuzzy-owl-1234.messwithdns.net`. Write it down; you will use it in every `dig` command in this section.
+1. Open [messwithdns.net](https://messwithdns.net/) in a browser. The site assigns you a random subdomain such as `fuzzy-owl-1234.messwithdns.com`. Write it down; you will use it in every `dig` command in this section.
 
-2. Find the authoritative nameserver for `messwithdns.net`. This server holds the current zone data for your subdomain, and querying it directly bypasses any resolver caching:
+2. Find the authoritative nameserver for `messwithdns.com`. This server holds the current zone data for your subdomain, and querying it directly bypasses any resolver caching:
 
    ```bash
-   dig +short NS messwithdns.net
+   dig +short NS messwithdns.com
    ```
 
-   Record the nameserver hostname returned. You will substitute it for `<NS>` in later steps.
+   Record any one of the nameserver hostnames returned. You will substitute it for `<NS>` in later steps.
 
 3. In the Mess with DNS interface, create an **A record** for your subdomain. Set the value to `203.0.113.1` and the TTL to `300`.
 
@@ -56,24 +53,24 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 4. Query a public recursive resolver for your new record:
 
    ```bash
-   dig YOUR-SUBDOMAIN.messwithdns.net @1.1.1.1
+   dig YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
    ```
 
-   In the ANSWER SECTION, note the TTL value. That number is how many seconds Cloudflare's resolver will cache this answer before issuing a fresh query to the authoritative server.
+   In the ANSWER SECTION, note the TTL value. That number is the remaining cache lifetime on this answer at Cloudflare's resolver before it will need to refresh from the authoritative server.
 
 5. Now query the authoritative server directly:
 
    ```bash
-   dig YOUR-SUBDOMAIN.messwithdns.net @<NS>
+   dig YOUR-SUBDOMAIN.messwithdns.com @<NS>
    ```
 
-   The authoritative server returns the current record value immediately and does not cache. The difference between this query and the previous one is exactly the distinction between "the record changed" and "every resolver on the internet has the new value."
+   The authoritative server answers from the current zone data and does not involve a recursive cache. The difference between this query and the previous one is exactly the distinction between "the record changed" and "every resolver on the internet has the new value."
 
 6. In the Mess with DNS interface, change the **TTL** on the A record from `300` to `30`, but keep the IP address at `203.0.113.1` for now. Then query both servers again:
 
    ```bash
-   dig A YOUR-SUBDOMAIN.messwithdns.net @<NS>
-   dig A YOUR-SUBDOMAIN.messwithdns.net @1.1.1.1
+   dig A YOUR-SUBDOMAIN.messwithdns.com @<NS>
+   dig A YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
    ```
 
    The authoritative server shows the new TTL immediately. The recursive resolver may still show a much higher remaining TTL from the earlier 300-second cache entry. Lowering TTL is not retroactive: you have to wait for the old cached answer to expire before the lower TTL takes effect at that resolver.
@@ -81,57 +78,45 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 7. Add an **AAAA record** for your subdomain pointing to `2001:db8::1` with TTL `300`. Confirm both records exist at the authoritative server:
 
    ```bash
-   dig A YOUR-SUBDOMAIN.messwithdns.net @<NS>
-   dig AAAA YOUR-SUBDOMAIN.messwithdns.net @<NS>
+   dig A YOUR-SUBDOMAIN.messwithdns.com @<NS>
+   dig AAAA YOUR-SUBDOMAIN.messwithdns.com @<NS>
    ```
 
    A domain with both A and AAAA records is dual-stack. A stale AAAA record pointing nowhere can break only IPv6 clients while IPv4 works fine, which makes the outage appear intermittent when viewed from a single protocol.
 
-8. Add a **TXT record** for your subdomain with the following text:
+8. **Demonstrate TTL propagation.** After lowering the TTL in step 6, wait at least 5 minutes for any earlier 300-second cached answer to age out at public resolvers. Then change the A record IP address from `203.0.113.1` to `203.0.113.2`.
 
-   ```
-   v=spf1 ip4:203.0.113.1 -all
-   ```
-
-   Query for it:
+   Query both the authoritative server and the public resolver immediately after making the change:
 
    ```bash
-   dig TXT YOUR-SUBDOMAIN.messwithdns.net @<NS>
+   # Authoritative server: always current
+   dig +short A YOUR-SUBDOMAIN.messwithdns.com @<NS>
+
+   # Recursive resolver: may still show the old answer
+   dig +short A YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
    ```
 
-   This is the format of a real SPF record. The `-all` qualifier at the end is a hard fail: any sender not explicitly listed should be rejected. Your subdomain has no real mail servers, so this policy is consistent with that.
+   The authoritative server returns the new IP right away. The public resolver may briefly keep the old IP, but once it refreshes its now-low-TTL cache, the new answer should appear within about 30 seconds rather than up to 5 minutes.
 
-9. Add an **MX record** for your subdomain. Set the mail server to `mail.example.com.` (include the trailing dot) and the priority to `10`.
+   Do not rely on the TTL in the recursive resolver's ANSWER SECTION to visibly count down one second at a time. With anycast public resolvers such as `1.1.1.1`, repeated queries may hit different cache nodes, or the resolver may simply hand you a freshly resolved 30-second answer each time. The real signal is not a perfect countdown. It is whether the old IP can still appear briefly after the change, and whether that stale window is now bounded to roughly 30 seconds instead of several minutes.
+
+9. Observe **negative caching** with a name that does not exist yet. Query a fresh label under your subdomain, such as `missing`:
 
    ```bash
-   dig MX YOUR-SUBDOMAIN.messwithdns.net @<NS>
+   dig missing.YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
    ```
 
-   The priority number in the answer determines preference: lower is tried first. A domain with MX records at priorities 10 and 20 uses priority 10 as the primary and priority 20 as the fallback.
+   You should get `NXDOMAIN`. In the AUTHORITY SECTION you will see the zone's SOA record. The next step looks at it directly.
 
-10. **Demonstrate TTL propagation.** Re-run the recursive query from step 6 until the TTL in its ANSWER SECTION has counted down to `30` or lower. Then change the A record IP address from `203.0.113.1` to `203.0.113.2`.
+   Do not create this `missing` record during class. The whole point of this check is to see that negative answers can be cached too.
 
-    Query both the authoritative server and the public resolver immediately after making the change:
-
-    ```bash
-    # Authoritative server: always current
-    dig +short A YOUR-SUBDOMAIN.messwithdns.net @<NS>
-
-    # Recursive resolver: may still show the old answer
-    dig +short A YOUR-SUBDOMAIN.messwithdns.net @1.1.1.1
-    ```
-
-    The authoritative server returns the new IP right away. The public resolver may briefly keep the old IP, but once it refreshes its now-low-TTL cache, the new answer should appear within about 30 seconds rather than up to 5 minutes.
-
-11. Observe **negative caching** with a name that does not exist yet. Query a fresh label under your subdomain, such as `missing`:
+10. **Read the negative-cache timer from the SOA attached to the negative response.** Re-run the missing-name query and inspect the SOA record in the AUTHORITY SECTION:
 
     ```bash
-    dig missing.YOUR-SUBDOMAIN.messwithdns.net @1.1.1.1
+    dig missing.YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
     ```
 
-    You should get `NXDOMAIN`. In the AUTHORITY SECTION, note the zone's SOA record and its TTL. That TTL is how long the resolver may cache the "does not exist" answer. On this platform it is often much longer than the 30-second positive TTL you just used, which is why accidentally testing a name before creating it can make a new record appear broken for much longer than expected.
-
-    Do not create this `missing` record during class. The whole point of this check is to see that negative answers can be cached too.
+    In the AUTHORITY SECTION you will see one SOA tuple of seven fields: primary nameserver, responsible-party email (with `@` rewritten as `.`), serial, refresh, retry, expire, and minimum. The TTL printed on that SOA record is the negative-cache lifetime the resolver may apply to this `NXDOMAIN` answer. Many authoritative servers derive that value from the zone's SOA settings, which is why administrators still inspect the SOA when reasoning about negative caching. The operational lesson is the durable one: negative answers can linger independently of your 30-second A-record TTL, so accidentally querying a name before creating it can make a new record appear broken for longer than the positive TTL would suggest.
 </Steps>
 
 <ActivityQuestion>
@@ -161,23 +146,31 @@ SPF, DKIM, and DMARC rely on DNS records published at well-known locations, but 
 
    Find the `v=DMARC1` record. Record the `p=` policy: `reject` instructs receiving servers to discard messages that fail alignment; `quarantine` routes them to spam; `none` logs failures but takes no action.
 
-3. Look up the DMARC policy for a second domain and compare:
+3. Look up a **DKIM public key**. Unlike SPF and DMARC, DKIM does not live at a well-known name. Each sending system publishes its public key under a **selector** of its own choosing, at `<selector>._domainkey.<domain>`. To find a selector yourself, inspect the headers of a real email from that domain and look for the `s=` field in the `DKIM-Signature` header. A header fragment such as `DKIM-Signature: ... d=google.com; s=20230601; ...` tells you to query `20230601._domainkey.google.com`. At the time this activity was tested, Google published a selector at `20230601`:
+
+   ```bash
+   dig TXT 20230601._domainkey.google.com +short
+   ```
+
+   If this query returns no answer on the day you run it, that selector has rotated. That is normal: selectors are chosen by the sender and can change over time. When it does return an answer, you will see a long TXT record beginning with `v=DKIM1; k=rsa; p=...`. The `p=` field is the base64-encoded public key. The receiving server fetches this key, verifies the signature on the email body and selected headers, and only then concludes the message was not modified in transit and was signed by someone holding the private key for this selector.
+
+4. Look up the DMARC policy for a second domain and compare:
 
    ```bash
    dig TXT _dmarc.mit.edu +short
    ```
 
-   Note the `p=` value and compare it to Google's. A `p=none` policy means the domain is collecting DMARC reports to audit its sending sources before committing to enforcement. Organizations typically run `p=none` while discovering all legitimate senders, then move to `p=quarantine` or `p=reject` once confident.
+   Note the `p=` value and compare it to Google's. At the time this activity was tested, MIT returned `p=none`. A `p=none` policy means the domain is collecting DMARC reports to audit its sending sources before committing to enforcement. Organizations typically run `p=none` while discovering all legitimate senders, then move to `p=quarantine` or `p=reject` once confident.
 
-4. Check the MX records for `google.com` to see how Gmail routes incoming mail:
+5. Check the MX records for `google.com` to see how Gmail routes incoming mail:
 
    ```bash
    dig MX google.com +short
    ```
 
-   You will see multiple records at different priority values. The sending mail server tries the lowest-priority record first and falls back to higher-numbered records if the primary is unreachable.
+   Record the priority values and hostnames you actually see. A domain can publish one MX record or several. When multiple MX records exist, the sending mail server tries the lowest-numbered preference first and falls back to higher-numbered records if the primary is unreachable. A single advertised MX hostname can still hide redundancy behind that name.
 
-5. Check whether `example.com` publishes a NULL MX record:
+6. Check whether `example.com` publishes a NULL MX record:
 
    ```bash
    dig MX example.com +short
@@ -203,7 +196,7 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
    dig +short aws.amazon.com
    ```
 
-   These are CloudFront edge addresses, not the IP of a single web server in one location. Clients in different geographic regions receive different IPs, each routing to the nearest CloudFront PoP.
+   You may see one or more CNAMEs before the final A records. The returned addresses belong to CloudFront edge infrastructure rather than to one web server in one location. Clients in different geographic regions, or the same client at different times, can receive different edge addresses.
 
 2. Fetch the HTTP headers from the same site and look for CDN fingerprints:
 
@@ -211,19 +204,19 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
    curl -sI https://aws.amazon.com/ | grep -iE "server:|x-cache:|x-amz-cf"
    ```
 
-   `X-Cache` shows CloudFront's decision for this response. `Hit from cloudfront` means the edge served a cached copy; `Miss from cloudfront` means the edge had to fetch from the origin. `X-Amz-Cf-Pop` names the specific CloudFront edge location that served it.
+   `X-Cache` shows CloudFront's decision for this response. `Hit from cloudfront` means the edge served a cached copy; `Miss from cloudfront` means the edge had to fetch from the origin. `X-Amz-Cf-Pop` names the specific CloudFront edge location that served it. If the generic `server:` header is unhelpful, the CloudFront-specific headers are the stronger evidence that a CDN is in the path.
 
    <Aside type="note" title="CDN headers by provider">
    Header names are provider-specific. CloudFront uses `X-Cache` and `X-Amz-Cf-Pop`. Cloudflare uses `CF-Cache-Status` and `CF-Ray`. Fastly uses `X-Served-By`. The exact cache status varies by resource and over time, but the presence of provider-specific headers confirms a CDN is in the path.
    </Aside>
 
-3. Fetch headers from a Cloudflare-hosted static resource to compare naming conventions:
+3. Fetch headers from a Cloudflare-hosted static resource to compare naming conventions, and grab `cache-control:` along with the Cloudflare-specific headers:
 
    ```bash
-   curl -sI https://developers.cloudflare.com/robots.txt | grep -iE "cf-ray:|cf-cache-status:|server:"
+   curl -sI https://developers.cloudflare.com/robots.txt | grep -iE "cf-ray:|cf-cache-status:|server:|cache-control:"
    ```
 
-   `CF-Ray` is a unique identifier for this request's path through Cloudflare's network. `CF-Cache-Status` reports Cloudflare's cache decision for this response. On a static resource like this, you will often see `HIT` or `MISS`.
+   `CF-Ray` is a unique identifier for this request's path through Cloudflare's network. `CF-Cache-Status` reports Cloudflare's cache decision for this response. On a static resource like this, you may see `HIT`, `MISS`, `EXPIRED`, or another cache result depending on what the edge already has. The `Cache-Control` header carries the directive the origin sent for this response. A `max-age=N` value gives caches a positive freshness lifetime; if you instead see `max-age=0`, the origin is telling caches to revalidate before reusing the object.
 
 4. Fetch headers from a dynamic Cloudflare page and compare the status value:
 
@@ -231,7 +224,7 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
    curl -sI https://blog.cloudflare.com/ | grep -iE "cf-ray:|cf-cache-status:|server:"
    ```
 
-   A value such as `DYNAMIC` means Cloudflare was in the path but did not serve a cached copy. `HIT` means the edge returned cached content. `MISS` means the edge had to fetch from the origin.
+   A value such as `DYNAMIC`, `MISS`, or `BYPASS` means Cloudflare was in the path but did not serve a cached copy. `HIT` means the edge returned cached content. The exact value varies over time and by URL, which is why the stable lesson here is to identify the provider-specific headers first and interpret the cache result second.
 
 5. Check what TLS certificate the CDN presents at the edge:
 
@@ -240,18 +233,18 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
      | openssl x509 -noout -issuer -subject
    ```
 
-    For `aws.amazon.com`, the issuer is currently an Amazon CA. The important point is that this certificate is presented by CloudFront at the edge PoP rather than by a single origin server. A CloudFront distribution can use an ACM certificate or an imported certificate for the viewer-facing connection, and the origin can use a different certificate on the private connection from CloudFront to the backend.
+      At the time this activity was tested, the issuer for `aws.amazon.com` was an Amazon CA. Do not anchor on the issuer name. The durable point is that the viewer-facing certificate is presented by CloudFront at the edge PoP rather than by a single origin server. A CloudFront distribution can use an ACM certificate or an imported certificate for the viewer-facing connection, and the origin can use a different certificate on the private connection from CloudFront to the backend.
 </Steps>
 
 <ActivityQuestion>
-The TLS certificate for `aws.amazon.com` was issued by Amazon's CA, and TLS terminates at the CloudFront edge rather than at the origin web server. TLS termination at the edge requires the CDN to hold the private key for that certificate. What does this mean for the trust model between the origin operator and the CDN provider? Under what conditions would you choose not to terminate TLS at the CDN edge?
+The certificate you just inspected was presented by the CloudFront edge rather than by a single origin web server. TLS termination at the edge requires the CDN to hold or control the private key for the viewer-facing certificate. What does this mean for the trust model between the origin operator and the CDN provider? Under what conditions would you choose not to terminate TLS at the CDN edge?
 </ActivityQuestion>
 
 ---
 
 ## TLS Certificate Inspection
 
-A TLS certificate contains the hostnames it covers, the chain of trust back to a root CA, the validity window, and a Certificate Transparency log entry. This section reads those fields directly on a live server so you can recognize each one when debugging a certificate failure.
+A TLS certificate contains the hostnames it covers, the chain of trust back to a root CA, the validity window, and a Certificate Transparency log entry. Beyond the certificate itself, two connection-level signals matter operationally: an HSTS header that pins the browser to HTTPS for future visits, and an OCSP staple that lets the server prove the certificate has not been revoked without the client phoning the CA on every handshake. This section reads each of those directly on a live server so you can recognize them when debugging a certificate failure.
 
 <Steps>
 1. Connect to Oregon State's web server and capture the key certificate fields:
@@ -274,15 +267,16 @@ A TLS certificate contains the hostnames it covers, the chain of trust back to a
 
    `Verify return code: 0 (ok)` means the full chain validated against your system's trust store. Any other code indicates a problem: an expired certificate, a missing intermediate, or a hostname mismatch.
 
-3. Look up the Certificate Transparency log entries for this domain in a browser:
+3. Inspect the certificate's embedded **Certificate Transparency** evidence:
 
+   ```bash
+   openssl s_client -connect oregonstate.edu:443 -servername oregonstate.edu 2>/dev/null \
+     | openssl x509 -noout -text | grep -A6 "CT Precertificate SCTs"
    ```
-   https://crt.sh/?q=oregonstate.edu
-   ```
 
-   You will see publicly logged certificates matching this domain search, with issuance dates and issuing CAs. Every publicly trusted certificate issued since 2018 must appear in a CT log: browsers reject certificates that have not been logged.
+   You should see one or more **Signed Certificate Timestamp** entries, each with a Log ID and timestamp. Those SCTs are proof that the certificate or precertificate was submitted to public Certificate Transparency logs. Every publicly trusted certificate issued today needs CT evidence like this or browsers will reject it.
 
-   Notice how frequently certificates appear in the log and which CA issued each one. A domain using Let's Encrypt will show a new entry approximately every 90 days because that is the maximum certificate lifetime.
+   If you want to browse the historical log entries in a browser and `crt.sh` is available, you can still try `https://crt.sh/?q=oregonstate.edu`, but do not block on that site. The SCTs in the certificate are the durable signal that CT logging happened.
 
 4. Check whether `oregonstate.edu` restricts which CAs are authorized to issue certificates for the domain:
 
@@ -290,9 +284,26 @@ A TLS certificate contains the hostnames it covers, the chain of trust back to a
    dig CAA oregonstate.edu +short
    ```
 
-   A CAA record such as `0 issue "letsencrypt.org"` tells every other CA that Let's Encrypt is the only authorized issuer. If another CA issues a certificate anyway, CT monitoring catches it because the certificate must appear in a public log.
+   A CAA record such as `0 issue "letsencrypt.org"` tells every other compliant public CA that Let's Encrypt is the only authorized issuer. If another CA issues a certificate anyway, CT monitoring catches it because the certificate must appear in a public log.
 
-   If the query returns nothing, there is no CAA record and any CA can issue for this domain.
+   If the query returns nothing, there is no public CAA restriction for this domain.
+
+5. **Read the HSTS header.** HSTS is published as an HTTP response header, not as part of the certificate. Fetch headers from a site that ships it:
+
+   ```bash
+   curl -sI https://www.cloudflare.com/ | grep -i strict-transport-security
+   ```
+
+   You should see something like `strict-transport-security: max-age=31536000; includeSubDomains`. The `max-age` value is how many seconds the browser will refuse to make an unencrypted connection to this domain after seeing this header. `includeSubDomains` extends that policy to every subdomain. If the response also contained `preload`, the operator would be asking for the domain to be added to the browser preload list, which protects even the very first visit. Once a browser has cached this header, it auto-upgrades any future `http://` link to `https://` for this host.
+
+6. **Check OCSP stapling.** Stapling lets the server present a recent CA-signed proof of non-revocation alongside its certificate so the client does not have to query the CA itself. Use the lecture's diagnostic:
+
+   ```bash
+   echo | openssl s_client -connect www.cloudflare.com:443 -servername www.cloudflare.com -status 2>/dev/null \
+     | grep -A1 "OCSP Response Status"
+   ```
+
+   A working staple shows `OCSP Response Status: successful (0x0)` followed by `Cert Status: good`. If you instead see `OCSP response: no response sent`, the server simply has not enabled stapling for that certificate; that is a configuration choice on the server, not a sign that the certificate is revoked. Modern servers turn stapling on so revocation checks happen during the handshake without an extra round trip to the CA, and without leaking the user's browsing target to the CA.
 </Steps>
 
 <ActivityQuestion>
@@ -301,9 +312,9 @@ Let's Encrypt issues 90-day certificates rather than the 1-year or 2-year certif
 
 ---
 
-## Reverse Proxy Path Routing
+## Reverse Proxy Path Routing and Load Balancing
 
-A reverse proxy routes incoming requests to different backends based on the content of the HTTP request. This section builds a three-container setup: one nginx instance acting as a Layer 7 proxy, and two nginx instances acting as separate backends with different content. The proxy reads the URL path from each HTTP request and forwards it to the matching backend.
+A reverse proxy routes incoming requests to different backends based on the content of the HTTP request. This section first builds a three-container setup (one nginx proxy, one web backend, one api backend) and uses the proxy to do **path-based routing** between them. It then refactors the web backend into three identical replicas behind an nginx `upstream` block to demonstrate **Layer 7 load balancing** across them. Both behaviors live in the same proxy: routing decides which pool of backends a request belongs to, and load balancing decides which replica inside that pool answers it.
 
 Create a working directory for this section:
 
@@ -422,8 +433,8 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 4. Confirm the routing with the response headers:
 
    ```bash
-   curl -sI http://localhost:8080/ | grep X-Served-By
-   curl -sI http://localhost:8080/api/ | grep X-Served-By
+   curl -sI http://localhost:8080/ | grep -i x-served-by
+   curl -sI http://localhost:8080/api/ | grep -i x-served-by
    ```
 
    The first response should carry `X-Served-By: web-backend`. The second should carry `X-Served-By: api-backend`. The proxy added that header inside the matching `location` block, which is why the value differs by path.
@@ -446,6 +457,109 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
    You will see two new log lines appear in the proxy log, one for `/` and one for `/api/`. This centralized record is one of the main operational advantages of routing all traffic through a proxy: instead of checking logs on every backend separately, you have one stream that shows the full request history for the entire application. Press `Ctrl+C` in the log terminal when you are ready to continue.
 </Steps>
 
+### Distribute Load Across Multiple Replicas
+
+So far the proxy forwards every `/` request to exactly one backend. Production deployments run multiple identical replicas behind the proxy and let the proxy spread requests across them. Refactor the web backend into three replicas and observe the distribution.
+
+<Steps>
+1. Replace the contents of `proxy.conf` with a version that defines an explicit upstream pool and exposes the chosen replica in a response header:
+
+   ```nginx
+   upstream web_backends {
+       server web1:80;
+       server web2:80;
+       server web3:80;
+   }
+
+   server {
+       listen 80;
+
+       location /api/ {
+           proxy_pass http://api/;
+           add_header X-Served-By "api-backend";
+       }
+
+       location / {
+           proxy_pass http://web_backends/;
+           add_header X-Served-By "web-backend";
+           add_header X-Upstream-Addr $upstream_addr;
+       }
+   }
+   ```
+
+   The `upstream web_backends` block names a pool of three backends. `proxy_pass http://web_backends/` sends each `/` request to one of them. By default, nginx uses **round-robin** load balancing, so repeated simple requests tend to rotate across `web1`, `web2`, and `web3`. The `$upstream_addr` variable holds the IP and port of the replica nginx actually used for this request, and the `add_header` line copies it into the response so you can see the choice from the client side.
+
+2. Replace `docker-compose.yml` with a version that defines three identical web replicas:
+
+   ```yaml
+   services:
+     proxy:
+       image: nginx:1.27-alpine
+       ports:
+         - "8080:80"
+       volumes:
+         - ./proxy.conf:/etc/nginx/conf.d/default.conf
+       depends_on:
+         - web1
+         - web2
+         - web3
+         - api
+
+     web1:
+       image: nginx:1.27-alpine
+       volumes:
+         - ./web.html:/usr/share/nginx/html/index.html
+
+     web2:
+       image: nginx:1.27-alpine
+       volumes:
+         - ./web.html:/usr/share/nginx/html/index.html
+
+     web3:
+       image: nginx:1.27-alpine
+       volumes:
+         - ./web.html:/usr/share/nginx/html/index.html
+
+     api:
+       image: nginx:1.27-alpine
+       volumes:
+         - ./api.html:/usr/share/nginx/html/index.html
+   ```
+
+   All three web replicas mount the same `web.html`, so their content is identical. The interesting question is no longer *what* they serve but *which one* served a given request. Only `proxy` is exposed on the host; the replicas are reachable only through the proxy.
+
+3. Apply the refactor. Compose will remove the old `web` container and start the three new replicas plus a fresh proxy with the new config:
+
+   ```bash
+   docker compose up -d
+   docker compose ps
+   ```
+
+   You should now see five services running: `proxy`, `web1`, `web2`, `web3`, and `api`.
+
+4. Send several requests to `/` and watch which replica answers each one:
+
+   ```bash
+   for i in 1 2 3 4 5 6; do
+     curl -sI http://localhost:8080/ | grep -i x-upstream-addr
+   done
+   ```
+
+    You should see three different upstream addresses recur across repeated requests, one per replica. With nginx's default upstream scheduling, sequential one-off requests tend to rotate through the pool in round-robin order. Notice that the response *body* would be identical across all six requests because every replica serves the same `web.html`; the only thing that distinguishes them at this scale is which container processed the request.
+
+5. Confirm path routing still works alongside load balancing. The api backend is not behind the upstream pool; it remains a single backend reached via path-based routing:
+
+   ```bash
+   curl -sI http://localhost:8080/api/ | grep -iE "x-served-by|x-upstream-addr"
+   ```
+
+   You should see `X-Served-By: api-backend` but no `X-Upstream-Addr` header, because the `add_header X-Upstream-Addr` directive lives only inside the `location /` block. The proxy is now doing two distinct jobs in one config: choosing a backend pool by path, then choosing a replica inside that pool.
+</Steps>
+
+<ActivityQuestion>
+The lecture's load-balancer table lists round-robin, least-connections, and IP-hash as common distribution algorithms. You just observed round-robin: every replica receives roughly equal traffic. Imagine three different production scenarios for the web pool: (a) a long-running file-upload endpoint where some requests hold a connection open for minutes while others return in milliseconds, (b) a session-cached application where a user's logged-in state lives in memory on whichever replica handled their first request, and (c) a stateless JSON API where every request is independent and roughly equal-cost. For each scenario, which algorithm is the right choice and why? Which scenario is the one round-robin is actually well-suited to?
+</ActivityQuestion>
+
 Run this command to produce a clean visible result with your identifier:
 
 ```bash
@@ -464,7 +578,7 @@ docker compose down
 
 ## Going Further
 
-You have directly observed TTL propagation in a live DNS zone, read production email authentication and TLS records with `dig` and `openssl`, traced CDN cache behavior through HTTP headers, and routed requests through a Layer 7 proxy. The natural next step on the proxy side is to add automatic TLS.
+You have directly observed TTL propagation in a live DNS zone, read production email authentication and TLS records with `dig` and `openssl`, traced CDN cache behavior through HTTP headers, and built a Layer 7 proxy that does both path-based routing and round-robin load balancing across three replicas. The natural next step on the proxy side is to add automatic TLS.
 
 [Caddy](https://caddyserver.com/docs/getting-started) replaces the nginx proxy with a server that handles certificate issuance and renewal automatically. On a machine with a public IP and a domain name pointed at it, Caddy requests a certificate from Let's Encrypt during first startup and renews it without any additional tooling. To see the difference in operational overhead, rewrite this activity's proxy configuration as a `Caddyfile` and compare the number of moving parts required to serve the same routes over HTTPS.
 
