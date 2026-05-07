@@ -2,7 +2,7 @@
 title: System Security and Hardening
 description: "Practical server hardening from first boot: threat models, least privilege, SSH keys, UFW firewalls, Fail2Ban, patching, and auditing."
 sidebar:
-  order: 13
+  order: 19
 draft: true
 ---
 
@@ -17,6 +17,17 @@ draft: true
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
+
+{/* ai-summary
+type: lecture
+slug: system-security-and-hardening
+order: 19
+covers: threat modeling and CIA triad; Linux hardening (SSH keys, least privilege, UFW, Fail2Ban, patching); container and image security; cloud IAM least privilege; IaC secrets management; CI/CD pipeline security; Kubernetes RBAC and NetworkPolicy; admission controllers; secrets encryption at rest; audit logging; security retrospective across all course topics
+prereq_lectures: linux-server-planning-and-configuration, networking-fundamentals, containerization-with-docker, cloud-computing, infrastructure-as-code, configuration-management, ci-cd, container-orchestration, network-services-and-application-delivery, monitoring-and-performance, log-management-and-analysis, incident-response-fundamentals, site-reliability-and-capacity-planning, windows-server-and-active-directory, on-premises-infrastructure
+followup_lectures: documentation-teamwork-wrap-up
+paired_activities: security-audit
+supports_labs:
+*/}
 
 Imagine you have just provisioned a fresh Ubuntu server and attached it to a public IP address. Within minutes, automated scanners will discover it. Within hours, bots will begin probing SSH, HTTP, and any other open port for default credentials and known vulnerabilities. This is not hypothetical; it is the baseline reality of operating a public-facing server.
 
