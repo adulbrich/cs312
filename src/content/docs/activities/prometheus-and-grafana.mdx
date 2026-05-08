@@ -14,12 +14,12 @@ type: activity
 slug: prometheus-and-grafana
 order: 13
 paired_lecture: monitoring-and-performance
-practices: pull-model scraping via service annotations vs. static targets; Prometheus exposition format; counter vs. gauge vs. histogram metric types; RED method in PromQL (rate, errors, p95 latency); USE method queries for node infrastructure metrics; Grafana dashboard building; absence-based alerting with absent(); comparison to the dead man's switch pattern from the lecture
+practices: pull-model scraping via service annotations vs. static targets; Prometheus exposition format; counter vs. gauge vs. histogram metric types; RED method in PromQL (rate, errors, p95 latency); direct target availability via up; USE method queries for node infrastructure metrics; Grafana dashboard building; absence-based alerting with absent(); comparison to the dead man's switch pattern from the lecture
 prereq_activities: minikube
-output: a minikube Grafana dashboard showing RED and USE panels alongside a firing Prometheus absence alert for a service you control
+output: a minikube Grafana dashboard showing RED, target-availability, and USE panels alongside a firing Prometheus absence alert for a service you control
 */}
 
-This activity puts into practice the concepts from the [Monitoring, Alerting, and Observability](/lectures/monitoring-and-performance/) lecture. You will install a lightweight Prometheus and Grafana stack on minikube using Helm, deploy a small instrumented service, and work through three layers of the lecture: what Prometheus actually collects (the raw exposition format and metric types), how to turn those metrics into RED and USE signals on a dashboard, and how an absence-based alert compares to the full dead man's switch pattern from the lecture. By the end, you will have a working local monitoring stack, a five-panel dashboard, and a firing alert you triggered yourself.
+This activity puts into practice the concepts from the [Monitoring, Alerting, and Observability](/lectures/monitoring-and-performance/) lecture. You will install a lightweight Prometheus and Grafana stack on minikube using Helm, deploy a small instrumented service, and work through three layers of the lecture: what Prometheus actually collects (the raw exposition format and metric types), how to turn those metrics into RED and USE signals on a dashboard, and how an absence-based alert compares to the full dead man's switch pattern from the lecture. By the end, you will have a working local monitoring stack, a six-panel dashboard, and a firing alert you triggered yourself.
 
 ---
 
@@ -92,10 +92,15 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
      persistentVolume:
        enabled: false
 
+   scrapeConfigs:
+     kubernetes-service-endpoints:
+       scrape_interval: 15s
+
    serverFiles:
      alerting_rules.yml:
        groups:
          - name: podinfo.rules
+           interval: 15s
            rules:
              - alert: PodinfoMissing
                expr: absent(up{service="podinfo", namespace="observability"})
@@ -108,7 +113,7 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
    EOF
    ```
 
-   This keeps the Prometheus install small and defines one alert rule up front. Alertmanager stays disabled, so in this activity you will inspect the firing rule in Prometheus rather than route a notification anywhere. Node Exporter is left enabled at its default so you can query Linux OS metrics later in this activity.
+   This keeps the Prometheus install small, speeds up the `kubernetes-service-endpoints` scrape job to `15s` so the `podinfo` demo responds quickly, and evaluates the demo alert rule group every `15s` without rewriting Prometheus's entire global config. Alertmanager stays disabled, so in this activity you will inspect the firing rule in Prometheus rather than route a notification anywhere. Node Exporter is left enabled at its default cadence so you can query Linux OS metrics later in this activity.
 
 5. **Write the Grafana values file:**
 
@@ -190,7 +195,9 @@ Prometheus is now running and will scrape its targets on a fixed interval. If th
 
 ## Deploy a Service and Let Prometheus Discover It
 
-Now you need something that produces application metrics. In this section you will deploy `podinfo`, expose its metrics on a separate port, let Prometheus discover that endpoint through service annotations, and then look at the raw data Prometheus is actually collecting.
+Now you need something that produces application metrics. In this section you will deploy `podinfo`, a small demo web service that already exposes Prometheus metrics, and give it one port for normal HTTP traffic and one port just for `/metrics`.
+
+Prometheus is already running in the `monitoring` namespace from the previous section. The new piece here is the application side: a Service in the `observability` namespace that tells Prometheus, through annotations, where that metrics endpoint lives so it can start scraping it automatically.
 
 <Steps>
 
@@ -264,7 +271,9 @@ Now you need something that produces application metrics. In this section you wi
    EOF
    ```
 
-   The Service annotations are the important part. They tell Prometheus that this Service should be scraped, and which port exposes metrics.
+   The Deployment runs `podinfo`, which is just a sample application for demos and testing. It serves the app itself on port `9898`, and it serves Prometheus metrics separately on port `9797`.
+
+   The Service annotations are the important part. They tell Prometheus that this Service should be scraped, which port to use, and which path contains the metrics text.
 
 2. **Apply the manifest and wait for the Deployment to become ready:**
 
@@ -284,13 +293,13 @@ Now you need something that produces application metrics. In this section you wi
    kubectl -n observability port-forward svc/podinfo 9898:9898 9797:9797
    ```
 
-   Keep that terminal open. You will use `http://127.0.0.1:9898` for test traffic and `http://127.0.0.1:9797/metrics` to inspect the raw exposition output.
+   Keep that terminal open. You will use `http://127.0.0.1:9898` for test traffic and `http://127.0.0.1:9797/metrics` to inspect the raw exposition output. The first URL is what a normal client would hit. The second URL is what Prometheus hits on every scrape.
 
 4. **Confirm that Prometheus discovered the new target:**
 
    Open `http://127.0.0.1:9090/targets` in your browser. Look for a target from the `observability` namespace with the `podinfo` Service name.
 
-   The state should become `UP` within a minute. That is the scrape relationship you created with three Service annotations, not with a hand-edited `prometheus.yml`.
+   The state should become `UP` within a minute. That means Prometheus discovered the Service from Kubernetes metadata, connected to `podinfo` on port `9797`, and successfully fetched `/metrics`. You created that scrape relationship with three Service annotations, not with a hand-edited `prometheus.yml`.
 
 5. **Run a simple query to confirm the target exists:**
 
@@ -308,13 +317,15 @@ Now you need something that produces application metrics. In this section you wi
    curl -s http://127.0.0.1:9797/metrics | head -50
    ```
 
+   This is the key mental model for the rest of the activity: you are looking directly at the HTTP response that `podinfo` returns when someone requests `/metrics`. Prometheus is not inventing these numbers. `podinfo` is exposing them, and Prometheus is repeatedly fetching this endpoint and storing what it sees.
+
    Find three things in the output:
 
    - A `# TYPE ... counter` line: this metric only ever increases. The `rate()` function will convert it to a per-second rate over a time window.
    - A `# TYPE ... gauge` line: this is a point-in-time value that can go up or down, such as current memory usage or active connection count.
    - Lines ending in `_bucket{le="..."}`: histogram buckets. Each bucket counts how many observations fell below that boundary value. `histogram_quantile()` reads across all buckets at query time to compute any percentile you ask for.
 
-   This is the Prometheus exposition format. Every exporter and every instrumented application produces text exactly like this. Prometheus fetches it, parses the values, and writes them to its time-series database on every scrape.
+   This text format is the Prometheus exposition format. `podinfo` is one instrumented application that speaks it; other exporters use the same overall pattern even though their metric names differ. In this setup, `podinfo` is the app, the Kubernetes Service makes its metrics endpoint reachable, Prometheus is the scraper and time-series database, and Grafana will later read from Prometheus to draw dashboards. The text you just fetched is the exact payload Prometheus parses on each scrape.
 
 </Steps>
 
@@ -342,27 +353,51 @@ Once the target is being scraped, make it do something interesting. In this sect
 
 2. **Query the RED signals in the Prometheus expression browser:**
 
+   Before you build dashboard panels, run two broad discovery queries so you can see what labels Prometheus is actually attaching in this cluster and which request paths are contributing background traffic:
+
    ```promql
-   sum(rate(http_requests_total{service="podinfo",  namespace="observability"}[1m]))
+   sum by (job, instance, service, namespace) (rate(http_requests_total[5m]))
    ```
 
    ```promql
-   sum(rate(http_requests_total{service="podinfo", namespace="observability", status=~"5.."}[1m]))
+   sum by (path, status) (rate(http_request_duration_seconds_count{service="podinfo", namespace="observability"}[5m]))
+   ```
+
+   The first query should show one `podinfo` target under the `kubernetes-service-endpoints` job. The second query makes an important behavior visible before you build any panels: Kubernetes is continuously calling `/readyz` and `/healthz`, so those probe requests will dominate simple request-rate graphs unless you filter them out.
+
+3. **Build the three RED queries you will use in Grafana:**
+
+   ```promql
+   sum(rate(http_request_duration_seconds_count{service="podinfo", namespace="observability", path=~"root|status|delay"}[5m]))
    ```
 
    ```promql
-   histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service="podinfo", namespace="observability"}[1m])))
+   sum(rate(http_request_duration_seconds_count{service="podinfo", namespace="observability", path=~"root|status|delay", status=~"5.."}[5m]))
    ```
 
-   These are the three RED signals: Rate, Errors, and Duration at the 95th percentile. The `service` and `namespace` selectors keep the queries focused on the podinfo workload you just deployed, even if your cluster already has other scraped workloads in it. The third query uses `histogram_quantile()` against the `_bucket` lines you saw in the raw exposition output. Notice that changing `0.95` to `0.99` would give you p99 with no additional storage cost; the buckets are already there.
+   ```promql
+   histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service="podinfo", namespace="observability", path=~"root|status|delay"}[5m])))
+   ```
 
-3. **Log into Grafana and create a dashboard:**
+   These are the three RED signals: Rate, Errors, and Duration at the 95th percentile. `podinfo` exposes both `http_requests_total` and the `http_request_duration_seconds` histogram family, but the histogram series are the better fit for this exercise because they include the `path` label. That lets you filter out the readiness and liveness probes and focus on the traffic you generated yourself. The `_count` series is the total number of observed requests, and the `_bucket` series is the latency distribution. These examples use a `5m` range instead of a very short window so they stay stable if Prometheus has only recently restarted or if you pause for a minute between steps. The third query uses `histogram_quantile()` against the `_bucket` lines you saw in the raw exposition output. Notice that changing `0.95` to `0.99` would give you p99 with no additional storage cost; the buckets are already there.
+
+   If the 5xx query comes back empty, do not assume the selector is wrong immediately. In this demo that usually means the current `podinfo` process has not served any `500` responses yet, or Prometheus has not collected enough recent scrapes after a restart for `rate()` to evaluate the series. Send a few more requests to `/status/500`, wait about 30 seconds, and run the query again.
+
+4. **Log into Grafana and create a dashboard:**
 
    Open `http://127.0.0.1:3000`. Log in with username `admin` and password `cs312grafana`.
 
    Create a new dashboard with three time-series panels using the queries above. Use the panel titles `Request rate`, `5xx rate`, and `p95 latency`. Set the time range to the last 15 minutes.
 
-4. **Query the USE method signals for the node:**
+   Add one more panel that answers a different question: is Prometheus currently able to see and scrape the Podinfo target at all? Use a Stat panel with this query:
+ 
+   ```promql
+   max(up{service="podinfo", namespace="observability"}) or on() vector(0)
+   ```
+
+   Title it `Podinfo target up`. A value of `1` means Prometheus currently has a healthy scrape target. A value of `0` means the target is either failing to scrape or has disappeared from discovery entirely.
+
+5. **Query the USE method signals for the node:**
 
    In the Prometheus expression browser, run these two queries:
 
@@ -376,9 +411,9 @@ Once the target is being scraped, make it do something interesting. In this sect
 
    The first computes CPU utilization as a percentage by subtracting the idle fraction from 100. The second computes how much of total RAM is in use. Both values come from the Node Exporter DaemonSet pod that started up during installation; it exposes Linux kernel metrics directly from `/proc` and `/sys`.
 
-   Add both as panels in a second row of the same dashboard. Label them `Node CPU utilization (%)` and `Node memory used (%)`. Your dashboard now answers two layers of questions: the top row covers service health via RED, and the bottom row covers infrastructure utilization via USE.
+   Add both as panels in a second row of the same dashboard. Label them `Node CPU utilization (%)` and `Node memory used (%)`. Your dashboard now answers three different questions: the RED panels show user-visible service behavior, the `Podinfo target up` panel shows whether Prometheus can currently see the service at all, and the USE panels show whether the underlying node is under resource pressure.
 
-5. **Generate a second burst of traffic while watching the dashboard refresh:**
+6. **Generate a second burst of traffic while watching the dashboard refresh:**
 
    ```bash
    for i in {1..10}; do curl -s http://127.0.0.1:9898/ >/dev/null; done
@@ -390,7 +425,7 @@ Once the target is being scraped, make it do something interesting. In this sect
 </Steps>
 
 <ActivityQuestion>
-Your dashboard now has two rows: RED signals for the service and USE signals for the node. If the 5xx rate climbed to 10% but CPU and memory stayed flat, which layer of the system would you investigate first, and why? If CPU climbed to 90% while error rate and latency stayed completely normal, would you page someone immediately? What does that scenario tell you about the relationship between infrastructure saturation and user-visible impact?
+Your dashboard now separates three kinds of evidence: RED for user-visible service behavior, `Podinfo target up` for scrape availability, and USE for node resource pressure. If the 5xx rate climbed to 10% but CPU and memory stayed flat, which layer would you investigate first, and why? If `Podinfo target up` dropped to `0` while CPU and memory stayed normal, what would that suggest is failing? If CPU climbed to 90% while error rate and latency stayed normal, would you page someone immediately?
 </ActivityQuestion>
 
 ---
@@ -405,7 +440,7 @@ Dashboards are useful only when someone is looking at them. In this stripped-dow
 
    Visit `http://127.0.0.1:9090/alerts` in your browser.
 
-   You should see the `PodinfoMissing` rule listed, but not firing.
+   You should see the `PodinfoMissing` rule listed in the `inactive` state. That is the expected state while Prometheus can still scrape the target. It will move to `Pending` and then `Firing` only after the target disappears for the full `for: 1m` window.
 
 2. **Confirm where that rule came from:**
 
@@ -428,7 +463,7 @@ Dashboards are useful only when someone is looking at them. In this stripped-dow
 
    The expression uses `absent()` and the rule has `for: 1m`, so the alert first shows as `Pending` and then transitions to `Firing` after one continuous minute of absence. The `for` clause prevents a single missed scrape from moving the rule into `Firing`; the target must stay absent for the full duration.
 
-   While the alert is in `Firing`, your Grafana dashboard and the Prometheus alert page together show the full picture: the top row shows the last-known RED values before the service disappeared, the bottom row shows the node is still healthy, and the alert page shows exactly which rule fired and why. In a larger stack, Alertmanager would sit after this step and decide whether to notify anyone.
+   While the alert is in `Firing`, the dashboard and the Prometheus alerts page give you different kinds of evidence. The RED panels show the recent request, error, and latency history from before Podinfo disappeared. The `Podinfo target up` panel shows the direct availability signal for the scrape target, and the USE panels show whether the node itself is still healthy. The Prometheus alerts page then shows the current state change: the `PodinfoMissing` rule is firing because the target has been absent for long enough. In a larger stack, Alertmanager would sit after this step and decide whether to notify anyone.
 
 5. **Restore the service:**
 
