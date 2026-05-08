@@ -13,7 +13,7 @@ import HistoricalNote from '/src/components/HistoricalNote.astro';
 type: lecture
 slug: monitoring-and-performance
 order: 13
-covers: metrics, logs, and traces; monitoring architectures; USE/RED and SLOs; Prometheus and PromQL; Kubernetes monitoring; dashboards, alerts, and burn-rate thinking
+covers: metrics, logs, and traces; monitoring architectures; USE/RED/Golden Signals and SLOs; Prometheus and PromQL; Kubernetes monitoring; dashboards, alerts, and burn-rate thinking
 prereq_lectures: container-orchestration, network-services-and-application-delivery
 followup_lectures: log-management-and-analysis
 paired_activities: prometheus-and-grafana
@@ -30,7 +30,7 @@ The observability community has converged on three categories of telemetry data,
 
 **Metrics** are numeric measurements collected at regular intervals: CPU utilization every 15 seconds, request count per minute, memory usage every 30 seconds. Because they are numeric and sampled uniformly, metrics are cheap to store and fast to query. They are excellent for answering "how much" and "how often" over time, which makes them the backbone of dashboards and alerting. A spike in error rate, a gradual climb in memory utilization, a sudden drop in request throughput: all of these reveal themselves clearly in a time-series graph.
 
-**Logs** are timestamped records of discrete events. When a request fails with a 500 error, a log entry captures the error message, the request path, the client IP, and often a stack trace. Logs are event-driven rather than interval-driven: they are written when something happens, not on a fixed schedule. That event-driven nature is what makes logs irreplaceable for diagnosis. Metrics tell you that something is wrong; logs tell you why. The Log Management and Incident Investigation lecture covers log tooling in depth.
+**Logs** are timestamped records of discrete events. When a request fails with a 500 error, a log entry captures the error message, the request path, the client IP, and often a stack trace. Logs are event-driven rather than interval-driven: they are written when something happens, not on a fixed schedule. That event-driven nature is what makes logs irreplaceable for diagnosis. Metrics tell you that something is wrong; logs tell you why.
 
 **Traces** follow a single request as it passes through multiple services. A trace shows that a particular API call spent 5 ms in the load balancer, 80 ms in the application server, and 340 ms waiting on a database query. In a single-service application, you do not need distributed tracing; all the timing information is visible in one place. As architecture grows to include multiple services that call each other, tracing becomes essential for identifying which service in the chain is the bottleneck. Tools like [Jaeger](https://www.jaegertracing.io/), [Tempo](https://grafana.com/oss/tempo/), and OpenTelemetry-compatible collectors gather traces.
 
@@ -76,7 +76,7 @@ In practice, SNMP metrics are collected by a polling agent (the [Prometheus SNMP
 
 ### The Push Model: StatsD and Application Emission
 
-An alternative to central polling is having applications emit metrics themselves. The StatsD protocol, developed at Etsy in 2011, defines a simple format for applications to push metric values to a local daemon via UDP: `page.views:1|c` increments a counter by one, and `request.latency:45|ms` records a 45-millisecond timing measurement. The daemon aggregates values over a flush interval and forwards the results to a backend like [Graphite](https://graphiteapp.org/) or [InfluxDB](https://www.influxdata.com/).
+An alternative to central polling is having applications emit metrics themselves. The [StatsD protocol](https://github.com/statsd/statsd), developed at Etsy in 2011, defines a simple format for applications to push metric values to a local daemon via UDP: `page.views:1|c` increments a counter by one, and `request.latency:45|ms` records a 45-millisecond timing measurement. The daemon aggregates values over a flush interval and forwards the results to a backend like [Graphite](https://graphiteapp.org/) or [InfluxDB](https://www.influxdata.com/).
 
 The push model makes instrumentation easy to add: drop in a library, call `statsd.increment("checkout.success")` at the relevant point in code, and the metric appears in your dashboard without configuring a separate exporter or exposing an HTTP endpoint. The tradeoff is that a quiet application looks identical to a crashed one. If the process stops emitting, you see no data. The collector cannot distinguish silence-from-health from silence-from-crash, which is a significant blind spot.
 
@@ -100,9 +100,9 @@ Application Performance Monitoring (APM) is a distinct category of observability
 
 APM instruments individual code paths automatically. In Java, APM agents typically use bytecode injection: the agent intercepts class loading at JVM startup and inserts instrumentation code into application methods without requiring changes to the application itself. In Python and Ruby, agents patch standard library functions at import time. The result is a call graph for each request: this HTTP request spent 5 ms in routing, 80 ms in business logic, and 340 ms waiting for a PostgreSQL query, and here is the specific query text that was slow.
 
-Tools in this space include [Dynatrace](https://www.dynatrace.com/), [New Relic APM](https://newrelic.com/), [Datadog APM](https://www.datadoghq.com/product/apm/), and [Elastic APM](https://www.elastic.co/observability/application-performance-monitoring). APM is most valuable when you know a service is slow (from service metrics) and need to understand which internal operation is responsible. In a monolithic application, APM is often the first tool for performance investigation. In a microservices architecture, APM and distributed tracing overlap substantially, and OpenTelemetry is the emerging instrumentation standard for both.
+Tools in this space include [Dynatrace](https://www.dynatrace.com/), [New Relic APM](https://newrelic.com/), [Datadog APM](https://www.datadoghq.com/product/apm/), [Sentry Performance](https://sentry.io/solutions/application-performance-monitoring/), and [Elastic APM](https://www.elastic.co/observability/application-performance-monitoring). APM is most valuable when you know a service is slow (from service metrics) and need to understand which internal operation is responsible. In a monolithic application, APM is often the first tool for performance investigation. In a microservices architecture, APM and distributed tracing overlap substantially, and OpenTelemetry is the emerging instrumentation standard for both.
 
-## What to Measure: Three Layers, USE, and RED
+## What to Measure: Three Layers and Monitoring Frameworks
 
 Deciding what to measure has two parts: understanding which layer of the system a metric describes, and applying systematic frameworks to avoid missing important signals.
 
@@ -142,6 +142,20 @@ The RED method, developed by Tom Wilkie, applies to request-driven services: web
 
 USE and RED together cover the full surface of a typical production system. USE tells you whether resources are healthy; RED tells you whether services are behaving correctly from the perspective of their callers.
 
+### The Golden Signals
+
+Google's Site Reliability Engineering book distilled monitoring for request-driven systems into four signals: latency, traffic, errors, and saturation. This overlaps heavily with RED. In practice, the Golden Signals are best understood as RED plus one explicit question about capacity. RED focuses on user-visible symptoms at the service boundary. The Golden Signals keep that same user-facing orientation, but make saturation explicit so you notice the resource pressure that often appears before latency and errors climb.
+
+**Latency** measures how long successful requests take, distinguished from how long failed requests take. A failure completing in 1 ms should not be averaged with slow successful requests; the two have different operational meanings. Latency should always be measured at percentiles, not as an average.
+
+**Traffic** measures demand on the system: requests per second, queries per second, or whatever unit best represents load. Traffic context is essential for interpreting other signals. High CPU at 100 requests per second may indicate a problem; high CPU at 10,000 requests per second may be expected.
+
+**Errors** measure the rate of requests that fail, both explicitly (HTTP 500, connection refused) and implicitly (HTTP 200 with incorrect content, when detectable).
+
+**Saturation** measures how full the service is: what proportion of its capacity it is consuming. For a CPU, it is utilization. For a connection pool, it is the fraction of connections in use. Saturation is often the leading indicator: it starts climbing before latency and errors do.
+
+USE, RED, and the Golden Signals are not competing religions. USE is strongest for resources and infrastructure. RED is strongest for request-driven services and alerting. The Golden Signals are a compact checklist for service dashboards that blends the user-experience focus of RED with an explicit capacity lens.
+
 ## SLIs, SLOs, and Error Budgets
 
 Knowing what to measure is only half the problem. You also need to define what "healthy enough" looks like. That is the role of Service Level Indicators, Service Level Objectives, and error budgets.
@@ -152,7 +166,7 @@ A **Service Level Objective (SLO)** is a target for an SLI over a rolling time w
 
 A **Service Level Agreement (SLA)** is a formal commitment to an SLO, typically with contractual consequences. SLAs are what vendors promise to enterprise customers. SLOs are what engineering teams set internally, usually more conservatively than the SLA so that a near-miss on the internal target does not immediately constitute a breach.
 
-The **error budget** is the complement of the SLO: the 0.1% of requests allowed to fail under a 99.9% objective over the measurement window. The error budget is not a number to minimize at all costs; it is a budget to spend deliberately. When the budget is healthy, engineering teams can deploy frequently and accept some risk in pursuit of feature velocity. When the budget is nearly exhausted, teams should shift priority to reliability work. This creates a data-driven conversation between product teams and operations teams, grounded in actual user impact rather than intuition. The Site Reliability Engineering and Capacity Planning lecture covers error budget policy and how organizations enforce it.
+The **error budget** is the complement of the SLO: the 0.1% of requests allowed to fail under a 99.9% objective over the measurement window. The error budget is not a number to minimize at all costs; it is a budget to spend deliberately. When the budget is healthy, engineering teams can deploy frequently and accept some risk in pursuit of feature velocity. When the budget is nearly exhausted, teams should shift priority to reliability work. This creates a data-driven conversation between product teams and operations teams, grounded in actual user impact rather than intuition.
 
 <Aside type="note" title="SLOs Require Organizational Commitment">
 An error budget creates the right incentives only if the organization acts on it. An SLO that nobody enforces when breached is just a number on a dashboard. The most important step after defining an SLO is agreeing on what specifically happens when the error budget burns down faster than expected: who is notified, what work gets deprioritized, and who makes the call.
@@ -160,7 +174,23 @@ An error budget creates the right incentives only if the organization acts on it
 
 ## Prometheus: Architecture and the Pull Model
 
-Prometheus is the most widely deployed open-source metrics system, and it is the standard foundation for monitoring in Kubernetes environments. Each application (or an exporter running alongside it) exposes a plain-text HTTP endpoint; Prometheus scrapes that endpoint on a configured interval and stores the results in a local time-series database.
+[Prometheus](https://prometheus.io/docs/introduction/overview/) is the most widely deployed open-source metrics system, and it is the standard foundation for monitoring in Kubernetes environments. Each application (or an exporter running alongside it) exposes a plain-text HTTP endpoint; Prometheus scrapes that endpoint on a configured interval and stores the results in a local time-series database.
+
+At a high level, Prometheus has a small number of moving parts. Targets and exporters expose metrics, service discovery tells Prometheus where those targets live, the Prometheus server scrapes and stores the results locally, Grafana and the built-in web UI query Prometheus for graphs, and Alertmanager handles notifications when alert rules fire. The diagram below deliberately simplifies the deployment so the main data flow stays visible.
+
+```mermaid
+flowchart LR
+  SD[Service discovery]
+  Targets[Applications and exporters]
+  Prom[Scrape, query, and rule engine]
+  TSDB[(Local TSDB)]
+  Prom --> TSDB
+
+  SD -->|discover targets| Prom
+  Prom <-->|pull /metrics| Targets
+  Graf[Grafana and Prometheus UI] -->|query| Prom
+  Prom -->|send firing alerts| AM[Alertmanager]
+```
 
 A typical endpoint response looks like this:
 
@@ -202,27 +232,6 @@ The correct place for high-cardinality identifiers is in logs or traces, not in 
 If Prometheus memory usage is climbing unexpectedly, check the current time series count using the metric `prometheus_tsdb_head_series`. To find which metrics have the most series, run `topk(10, count by (__name__)({__name__=~".+"}))` in Prometheus's query interface. More than a few million series in a single instance is a strong sign of a cardinality problem in the instrumentation.
 </Aside>
 
-## Recording Rules
-
-PromQL queries on large datasets are expensive to compute. A histogram quantile over millions of time series, or a complex aggregation across dozens of services, can take several seconds. When that query powers a dashboard that many engineers have open simultaneously, or an alert that Prometheus evaluates every 15 seconds, the compute cost multiplies quickly.
-
-Recording rules precompute expensive PromQL expressions and store the result as a new metric, updated on a configurable interval. Dashboards and alert rules that need the result query the precomputed metric instead of rerunning the expensive expression on every load or evaluation:
-
-```yaml
-groups:
-  - name: latency.rules
-    rules:
-      - record: job:http_request_duration_seconds:p95
-        expr: |
-          histogram_quantile(0.95,
-            sum by (job, le) (
-              rate(http_request_duration_seconds_bucket[5m])
-            )
-          )
-```
-
-The naming convention `level:metric:operation` is a Prometheus community standard. Here `job` is the aggregation level, `http_request_duration_seconds` is the base metric, and `p95` describes what the rule computes. Recording rules also let you materialize SLI calculations as metrics, simplifying both alerting and long-term SLO reporting. Rather than recalculating the error ratio in every alert expression, a recording rule updates it on a schedule and the alert simply checks the precomputed value.
-
 ## Exporters
 
 Most software does not expose Prometheus metrics natively. Exporters bridge this gap: separate processes that translate a target system's native instrumentation into Prometheus exposition format. [Node Exporter](https://prometheus.io/docs/guides/node-exporter/) exposes Linux operating system metrics from the host kernel: CPU, memory, disk I/O, network throughput, and filesystem usage. A PostgreSQL exporter translates database statistics. The SNMP Exporter converts OID values from network devices into Prometheus metrics, bridging the SNMP and pull-model worlds.
@@ -231,19 +240,19 @@ Dozens of community-maintained exporters cover databases, message brokers, web s
 
 ## Synthetic Monitoring and Real User Monitoring
 
-The pull model and check-based model both measure systems from the inside out. Synthetic monitoring measures from the outside in: scripted probes simulate what a user would do and verify the system responds correctly.
+The pull model and check-based model both measure systems from the inside out. **Synthetic monitoring** measures from the outside in: scripted probes simulate what a user would do and verify the system responds correctly.
 
 The [Prometheus Blackbox Exporter](https://github.com/prometheus/blackbox_exporter) probes endpoints over HTTP, HTTPS, DNS, TCP, and ICMP and exposes the results as Prometheus metrics: whether the probe succeeded, the response time, the TLS certificate expiry days remaining, and the HTTP status code. A service that passes its internal health checks but returns 502 from behind the load balancer shows up as healthy in internal metrics and failing in Blackbox Exporter probes. That discrepancy tells you the problem is between the service and the user (the ingress controller, the load balancer, the CDN) rather than in the service itself.
 
-External probing services such as Pingdom and UptimeRobot do the same thing from locations entirely outside your infrastructure, catching failures that affect external users but not internal checks: a misconfigured firewall, a BGP routing problem, or a certificate that internal services bypass through internal DNS.
+External probing services such as Pingdom and UptimeRobot do the same thing from locations entirely outside your infrastructure, catching failures that affect external users but not internal checks: a misconfigured firewall, a BGP routing problem, or a certificate that internal services bypass through internal DNS. Open-source tooling exists here too: Prometheus Blackbox Exporter covers protocol-level probes, while self-hosted tools such as Gatus and Uptime Kuma package probing with their own dashboards and alerting. Full browser-journey synthetics are also possible with open-source browser automation frameworks, but they usually require more assembly than managed services.
 
-**Real User Monitoring (RUM)** is categorically different. Instead of simulating user actions from a probe, RUM instruments the user's browser with JavaScript to measure actual user experience: page load time, time to interactive, Core Web Vitals, JavaScript error rates, and network timing from the user's actual connection and device. RUM data captures the distribution of real user experiences across geographies and devices, which synthetic probes from a fixed data center location cannot replicate.
+**Real User Monitoring (RUM)** is categorically different. Instead of simulating user actions from a probe, RUM instruments the user's browser with JavaScript to measure actual user experience: page load time, time to interactive, Core Web Vitals, JavaScript error rates, and network timing from the user's actual connection and device. RUM data captures the distribution of real user experiences across geographies and devices, which synthetic probes from a fixed data center location cannot replicate. In practice, many of the APM platforms named earlier, including Datadog, Dynatrace, New Relic, and Sentry, offer this browser-side view as part of the same product rather than as a completely separate tool.
 
 Synthetic monitoring provides consistent, controlled measurements and alerts you when the service breaks. RUM reveals how actual users are experiencing the service, including users on slow networks or older devices whose experience a synthetic probe from a fast connection would never see. Both belong in a mature monitoring stack.
 
 ## eBPF and Zero-Code Instrumentation
 
-eBPF (extended Berkeley Packet Filter) is a Linux kernel feature that allows small, sandboxed programs to run safely inside the kernel in response to events: system calls, network packet arrivals, function calls in user space. For observability, eBPF enables instrumentation without modifying application code, deploying agents inside application containers, or recompiling anything.
+[eBPF](https://ebpf.io/) is a Linux kernel feature that allows small, sandboxed programs to run safely inside the kernel in response to events: system calls, network packet arrivals, function calls in user space. For observability, eBPF enables instrumentation without modifying application code, deploying agents inside application containers, or recompiling anything.
 
 An eBPF-based observability tool running with appropriate privileges on a Kubernetes node can observe every HTTP request made by every pod, every database query, every DNS lookup, and every file operation, by tracing the kernel and library functions that all of these operations pass through. The instrumentation is transparent to the application: no code changes, no agent injection, no restart required.
 
@@ -253,13 +262,13 @@ An eBPF-based observability tool running with appropriate privileges on a Kubern
 
 Running Prometheus as a standalone process requires manually editing `prometheus.yml` with scrape target addresses and reloading when anything changes. In a Kubernetes environment, pods get rescheduled to different IP addresses and scaling events add or remove instances in seconds. Static configuration is impractical.
 
-The **Prometheus Operator** is a Kubernetes controller that manages Prometheus as a native Kubernetes resource. Rather than editing a configuration file, you define scrape targets and alert rules as Kubernetes Custom Resources. The Operator watches for these resources and reconciles Prometheus configuration automatically.
+The [**Prometheus Operator**](https://prometheus-operator.dev/) is a Kubernetes controller that manages Prometheus as a native Kubernetes resource. Rather than editing a configuration file, you define scrape targets and alert rules as Kubernetes Custom Resources. The Operator watches for these resources and reconciles Prometheus configuration automatically.
 
 **ServiceMonitor** is a Custom Resource Definition that tells the Prometheus Operator which Kubernetes Services to scrape, on which port, and at what interval. When you create a ServiceMonitor with `kubectl apply`, the Operator adds the corresponding scrape configuration to Prometheus automatically. The monitored Service needs no knowledge of Prometheus; the ServiceMonitor is a separate object that describes the relationship.
 
 **PrometheusRule** is a CRD that defines alert rules as Kubernetes objects. You create them with `kubectl apply`, view them with `kubectl get prometheusrule`, and manage their lifecycle with the same tools you use for any other manifest. This treats monitoring configuration as infrastructure code, subject to version control and automated deployment.
 
-The **kube-prometheus-stack** is a [Helm](https://helm.sh/) chart that bundles Prometheus, the Prometheus Operator, Alertmanager, Grafana, kube-state-metrics, and Node Exporter into a single installable package, pre-configured to monitor a Kubernetes cluster immediately after installation.
+The **kube-prometheus-stack** is a [Helm](https://helm.sh/) chart that bundles Prometheus, the Prometheus Operator, Alertmanager, Grafana, kube-state-metrics, and Node Exporter into a single installable package, pre-configured to monitor a Kubernetes cluster immediately after installation. That convenience is a property of the chart, not of Kubernetes itself. A plain Prometheus server running in a cluster does not automatically discover kube-state-metrics unless you configure scraping for it or use an operator/chart that wires it in.
 
 ### kube-state-metrics
 
@@ -271,15 +280,31 @@ When you write a PromQL query using `kube_pod_container_status_restarts_total`, 
 
 ## PromQL: Extracting Meaning from Metrics
 
-[PromQL](https://prometheus.io/docs/prometheus/latest/querying/basics/) is the query language for Prometheus data. A few functions cover the majority of practical use cases.
+[PromQL](https://prometheus.io/docs/prometheus/latest/querying/basics/) is the query language for Prometheus data. Most useful queries are built from the same small set of parts: a metric name, optional label matchers, an optional time window, optional functions, and optional aggregation. Once you can read those pieces in order, PromQL stops looking like punctuation and starts looking like a description of what you want to measure.
+
+### The Shape of a Query
+
+This query contains most of the core syntax worth learning first:
+
+```promql
+sum by (job) (rate(http_requests_total{job="api"}[5m]))
+```
+
+Read it from the inside out. `http_requests_total` is the metric name. `{job="api"}` filters to time series whose `job` label has that value. `[5m]` turns the selector into a five-minute history window. `rate(...)` converts a counter into a per-second rate over that window. `sum by (job) (...)` aggregates the matching series while preserving the `job` label. Most dashboard panels and alert rules are variations on this pattern.
+
+PromQL also supports scalar and string values, but most operational work uses vectors, which means sets of time series. The first question to ask of any query is therefore simple: do I need the latest sample from each series, or a window of historical samples?
 
 ### Instant and Range Vectors
 
-A plain metric name returns an **instant vector**: the most recent value for every time series matching that name, along with its labels. Adding a time window in square brackets produces a **range vector**: the historical values for each matching time series over the specified duration. A range vector is the input to functions like `rate()` and `increase()`, which need a window of history to compute rates of change.
+A plain metric name returns an **instant vector**: the most recent value for every time series matching that name, along with its labels. Adding a time window in square brackets produces a **range vector**: the historical values for each matching time series over the specified duration. A range vector is the input to functions like `rate()` and `increase()`, which need a window of history to compute rates of change. Many beginner mistakes in PromQL come from handing the wrong data shape to a function.
+
+### Functions Must Match the Metric
+
+Not every function applies to every metric. PromQL is type-aware, and the metric's semantics matter too. `rate()` and `increase()` are for counters, not gauges. Gauge-style metrics are usually read directly or summarized with over-time functions such as averages or maxima. Histogram functions such as `histogram_quantile()` require histogram bucket data. A query can be syntactically valid and still be conceptually wrong, such as taking `rate()` of free memory. The safest habit is to ask two questions before choosing a function: what kind of metric is this, and am I working with an instant vector or a range vector?
 
 ### rate() and increase()
 
-`rate()` computes the per-second average rate of increase of a counter over a time window:
+Counter metrics are rarely useful raw because they only increase. `rate()` computes the per-second average rate of increase of a counter over a time window:
 
 ```promql
 rate(http_requests_total[5m])
@@ -297,10 +322,14 @@ A value above 3 means the container restarted more than 3 times in the last 10 m
 
 ### histogram_quantile()
 
-For histograms, `histogram_quantile()` computes percentiles at query time:
+For histograms, `histogram_quantile()` computes percentiles at query time. For classic Prometheus histograms, you usually pair it with `rate()` over the `_bucket` series and an aggregation that preserves the `le` bucket label:
 
 ```promql
-histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))
+histogram_quantile(0.95,
+  sum by (job, le) (
+    rate(http_request_duration_seconds_bucket[5m])
+  )
+)
 ```
 
 This computes the 95th-percentile latency over a 5-minute window. Plotting p50, p95, and p99 on the same panel reveals the shape of the latency distribution and makes tail-latency problems immediately visible.
@@ -319,21 +348,30 @@ This computes total request rate grouped by service name. To compute memory usag
 100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)
 ```
 
+## Recording Rules
+
+Once you can express a query in PromQL, the next question is whether you should recompute it every time a dashboard loads or an alert evaluates. Some queries are expensive. A histogram quantile over millions of time series, or a complex aggregation across dozens of services, can take several seconds. When that query powers a dashboard that many engineers have open simultaneously, or an alert that Prometheus evaluates every 15 seconds, the compute cost multiplies quickly.
+
+Recording rules precompute expensive PromQL expressions and store the result as a new metric, updated on a configurable interval. Dashboards and alert rules that need the result query the precomputed metric instead of rerunning the expensive expression on every load or evaluation:
+
+```yaml
+groups:
+  - name: latency.rules
+    rules:
+      - record: job:http_request_duration_seconds:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (job, le) (
+              rate(http_request_duration_seconds_bucket[5m])
+            )
+          )
+```
+
+The naming convention `level:metric:operation` is a Prometheus community standard. Here `job` is the aggregation level, `http_request_duration_seconds` is the base metric, and `p95` describes what the rule computes. Recording rules also let you materialize SLI calculations as metrics, simplifying both alerting and long-term SLO reporting. Rather than recalculating the error ratio in every alert expression, a recording rule updates it on a schedule and the alert simply checks the precomputed value.
+
 ## Grafana: From Numbers to Understanding
 
-Prometheus stores and queries data; Grafana makes it visual. A Grafana dashboard is a collection of panels, each displaying one or more PromQL queries as a graph, stat, gauge, table, or heatmap. The power of a dashboard is not in any individual panel but in the layout of many panels together, so that relationships between signals are immediately visible without switching between multiple pages.
-
-### The Golden Signals
-
-Google's Site Reliability Engineering book distilled monitoring into four signals applicable to any request-driven service.
-
-**Latency** measures how long successful requests take, distinguished from how long failed requests take. A failure completing in 1 ms should not be averaged with slow successful requests; the two have different operational meanings. Latency should always be measured at percentiles, not as an average.
-
-**Traffic** measures demand on the system: requests per second, queries per second, or whatever unit best represents load. Traffic context is essential for interpreting other signals. High CPU at 100 requests per second may indicate a problem; high CPU at 10,000 requests per second may be expected.
-
-**Errors** measure the rate of requests that fail, both explicitly (HTTP 500, connection refused) and implicitly (HTTP 200 with incorrect content, when detectable).
-
-**Saturation** measures how full the service is: what proportion of its capacity it is consuming. For a CPU, it is utilization. For a connection pool, it is the fraction of connections in use. Saturation is often the leading indicator: it starts climbing before latency and errors do.
+Prometheus stores and queries data; Grafana makes it visual. A Grafana dashboard is a collection of panels, each displaying one or more PromQL queries as a graph, stat, gauge, table, or heatmap. The power of a dashboard is not in any individual panel but in the layout of many panels together, so that relationships between signals are immediately visible without switching between multiple pages. In practice, the most effective dashboards organize those panels around a monitoring strategy such as RED or the Golden Signals, then arrange them so the viewer can move from symptom to likely cause without hunting.
 
 ### Dashboard Design Principles
 
@@ -478,7 +516,7 @@ This query computes the 1-hour burn rate against a 99.9% SLO. By itself, that is
 
 ## On-Call Culture and MTTD/MTTR
 
-The goal of the severity hierarchy is to ensure that the on-call rotation is sustainable. On-call engineers who are repeatedly interrupted by urgent alerts burn out and make mistakes during incidents. Google's SRE literature treats roughly two distinct incidents per 12-hour shift as an upper bound for sustainable pager load. An incident here means one underlying problem, even if that problem generates many duplicate pages. That benchmark is useful because it forces you to examine grouping quality, duplicate alert fan-out, and alert storms rather than counting raw notifications alone. The Site Reliability Engineering and Capacity Planning lecture covers on-call sustainability in depth.
+The goal of the severity hierarchy is to ensure that the on-call rotation is sustainable. On-call engineers who are repeatedly interrupted by urgent alerts burn out and make mistakes during incidents. Google's SRE literature treats roughly two distinct incidents per 12-hour shift as an upper bound for sustainable pager load. An incident here means one underlying problem, even if that problem generates many duplicate pages. That benchmark is useful because it forces you to examine grouping quality, duplicate alert fan-out, and alert storms rather than counting raw notifications alone.
 
 ### MTTD and MTTR
 
@@ -518,6 +556,7 @@ The Log Management and Incident Investigation lecture extends these foundations 
 
 ## Resources
 
+- <a href="https://www.youtube.com/watch?v=rT4fJNbfe14" target="_blank" rel="noopener noreferrer">Prometheus: The Documentary (YouTube)</a>
 - <a href="https://sre.google/sre-book/monitoring-distributed-systems/" target="_blank" rel="noopener noreferrer">Monitoring Distributed Systems (Rob Ewaschuk) (Book Chapter)</a>
 - <a href="https://www.brendangregg.com/usemethod.html" target="_blank" rel="noopener noreferrer">The USE Method (Brendan Gregg) (Deep-Dive Article)</a>
 - <a href="https://grafana.com/blog/2018/08/02/the-red-method-how-to-instrument-your-services/" target="_blank" rel="noopener noreferrer">The RED Method: How to Instrument Your Services (Tom Wilkie / Grafana) (Deep-Dive Article)</a>

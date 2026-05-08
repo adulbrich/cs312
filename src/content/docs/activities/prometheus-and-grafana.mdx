@@ -325,7 +325,7 @@ Prometheus is already running in the `monitoring` namespace from the previous se
    - A `# TYPE ... gauge` line: this is a point-in-time value that can go up or down, such as current memory usage or active connection count.
    - Lines ending in `_bucket{le="..."}`: histogram buckets. Each bucket counts how many observations fell below that boundary value. `histogram_quantile()` reads across all buckets at query time to compute any percentile you ask for.
 
-   This text format is the Prometheus exposition format. `podinfo` is one instrumented application that speaks it; other exporters use the same overall pattern even though their metric names differ. In this setup, `podinfo` is the app, the Kubernetes Service makes its metrics endpoint reachable, Prometheus is the scraper and time-series database, and Grafana will later read from Prometheus to draw dashboards. The text you just fetched is the exact payload Prometheus parses on each scrape.
+   This text format is the Prometheus exposition format. `podinfo` is one instrumented application that speaks it; other exporters use the same overall pattern even though their metric names differ. `podinfo` also has OpenTelemetry support upstream, but this activity is not using OTLP or an OpenTelemetry Collector; it is scraping the Prometheus-format `/metrics` endpoint directly. In this setup, `podinfo` is the app, the Kubernetes Service makes its metrics endpoint reachable, Prometheus is the scraper and time-series database, and Grafana will later read from Prometheus to draw dashboards. The text you just fetched is the exact payload Prometheus parses on each scrape.
 
 </Steps>
 
