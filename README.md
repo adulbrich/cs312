@@ -46,6 +46,7 @@ This repository contains the source code for the CS312 website.
 - [ ] Add the DNS exercise back from 2024.
 - [ ] Evaluate honeypot content, such as T-Pot CE, as a possible addition.
 - [ ] Investigate [Angie](https://en.angie.software/).
+- [ ] Discuss load and performance testing tools, such as k6, in the context of capacity planning and performance monitoring.
 
 ### Research Queue
 
