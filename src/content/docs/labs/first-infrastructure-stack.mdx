@@ -281,9 +281,9 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    ```hcl
    variable "ami_id" {
-     description = "AMI ID for the EC2 instance (Ubuntu 24.04 in us-east-1)"
+     description = "AMI ID for the EC2 instance (Ubuntu 26.04 in us-east-1)"
      type        = string
-     default     = "ami-0a0e5d9c7acc336f1"
+     default     = "ami-0d13e2317a7e75c95"
    }
 
    variable "instance_type" {
@@ -299,12 +299,12 @@ The stack you are about to define provisions two EC2 instances and two security 
    ```
 
    <Aside type="tip">
-   The `ami_id` default may need updating; AMI IDs change over time and vary by region. To find the current Ubuntu 24.04 LTS AMI in us-east-1, open the EC2 Console, click **Launch instance**, search for "Ubuntu 24.04", and copy the AMI ID from the results without actually launching anything. It will look like `ami-0a0e5d9c7acc336f1`. Paste it as the default in `variables.tf`.
+   The `ami_id` default may need updating; AMI IDs change over time and vary by region. To find the current Ubuntu 26.04 LTS AMI in us-east-1, open the EC2 Console, click **Launch instance**, search for "Ubuntu 26.04", and copy the AMI ID from the results without actually launching anything. It will look like `ami-0d13e2317a7e75c95`. Paste it as the default in `variables.tf`.
 
-   If you have the AWS CLI configured, you can also retrieve it programmatically (add `--profile cs312` if you are using a named profile):
+   If you have the AWS CLI configured, you can also retrieve it programmatically (add `--profile profile-name` if you are using a named profile):
    ```bash
    aws ec2 describe-images \
-     --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
+     --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*" \
                "Name=architecture,Values=x86_64" \
                "Name=state,Values=available" \
      --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' \
