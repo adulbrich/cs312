@@ -138,7 +138,7 @@ Before adding any resources, set up the working directory, introduce two data so
 
      filter {
        name   = "name"
-       values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
+       values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*"]
      }
 
      filter {
@@ -150,7 +150,7 @@ Before adding any resources, set up the working directory, introduce two data so
 
     `main.tf` is the primary configuration file for this project. The `terraform {}` block sets the required Terraform version and constrains provider dependencies. This AWS constraint allows any compatible 6.x provider release at or above 6.41.0. The `provider "aws" {}` block configures how the AWS provider connects to your account: which region to target and how to authenticate. See the [AWS provider documentation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs) for the full set of arguments. The two `data {}` blocks are data sources: unlike resource blocks, data sources read existing infrastructure rather than create it. They are read-only queries whose results you can reference anywhere in the configuration.
 
-   `owners = ["099720109477"]` limits results to images published by Canonical. Ubuntu 24.04 images now use the `hvm-ssd-gp3` naming family, so an older `hvm-ssd` filter will not match current releases.
+   `owners = ["099720109477"]` limits results to images [published by Canonical](https://documentation.ubuntu.com/aws/aws-how-to/instances/find-ubuntu-images/). Ubuntu 26.04 images uses the `hvm-ssd-gp3` naming family, so an older `hvm-ssd` filter will not match current releases.
 
 3. **Write `variables.tf`:**
 

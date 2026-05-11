@@ -182,7 +182,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 2. Navigate to **EC2 > Instances** and click **Launch instances**.
 
    - **Name:** `cs312-web`
-   - **AMI:** Ubuntu Server 24.04 LTS (64-bit x86)
+   - **AMI:** Ubuntu Server 26.04 LTS (64-bit x86)
    - **Instance type:** `t3.micro`
    - **Key pair:** select your existing key pair
    - **Network settings:** click **Edit**
@@ -197,7 +197,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 3. Launch a second instance that plays the private-tier role.
 
    - **Name:** `cs312-db-probe`
-   - **AMI:** Ubuntu Server 24.04 LTS (64-bit x86)
+   - **AMI:** Ubuntu Server 26.04 LTS (64-bit x86)
    - **Instance type:** `t3.micro`
    - **Key pair:** select your existing key pair
    - **Network settings:** click **Edit**
@@ -291,7 +291,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
     aws sts get-caller-identity
     ```
 
-    Ubuntu 24.04 does not ship `awscli` in its apt repositories, so you install it from the official AWS bundle instead. The response shows your account ID and the role ARN. An ARN (Amazon Resource Name) is a globally unique identifier that AWS uses to refer to any resource across any account and region; you will see them throughout the AWS CLI and console. The CLI found and used the credentials from the metadata service without a single `aws configure` prompt.
+    Ubuntu 26.04 does not ship `awscli` in its apt repositories, so you install it from the official AWS bundle instead. The response shows your account ID and the role ARN. An ARN (Amazon Resource Name) is a globally unique identifier that AWS uses to refer to any resource across any account and region; you will see them throughout the AWS CLI and console. The CLI found and used the credentials from the metadata service without a single `aws configure` prompt.
 
 12. Validate the security-group relationship you built earlier by probing the private instance on port 5432:
 
