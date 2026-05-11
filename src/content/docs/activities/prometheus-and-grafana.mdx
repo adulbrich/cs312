@@ -3,7 +3,6 @@ title: "Prometheus and Grafana"
 description: "Deploy a pull-based metrics stack on minikube, explore the Prometheus exposition format, query RED and USE signals in PromQL, build a dashboard, and watch an absence-based alert fire."
 sidebar:
   order: 13
-draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
@@ -506,4 +505,4 @@ You have worked through the pull model end to end: raw exposition format, PromQL
 
 For deeper monitoring, compare this activity's two-release setup to the `kube-prometheus-stack` chart used in the later lab. Run `helm show values prometheus-community/kube-prometheus-stack | less` and notice how much more of the Kubernetes ecosystem it packages: the Prometheus Operator, ServiceMonitors and PrometheusRules as Kubernetes objects, kube-state-metrics for Kubernetes-level signals, and pre-built dashboards for the cluster. Pay particular attention to ServiceMonitor, which replaces the annotation-based discovery you used here.
 
-For deeper alerting, read the SRE Workbook chapter [Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/) and try writing a burn-rate rule against the error data you collected. A burn rate of 14.4 means a 30-day error budget exhausts in two days. The PromQL expression in the lecture gives you the starting point; the Workbook explains how to pair a short window with a long window to reduce false positives from transient spikes while still resetting quickly once the incident ends.
+For deeper alerting, read the Google SRE chapter [Alerting on SLOs](https://sre.google/workbook/alerting-on-slos/) and try writing a burn-rate rule against the error data you collected. A burn rate of 14.4 means a 30-day error budget exhausts in two days. The PromQL expression in the lecture gives you the starting point; the Workbook explains how to pair a short window with a long window to reduce false positives from transient spikes while still resetting quickly once the incident ends.

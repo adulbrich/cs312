@@ -3,7 +3,6 @@ title: "Monitoring, Alerting, and Observability"
 description: "The architectures, frameworks, and tools of production monitoring: pull, push, and check-based systems; USE and RED methods; SLOs and error budgets; Prometheus, Grafana, and PromQL; alert design; and the practices that keep on-call rotations sustainable."
 sidebar:
   order: 13
-draft: true
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -269,6 +268,12 @@ The [**Prometheus Operator**](https://prometheus-operator.dev/) is a Kubernetes 
 **PrometheusRule** is a CRD that defines alert rules as Kubernetes objects. You create them with `kubectl apply`, view them with `kubectl get prometheusrule`, and manage their lifecycle with the same tools you use for any other manifest. This treats monitoring configuration as infrastructure code, subject to version control and automated deployment.
 
 The **kube-prometheus-stack** is a [Helm](https://helm.sh/) chart that bundles Prometheus, the Prometheus Operator, Alertmanager, Grafana, kube-state-metrics, and Node Exporter into a single installable package, pre-configured to monitor a Kubernetes cluster immediately after installation. That convenience is a property of the chart, not of Kubernetes itself. A plain Prometheus server running in a cluster does not automatically discover kube-state-metrics unless you configure scraping for it or use an operator/chart that wires it in.
+
+<Aside type="note" title="Managed Runtimes Change the Backend More Than the Concepts">
+If you run Kubernetes through EKS, GKE, or AKS, you may use a managed Prometheus service instead of operating Prometheus yourself. The underlying ideas do not change: exporters still expose metrics, labels still distinguish time series, and PromQL or Prometheus-compatible queries still power dashboards and alerts. What changes is that cloud providers also expose their own native metrics for the managed pieces around your workloads, such as load balancers, managed databases, and serverless components.
+
+The same logic applies outside Kubernetes. If you run containers on ECS, you will often start with CloudWatch metrics and Container Insights, then add OpenTelemetry or Prometheus-compatible metrics when you need deeper application detail. On EC2 or other virtual machines, Node Exporter and application exporters fill the same role. In Nomad environments, teams commonly pair Prometheus with Nomad or Consul service discovery, or use a vendor platform such as Datadog. The real choice is usually not whether to do observability, but which layers are provider-managed and which layers you instrument and query yourself.
+</Aside>
 
 ### kube-state-metrics
 
