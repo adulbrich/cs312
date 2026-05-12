@@ -272,7 +272,7 @@ Prometheus is already running in the `monitoring` namespace from the previous se
 
    The Deployment runs `podinfo`, which is just a sample application for demos and testing. It serves the app itself on port `9898`, and it serves Prometheus metrics separately on port `9797`.
 
-   The Service annotations are the important part. They tell Prometheus that this Service should be scraped, which port to use, and which path contains the metrics text.
+   The Service *annotations* are the important part. They tell Prometheus that this Service should be scraped, which port to use, and which path contains the metrics text.
 
 2. **Apply the manifest and wait for the Deployment to become ready:**
 
@@ -336,7 +336,16 @@ Prometheus learned about `podinfo` because the Service carried three annotations
 
 ## Query RED and USE Signals
 
-Once the target is being scraped, make it do something interesting. In this section you will generate traffic, translate the raw metrics into RED method signals for the service, and then query USE method signals for the node that hosts it. Both become panels in a single dashboard.
+Once the target is being scraped, make it do something interesting. In this section you will generate traffic, run a small set of Prometheus checks to validate labels and target state, and then build all RED and USE panels directly in Grafana.
+
+Before the first query, keep this PromQL syntax refresher nearby:
+
+- `metric_name{label="value"}` selects time series by metric name and exact label match.
+- `label=~"regex"` uses a regex label match instead of exact match.
+- `[5m]` after a metric selects a 5 minute range vector.
+- `rate(counter[5m])` converts a counter to a per-second rate over that window.
+- `sum by (label1, label2) (...)` aggregates series while keeping only listed labels.
+- `histogram_quantile(0.95, ...)` computes p95 from histogram bucket series.
 
 <Steps>
 
@@ -350,69 +359,90 @@ Once the target is being scraped, make it do something interesting. In this sect
 
    This gives you three things to measure immediately: total request volume, error count, and slow requests.
 
-2. **Query the RED signals in the Prometheus expression browser:**
+2. **Run two quick checks in the Prometheus expression browser:**
 
-   Before you build dashboard panels, run two broad discovery queries so you can see what labels Prometheus is actually attaching in this cluster and which request paths are contributing background traffic:
+   Before building dashboard panels, run two small validation queries: one to confirm target identity labels, and one to confirm request labels (`path`, `status`) and spot probe traffic.
 
    ```promql
-   sum by (job, instance, service, namespace) (rate(http_requests_total[5m]))
+   sum by (job, instance, service, namespace) (up{service="podinfo", namespace="observability"})
    ```
 
    ```promql
    sum by (path, status) (rate(http_request_duration_seconds_count{service="podinfo", namespace="observability"}[5m]))
    ```
 
-   The first query should show one `podinfo` target under the `kubernetes-service-endpoints` job. The second query makes an important behavior visible before you build any panels: Kubernetes is continuously calling `/readyz` and `/healthz`, so those probe requests will dominate simple request-rate graphs unless you filter them out.
+   The first query should show one `podinfo` target under the `kubernetes-service-endpoints` job. The second query makes an important behavior visible before you build panels: Kubernetes is continuously calling `/readyz` and `/healthz`, so those probe requests will dominate simple request-rate graphs unless you filter them out.
 
-3. **Build the three RED queries you will use in Grafana:**
+3. **Log into Grafana and create the dashboard shell first:**
+
+   Open `http://127.0.0.1:3000`. Log in with username `admin` and password `cs312grafana`.
+
+   Create a new dashboard and set the time range to the last 15 minutes. You will add six panels in two rows:
+
+   - Row 1 (service behavior): `Request rate`, `5xx rate`, `p95 latency`, `Podinfo target up`
+   - Row 2 (node resources): `Node CPU utilization (%)`, `Node memory used (%)`
+
+4. **Add the RED panels in Grafana, one query at a time:**
+
+   **Panel 1: `Request rate`**
 
    ```promql
    sum(rate(http_request_duration_seconds_count{service="podinfo", namespace="observability", path=~"root|status|delay"}[5m]))
    ```
 
+   This is RED **Rate**. `http_request_duration_seconds_count` is a counter from the latency histogram family, so `rate(...[5m])` gives requests per second. The `path` regex intentionally includes only the routes you generated and excludes `/readyz` and `/healthz` probe traffic.
+
+   **Panel 2: `5xx rate`**
+
    ```promql
    sum(rate(http_request_duration_seconds_count{service="podinfo", namespace="observability", path=~"root|status|delay", status=~"5.."}[5m]))
    ```
+
+   This is RED **Errors**. It uses the same base counter and filters to status codes matching `5..` (all 5xx). If this panel is empty, send a few more `/status/500` requests, wait about 30 seconds, and refresh.
+
+   **Panel 3: `p95 latency`**
 
    ```promql
    histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service="podinfo", namespace="observability", path=~"root|status|delay"}[5m])))
    ```
 
-   These are the three RED signals: Rate, Errors, and Duration at the 95th percentile. `podinfo` exposes both `http_requests_total` and the `http_request_duration_seconds` histogram family, but the histogram series are the better fit for this exercise because they include the `path` label. That lets you filter out the readiness and liveness probes and focus on the traffic you generated yourself. The `_count` series is the total number of observed requests, and the `_bucket` series is the latency distribution. These examples use a `5m` range instead of a very short window so they stay stable if Prometheus has only recently restarted or if you pause for a minute between steps. The third query uses `histogram_quantile()` against the `_bucket` lines you saw in the raw exposition output. Notice that changing `0.95` to `0.99` would give you p99 with no additional storage cost; the buckets are already there.
+   This is RED **Duration** at the 95th percentile. `http_request_duration_seconds_bucket` provides histogram bucket counters labeled by `le` (less-than-or-equal bucket boundary). `rate()` computes per-second bucket increases, `sum by (le)` combines matching buckets, and `histogram_quantile(0.95, ...)` estimates p95.
 
-   If the 5xx query comes back empty, do not assume the selector is wrong immediately. In this demo that usually means the current `podinfo` process has not served any `500` responses yet, or Prometheus has not collected enough recent scrapes after a restart for `rate()` to evaluate the series. Send a few more requests to `/status/500`, wait about 30 seconds, and run the query again.
+   These three panels use the same source metric family on purpose: `_count` for request volume and errors, `_bucket` for latency percentile.
 
-4. **Log into Grafana and create a dashboard:**
+5. **Add a direct target-availability Stat panel:**
 
-   Open `http://127.0.0.1:3000`. Log in with username `admin` and password `cs312grafana`.
-
-   Create a new dashboard with three time-series panels using the queries above. Use the panel titles `Request rate`, `5xx rate`, and `p95 latency`. Set the time range to the last 15 minutes.
-
-   Add one more panel that answers a different question: is Prometheus currently able to see and scrape the Podinfo target at all? Use a Stat panel with this query:
+   **Panel 4: `Podinfo target up`**
  
    ```promql
    max(up{service="podinfo", namespace="observability"}) or on() vector(0)
    ```
 
-   Title it `Podinfo target up`. A value of `1` means Prometheus currently has a healthy scrape target. A value of `0` means the target is either failing to scrape or has disappeared from discovery entirely.
+   `up{...}` is per-target scrape health. `max(...)` collapses to one value. `or on() vector(0)` provides a fallback zero when the left side has no series at all, so the panel shows `0` instead of `No data` if the target disappears from discovery.
 
-5. **Query the USE method signals for the node:**
+6. **Add the USE panels in Grafana:**
 
-   In the Prometheus expression browser, run these two queries:
+   **Panel 5: `Node CPU utilization (%)`**
 
    ```promql
    100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])))
    ```
 
+   `node_cpu_seconds_total` is a counter partitioned by CPU mode. `mode="idle"` selects idle time only. `rate(...[5m])` gives the idle fraction per second, `avg(...)` averages across cores and instances in this small cluster, and `1 - idle` gives used CPU fraction. Multiplying by 100 gives a percent.
+
+    **Panel 6: `Node memory used (%)`**
+
    ```promql
    100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))
    ```
 
-   The first computes CPU utilization as a percentage by subtracting the idle fraction from 100. The second computes how much of total RAM is in use. Both values come from the Node Exporter DaemonSet pod that started up during installation; it exposes Linux kernel metrics directly from `/proc` and `/sys`.
+   This computes memory usage percent as `1 - available/total`. `MemAvailable` is the kernel estimate of allocatable memory without heavy reclaim.
 
-   Add both as panels in a second row of the same dashboard. Label them `Node CPU utilization (%)` and `Node memory used (%)`. Your dashboard now answers three different questions: the RED panels show user-visible service behavior, the `Podinfo target up` panel shows whether Prometheus can currently see the service at all, and the USE panels show whether the underlying node is under resource pressure.
+   Both values come from Node Exporter. In minikube this is typically one node, so these queries act as cluster-node health checks.
 
-6. **Generate a second burst of traffic while watching the dashboard refresh:**
+   Your dashboard now answers three different questions: RED panels show user-visible service behavior, `Podinfo target up` shows scrape visibility of the service, and USE panels show node resource pressure.
+
+7. **Generate a second burst of traffic while watching the dashboard refresh:**
 
    ```bash
    for i in {1..10}; do curl -s http://127.0.0.1:9898/ >/dev/null; done
