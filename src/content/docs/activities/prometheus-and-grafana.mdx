@@ -338,14 +338,24 @@ Prometheus learned about `podinfo` because the Service carried three annotations
 
 Once the target is being scraped, make it do something interesting. In this section you will generate traffic, run a small set of Prometheus checks to validate labels and target state, and then build all RED and USE panels directly in Grafana.
 
-Before the first query, keep this PromQL syntax refresher nearby:
+A normal PromQL query usually has one of these shapes:
 
-- `metric_name{label="value"}` selects time series by metric name and exact label match.
-- `label=~"regex"` uses a regex label match instead of exact match.
-- `[5m]` after a metric selects a 5 minute range vector.
-- `rate(counter[5m])` converts a counter to a per-second rate over that window.
-- `sum by (label1, label2) (...)` aggregates series while keeping only listed labels.
-- `histogram_quantile(0.95, ...)` computes p95 from histogram bucket series.
+```promql
+# Instant selector ("what is true right now")
+# this selects time series by metric name and exact label match
+# we an use regex match with =~ instead of = 
+metric_name{label="value"}
+
+# Range function over time ("how has this changed over 5 minutes")
+# the rate function converts a counter to a per-second rate over the window
+rate(metric_name{label="value"}[5m])
+
+# Aggregated result ("combine many series into a summary")
+# this aggregates series while keeping only listed labels
+sum by (label1, label2) (rate(metric_name{label="value"}[5m]))
+```
+
+You can find all available [query functions in the Prometheus documentation](https://prometheus.io/docs/prometheus/latest/querying/functions/).
 
 <Steps>
 
