@@ -212,7 +212,7 @@ on:
       - 'Dockerfile'
 ```
 
-`pull_request` fires when a pull request is opened, synchronized (new commits pushed), or reopened. This is the primary trigger for running CI checks on proposed changes before they are merged. A subtle but important variant is `pull_request_target`, which runs in the context of the *target* branch rather than the PR branch; it is more privileged and has been the source of many publicized supply-chain incidents, so reach for it only when you understand the implications.
+`pull_request` fires when a pull request is opened, synchronized (new commits pushed), or reopened. This is the primary trigger for running CI checks on proposed changes before they are merged. A subtle but important variant is `pull_request_target`, which runs in the context of the *target* branch rather than the PR branch; it is more privileged and has been the source of [many publicized supply-chain incidents](https://tanstack.com/blog/npm-supply-chain-compromise-postmortem), so reach for it only when you understand the implications.
 
 <Aside type="caution" title="Why pull_request_target Is Dangerous">
 With `pull_request`, fork PRs run without access to repository secrets and with a read-only `GITHUB_TOKEN`, so untrusted code has very limited reach. `pull_request_target` flips the trust boundary: it runs using the base branch workflow file and can access repository secrets, because it is designed for write-back operations like labeling or commenting on fork PRs. The trap is checking out and executing the PR's code inside a `pull_request_target` workflow. That combination gives attacker-controlled code access to credentials it should never see. The rule is simple: if you use `pull_request_target`, never check out or run code from the PR branch.
