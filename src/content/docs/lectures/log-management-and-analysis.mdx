@@ -27,7 +27,7 @@ Log management is the practice of collecting, storing, and querying those record
 
 Metrics and logs are complementary. You cannot replace one with the other, and understanding why helps you know which to reach for first.
 
-Metrics are collected at regular, predetermined intervals regardless of whether anything interesting is happening. Every 15 seconds, Prometheus scrapes memory usage, CPU utilization, and request counts. The result is a dense, uniform time series: every interval of the past week has a data point, even the ones where nothing was wrong. This uniformity is what makes metrics cheap to store, fast to query, and well-suited for dashboards and alerting.
+Metrics are collected at regular, predetermined intervals regardless of whether anything interesting is happening. In many production setups, Prometheus scrapes memory usage, CPU utilization, and request counts every 15 seconds, though the upstream default global scrape interval is 1 minute unless overridden. The result is a dense, uniform time series: every interval of the past week has a data point, even the ones where nothing was wrong. This uniformity is what makes metrics cheap to store, fast to query, and well-suited for dashboards and alerting.
 
 Logs are event-driven. A log entry is written when something happens: a request completes, an error is thrown, a configuration file is reloaded, a user authenticates. Between events, nothing is written. A quiet system writes few logs; a system under heavy load or under attack writes many. This variable density is the first thing that distinguishes log analysis from metrics analysis.
 
@@ -168,7 +168,7 @@ The **/var/log directory** remains the traditional home for plain-text log files
 Plain-text log files are readable with `cat`, `less`, `grep`, and `awk` without special tooling. That simplicity is a durability advantage: you can process log files from a decade ago with the same tools you use today.
 
 <Aside type="note" title="Logging on macOS and Windows">
-On macOS, the primary system log mechanism is the **Unified Logging System (ULS)**, which replaced syslog. Logs are stored in `/var/log/` for some older daemons, but system logs are primarily queried via the `log` command: `log show --predicate 'eventMessage contains[c] "error"' --info --last 1h`. Windows uses the **Event Log**, managed by the Event Viewer GUI or queried via PowerShell: `Get-EventLog -LogName Application -EntryType Error -Newest 100`. Windows also writes application logs to files under `C:\ProgramData\` or application-specific directories. The underlying principle is the same across all platforms: applications write structured or unstructured events to a system log store, operators retrieve and search those events, and centralized collection agents aggregate logs from many machines. The tools and paths differ, but the investigation workflow is portable.
+On macOS, the primary system log mechanism is the **Unified Logging System (ULS)**, which replaced syslog. Logs are stored in `/var/log/` for some older daemons, but system logs are primarily queried via the `log` command: `log show --predicate 'eventMessage contains[c] "error"' --info --last 1h`. Windows uses the **Event Log**, managed by the Event Viewer GUI or queried via PowerShell: `Get-WinEvent -FilterHashtable @{LogName='Application'; Level=2} -MaxEvents 100`. Windows also writes application logs to files under `C:\ProgramData\` or application-specific directories. The underlying principle is the same across all platforms: applications write structured or unstructured events to a system log store, operators retrieve and search those events, and centralized collection agents aggregate logs from many machines. The tools and paths differ, but the investigation workflow is portable.
 </Aside>
 
 ## auditd: The Kernel Audit Subsystem
@@ -184,8 +184,8 @@ auditctl -w /etc/sudoers -p wa -k sudoers-change
 # Log all executions of su
 auditctl -w /usr/bin/su -p x -k privilege-escalation
 
-# Log all file opens in /etc by non-root users
-auditctl -a always,exit -F arch=b64 -S open -F dir=/etc -F auid>=1000 -k etc-access
+# Log common file-open syscalls in /etc by non-root users (64-bit systems)
+auditctl -a always,exit -F arch=b64 -S open -S openat -F dir=/etc -F auid>=1000 -k etc-access
 ```
 
 The audit log at `/var/log/audit/audit.log` records structured entries for each matched event, including the timestamp, the user who triggered it, the process name and PID, and the specific system call and arguments. This is the log that compliance auditors typically request: PCI-DSS requires audit trails for access to cardholder data systems, HIPAA requires audit logs for access to protected health information, and <a href="https://www.fedramp.gov/" target="_blank" rel="noopener noreferrer">FedRAMP</a> (Federal Risk and Authorization Management Program) requires system-level audit logging with specific retention periods.
@@ -260,7 +260,7 @@ Container logs capture what the application wrote to stdout and stderr. Kubernet
 
 `kubectl describe pod <pod-name>` is frequently the fastest path to root cause for pod-level failures. The Events section at the bottom shows the cluster's record of what happened to the pod: image pull errors, resource limit violations, liveness probe failures, and evictions all appear here. These are infrastructure-level events that the application cannot see and therefore cannot log. An image pull failure appears in the Events section before any application logs exist, because the container never started.
 
-Kubernetes events are short-lived by default. On many clusters the kube-apiserver keeps them for about one hour, because the default `--event-ttl` is `1h`, though operators can change that. If you are investigating an incident that happened hours ago, the events may no longer be available even if the pod still exists. This is one of the practical reasons to export events or persist them in a centralized observability system.
+Kubernetes events are short-lived by default. In upstream Kubernetes, the kube-apiserver default for `--event-ttl` is `1h`, though cluster operators and managed platforms can change this. If you are investigating an incident that happened hours ago, the events may no longer be available even if the pod still exists. This is one of the practical reasons to export events or persist them in a centralized observability system.
 
 <Aside type="note" title="Container Logs Are Ephemeral">
 Container log files in `/var/log/pods/` are deleted when a pod is removed from the node. If you delete a pod, or if the node it ran on is replaced, its logs are gone unless they have been shipped to a centralized logging system. Logging agents running as DaemonSets exist precisely to collect and preserve these logs before the pod disappears.
@@ -353,10 +353,10 @@ To extract and count usernames from failed SSH authentication attempts:
 
 ```bash
 grep "Failed password for" /var/log/auth.log | \
-  grep -oP 'for \K\S+' | \
+  sed -E 's/.*Failed password for (invalid user )?([^ ]+).*/\2/' | \
   sort | uniq -c | sort -rn
 # grep "Failed password for": keep only failed password lines
-# grep -oP 'for \K\S+': print only the username token after "for"
+# sed -E ...: extract the username token, handling both valid and "invalid user" cases
 ```
 
 The difference between a long list of failed passwords for `root`, `admin`, and `test` from many different IPs (an automated brute-force scan, probably not targeted) versus focused failed attempts for actual employee usernames from a single unfamiliar IP (potentially credential stuffing) is visible in this output within seconds.
@@ -400,13 +400,21 @@ A concrete walkthrough illustrates how the three phases work together. At 03:07,
 **Narrow:** Start with a per-minute count of errors rather than reading raw log output:
 
 ```bash
-awk '$9 >= 500 {print $4}' /var/log/nginx/access.log | cut -d: -f1-2 | sort | uniq -c | tail -20
+awk '$9 >= 500 {print $4}' /var/log/nginx/access.log | cut -d: -f1-3 | sort | uniq -c | tail -20
+# awk '$9 >= 500 {print $4}': keep only 5xx rows and print the timestamp field
+# cut -d: -f1-3: keep date + hour + minute so entries bucket per minute
+# sort: group identical minute buckets together
+# uniq -c: count requests per minute bucket
+# tail -20: show the most recent 20 buckets
 ```
 
 The output shows 0 errors at 03:03, then 847 errors at 03:04. The symptom started abruptly, suggesting a discrete event rather than gradual degradation. Look at the 5 minutes before 03:04:
 
 ```bash
 journalctl -u order-api.service --since "03:00:00" --until "03:04:00" -p err
+# -u order-api.service: query only the order-api service unit
+# --since / --until: narrow output to the pre-symptom time window
+# -p err: show only error-priority entries and above
 ```
 
 Three entries between 03:01:17 and 03:03:58: all `database connection timeout` errors with the same upstream host (`postgres-prod:5432`). The database connection is timing out. The application error at 03:04 is a consequence, not the cause.
@@ -415,6 +423,8 @@ Three entries between 03:01:17 and 03:03:58: all `database connection timeout` e
 
 ```bash
 grep "03:01\|03:02\|03:03" /var/log/postgresql/postgresql.log | grep -i "error\|fatal\|deadlock\|lock"
+# first grep: keep only lines from the target minutes (03:01 through 03:03)
+# second grep -i: case-insensitive filter for failure and locking keywords
 ```
 
 A stream of `FATAL: remaining connection slots are reserved for non-replication superuser connections` entries starting at 03:01:04. PostgreSQL hit its maximum connection limit.
@@ -423,6 +433,9 @@ Now check why: look at the system journal on the database host for the 30 minute
 
 ```bash
 journalctl -p warning --since "02:30:00" --until "03:01:00" | grep -i "connection\|memory\|postgres"
+# journalctl -p warning: include warning-level and higher system entries
+# --since / --until: scan the 30 minutes before the first database failures
+# grep -i: keep lines related to connection pressure, memory pressure, or PostgreSQL
 ```
 
 The journal shows a scheduled data export job started at 02:58:23. That job opened 90 long-running database connections for a batch export, consuming the remaining connection pool headroom. The order API could not acquire connections for its own requests.
@@ -602,7 +615,7 @@ The Incident Response and Disaster Recovery lecture extends this investigation c
 
 ## Resources
 
-- <a href="https://www.youtube.com/watch?v=KK9FI4OfPUY" target="_blank" rel="noopener noreferrer">Central Log Management for Docker + Linux // Grafana Loki (Chistian Lampa) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=KK9FI4OfPUY" target="_blank" rel="noopener noreferrer">Central Log Management for Docker + Linux // Grafana Loki (Christian Lampa) (YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=B2IS-XS-cc0" target="_blank" rel="noopener noreferrer">Fluent Bit explained | Fluent Bit vs Fluentd (TechWorld with Nana) (YouTube)</a>
 - <a href="https://stripe.com/blog/canonical-log-lines" target="_blank" rel="noopener noreferrer">Fast and flexible observability with canonical log lines (Brandur Leach) (Stripe)</a>
 - <a href="https://sre.google/sre-book/monitoring-distributed-systems/" target="_blank" rel="noopener noreferrer">Monitoring Distributed Systems (Rob Ewaschuk) (Google SRE Book)</a>
