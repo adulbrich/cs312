@@ -21,6 +21,10 @@ This repository contains the source code for the CS312 website.
 
 ### Course Design Backlog
 
+- [ ] **Teamwork integration, phase 1 (Ops 3/4 hand-off test):** After Ops 3 submission, randomly pair students and have each partner deploy the other's infrastructure from scratch using only the submitted documentation with no questions allowed; if the deployment fails, both students debug and resubmit together, making "operator-reproducible documentation" a genuinely testable criterion rather than a rubric checkbox.
+- [ ] **Teamwork integration, phase 2 (Ops 5 on-call simulation):** Convert Ops 5 into a squad-based exercise: form groups of three, assign rotating 24-hour on-call shifts, and pre-load a menu of injectable failure scenarios; the on-call engineer triages and writes a postmortem while the other two act as incident commanders; deliverables are a shared incident log plus individual runbooks graded separately.
+- [ ] Build the Ops 5 failure scenario menu: 8 to 10 scenarios (crash loops, resource exhaustion, broken configs, missing PVCs, alert misfires) that can be injected in under five minutes and resolved within a single on-call shift, with a reset path back to a known-good state.
+- [ ] Write rubric extensions for both teamwork moments: the hand-off test scores documentation quality by whether a stranger can successfully deploy it; the on-call simulation weights the individual runbook separately from the joint postmortem so no student can coast on their teammates.
 - [ ] At term end, review slugs and titles for consistency across assignments, labs, activities, lectures, and practicalities. After renaming files, update Canvas and rely on filenames rather than duplicated slug values where possible.
 - [ ] Check with TAs whether labs need more step-by-step depth relative to activities. Labs should stay more how-to focused and go slightly further operationally.
 - [ ] Improve the project rubric.
