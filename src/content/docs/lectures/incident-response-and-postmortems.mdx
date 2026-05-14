@@ -74,6 +74,17 @@ Once an incident has been declared and the basic response artifacts exist, the n
 
 These five phases are not equal in duration. Detection might take milliseconds (an automated alert) or hours (a customer complaint). Mitigation might take three minutes (a rollback) or three days (waiting for an upstream vendor to fix a regression). The lifecycle is a cognitive tool more than a schedule: knowing which posture the team is currently in, and noticing when it should shift, is what keeps a response coherent over an extended period.
 
+Read as a set of posture changes rather than a rigid checklist, the lifecycle looks like this:
+
+```mermaid
+flowchart TB
+  Signals["Alerts, dashboards,<br/>or user reports"] --> Detect["Detect<br/>Notice the signal"]
+  Detect --> Triage["Triage<br/>Confirm scope and impact"]
+  Triage --> Mitigate["Mitigate<br/>Choose the fastest reversible action"]
+  Mitigate --> Resolve["Resolve<br/>Verify stability against recovery criteria"]
+  Resolve --> Learn["Learn<br/>Capture what changed and what to improve"]
+```
+
 ## Mitigation as a Toolkit
 
 The most counterintuitive idea in incident response is that the first response to a failure should rarely be to understand it. Diagnosis is slow. Users do not benefit from your understanding; they benefit from a working service. The job of mitigation is to restore service as quickly as possible using whatever tool is fastest, even if the result is temporary, inelegant, or leaves a deeper problem unaddressed for later.
@@ -123,6 +134,27 @@ If the choice is truly between preserving evidence and stopping active customer 
 ## Incident Roles
 
 Preparedness artifacts and mitigation options matter, but they do not coordinate themselves. A response without defined roles produces a recognizable failure mode: several engineers all working in parallel on overlapping investigations, nobody making decisions, status updates either missing entirely or duplicated across channels, and a customer-facing audience that has heard nothing for forty minutes. The fix is to define a small number of roles, declare them explicitly when the incident is opened, and respect their boundaries during the response.
+
+Taken together, the role structure is a small coordination system with one shared source of truth:
+
+```mermaid
+flowchart TD
+  IC["Incident Commander<br/>Sets priorities and makes response decisions"]
+  Ops["Operations Lead<br/>Investigates and executes mitigations"]
+  Comms["Communications Lead<br/>Translates impact for other audiences"]
+  Scribe["Scribe<br/>Maintains the live timeline"]
+  Channel["Incident channel and live record<br/>Shared source of truth"]
+  Stakeholders["Customers, support, and leadership"]
+
+  IC -->|directs| Ops
+  IC -->|sets cadence| Comms
+  IC -->|assigns recording| Scribe
+  Ops -->|findings and actions| Channel
+  Scribe -->|timeline and decisions| Channel
+  Channel -->|current state| IC
+  Channel -->|facts to translate| Comms
+  Comms -->|status updates| Stakeholders
+```
 
 ### Incident Commander
 
@@ -225,6 +257,21 @@ Once mitigation is holding, the response moves into a monitoring posture. The Co
 ## Blameless Postmortems
 
 Once the service is stable and the responders have stood down, the operational question changes. It is no longer "how do we restore service?" but "how do we learn from what just happened?" The postmortem is the artifact that converts the experience of an incident into a durable change in the system. Without it, every incident is a fresh expense paid in customer pain, engineer attention, and organizational trust. With it, each incident contributes to a slow improvement in the system's design and the team's operational practice. A consistent postmortem practice is one of the clearest signs that an operations program is improving over time.
+
+At a high level, the postmortem process is a decision gate followed by a learning pipeline:
+
+```mermaid
+flowchart TD
+  Close["Incident is stable and closed"] --> Trigger{"Meets postmortem trigger?"}
+  Trigger -->|No| Review["Short incident review<br/>Capture the lesson and small fixes"]
+  Trigger -->|Yes| Gather["Collect timeline, alerts,<br/>deploy data, and notes"]
+  Gather --> Write["Write summary, impact,<br/>and timeline"]
+  Write --> Factors["Identify contributing factors<br/>and structural causes"]
+  Factors --> Actions["Assign action items<br/>with one owner and a due date"]
+  Review --> Followup["Three-week test<br/>Check whether follow-up actually finished"]
+  Actions --> Followup
+  Followup --> Improve["System and response improve"]
+```
 
 ### When a Postmortem Is Required
 
