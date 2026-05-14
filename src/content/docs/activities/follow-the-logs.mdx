@@ -26,7 +26,7 @@ The flow is split by environment on purpose. The first half stays on the Linux m
 
 - Access to an Ubuntu or Debian Linux machine where you have `sudo` privileges
 - `journalctl`, `logger`, `grep`, and `awk` on that machine
-- `auditd` on the Linux machine. Install it if it is not already present: `sudo apt-get install -y auditd && sudo systemctl enable auditd --now`
+- `auditd` on the Linux machine. Install it if it is not already present: `sudo apt-get install -y auditd && sudo systemctl enable auditd --now` (this might not work on WSL2, so if you are using WSL, you can skip the auditd section)
 - `kubectl` on your local machine and a running minikube cluster from the [Minikube](/activities/minikube/) activity. Start minikube before class if it is not already running.
 
 ---
@@ -202,12 +202,12 @@ Read top to bottom during triage: start where users are failing, then move inwar
 4. **Correlate the degradation window across application, database, and host logs:**
 
     ```bash
-    grep 'database connection timeout\|connection pool exhausted' ~/cs312-log-activity/bundle/order-api.jsonl
-    grep 'remaining connection slots\|logical replication launcher' ~/cs312-log-activity/bundle/postgres.log
-    grep 'nightly-export.service still running\|holding open sessions' ~/cs312-log-activity/bundle/db-host-journal.log
+    grep '"level":"error"' ~/cs312-log-activity/bundle/order-api.jsonl 
+    awk '$2 >= "03:01:00" && $2 < "03:05:00"' ~/cs312-log-activity/bundle/postgres.log
+    awk '$3 >= "03:01:00" && $3 < "03:05:00"' ~/cs312-log-activity/bundle/db-host-journal.log
     ```
 
-    These commands surface the supporting entries around the failure window without assuming exact timestamps up front. `order-api.jsonl` shows two early database timeouts that still served stale cache, then a pool-exhaustion warning at `03:03:14`, and finally a timeout at `03:03:58` with no fallback left. `postgres.log` shows connection-slot exhaustion at `03:01:04` and a later worker issue at `03:04:13`. `db-host-journal.log` shows the export service still running at `03:01:05` and still holding sessions at `03:04:14`.
+    Now that you have the first application error at `03:01:17`, hold the time window fixed across the other logs instead of searching by message text. These commands keep only entries from `03:01:00` through `03:04:59` in each file so you can compare the same interval at every layer. `order-api.jsonl` shows two early database timeouts that still served stale cache, then a pool-exhaustion warning at `03:03:14`, and finally a timeout at `03:03:58` with no fallback left. `postgres.log` shows repeated connection-slot exhaustion starting at `03:01:04` and a later worker issue at `03:04:13`. `db-host-journal.log` shows the export service still running at `03:01:05` and still holding sessions at `03:04:14`.
 
 5. **Use the service name you just surfaced to search earlier entries in the same host log:**
 
