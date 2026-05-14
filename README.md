@@ -34,10 +34,13 @@ This repository contains the source code for the CS312 website.
 - [ ] Expand the resources sections beyond reading to include videos, podcasts, and other media.
 - [ ] Review the Linux Sysadmin Handbook for gaps in coverage.
 - [ ] Consider guest lectures.
+- [ ] Consider moving the contents of `cluster-operations.mdx` to `first-container-orchestration-deployment` (Week 7), so that we can do the `observability-workshop.mdx` in Week 8, and logs in Week 9. Logs would be a new lab. Alternatively, we could do logs in Week 8 as well (part of observability), and then do the failure drills in Week 9.
+  - If adding logs to labs, consider adding logs to assignment as well.
 
 ### Content and Tooling Backlog
 
 - [ ] Add references to other HashiCorp tools where they genuinely fit, such as Vault, Nomad, and Consul.
+- [ ] Revisit the journalctl activity and evaluate a container or container-cluster version for the incident-bundle and symptom-scoping sections so a full VM is not the default requirement.
 - [ ] Revisit the First Container Orchestration Deployment (k3s) lab and change the MariaDB example to use a PVC-backed deployment in a future iteration.
 - [ ] Build a small reusable To-Do application for future activities, using a frontend plus a Flask backend with Postgres, and optionally nginx as a reverse proxy.
 - [ ] Keep the To-Do app intentionally small: create, list, update, complete, and delete tasks, with a health endpoint and environment-variable configuration.
