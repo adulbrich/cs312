@@ -1,9 +1,8 @@
 ---
 title: "Follow the Logs"
-description: "Investigate a staged incident using journalctl and structured log files, trace a container crash with kubectl, deploy Fluent Bit as a DaemonSet to see log enrichment in action, verify a file access event with auditd, and reconstruct a cause chain as an incident timeline."
+description: "Investigate a staged incident with journal, application, database, audit, and Kubernetes logs, then produce a timestamped incident timeline and inspect enriched Fluent Bit output."
 sidebar:
   order: 14
-draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
@@ -11,12 +10,12 @@ import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 {/* ai-summary
 type: activity
-slug: journalctl
+slug: follow-the-logs
 order: 14
 paired_lecture: log-management-and-analysis
-practices: journalctl filtering by tag, priority, and boot; scoping an investigation from edge logs to application and database sources; kubectl logs --previous and kubectl describe events for container crash investigation; Fluent Bit DaemonSet deployment and Kubernetes metadata enrichment; correlation ID tracing across multiple log sources; auditd watch rules and ausearch for kernel-level audit events; incident timeline table construction from four sources
+practices: journalctl filtering by tag, priority, and boot metadata; timestamp-based triage from nginx access logs into application, database, and host logs; kubectl logs --previous and kubectl describe for crash-loop investigation; Fluent Bit DaemonSet deployment and Kubernetes metadata enrichment; auditd file-access verification with ausearch; concise incident timeline construction from multiple sources
 prereq_activities: vm-setup, minikube
-output: an incident timeline file for the staged server incident plus a live Fluent Bit stream showing Kubernetes metadata enrichment
+output: a timestamped incident timeline file plus Fluent Bit output showing Kubernetes-enriched container logs
 */}
 
 This activity puts into practice the concepts from the [Log Management and Incident Investigation](/lectures/log-management-and-analysis/) lecture. You will first investigate a staged incident on a Linux server with `journalctl`, flat files, and `auditd`, then switch once to minikube to practice `kubectl logs --previous` and watch Fluent Bit enrich container logs. By the end, you will have a timestamped incident timeline from the server-side investigation and a direct view of how Kubernetes log collection works before logs reach a real backend.
@@ -26,15 +25,15 @@ The flow is split by environment on purpose. The first half stays on the Linux m
 ## What You Will Need
 
 - Access to an Ubuntu or Debian Linux machine where you have `sudo` privileges
-- `journalctl`, `logger`, `grep`, and `awk` on that server (all present by default on Ubuntu 22.04)
-- `auditd` on the server. Install it if it is not already present: `sudo apt-get install -y auditd && sudo systemctl enable auditd --now`
+- `journalctl`, `logger`, `grep`, and `awk` on that machine
+- `auditd` on the Linux machine. Install it if it is not already present: `sudo apt-get install -y auditd && sudo systemctl enable auditd --now`
 - `kubectl` on your local machine and a running minikube cluster from the [Minikube](/activities/minikube/) activity. Start minikube before class if it is not already running.
 
 ---
 
 ## Build the Incident Bundle
 
-Before investigating anything, you need a controlled set of logs to work with. Every student investigates the same failure sequence: a database connection pool exhausted by a long-running export job, causing an order API to return HTTP 500 errors. Three of the files in this bundle simulate the flat log files you would usually find under `/var/log/` or an application-specific log directory, while `db-host-journal.log` is a saved excerpt from another machine's systemd journal. The journal entries you write here are real: `logger` sends them to the same local logging path that many Linux services use automatically through systemd-managed stdout and stderr or the syslog socket at `/dev/log`.
+Before investigating anything, you need a controlled set of logs to work with. This bundle captures the same staged failure sequence each time: a long-running export job opens too many PostgreSQL sessions, exhausts database connection slots, and eventually pushes the order API into timeouts and HTTP 500 errors. Three of the files in this bundle simulate the flat log files you would usually find under `/var/log/` or an application-specific log directory, while `db-host-journal.log` is a saved excerpt from another machine's systemd journal. The journal entries you write here are real: `logger` writes through the syslog socket at `/dev/log`. Many Linux services reach the journal differently, either through systemd-managed stdout and stderr or through syslog, but the resulting entries are all searchable with `journalctl`.
 
 Run the following commands on your **Linux machine**.
 
@@ -75,10 +74,10 @@ Run the following commands on your **Linux machine**.
     ```bash
     cat > ~/cs312-log-activity/bundle/order-api.jsonl << 'EOF'
     {"timestamp":"2026-03-15T03:00:52.011Z","level":"info","service":"order-api","message":"worker pool healthy","request_id":"req-1001","duration_ms":19}
-    {"timestamp":"2026-03-15T03:01:17.125Z","level":"error","service":"order-api","message":"database connection timeout","upstream_host":"postgres-prod","upstream_port":5432,"request_id":"req-1002","duration_ms":30012}
-    {"timestamp":"2026-03-15T03:02:06.993Z","level":"error","service":"order-api","message":"database connection timeout","upstream_host":"postgres-prod","upstream_port":5432,"request_id":"req-1003","duration_ms":30009}
-    {"timestamp":"2026-03-15T03:03:14.411Z","level":"warn","service":"order-api","message":"connection pool exhausted, retrying","request_id":"req-1004","duration_ms":1050}
-    {"timestamp":"2026-03-15T03:03:58.731Z","level":"error","service":"order-api","message":"database connection timeout","upstream_host":"postgres-prod","upstream_port":5432,"request_id":"req-1005","duration_ms":30001}
+    {"timestamp":"2026-03-15T03:01:17.125Z","level":"error","service":"order-api","message":"database connection timeout, served stale cache","upstream_host":"postgres-prod","upstream_port":5432,"request_id":"req-1002","duration_ms":30012,"fallback":"stale-cache","http_status":200}
+    {"timestamp":"2026-03-15T03:02:06.993Z","level":"error","service":"order-api","message":"database connection timeout, served stale cache","upstream_host":"postgres-prod","upstream_port":5432,"request_id":"req-1003","duration_ms":30009,"fallback":"stale-cache","http_status":200}
+    {"timestamp":"2026-03-15T03:03:14.411Z","level":"warn","service":"order-api","message":"connection pool exhausted, retry queue growing","request_id":"req-1004","duration_ms":1050,"retry_queue_depth":7}
+    {"timestamp":"2026-03-15T03:03:58.731Z","level":"error","service":"order-api","message":"database connection timeout, fallback unavailable","upstream_host":"postgres-prod","upstream_port":5432,"request_id":"req-1005","duration_ms":30001,"fallback":"none","http_status":500}
     {"timestamp":"2026-03-15T03:04:12.841Z","level":"fatal","service":"order-api","message":"startup dependency check failed after restart","upstream_host":"postgres-prod","upstream_port":5432,"request_id":"req-1006","duration_ms":0}
     EOF
    ```
@@ -198,25 +197,25 @@ Read top to bottom during triage: start where users are failing, then move inwar
     grep '"level":"error"' ~/cs312-log-activity/bundle/order-api.jsonl | head -1
     ```
 
-    The first application error appears at `03:01:17`, almost three minutes before the first HTTP 500. That gap is the MTTD window if alerting fires only on HTTP error rate. Use this earlier application error as the anchor for the deeper investigation.
+    The first application error appears at `03:01:17`, almost three minutes before the first HTTP 500. That gap is realistic here because the early database timeouts were absorbed by stale-cache fallback inside `order-api`, so the edge still returned `200` for a while. Use this earlier application error as the anchor for the deeper investigation.
 
 4. **Correlate the degradation window across application, database, and host logs:**
 
     ```bash
-    grep '"request_id":"req-1002"' ~/cs312-log-activity/bundle/order-api.jsonl
-    grep '03:01:04\|03:04:13' ~/cs312-log-activity/bundle/postgres.log
-    grep '03:01:05\|03:04:14' ~/cs312-log-activity/bundle/db-host-journal.log
+    grep 'database connection timeout\|connection pool exhausted' ~/cs312-log-activity/bundle/order-api.jsonl
+    grep 'remaining connection slots\|logical replication launcher' ~/cs312-log-activity/bundle/postgres.log
+    grep 'nightly-export.service still running\|holding open sessions' ~/cs312-log-activity/bundle/db-host-journal.log
     ```
 
-    These commands surface the exact supporting entries around the failure window. `order-api.jsonl` shows the first timeout at `03:01:17`. `postgres.log` shows connection-slot exhaustion at `03:01:04` and a later worker issue at `03:04:13`. `db-host-journal.log` shows the export service still running at `03:01:05` and still holding sessions at `03:04:14`.
+    These commands surface the supporting entries around the failure window without assuming exact timestamps up front. `order-api.jsonl` shows two early database timeouts that still served stale cache, then a pool-exhaustion warning at `03:03:14`, and finally a timeout at `03:03:58` with no fallback left. `postgres.log` shows connection-slot exhaustion at `03:01:04` and a later worker issue at `03:04:13`. `db-host-journal.log` shows the export service still running at `03:01:05` and still holding sessions at `03:04:14`.
 
-5. **Widen the window backward to find what started the chain:**
+5. **Use the service name you just surfaced to search earlier entries in the same host log:**
 
     ```bash
-    grep 'Started nightly-export.service\|opened 90 database sessions' ~/cs312-log-activity/bundle/db-host-journal.log
+    grep 'nightly-export' ~/cs312-log-activity/bundle/db-host-journal.log
     ```
 
-    This surfaces the precursor before any user-visible failure: the export job started at `02:58:23` and opened 90 database sessions at `02:58:24`. That is the earliest concrete evidence explaining why the later timeouts happen.
+    The earlier lines show the export job starting at `02:58:23` and opening 90 database sessions at `02:58:24`. If that service name had not appeared, we would have to look backwards with a wider time window and more guesswork about what to search for.
 
 </Steps>
 
@@ -250,7 +249,7 @@ You now have enough evidence to write the incident timeline without introducing 
 
     Incident: order-api HTTP 500 spike (15 Mar 2026 starting 03:04 UTC)
     Root cause: nightly-export opened 90 long-lived PostgreSQL sessions,
-    exhausting the connection pool and leading to order-api timeouts.
+    exhausting PostgreSQL connection slots and leading to order-api timeouts.
 
     TIME (UTC)   SOURCE               EVENT
     02:58:24     db-host-journal.log  nightly-export opened 90 database sessions
@@ -269,7 +268,7 @@ You now have enough evidence to write the incident timeline without introducing 
     cat ~/cs312-log-activity/timeline.txt
     ```
 
-    Your name, hostname, and cause chain should all appear in one clean block. Notice the gap between internal failure (`03:01:04`) and first user-visible symptom (`03:04:01`): almost three minutes during which the application was degrading before requests started failing. That gap is the MTTD window if alerting fires only when the HTTP 5xx rate rises.
+    Your name, hostname, and cause chain should all appear in one clean block. Notice the gap between internal failure (`03:01:04`) and first user-visible symptom (`03:04:01`): for almost three minutes, `order-api` was still masking some database timeouts with stale-cache fallback before that degraded path ran out. That gap is the MTTD window if alerting fires only when the HTTP 5xx rate rises.
 
 </Steps>
 
@@ -633,10 +632,6 @@ Stay on your **local machine terminal**.
    ```
 
 </Steps>
-
-<Aside type="note" title="Rotation handles size; agents handle ephemerality">
-`logrotate` keeps disk usage bounded on a long-running server. It does not help when a pod is deleted: container log files in `/var/log/pods/` are removed with the pod. Fluent Bit, running as a DaemonSet, ships logs off the node before the pod disappears. That is the gap that a collection agent closes, and the reason the lecture distinguishes between local rotation and centralized collection.
-</Aside>
 
 <ActivityQuestion>
 The `kubernetes.pod_name` and `kubernetes.namespace_name` fields were not written by the log-generator application. Which component in the pipeline added them, and how does it know which pod a given log file belongs to? Why does having this metadata embedded in every forwarded entry matter when you are investigating an incident across a cluster with many nodes and many pods?
