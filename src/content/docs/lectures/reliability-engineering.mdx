@@ -1,6 +1,6 @@
 ---
-title: "Site Reliability Engineering and Capacity Planning"
-description: "SRE as a discipline, toil measurement and reduction, error budgets as organizational policy, capacity planning fundamentals, on-call sustainability, and chaos engineering."
+title: "Reliability Engineering"
+description: "The long-horizon engineering practice that pairs with incident response: SRE as a discipline, toil reduction, error budgets as organizational policy, capacity planning, release safety, on-call sustainability, chaos engineering and game days, and disaster recovery."
 sidebar:
   order: 16
 draft: true
@@ -11,18 +11,18 @@ import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 {/* ai-summary
 type: lecture
-slug: site-reliability-and-capacity-planning
+slug: reliability-engineering
 order: 16
-covers: SRE as discipline/history; toil and toil reduction; error budgets as policy; capacity planning and autoscaling policy; on-call sustainability; chaos engineering
-prereq_lectures: monitoring-and-performance, incident-response-fundamentals
-followup_lectures: windows-server-and-active-directory
-paired_activities:
+covers: SRE as a discipline; toil and toil reduction; error budgets as organizational policy; release safety and production readiness; capacity planning and autoscaling; on-call sustainability and alert quality; chaos engineering and game days; disaster recovery (RTO/RPO, backup strategies, failover architectures)
+prereq_lectures: monitoring-and-performance, incident-response-and-postmortems
+followup_lectures: on-premises-infrastructure
+paired_activities: sre-practice
 supports_labs: observability-workshop
 */}
 
-A team that runs its own software in production will encounter a tension that is almost universal: as a system grows, the operational work required to keep it running tends to grow faster than the team does. Engineers who should be building new capabilities find themselves spending their time on deployments, on-call pages, manual scaling, and repetitive configuration changes. The work is necessary and real, but it does not produce lasting improvement. If the work were not done, the system would fail; because it is done, the system survives, but nothing gets easier.
+The Incident Response lecture taught what to do when production breaks. This lecture asks the longer-horizon question that pairs with it: how do you organize an engineering team so production breaks less often, and so each break costs less than the last? The two questions are inseparable in practice. A team that handles incidents well but invests nothing in reliability will accumulate the same incidents indefinitely, paying for each one in customer pain and engineer attention. A team that invests heavily in reliability but cannot run an incident response will find that no amount of preparation prevents every failure, and the failures it does experience will be longer and more confused than they need to be.
 
-This is the problem that **Site Reliability Engineering (SRE)** was designed to solve. SRE is a discipline that applies software engineering principles to operations: instead of accepting manual, repetitive operational work as inevitable, it treats that work as a design problem and invests in eliminating it through automation, instrumentation, and organizational practices grounded in measurement. The tools you have encountered in the preceding weeks, Prometheus for metrics, alerting for detection, Kubernetes for self-healing, Ansible for configuration management, are all building blocks of an SRE approach. This lecture frames those tools in the context of the organizational discipline that makes them work at scale.
+This lecture is about the engineering practice on the other side of that pairing. The tools you have encountered in the preceding weeks (Prometheus, Kubernetes, Ansible, CI/CD pipelines, structured logging) are all building blocks of that practice. The discipline that uses those blocks systematically is **Site Reliability Engineering (SRE)**, originally developed at Google and now widely adopted. SRE is not the only flavor of reliability engineering, but it is the most influential, and its vocabulary (toil, error budgets, SLOs, game days) has become the standard way the industry talks about the work. This lecture covers SRE as a discipline, the specific practices it has institutionalized, and the disaster recovery work that any reliability program eventually has to take seriously.
 
 ## What SRE Is (and Is Not)
 
@@ -34,33 +34,21 @@ The discipline he built was formally documented in [Google's Site Reliability En
 
 Traditional operations teams write runbooks that tell engineers how to respond when things go wrong. SRE teams write software that eliminates the need for those runbooks in the first place. This is not a criticism of runbooks (a good runbook is better than no runbook), but a statement about where improvement investment should go. A runbook that gets consulted three times a week is a signal that an automation opportunity exists.
 
-The practical implication is staffing. An SRE team is composed of software engineers, and a significant fraction of their time is spent writing code that improves the reliability and operability of the services they run. Google's stated target is that SREs spend at least 50 percent of their time on engineering project work that improves the system. The rest of their time includes on-call, operational response, and other service work. If interrupt-driven operational load consistently squeezes project time below 50 percent, the team has either taken on too many services or has not invested enough in automation.
+The practical implication is staffing. An SRE team is composed of software engineers, and a significant fraction of their time is spent writing code that improves the reliability and operability of the services they run. Google's stated target is that SREs spend at least 50 percent of their time on engineering project work that improves the system. The rest of their time includes on-call, operational response, and other service work. If interrupt-driven operational load consistently squeezes project time below 50 percent, the team has either taken on too many services or has not invested enough in automation, and the response is to address the root condition rather than to work harder.
 
 ### SRE vs. DevOps
 
 DevOps is a cultural and organizational philosophy: it argues that development and operations should share responsibility for the software lifecycle, that silos between "people who write code" and "people who run code" are harmful, and that continuous delivery and feedback loops improve both speed and reliability. SRE is one specific implementation of DevOps values. It provides concrete practices (error budgets, toil measurement, on-call load targets) and organizational models that give DevOps principles operational teeth.
 
-If DevOps is the philosophy, SRE is one way to practice it. An organization can follow DevOps principles without having anyone with "SRE" in their title; an organization with a dedicated SRE team should see that team as an implementation of DevOps values, not a separate discipline competing with them.
-
-### Staffing Models
-
-Three organizational models for SRE are common in practice.
-
-**Embedded SRE** places one or two SREs directly on each product team. The SRE is a full team member who focuses on reliability, automation, and operational instrumentation. This model works well because the SRE has deep context on the team's service and can invest in exactly the improvements that matter most. The risk is that embedded SREs get pulled into feature work and lose the operational focus that makes them valuable.
-
-**Shared SRE consultation** maintains a central SRE team that product teams apply to engage. The SRE team takes on the operational responsibility for a service once it meets a reliability bar (typically a minimum SLO). Services that fall below the bar are returned to the product team with a list of required improvements. This creates an incentive for product teams to invest in reliability before asking SRE to run the service, and lets the SRE team specialize rather than spreading across many different technology stacks.
-
-**Platform engineering** is the direction many organizations are moving. Instead of running each product service directly, the platform team builds internal tools and platforms that make reliability automatic for product teams: deployment pipelines with rollback built in, metrics and alerting that require no per-service configuration, and on-call tooling that routes appropriately. Product teams gain reliable infrastructure without needing an embedded SRE on each of them. Platform engineering encodes SRE practices into the infrastructure itself.
+If DevOps is the philosophy, SRE is one way to practice it. An organization can follow DevOps principles without having anyone with "SRE" in their title; an organization with a dedicated SRE team should see that team as an implementation of DevOps values, not a separate discipline competing with them. In practice the boundaries blur: many companies use "Platform Engineering," "Production Engineering," or "Reliability Engineering" as their internal term for what is recognizably SRE work, and the practices travel even when the title does not.
 
 ### Why Organizations Adopt SRE
 
-SRE can sound like a clean theory until you look at the situations that pushed real organizations toward it. Public case studies from [Evernote and The Home Depot](https://sre.google/workbook/slo-engineering-case-studies/) are useful precisely because neither company started by asking how to copy Google. They started by asking how to stop reliability work and delivery work from undermining each other.
+SRE can sound like a clean theory until you look at the situations that pushed real organizations toward it. Evernote's [SLO case study](https://sre.google/workbook/slo-engineering-case-studies/) is useful precisely because the company did not start by asking how to copy Google. They started by asking how to stop reliability work and delivery work from undermining each other. A traditional split between development and operations had produced the familiar conflict: developers wanted to ship, operations wanted to protect production, and both sides experienced the other as a brake. The move toward SLOs gave both groups a common frame of reference tied to user-visible sync availability. Notice what changed there: the important shift was not merely adding a dashboard. It was replacing argument by role with argument by shared measurement.
 
-At Evernote, a traditional split between development and operations had produced the familiar conflict: developers wanted to ship, operations wanted to protect production, and both sides experienced the other as a brake. Their move toward SLOs gave both groups a common frame of reference tied to user-visible sync availability. Notice what changed there. The important shift was not merely adding a dashboard. It was replacing argument by role with argument by shared measurement.
+That coordination problem is the most common reason organizations reach for SRE. Engineering scale makes it harder for any single person to hold the system in their head, and the consequences of misunderstanding become visible faster. SRE practices are useful not primarily because they look like Google's, but because they make the system legible to itself: services have measurable health, teams have shared vocabulary for reliability tradeoffs, and decisions about velocity versus stability can be grounded in data instead of in personal authority.
 
-The Home Depot faced a different version of the same problem. As the company moved from centralized support for large software packages toward many independently operated microservices, teams needed a common way to describe what each service could promise to its dependents. Their VALET framework, volume, availability, latency, errors, and tickets, turned service reliability into something product teams, developers, and operations staff could discuss in the same language. In other words, SRE practices became the coordination mechanism that made a large distributed organization legible to itself.
-
-## Toil: The Enemy of Scale
+## Toil
 
 Google's SRE book defines **toil** as work that is manual, repetitive, automatable, tactical rather than strategic, and scales linearly with service size rather than logarithmically with service capability. Toil is not just "work I do not enjoy." It is a precise category.
 
@@ -88,25 +76,23 @@ You can see toil most clearly in work that is obviously valuable but so expensiv
 
 Slack's change was conceptually simple: keep representative synthetic clients running continuously, wire the system into safety controls, and make it available to product teams as routine infrastructure rather than a special event. The lasting value was not only better performance data. It was that engineers no longer had to pay the same setup tax every time they wanted to ask, "Will this behave safely at scale?" Good toil reduction often looks like this: a painful but common validation step stops being an episode of heroics and becomes a normal part of the system.
 
-That matters for the next step in SRE maturity. Once teams can cheaply test whether a change is safe at scale, reliability measurement can start shaping release behavior instead of merely recording failures after the fact.
-
 <Aside type="note" title="Not All Operations Work Is Toil">
 Designing a capacity plan, debugging a novel failure mode, or writing a runbook for a scenario that has never occurred before are not toil. They require thought and produce lasting results. Toil is the repetitive fraction of operations work. The goal is to shift the balance toward work that improves the system rather than merely sustaining it.
 </Aside>
 
 ## Error Budgets as Organizational Policy
 
-The Monitoring and Alerting lecture introduced error budgets as a measurement: if your SLO is 99.9%, your error budget is 0.1% of requests over the measurement window. This section covers what to do with that measurement, which is where most organizations stop short.
+The Monitoring lecture introduced error budgets as a measurement: if your SLO is 99.9 percent, your error budget is 0.1 percent of requests over the measurement window. The Incident Response lecture introduced the point that severity should be tied to SLO consumption. This section covers what to do with that measurement at the organizational level, which is where most organizations stop short.
 
-An error budget becomes organizationally useful when it is treated as a **spending policy**. When the error budget is healthy, engineering teams can move fast, accept risk, and deploy frequently. When the budget is exhausted or close to exhaustion, reliability work takes priority and deployment pace slows. This conversion of a measurement into a policy is what makes SLOs actionable rather than decorative.
+An error budget becomes organizationally useful when it is treated as a **spending policy**. When the error budget is healthy, engineering teams can move fast, accept risk, and deploy frequently. When the budget is exhausted or close to exhaustion, reliability work takes priority and deployment pace slows. This conversion of a measurement into a policy is what makes SLOs actionable rather than decorative. It is also the load-bearing concept of the SRE discipline. Almost every other SRE practice in this lecture (toil reduction, release safety, capacity planning, chaos engineering) can be motivated by the question "what investments earn back error budget?"
 
 ### The Error Budget Policy Document
 
-Every service with an SLO should have a written error budget policy that answers three questions: what happens when the budget is 50 percent consumed? What happens when it is 90 percent consumed? What happens when it is fully consumed?
+Every service with an SLO should have a written error budget policy that answers three questions. What happens when the budget is 50 percent consumed? What happens when it is 90 percent consumed? What happens when it is fully consumed?
 
 Typical answers might be: at 50 percent consumed, the team reviews the current deployment rate and any recent reliability regressions. At 90 percent, the team halts non-critical deployments and shifts engineering focus to reliability. At 100 percent (SLO breach), no new features ship until the budget is replenished, and a postmortem is conducted if the breach resulted from a significant incident.
 
-The specifics matter less than the commitment. An error budget policy that everyone has signed off on creates accountability without blame: when the budget runs low, there is no debate about whether reliability is more important than new features this week. The budget made that decision in advance.
+The specifics matter less than the commitment. An error budget policy that everyone has signed off on creates accountability without blame: when the budget runs low, there is no debate about whether reliability is more important than new features this week. The budget made that decision in advance, in writing, when nobody was under pressure.
 
 ### Error Budgets and Organizational Dynamics
 
@@ -116,13 +102,15 @@ A development team that has spent 80 percent of their error budget this month ha
 
 This only works if the error budget policy is enforced. An SLO that nobody acts on when breached is a number on a dashboard, not an organizational tool. Leadership commitment to honoring the policy during the periods when it is inconvenient (when a product deadline coincides with a depleted budget) is what determines whether error budgets are a real organizational practice or a performance of measurement.
 
-### Case Studies: When SLOs Start Making Decisions
+### Error Budgets and Postmortem Action Items
 
-That shift from measurement to policy is easiest to see when a reliability target starts changing release decisions on inconvenient days. Evernote's [SLO case study](https://sre.google/workbook/slo-engineering-case-studies/) is instructive because the team deliberately started with a simple monthly uptime target for the core user promise, syncing and accessing notes, measured from outside their environment. They did not wait for a perfect model of every user interaction. They chose a good-enough measurement, reviewed it monthly, and used it to drive action items shared by both Evernote and Google.
+There is a direct connection here back to the Incident Response lecture's emphasis on postmortem action items as the entire point of the postmortem. The three-week test (will someone, in three weeks, ask whether each action item is done?) becomes much easier to pass when action items have organizational weight, and the error budget policy is the most common mechanism that provides that weight. If a postmortem identifies that a reliability investment is required to prevent recurrence, and the team's error budget policy says reliability work takes priority when budget is depleted, the action item is not competing with feature work on equal footing. It has been assigned priority by the policy that everyone agreed to in advance. Postmortems without error budgets often produce action items that quietly do not happen; postmortems with them produce action items that quietly do.
+
+### Case Study: When SLOs Start Making Decisions
+
+That shift from measurement to policy is easiest to see when a reliability target starts changing release decisions on inconvenient days. The Evernote SLO case study referenced earlier is instructive because the team deliberately started with a simple monthly uptime target for the core user promise, syncing and accessing notes, measured from outside their environment. They did not wait for a perfect model of every user interaction. They chose a good-enough measurement, reviewed it monthly, and used it to drive action items shared by both Evernote and Google.
 
 The most useful part of that story is not the percentage itself. It is what the percentage allowed the team to do. When release pressure and reliability pressure collided, SLO calculations gave them a shared basis for deciding how many release windows they could tolerate and how much customer pain they were willing to impose. That is the organizational point of an error budget policy. It does not eliminate judgment, but it moves the judgment onto explicit, reviewable ground.
-
-The Home Depot's work points in the same direction from a different angle. At the time of publication, the company was still building toward a fuller error-budget culture, but its VALET framework made the prerequisites visible by tracking volume, availability, latency, errors, and tickets across hundreds of services. A retailer cannot reason seriously about reliability without reasoning about peaks like Black Friday, and that is why volume belonged in the framework. Error budgets only work after the organization can already see its promises and failures in comparable terms.
 
 <Aside type="caution" title="SLOs Must Match User Reality">
 An SLO that does not reflect actual user experience is worse than no SLO. If your SLO measures server-side availability but your CDN silently serves stale content during outages, your SLO looks good while users experience problems. SLIs should be chosen so that a healthy SLO means users are actually getting the service they expect. When in doubt, measure from as close to the user as possible.
@@ -132,17 +120,13 @@ An SLO that does not reflect actual user experience is worse than no SLO. If you
 
 Once an error budget exists, the practical question is not whether you ever release, but how you spend reliability risk. Release safety is the discipline of making changes small, observable, and reversible enough that a team can learn quickly without betting the entire service on one rollout. Production readiness is the evidence, before a change begins, that the service has the dashboards, alerts, rollback path, dependency understanding, and capacity headroom required to survive normal failures. Together they keep an error budget from becoming a monthly accounting ritual with no effect on day-to-day engineering behavior.
 
-A healthy error budget should usually push teams toward smaller, more boring releases, not larger gambles. If recovery from a bad change takes longer than the budget it can burn, the rollout shape is already too risky. Canarying, limited blast radius, and rollback readiness are all ways of rationing uncertainty. They assume that change is normal and ask how much of the system you are willing to expose before you have evidence that the change is safe.
+A healthy error budget should usually push teams toward smaller, more boring releases, not larger gambles. If recovery from a bad change takes longer than the budget it can burn, the rollout shape is already too risky. Canarying, limited blast radius, and rollback readiness are all ways of rationing uncertainty. They assume that change is normal and ask how much of the system you are willing to expose before you have evidence that the change is safe. The Incident Response lecture's three mitigation principles (reversibility, blast radius, and time-to-undo) are not only properties you want during an incident; they are properties you want every change to have, so that any incident a change might cause is cheap to mitigate.
 
 Production readiness reviews are useful only when they ask operational questions rather than ceremonial ones. What user-visible SLO is this service trying to preserve? Which dashboards show whether this release is harming it? Which dependency fails first if load spikes? How quickly can the team stop or reverse the rollout? What manual intervention would still be required at 2 AM? A service is production-ready when those questions have operational answers, not when a checklist has been formally completed.
 
-### Case Studies: Release Safety in Practice
+### Case Study: When Rollout Shape Is the Failure
 
-The same public cases become sharper when the question shifts from measurement to release shape. Evernote's [SLO case study](https://sre.google/workbook/slo-engineering-case-studies/) is useful here because SLO calculations helped the team reduce a proposed set of five release windows to two while they were still chasing a complex bug. The lesson is not that two windows are always better than five. It is that rollout shape became a reliability decision grounded in estimated customer impact rather than a negotiation between groups with different incentives.
-
-Slack's [Continuous Load Testing](https://slack.engineering/continuous-load-testing/) provides the proactive version of the same idea. By validating high-impact changes against an always-running large-organization test environment, and by building automatic shutdown and emergency-stop controls into the load-testing system itself, Slack turned production readiness into ongoing evidence rather than an occasional meeting. A release becomes safer when the organization can answer "How will this behave at scale?" before real users do.
-
-Cloudflare's [June 2022 outage](https://blog.cloudflare.com/cloudflare-outage-on-june-21-2022/) shows the opposite failure mode. The change belonged to a long-running resilience project, had been peer reviewed, and used a staggered rollout, but the stagger was not small enough in the failure domain that mattered most: the MCP-enabled locations carrying an outsized share of traffic. Cloudflare's own follow-up emphasized that the rollout should have included MCP-specific testing earlier and that automated commit-confirm rollback would have reduced recovery time. Release safety is therefore not separate from resilience work. It is the condition that keeps resilience work from becoming the next outage.
+Cloudflare's [June 2022 outage](https://blog.cloudflare.com/cloudflare-outage-on-june-21-2022/) shows what happens when release safety is not aligned with failure domains. The change belonged to a long-running resilience project, had been peer reviewed, and used a staggered rollout, but the stagger was not small enough in the failure domain that mattered most: the MCP-enabled locations carrying an outsized share of traffic. Cloudflare's own follow-up emphasized that the rollout should have included MCP-specific testing earlier and that automated commit-confirm rollback would have reduced recovery time. Release safety is therefore not separate from resilience work. It is the condition that keeps resilience work from becoming the next outage.
 
 This is why error budgets and release safety belong in the same conversation. Error budgets tell you when the service can afford more change. Release safety determines whether a specific change is shaped responsibly enough to spend that budget.
 
@@ -182,13 +166,9 @@ The appropriate headroom varies by cost sensitivity and traffic volatility. A se
 For each request type your service handles, calculate the maximum per-request CPU and memory cost that the service can sustain at peak load without saturation. This is the performance budget. When a new feature would push per-request cost above the budget, it either needs optimization or the service needs to be provisioned for more capacity before the feature ships. Making the budget explicit prevents the gradual performance degradation that accumulates when each new feature adds "just a little" overhead with no accountability.
 </Aside>
 
-### Case Studies: Capacity as a System Property
+### Case Study: Nonlinear Capacity Failure
 
-Once you start thinking seriously about safe change, capacity planning becomes easier to understand when you contrast a proactive example with two failures. Slack's [Continuous Load Testing](https://slack.engineering/continuous-load-testing/) shows the proactive version. By keeping synthetic clients running continuously against an organization larger than their biggest real customer, Slack turned scale assumptions into something they could test repeatedly. That let teams validate large releases, rehearse major launches, and observe how systems behaved when traffic was removed from one availability zone, all without waiting for a real incident to expose a weak assumption. Capacity planning is not a yearly spreadsheet exercise. It is an ongoing attempt to compare expected behavior with measured behavior before customers do it for you.
-
-A second Slack example, [the 2-22-22 incident](https://slack.engineering/slacks-incident-on-2-22-22/), shows the failure version. The system did not simply run out of database. A control-plane change in service discovery reduced cache stability at the same time that an inefficient scatter query became important. Lower cache hit rates increased database load, which made it harder for the cache to refill, which pushed the system deeper into overload. That is a much more realistic picture of capacity failure in distributed systems: the bottleneck is often an interaction between caches, queries, retries, and control planes rather than a single graph that reached 100 percent.
-
-Cloudflare's [July 2020 backbone outage](https://blog.cloudflare.com/cloudflare-outage-on-july-17-2020/) teaches the same lesson from the network side. A routing error caused traffic from many sites to concentrate on Atlanta, overwhelming one part of the backbone. The operational point is that headroom has to be reasoned about along traffic paths and failure domains, not just per server or per rack. A service can look generously provisioned when viewed one machine at a time and still have dangerously little room for a bad traffic shift.
+Capacity planning is not a yearly spreadsheet exercise. It is an ongoing attempt to compare expected behavior with measured behavior before customers do it for you. Slack's [2-22-22 incident](https://slack.engineering/slacks-incident-on-2-22-22/) is a useful example because the system did not simply run out of database. A control-plane change in service discovery reduced cache stability at the same time that an inefficient scatter query became important. Lower cache hit rates increased database load, which made it harder for the cache to refill, which pushed the system deeper into overload. That is a much more realistic picture of capacity failure in distributed systems: the bottleneck is often an interaction between caches, queries, retries, and control planes rather than a single graph that reached 100 percent.
 
 When teams fail to reason about those interactions ahead of time, the bill is eventually paid in pages, escalations, and interrupted sleep. That is why capacity surprises so often become on-call problems.
 
@@ -200,7 +180,7 @@ When capacity assumptions fail or risky change reaches production too broadly, t
 
 The most important determinant of on-call health is alert quality. An on-call engineer who receives ten pages per shift, of which eight require no action, is being trained to treat pages as noise. The two real pages that arrive during that shift are processed with the same urgency as the eight false ones, which means urgency has effectively been diluted toward zero.
 
-A commonly cited SRE target, drawn from Google's published guidance, is no more than two distinct incidents per 12-hour shift that require real response. Exceeding this consistently is not a signal to increase the rotation size; it is a signal that alert design needs improvement. Every noisy alert that is not fixed is a withdrawal from the attention budget of every engineer who will be on call until it is fixed. The alert design principles from the Monitoring and Alerting lecture (symptom-based over cause-based, `for` clauses to prevent transient firing, severity routing that separates pages from notifications) exist precisely to make this target achievable.
+A commonly cited SRE target, drawn from Google's published guidance, is no more than two distinct incidents per 12-hour shift that require real response. Exceeding this consistently is not a signal to increase the rotation size; it is a signal that alert design needs improvement. Every noisy alert that is not fixed is a withdrawal from the attention budget of every engineer who will be on call until it is fixed. The alert design principles from the Monitoring lecture (symptom-based over cause-based, `for` clauses to prevent transient firing, severity routing that separates pages from notifications) exist precisely to make this target achievable.
 
 ### Rotation Design
 
@@ -218,7 +198,7 @@ Breaking the spiral requires addressing alert quality first. Review the previous
 
 After alert quality is addressed, the next lever is toil reduction. If the on-call engineer spends two hours per shift on manual checks that could be automated, that is directly addressable. If they spend time answering questions that a runbook would answer, that is a documentation investment. The goal is to make the on-call rotation boring: a shift that ends with no pages and no toil is a successful shift.
 
-### Case Studies: Rebuilding What Deserves a Page
+### Case Study: Rebuilding What Deserves a Page
 
 Once the system's surprises start landing on people, the first repair is usually to redefine what deserves an interruption. In the [Evernote example from the SRE Workbook](https://sre.google/workbook/on-call/), the move from on-premises infrastructure to cloud changed the meaning of many familiar low-level symptoms. A few dropped packets or a transient database exception no longer carried the same direct meaning they once had in a tightly controlled datacenter. Evernote responded by reframing alerts around higher-level user impact and explicit severity categories. That shift reduced noise, made incident review more meaningful, and let on-call burden be discussed as a measurable property of team health instead of as private suffering.
 
@@ -226,9 +206,9 @@ The same chapter is also useful because it treats on-call as a trainable organiz
 
 A mature organization does not wait for real incidents to teach every lesson at full customer scale. That is where chaos engineering enters.
 
-## Chaos Engineering
+## Resilience Engineering: Chaos Engineering and Game Days
 
-On-call learns from failures after they happen. Chaos engineering tries to learn some of the same lessons earlier and under tighter control. It is the practice of deliberately introducing failures into a system in a controlled way to verify that its resilience mechanisms actually work. The name can be misleading: well-practiced chaos engineering is not chaotic. It is methodical, scoped, and designed to produce specific learnings.
+Incident response learns from failures after they happen. The Incident Response lecture's emphasis on blameless postmortems is the formal version of that learning. **Resilience engineering** is the complementary practice: learning some of the same lessons earlier and under tighter control, by introducing failures into the system on purpose. The two most common forms of that practice are **chaos engineering** (continuous, often automated, failure injection) and **game days** (planned, scoped, cooperative exercises). They share the same underlying logic: bounded failures can teach the same architectural and procedural lessons that uncontrolled failures do, at much lower cost.
 
 ### The Steady-State Hypothesis
 
@@ -242,7 +222,7 @@ Every chaos experiment should have a defined blast radius: the maximum scope of 
 
 Blast radius control also requires a kill switch: a mechanism to stop the experiment immediately if the system is not recovering as expected. The kill switch might be as simple as a script that reverses the failure injection, or a more sophisticated circuit breaker that the chaos platform provides. Running a chaos experiment without a kill switch is recklessness, not engineering.
 
-### A Useful Contrast: Uncontrolled Change Versus Controlled Failure
+### A Useful Contrast
 
 The easiest way to see what chaos engineering is for is to revisit the June 2022 Cloudflare outage from one final angle. A network change tied to a resilience project reached 19 high-traffic data centers before the failure mode was caught, which meant the architectural lesson was learned from a real outage rather than from a bounded experiment.
 
@@ -262,37 +242,88 @@ In a Kubernetes environment, straightforward early experiments include: deleting
 
 Tools like [LitmusChaos](https://litmuschaos.io/) and [Chaos Mesh](https://chaos-mesh.org/) provide Kubernetes-native chaos injection with blast radius controls built in. They are not required for getting started, but they provide structure and safety controls that become valuable as the practice matures.
 
-### Gamedays
+### Game Days
 
-A **gameday** is a planned, announced, scoped chaos experiment where the whole team is present to observe. Teams set aside time, define a scenario, and run a real or simulated failure. Gamedays build muscle memory for incident response: engineers practice triage and mitigation in a lower-stakes context where the blast radius is controlled and nobody is being woken up.
+A **game day** is a planned, announced, scoped chaos experiment where the whole team is present to observe. Teams set aside time, define a scenario, and run a real or simulated failure. Game days build muscle memory for incident response: engineers practice triage and mitigation in a lower-stakes context where the blast radius is controlled and nobody is being woken up.
 
-Gamedays are distinct from continuous chaos engineering in that they are explicitly cooperative: everyone knows a gameday is happening, and the focus is on the team's response process as much as on the system's resilience. The debrief after a gameday is at least as valuable as the experiment itself. What did the team try that worked? What did not? What runbook steps were missing or unclear? What monitoring was absent that would have helped?
+Game days are distinct from continuous chaos engineering in that they are explicitly cooperative: everyone knows a game day is happening, and the focus is on the team's response process as much as on the system's resilience. The debrief after a game day is at least as valuable as the experiment itself. What did the team try that worked? What did not? What runbook steps were missing or unclear? What monitoring was absent that would have helped?
 
-Run gamedays quarterly, or whenever significant changes happen to your infrastructure or team composition. Rotate roles so that everyone practices being the Incident Commander and the Communications Lead, not just the same senior engineer every time. Keep a log of findings from gamedays alongside your postmortem library; patterns across both reveal the most persistent gaps in your system and process.
+Run game days quarterly, or whenever significant changes happen to your infrastructure or team composition. Rotate roles so that everyone practices being the Incident Commander and the Communications Lead, not just the same senior engineer every time. Keep a log of findings from game days alongside your postmortem library; patterns across both reveal the most persistent gaps in your system and process.
 
-## Case Study Map
+## Disaster Recovery
 
-By this point the same organizations have appeared more than once because each exposed a different part of the same operating problem. The table below makes that reuse explicit so you can compare the cases as one set rather than remember them as unrelated anecdotes.
+Chaos engineering and game days prepare a team for incidents the system is *designed* to tolerate. Disaster recovery (DR) prepares the organization for the failures the system was not designed to tolerate alone: a region-wide cloud outage, a ransomware encryption of the primary database, the loss of a data center to fire or flood, the simultaneous unavailability of a critical third party. These are the events where the difference between continuing to operate and not is not faster mitigation but a separate, planned, tested recovery procedure that you may not exercise for years and then must execute under conditions worse than any normal incident.
 
-| Case study | Best used to illustrate | Operational lesson |
-| --- | --- | --- |
-| Evernote SLO work | Shared reliability policy and release tradeoffs | SLOs matter when they change release behavior and page design, not when they remain dashboard decoration. |
-| The Home Depot VALET framework | Reliability visibility at organizational scale | Error budgets require common service health signals before teams can make coordinated tradeoffs. |
-| Slack continuous load testing | Toil reduction, release readiness, and proactive capacity validation | Expensive validation should become routine infrastructure instead of a heroic special event. |
-| Slack 2-22-22 incident | Nonlinear capacity failure | Overload often emerges from interacting caches, queries, and control planes rather than one saturated host. |
-| Cloudflare July 2020 backbone outage | Failure-domain headroom | Generous per-node capacity can still fail when traffic shifts concentrate load along the wrong path. |
-| Cloudflare June 2022 outage | Rollout safety and blast radius control | A staged rollout is only safe if its stages match the real failure domains and rollback is fast. |
-| Netflix Simian Army | Controlled resilience testing | Bounded failures can teach the same architectural lesson as outages at much lower cost. |
+The line between incident response and disaster recovery is fuzzy in practice. A region failover that takes thirty minutes is a long incident. A complete failover that takes eight hours is a disaster. Both ends of that spectrum require the same kinds of planning, the same kinds of artifacts (runbooks, tested backups, named decision-makers), and the same blameless review afterward. The difference is mostly scope and the question of whether the standard response toolkit (rollback, traffic shifting, scaling) can address the failure at all.
+
+### RTO and RPO
+
+Two metrics anchor every DR plan, and they are easy to confuse.
+
+**Recovery Time Objective (RTO)** is the maximum acceptable duration of an outage. If your RTO is four hours, your DR plan must be capable of restoring service within four hours of a disaster being declared. RTO drives architectural decisions: a four-hour RTO might be achievable with a cold standby and manual failover, but a 15-minute RTO probably requires automated failover to a hot standby.
+
+**Recovery Point Objective (RPO)** is the maximum acceptable amount of data loss, measured in time. If your RPO is one hour, you can afford to lose at most one hour of data. RPO drives your backup and replication strategy: an RPO of one hour means backups every hour at minimum, while an RPO of zero requires synchronous replication to a secondary site.
+
+These two metrics are driven by business requirements, not by engineering preferences. The cost of achieving a lower RTO or RPO increases dramatically, and a conversation with business stakeholders about what level of availability and data durability they actually need (and what they are willing to pay for) is one of the most consequential reliability conversations an engineering organization will have. A retail business might tolerate hours of order-system downtime once a year more easily than five minutes of lost transaction data; a streaming service might trade durability for availability the other way around. The right RTO and RPO are different per service and per organization, and they are best chosen explicitly rather than by accident.
+
+### Backup Strategies
+
+Backups are the foundation of disaster recovery, but they are only useful if they actually work. A backup you have never tested is a hypothesis, not a safety net.
+
+**Full backups** capture the complete state of a system at a point in time. They are simple to reason about but consume significant storage and take a long time to create. Running a full backup daily is common for databases of moderate size.
+
+**Incremental backups** capture only the changes since the last backup (full or incremental). They are faster to create and consume less storage, but restoring from them requires replaying the full backup plus every subsequent incremental, which takes longer and introduces more points of failure.
+
+**Continuous replication** streams changes from the primary to a replica in near-real-time. PostgreSQL's streaming replication, MySQL's binary log replication, and cloud-native options like AWS RDS Multi-AZ all fall into this category. Continuous replication provides the lowest RPO (potentially zero) but does not protect against logical errors like accidentally dropping a table, because the drop command replicates too. For that reason, continuous replication is usually paired with periodic snapshots or point-in-time recovery, so that the system can be rolled back to a state before the logical error occurred.
+
+### The Tested-Restore Imperative
+
+The single most important property of a backup is that it has been restored recently. Backups that look healthy in monitoring but have never been used to actually restore the system are the most common failure mode in DR planning. The backup completes; the file lands in object storage; the metric goes green; nobody discovers until the disaster that the backup was being written with the wrong encryption key, or that the restore tool no longer works against the current database version, or that the recovery procedure takes 12 hours instead of the documented 2.
+
+Schedule automated restore tests at least monthly. Log the results of every restore test, including how long the restore took (this validates your RTO). Failing restore tests should be treated with the same urgency as production incidents, because they predict the next one.
+
+<Aside type="caution" title="A Backup You Have Not Restored Is Not a Backup">
+Treat untested backups as having unknown status, not healthy status. The metric you should report to leadership is not "we have backups" but "we restored from backup successfully on date X, and the restore took Y hours." Anything weaker than that is hoping.
+</Aside>
+
+### Failover Architectures
+
+**Cold standby** means you have backups stored offsite and a documented procedure for provisioning new infrastructure and restoring from those backups. This is the cheapest option but has the longest RTO, typically measured in hours. Cold standby is appropriate for systems where extended downtime is acceptable in exchange for low standing cost.
+
+**Warm standby** maintains a secondary environment that is running but not serving traffic. Data is replicated to the standby (often asynchronously), and failover involves promoting the standby and redirecting traffic. RTO is measured in minutes to tens of minutes. Warm standby is the common middle ground: it costs more than cold standby because the secondary environment is running, but it costs much less than a fully active second site.
+
+**Hot standby (active-active)** runs your application in two or more independent sites simultaneously, with traffic distributed across all of them. If one site fails, the others absorb its traffic automatically. This provides the lowest RTO (potentially seconds) but is the most complex and expensive to operate. Active-active also has the highest design cost: the application must be written to operate correctly with multiple primaries, which is a significant constraint on database schema, write coordination, and consistency expectations.
+
+### Failover in Practice
+
+A failover typically involves two actions: promoting the standby database to primary, and redirecting traffic to the surviving site. Traffic redirection can happen at the DNS level (updating a DNS record to point to the new site) or at the load balancer level (removing the failed site from the target group).
+
+```bash
+# Promote a PostgreSQL standby to primary
+ssh db-standby-01 'sudo -u postgres pg_ctl promote -D /var/lib/postgresql/16/main'
+
+# Update the DNS record to point to the standby site
+aws route53 change-resource-record-sets --hosted-zone-id $ZONE_ID \
+  --change-batch '{"Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"orders.example.com","Type":"A","TTL":60,"ResourceRecords":[{"Value":"10.0.2.50"}]}}]}'
+```
+
+DNS-based failover is simple but limited by DNS TTL: even with a 60-second TTL, some clients will cache the old address for longer. Load-balancer-based failover is faster and more reliable but requires both sites to be behind the same load balancer or a global traffic manager. Most mature DR plans use both: load-balancer failover for short outages within a region, DNS failover for cross-region disasters where the original load balancer itself is unavailable.
+
+### When DR Becomes IR
+
+A disaster recovery procedure that has been started is, by definition, also an incident. The Incident Response lecture's roles apply: someone is the IC, someone is the Operations Lead executing the runbook, someone is communicating with customers about an extended outage. The differences are mostly scale and the involvement of stakeholders outside engineering: legal teams may need to be notified, customer-success teams will be coordinating with major accounts, leadership will be briefed more frequently, and the postmortem will involve a broader audience than a typical incident. DR planning that does not account for these extensions tends to fail at the seams between engineering and the rest of the business, not at the technical recovery itself.
 
 ## Takeaways
 
-If you put these cases side by side, SRE stops looking like a bag of separate practices and starts looking like one operating philosophy. Evernote and The Home Depot explain why organizations reach for it in the first place. They need a common language for user promises, risk, and service health so that delivery pressure and stability pressure stop being two disconnected arguments.
+Reliability engineering is the discipline that operates between incidents. Where incident response asks "what do we do when production breaks?", reliability engineering asks "how do we make production break less, recover faster when it does, and learn more from each failure than we paid for?" The answers are mostly engineering investments and organizational practices, not heroic on-call work.
 
-Slack then shows what happens when that philosophy is applied well and when it is learned the hard way. Continuous load testing makes crucial questions cheap to ask repeatedly. The 2-22-22 incident shows why that matters, because distributed systems often fail through interactions that no single utilization graph fully explains. Capacity planning, then, is not merely choosing larger instances. It is learning where the system becomes nonlinear, unstable, or hard to reason about.
+The load-bearing concept of the discipline is the error budget. Once an SLO is a measurement and the error budget is a policy, almost every other practice in this lecture earns its place by reference to that policy. Toil reduction earns back time that can go toward improvements that protect the budget. Release safety prevents reckless spending of the budget on individual deployments. Capacity planning prevents the budget from being burned by load the system was never sized for. Chaos engineering and game days test the assumptions the budget depends on. Disaster recovery prepares for the catastrophic failures that would burn the budget many times over.
 
-Cloudflare and Netflix finish the argument by focusing on exposure. A resilience project can still fail if rollout logic, failure-domain modeling, or recovery paths are weaker than the architecture they are meant to protect. Release safety is the bridge between those lessons. It turns error-budget policy into canaries, small batches, rollback paths, and readiness checks that limit how much uncertainty reaches customers at once. Chaos engineering supplies the positive version of the same idea: learn on purpose, within bounds, before production teaches the lesson at full scale.
+On-call sustainability is the human side of all of this. A team that pages itself ten times a night cannot do the engineering work that would reduce the pages. The Evernote workbook example is a reminder that on-call burden is a property of the system and the alert design, not of individual engineers' tolerance. Alert quality is the leading indicator: the team that fixes its noisy alerts is the team that will have time to do the rest of the work in this lecture.
 
-Taken together, these cases describe the same loop. You define what good service means. You measure it in ways that reflect user impact. You watch the human cost of operating the system, especially toil and pager load. You invest in automation, safer rollouts, and validation under realistic load. Then you test your assumptions before production does it for you. That loop, more than any specific tool, is what makes SRE a discipline rather than a slogan.
+Disaster recovery rounds out the picture. The incident response toolkit (rollback, traffic shifting, feature flags) is enough for most failures. For the catastrophic ones (region loss, ransomware, prolonged third-party outage), what you have is the backup you tested last month and the failover procedure you ran in your most recent game day. RTO and RPO are not engineering preferences; they are business decisions about how much downtime and data loss the organization can tolerate, made before the disaster instead of during one.
+
+The On-Premises Infrastructure lecture that follows revisits some of these themes from the physical side: data centers, redundant power, network topology, and the hardware-level reliability investments that cloud providers make on behalf of their customers. The System Security and Hardening lecture later applies a security lens to most of the topics this course has covered. Both build on the operational vocabulary established here.
 
 ## Resources
 
@@ -300,8 +331,10 @@ Taken together, these cases describe the same loop. You define what good service
 - <a href="https://sre.google/workbook/table-of-contents/" target="_blank" rel="noopener noreferrer">The Site Reliability Workbook (Google, free online)</a>
 - <a href="https://sre.google/sre-book/eliminating-toil/" target="_blank" rel="noopener noreferrer">Eliminating Toil (Google SRE Book, Chapter 5)</a>
 - <a href="https://sre.google/workbook/error-budget-policy/" target="_blank" rel="noopener noreferrer">Error Budget Policy (Google SRE Workbook)</a>
+- <a href="https://sre.google/workbook/slo-engineering-case-studies/" target="_blank" rel="noopener noreferrer">SLO Engineering Case Studies (Google SRE Workbook)</a>
 - <a href="https://principlesofchaos.org/" target="_blank" rel="noopener noreferrer">Principles of Chaos Engineering</a>
 - <a href="https://netflixtechblog.com/the-netflix-simian-army-16e57fbab116" target="_blank" rel="noopener noreferrer">The Netflix Simian Army (Netflix Tech Blog)</a>
+- <a href="https://aws.amazon.com/builders-library/" target="_blank" rel="noopener noreferrer">Amazon Builders' Library</a>
 - <a href="https://increment.com/reliability/" target="_blank" rel="noopener noreferrer">Reliability (Increment Magazine)</a>
 - <a href="https://www.youtube.com/watch?v=uTEL8Ff1Zvk" target="_blank" rel="noopener noreferrer">SLOs Are the API Between SREs and Product Teams (Liz Fong-Jones, SREcon)</a>
 - <a href="https://charity.wtf/2020/10/03/on-call-at-scale/" target="_blank" rel="noopener noreferrer">On-Call at Scale (Charity Majors)</a>

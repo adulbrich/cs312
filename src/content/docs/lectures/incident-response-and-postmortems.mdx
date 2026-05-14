@@ -1,0 +1,260 @@
+---
+title: "Incident Response and Postmortems"
+description: "The human practice that runs on top of monitoring and logs: severity, the incident lifecycle, mitigation as a toolkit, roles, communication, decision-making under uncertainty, and blameless postmortems as the durable learning artifact."
+sidebar:
+  order: 15
+draft: true
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import HistoricalNote from '/src/components/HistoricalNote.astro';
+
+{/* ai-summary
+type: lecture
+slug: incident-response-and-postmortems
+order: 15
+covers: incident definition and severity tied to SLOs; lifecycle as posture shifts (detect, triage, mitigate, resolve, learn); mitigation principles (reversibility, blast radius, time-to-undo); rollback, feature flags, traffic shifting, scaling, graceful degradation, Kubernetes-native primitives; roles (IC, ops lead, comms lead, scribe) and the IC paradox; communication discipline (internal channel, status page, bridge calls, audience hierarchy); decision-making under uncertainty (System 1/2, hindsight bias, local rationality, CRM); recovery and verification; blameless postmortems (Just Culture, six-part structure, 5 Whys, action items, the three-week test)
+prereq_lectures: monitoring-and-performance, log-management-and-analysis
+followup_lectures: reliability-engineering
+paired_activities: incident-response-tabletop
+supports_labs: cluster-operations
+*/}
+
+A monitoring dashboard turning red and a wall of error logs are evidence, not response. They tell you something is wrong; they do not tell you what to do next. What comes next is the part of operations that no tool can do for you: a group of humans, often distributed and working under pressure, coordinating their attention and actions to restore service, communicate honestly about it, and learn from it afterward. The quality of that coordination, more than any individual engineer's brilliance, is what separates a twenty-minute incident from a six-hour one.
+
+This lecture is about that coordination. It picks up where the Monitoring and Log Management lectures leave off. Detection is the question those lectures answered; investigation is the discipline they introduced. The questions this lecture answers are operational and human. How do you decide how urgent a problem is? Who makes decisions during the response, and who executes them? What do you say to customers while you are still figuring out what is going on? How do you stop the bleeding before you understand the wound? And once the system is stable again, how do you turn the experience into something that makes the next failure less severe rather than just adding it to a list of war stories?
+
+The center of gravity here is not technical. The technical content of an incident, which command to run and which log to read and which knob to turn, is covered in the lectures around this one. The new material is everything that must be true for those technical actions to be performed well: the roles, the communication, the decision-making under uncertainty, and the cultural conditions that allow honest reflection afterward. Incidents are where engineering organizations show what they actually are. A team that responds to them well is a team that has done the unglamorous work of preparing for them.
+
+## What Is an Incident?
+
+An incident is any unplanned disruption to a service that requires a coordinated human response. The phrase "coordinated human response" is doing the work in that definition. Not every problem in production is an incident. A bug that affects a single user and can be triaged into a sprint backlog is not an incident; it is normal work. A monitoring spike that resolves on its own within sixty seconds is not an incident; it is noise. An incident is the category of problem that requires people to stop what they are otherwise doing and act in concert.
+
+Drawing this line precisely matters because the response itself is expensive. Declaring an incident pulls engineers off project work, opens communication channels, and consumes attention that has alternatives. If the line is too generous, every small issue triggers an incident process and the process loses meaning. If the line is too strict, real problems sit in normal work queues while user impact accumulates.
+
+### Severity Levels
+
+Severity levels give a team shared vocabulary for how bad a given incident is, which in turn determines how the team responds. A common scheme uses three or four tiers. **SEV-1** means a core business function is completely unavailable, data integrity is at risk, or a security incident is in progress: the response is immediate, all-hands, and includes paging on-call regardless of time of day. **SEV-2** means the service is meaningfully degraded but partially functional: a feature is broken, a subset of users is affected, or latency is elevated enough to change user behavior. **SEV-3** is elevated risk or a non-critical feature degradation that requires attention but not immediate response. **SEV-4** covers cosmetic issues that should be tracked so they do not accumulate into something worse.
+
+The most important property of a severity scheme is that the thresholds map to measurable signals, not to gut feelings. If a service has a 99.9 percent availability SLO, the Monitoring lecture's framing applies directly: an error rate sustained above 0.1 percent is, by definition, burning the error budget faster than it can replenish. That is a SEV-1 trigger that does not require debate at 2 AM. Tying severity to SLOs means the question "is this serious enough to wake someone up?" has already been answered, in writing, before anyone is on call.
+
+### Examples
+
+Incidents come in many shapes. A deployment introduces a crash that takes a service offline. A certificate that everyone forgot about expires overnight and clients start refusing to connect. A third-party API silently changes its rate-limit behavior and your service starts queueing requests until it runs out of memory. A misconfigured firewall rule blocks legitimate traffic from a partner. A database approaches its connection limit during a marketing campaign and starts refusing application connections. A power event in one availability zone evacuates a fraction of your fleet without warning. The common property of all of these is urgency: each is producing user impact while you are reading this sentence, and each benefits from a structured response rather than improvised heroics.
+
+## The Incident Lifecycle as Posture Shifts
+
+Every incident, regardless of severity, moves through five phases: detect, triage, mitigate, resolve, and learn. These phases are useful not because they describe a sequence of mechanical steps but because each represents a different posture the responders must adopt. The hardest part of incident response is often noticing when the posture needs to shift and changing it deliberately.
+
+**Detect** is the listening posture. Something has to notice that the system is in trouble. The Monitoring lecture covered the full vocabulary here: layered alerting on metrics, synthetic monitoring from outside the infrastructure, log-based detection for events that do not appear cleanly in metrics, and the dead man's switch that ensures the monitoring itself is alive. The point that matters for incident response is that the moment of detection is also the moment the clock starts: every minute that elapses between the system becoming unhealthy and someone realizing it is a minute of damage that cannot be recovered.
+
+**Triage** is the assessing posture. An alert is information, not yet a plan. The triage phase asks three questions in rapid succession: is this real, how bad is it, and who needs to be involved? The Log Management lecture's investigation method applies directly here: scope the symptom, narrow the time window, broaden across sources. The shift from detect to triage is the shift from "something happened" to "here is what is happening, here is what is affected, here is who is responding."
+
+**Mitigate** is the acting posture, and it is the phase where engineers' instincts most often fight them. The instinct of a trained engineer is to understand the problem before acting on it. During an incident, that instinct is wrong. Mitigation prioritizes restoring service over understanding the failure. The order of operations is: stop the bleeding, then diagnose the wound. A rollback that succeeds without explaining why the deployment failed is a successful mitigation. The understanding comes later. We will return to this principle in the next section.
+
+**Resolve** is the verifying posture. Mitigation reduces user impact; resolution returns the system to a state that does not depend on emergency intervention. A service running on its rollback version because the new release crashed is mitigated, not resolved. The transition from mitigate to resolve is the moment the responders allow themselves to slow down: the immediate crisis is past, and the work shifts from "as fast as possible" to "as correctly as possible."
+
+**Learn** is the reflecting posture. The system is stable, customers are no longer being harmed, and the responders are exhausted. This is the moment when the temptation to declare victory is strongest and when doing so is most damaging. The learning phase converts a painful experience into a lasting improvement. Skipping it, or doing it perfunctorily, is what causes the same incident to recur six months later in a slightly different costume.
+
+These five phases are not equal in duration. Detection might take milliseconds (an automated alert) or hours (a customer complaint). Mitigation might take three minutes (a rollback) or three days (waiting for an upstream vendor to fix a regression). The lifecycle is a cognitive tool more than a schedule: knowing which posture the team is currently in, and noticing when it should shift, is what keeps a response coherent over an extended period.
+
+## Mitigation as a Toolkit
+
+The most counterintuitive idea in incident response is that the first response to a failure should rarely be to understand it. Diagnosis is slow. Users do not benefit from your understanding; they benefit from a working service. The job of mitigation is to restore service as quickly as possible using whatever tool is fastest, even if the result is temporary, inelegant, or leaves a deeper problem unaddressed for later.
+
+Three principles unify the mitigation toolkit. **Reversibility** matters more than correctness: an action you can undo if it makes things worse is safer than an action that might be perfect but cannot be backed out. **Blast radius** matters as much as effectiveness: a fix that affects only the failing component is preferable to one that touches the entire fleet. **Time-to-undo** is the operationally meaningful measure of risk: a mitigation that takes thirty seconds to roll back is dramatically safer than one that takes thirty minutes, even if both are theoretically equivalent in correctness. With those principles in hand, the standard mitigation options become legible.
+
+### Rollback
+
+Rollback is the single most powerful mitigation strategy and the one that resolves the largest share of incidents. If the symptoms began shortly after a deployment, returning to the previous known-good version is almost always the correct first action. Modern deployment infrastructure makes this fast: Kubernetes Deployments retain previous ReplicaSets and rolling back means replacing the current pods with the old image; blue-green deployments switch traffic at the load balancer level; feature-flagged releases roll back by flipping a flag.
+
+The rollback discipline begins long before the incident. If a deployment cannot be rolled back cleanly, that is a problem you address during the deploy design, not during the response. Database migrations that drop columns, configuration changes that other services have already adopted, and any change that consumes resources from a finite pool can each make rollback impossible. A deployment pipeline that supports clean rollback is a reliability investment that pays off only during incidents, and it pays off enormously when it does.
+
+### Feature Flags
+
+Feature flags decouple deployment from release. Code can be deployed to production while the feature it enables remains off behind a flag; the feature is turned on later by a configuration change, and it can be turned off the same way without a redeployment. During an incident, a feature flag is a scalpel: if the failing component is one feature within a larger application, the flag disables exactly that feature and leaves the rest of the service unaffected. The blast radius is minimal, the time-to-undo is seconds, and the rollback is reversible by flipping the flag back. Feature flags are the cheapest mitigation to invoke and one of the most expensive to set up in the first place, which is part of what makes them a reliability investment rather than a runtime decision.
+
+### Traffic Shifting
+
+Traffic shifting moves users away from a broken component. If one availability zone is experiencing problems, draining it from the load balancer sends all traffic to healthy zones. If a canary deployment is misbehaving, removing it from the upstream pool returns the user population to the stable version. If a single database replica is corrupt, removing it from the read pool routes around it. Traffic shifting is particularly valuable because it works even when the cause is unknown: you do not need to understand why a zone is unhealthy to decide that traffic should not go there.
+
+### Scaling
+
+When the root cause is capacity pressure, adding capacity is mitigation. A service that has gone into thread-pool exhaustion under unexpected traffic can often be returned to health by adding instances and waiting for queues to drain. Scaling is not always available (it is not a fix for a logical error, a permission failure, or a database that has hit a hard limit) and it carries its own risk: scale-up events consume resources during the transition and can briefly worsen the very condition you are responding to. Treat scaling as a viable mitigation but not as a default response; for some failure modes, adding instances simply creates more failing instances faster.
+
+### Graceful Degradation
+
+Graceful degradation means intentionally reducing functionality to preserve the core experience. If a recommendation engine is overwhelming the database with queries, switching to a static "popular items" list keeps the rest of the page working. If a personalization service is timing out, falling back to a default user view costs personalization but preserves the application. Degradation requires that the system was designed to support it, which is again a reliability investment made before the incident. During the response, the question is not whether to degrade but which degraded mode preserves the most user value at the lowest cost.
+
+### Cluster-Native Primitives
+
+In a Kubernetes environment, the mitigation toolkit extends to operations the orchestrator provides directly. `kubectl rollout undo` rolls back to the previous ReplicaSet, often within seconds, and is reversibility in command form. `kubectl rollout pause` stops an in-progress rollout without rolling back, giving the responder time to investigate whether the new image is the cause. `kubectl cordon` and `kubectl drain` remove a suspect node from scheduling and evacuate its pods to healthier neighbors, which is blast-radius reduction at the node level. `kubectl exec` opens a shell inside a running container when logs are insufficient. `kubectl port-forward` bypasses the Service and Ingress layer to test a single pod directly, ruling networking out as a cause. Each of these commands corresponds to a mitigation principle: rolling back is reversibility, cordoning is blast radius reduction, port-forwarding is isolation for diagnosis. Knowing them before 2 AM is what separates a calm response from a frantic one. They complement the investigation tools from the Log Management lecture: `kubectl logs` and `kubectl describe` tell you what is happening, and the commands above give you the means to act on that information.
+
+### Choosing a Mitigation
+
+The choice of mitigation is rarely about elegance. It is about the question "what is the fastest reversible action that reduces user impact, and what evidence do I have that it will help?" If a deployment shipped fifteen minutes before the symptoms began, rollback has overwhelming prior probability. If the error rate is concentrated in one region, traffic shifting away from that region is a tractable first move. If a specific feature appears in the error traces, a feature flag is the smallest cut you can make. The discipline is to act on the highest-probability mitigation first, observe whether it helps, and revise the hypothesis if it does not.
+
+<Aside type="tip" title="Define Success Before You Mitigate">
+For every mitigation, state what success looks like before you execute it. "Success means the application error rate drops below 0.1 percent within five minutes and stays there." If the error rate does not drop, your mitigation was the wrong one and you need a different hypothesis. Without an explicit success criterion, it is easy to invest twenty minutes in a mitigation that is not actually helping because the responder has emotional commitment to the action they just took.
+</Aside>
+
+## Incident Roles
+
+A response without defined roles produces a recognizable failure mode: several engineers all working in parallel on overlapping investigations, nobody making decisions, status updates either missing entirely or duplicated across channels, and a customer-facing audience that has heard nothing for forty minutes. The fix is to define a small number of roles, declare them explicitly when the incident is opened, and respect their boundaries during the response.
+
+### Incident Commander
+
+The Incident Commander (IC) owns the response itself. The IC's job is not to do the technical work; it is to coordinate the people doing the technical work and to make decisions when decisions are required. A good IC asks questions: what is the current customer impact, what have we tried, what are we trying next, when is our next status update, do we have the right people involved? The IC time-boxes investigations and notices when a line of inquiry has stalled. The IC declares the severity level, escalates when needed, and ultimately decides when the incident is closed.
+
+The IC paradox is that the most useful person in the response is often the one who is not typing commands. The IC must remain available for decisions, which means keeping enough mental bandwidth free to think about the response as a whole. An IC who dives into a `kubectl` session to debug a pod has effectively vacated the IC role; someone else must step into it, or the response loses its coordinator. When you take on the IC role, announce it explicitly: "I am acting as IC for this incident." Removing ambiguity about who is in command is one of the IC's first actions.
+
+### Operations Lead
+
+The Operations Lead (sometimes called the Technical Lead) does the hands-on diagnostic and mitigation work. They read the logs, run the commands, deploy the rollback, check the metrics. They report findings to the IC and ask for decisions when decisions are required. In a small team, the Operations Lead is often the on-call engineer who received the initial page.
+
+The Operations Lead's most important habit is narrating their work in the incident channel as they do it. "Checking error rate in Prometheus. Confirmed elevated 500s starting at 14:03." "SSHing to db-prod-01 to verify connection pool state." "Rolling back the order-api deployment now; expected to complete in ninety seconds." This narration serves two purposes. It keeps the IC and other responders informed without requiring side conversations. And it creates a real-time timeline that becomes invaluable during the postmortem, when memory is unreliable and the question "what did we try and in what order?" must be answered precisely.
+
+### Communications Lead
+
+The Communications Lead manages messaging to audiences outside the immediate response team. This includes updating the public status page, sending internal notifications to leadership, and coordinating with customer support. The Comms Lead's job is to translate the technical state of the incident into language that each audience can act on, and to do so on a predictable cadence so that stakeholders do not interrupt the response to ask for updates.
+
+A good Comms Lead has internalized the audience hierarchy. The incident channel speaks engineering vocabulary because its audience is engineers. The status page speaks symptom-and-impact vocabulary because its audience is customers who care whether the service works, not why it failed. The leadership update speaks business-impact vocabulary because its audience needs to know whether the company is exposed and what they should be doing in response. Each audience needs the same underlying facts framed differently.
+
+### Scribe
+
+The Scribe records the timeline of the response. They note when alerts fired, when each person joined the response, what actions were taken, and what the results were. This role is especially important for complex SEV-1 incidents that span hours, where individual memory becomes unreliable and the timeline that anchors the postmortem must be reconstructed from notes rather than recollection.
+
+The Scribe role is the one most commonly skipped, and skipping it is the most common cause of poor postmortems. The engineer doing the technical work cannot reliably also document the timeline; their attention is on the system, not the record. If a team can staff only two roles, IC and Scribe are the right two. A coordinated response with a thin technical bench can still produce a good postmortem if the timeline is captured well, while a brilliant technical response without a timeline becomes hard to learn from.
+
+### Small Teams
+
+On teams of three or four engineers, one person often fills multiple roles. That is workable, but the roles should still be declared explicitly. "I am acting as IC and Comms for this one" is more useful than implicit role assumption, because it tells everyone else where to direct decisions and communications. The role that combines least well with technical work is Scribe, for the reason given above. When a small team must compress, prefer combining IC and Comms or folding Comms into the IC's responsibilities over asking the Operations Lead to also keep the timeline.
+
+## Communication Under Pressure
+
+Communication during an incident is not a side activity; it is part of the response. An incident with excellent technical handling and silent communication produces angry customers, panicked leadership, and a support team flooded by tickets the team itself could have prevented. The cost of bad incident communication is paid by everyone except the responders, which is why responders sometimes underinvest in it. The right framing is that communication shapes how the rest of the organization perceives the incident, and a poorly perceived incident creates downstream work even after the technical response is complete.
+
+### The Internal Channel
+
+The first communication artifact created during an incident is a dedicated channel, usually in the team's chat platform. A naming convention like `#inc-2026-05-14-checkout-outage` is helpful: dated, scoped, and discoverable. A pinned message at the top of the channel carries the current severity, the IC's name, the next scheduled update, and a one-line summary of the current state. All incident discussion happens in this channel. Side conversations in direct messages or other rooms fragment the record, and the postmortem suffers for it later.
+
+Within the channel, structured updates beat free-form discussion. For a SEV-1, an update every fifteen minutes keeps stakeholders calm and reduces the number of "any update?" interruptions that otherwise consume responder attention. A useful template includes the current status, what was just tried, what is being tried next, and when the next update will arrive. The template matters less than the cadence: predictable updates train the organization to wait for the next one rather than to ask for one.
+
+### The Status Page
+
+The status page is the single most important external communication artifact during an incident. Customers are more forgiving of downtime than they are of silence. A status page that acknowledges the problem early, describes the impact in customer-facing terms, and updates regularly defuses most of the support pressure that would otherwise reach the response team through other channels.
+
+Several principles separate status pages that help from ones that hurt. Acknowledge the problem before you fully understand it; a status page that says "we are investigating reports of elevated error rates affecting checkout" is appropriate within five minutes of detection, long before root cause is known. Describe impact in terms customers can verify against their own experience: "some users may receive errors when placing orders" beats "the order-api service is returning 502s." Avoid speculation about cause, especially in the first updates; "investigating" is honest, and a status page is not the place to publish hypotheses you may later have to retract. When the incident is resolved, post a final update confirming the resolution and committing to a public follow-up. The follow-up is the postmortem.
+
+### Bridge Calls
+
+For complex SEV-1 incidents involving multiple teams, a voice or video bridge can be more effective than a text channel. Voice is higher bandwidth and supports faster back-and-forth during time-critical decisions. The IC runs the call, mutes participants who are not actively contributing, and periodically summarizes the current state for participants who have just joined. A common mistake is to abandon the text channel once the bridge is open; the text channel is the record, and decisions made on the bridge should be summarized into it so the postmortem has a written trail.
+
+<Aside type="caution" title="Never Speculate Publicly">
+Public status updates and customer communications should describe what customers can observe, what the team is doing about it, and when the next update will arrive. They should never speculate about cause, blame a specific person or team, or include internal vocabulary like service names or container identifiers. A status update that says "a junior engineer ran the wrong command" is corrosive even if it is accurate, because it broadcasts blame externally and erodes psychological safety internally. The technical detail belongs in the postmortem, written with care; the public update belongs to symptom, impact, and what you are doing.
+</Aside>
+
+## Decision-Making Under Pressure
+
+The most important conceptual gap in most incident response training is the one between "here are the steps" and "here is how humans actually behave when the steps are happening to them." Real incidents involve sleep-deprived engineers making consequential decisions on incomplete information while a clock is running and other humans are watching. The cognitive conditions are unfavorable, and the failure modes of those conditions are predictable enough that they can be designed around.
+
+### Two Modes of Thinking
+
+The psychologist Daniel Kahneman's distinction between fast, intuitive, pattern-matching thinking (System 1) and slow, deliberate, analytical thinking (System 2) is useful here. Most engineering work uses System 2: you read code carefully, reason through edge cases, write tests, and consider design tradeoffs. Incident response is conducted largely in System 1, because there is not time for the slower mode. The engineer recognizes a pattern, reaches for a familiar mitigation, observes whether it works, and moves on.
+
+System 1 is fast and usually right, but it has characteristic failure modes. It anchors on the first plausible explanation and is slow to abandon it. It pattern-matches to similar past incidents and may miss the ways the current one differs. It underweights evidence that contradicts the working hypothesis. The first job of the IC is to provide a thin layer of System 2 oversight on top of the System 1 work being done by the Operations Lead: to ask "are we sure?", to time-box investigations that have stalled, and to deliberately consider alternative hypotheses when the current one is not yielding progress.
+
+### Hindsight Bias and Local Rationality
+
+Two cognitive biases shape both the response and (more dangerously) the postmortem that follows. **Hindsight bias** is the tendency to see past events as more predictable than they were at the time. Reading an incident timeline after the fact, it is almost impossible to avoid the feeling that the responders should have seen it sooner, tried the right thing first, escalated earlier. That feeling is almost always wrong. The responders did not have the information you have now; they had the information they had at the time, plus the cognitive load of acting under pressure.
+
+**Local rationality** is the complementary principle: the actions taken during an incident, however questionable they look in retrospect, made sense to the person taking them given the information they had at the moment. An engineer who ran the wrong command did so because, in the moment, that command appeared correct to them. The postmortem question is not "why did they do something so foolish?" It is "what conditions made the foolish action look correct?" Almost always, the answer is a combination of incomplete documentation, ambiguous tooling, time pressure, and the cognitive cost of System 1 operation. The system designed those conditions; the engineer was their final expression.
+
+### A Structured Process Beats Individual Brilliance
+
+The aviation industry learned this lesson before software did. In the 1970s, several catastrophic accidents (the 1977 Tenerife runway collision, the 1972 Eastern Air Lines Flight 401 crash, the 1978 United Airlines Flight 173 fuel starvation) shared a pattern: highly skilled captains, technically capable of recovering, were unable to make use of the information available to them in the cockpit because cockpit culture did not support it. First officers and flight engineers either failed to challenge captains or were overruled when they did. The industry's response was Crew Resource Management (CRM), a body of training that explicitly teaches non-technical skills: communication, decision-making, leadership, and the responsibility of a crew to use all available resources rather than deferring to the most senior person in the room.
+
+Incident response inherits this lesson. A well-run incident is not a stage for the most senior engineer to solve a problem; it is a coordinated use of every responder's attention. The IC role exists in part to make this work: by separating coordination from technical execution, the IC creates space for junior responders to raise observations without competing for the same attention that the Operations Lead is using. A good incident channel has questions from engineers who have only been on the team for a month, and good ICs treat those questions as data.
+
+<HistoricalNote title="Crew Resource Management and Software Operations">
+Crew Resource Management originated at a 1979 NASA workshop on cockpit communication and was widely adopted across commercial aviation through the 1980s. Its effects on safety were substantial. The accident rate per million flight hours fell dramatically over the following decades, and post-incident reviews increasingly identified communication failures rather than pure technical errors as the primary cause of accidents that did occur. The software industry began borrowing CRM concepts in the 2000s, most visibly in Google's SRE practice and Netflix's chaos engineering culture. The Google SRE book's chapter on incident response explicitly cites CRM as an inspiration. The convergence is not coincidental: both industries operate complex systems where consequences are large, response time is short, and the cognitive load of operating the system reliably exceeds what any one person can manage alone.
+</HistoricalNote>
+
+### Time-Boxing
+
+A useful IC habit is to time-box investigations. "Spend the next ten minutes confirming whether this is a database problem. If you do not have an answer by 14:25, we move to traffic shifting away from the affected zone regardless." Time-boxing has two effects. It bounds the cost of a hypothesis that turns out to be wrong, and it forces a deliberate reconsideration at the boundary, where the responder is asked to step back and re-evaluate rather than continuing to push on the same investigation through sunk cost. ICs who use time-boxing produce shorter incidents, on average, than ICs who do not.
+
+## Recovery and Verification
+
+Recovery is the transition from "the immediate fire is out" to "we are confident the system is healthy enough to no longer require active attention." It is tempting to declare victory the moment the error rate drops, and premature declaration is one of the most common ways for a SEV-1 to become a SEV-1.5 an hour later when the underlying instability reasserts itself.
+
+A useful discipline is to define recovery criteria explicitly before mitigation completes. "Success means error rate below 0.1 percent, p99 latency below 800 ms, and all synthetic checks passing for at least thirty minutes." Until those criteria are met, the incident is not over. Downstream verification matters as much as the primary signal: if the order service's error rate has recovered, are downstream services like payment processing and email confirmation also healthy? An incident that restores the visible service but leaves a downstream system queueing failed jobs is not actually resolved.
+
+The transition from mitigated to resolved often happens later, sometimes much later. A service running on its rollback version is mitigated; it is not resolved until the bug that triggered the rollback is identified, fixed, and deployed. Resolution work often moves to normal working hours, which is the right tradeoff: complex changes made at 3 AM under fatigue and pressure are more dangerous than the residual exposure of running on a known-good but older version for a few hours.
+
+Once mitigation is holding, the response moves into a monitoring posture. The Comms Lead posts the resolution to the status page and internal channels. The Scribe captures the final state of the timeline. The IC announces that the incident is closing and schedules the postmortem within 24 to 48 hours, while memory is fresh. The team disbands not because the work is over but because the urgency is gone, and the work that remains belongs to a different posture.
+
+## Blameless Postmortems
+
+The postmortem is the artifact that converts the experience of an incident into a durable change in the system. Without it, every incident is a fresh expense paid in customer pain, engineer attention, and organizational trust. With it, each incident contributes to a slow improvement in the system's design and the team's operational practice. The presence of postmortems is the single strongest predictor of whether an operations practice is improving over time.
+
+### Why Blameless
+
+A postmortem is blameless not as a politeness but as a structural requirement. The information needed to make the system better is held by the engineers who were closest to the failure. If those engineers expect to be blamed, they will omit details, qualify their actions, and decline to volunteer information that might look bad. The postmortem becomes a defensive document rather than an analytical one, and the durable improvements that would have come from it do not appear.
+
+The aviation industry built its safety record on this principle. The Aviation Safety Reporting System, administered by NASA since 1976, accepts confidential reports of safety incidents from pilots, controllers, and crew. Reports are de-identified and analyzed for systemic patterns. Crucially, filing a report grants immunity from FAA enforcement action for non-deliberate violations disclosed in the report. The system works because the people closest to the failures have a credible reason to report them honestly. The software industry's adoption of blameless postmortems is the same idea applied to the same kind of complex socio-technical system.
+
+The structural argument is what matters here. Blameless culture is not a generous gesture made by leadership; it is a precondition for getting the information the organization needs in order to improve. An organization that punishes individuals for incidents is choosing not to have that information. Some organizations make this choice and pay for it in slower learning and accumulating brittleness over time.
+
+### Just Culture
+
+The concept of **Just Culture**, developed by Sidney Dekker and others in safety-critical industries, refines the idea further. A purely blameless culture, taken literally, becomes uncomfortable in the cases where individual judgment genuinely was poor: a deliberately reckless action, a knowing violation of policy, sabotage. Just Culture distinguishes between *human error* (a slip, a mistake, an honest misreading of the situation), *at-risk behavior* (a shortcut taken because the engineer did not perceive the risk), and *reckless behavior* (knowingly taking a substantial and unjustifiable risk). The first calls for system change. The second calls for coaching and removal of the incentives that pushed toward the shortcut. Only the third calls for accountability of the individual, and even then in the context of asking why the organization allowed reckless behavior to occur in the first place.
+
+Most incidents are in the first category. The engineer who deleted the wrong database had a system that allowed deletion of the wrong database. The engineer who deployed the broken release had a pipeline that allowed the broken release to reach production. Almost always, the work that prevents the next incident is system-level, not individual.
+
+### The Structure of a Postmortem
+
+A complete postmortem covers six areas. Each is short on its own, and the value is in their combination.
+
+A **summary** of one paragraph: what happened, when, for how long, and what the user impact was. This is the first thing readers see and often the only part many readers will read. It must stand alone.
+
+An **impact statement** that quantifies the blast radius: users affected, requests failed, duration, revenue or business-metric impact, and any data integrity consequences. Numbers matter here. "Some users were affected" is not an impact statement.
+
+A **timeline** with timestamps, reconstructed from the incident channel, the Scribe's notes, deploy logs, monitoring annotations, and any other available record. The Log Management lecture introduced the timeline table as an artifact; this is where it lives durably. A good timeline traces the response: when the alert fired, when each responder joined, when each action was taken, and when the system returned to steady state.
+
+**Contributing factors**: the conditions that allowed the incident to happen. This is broader than "root cause" and intentionally plural. A failed deployment is not just "a bug in the code"; it is also "a test suite that did not cover this case," "a canary deploy that did not run long enough," "a runbook that did not include the rollback command," and possibly "an on-call rotation that left the most-qualified engineer unreachable." Listing the contributing factors honestly is the part of the postmortem that resists the urge to find a single villain.
+
+**Root cause analysis**, often done with the 5 Whys technique. The 5 Whys is simple in concept and hard to do well. You ask "why did this happen?" of the symptom, then "why?" of the answer, and so on, until you reach a cause that is structural rather than proximate. A 5 Whys analysis that ends at "the engineer made a mistake" is incomplete. It should continue until it reaches "the system allowed this kind of mistake to cause this kind of damage," which is where the actionable change lives.
+
+**Action items**, each with a single owner and a due date. This is the entire point of the postmortem. A postmortem with elegant analysis and no action items has produced nothing. Action items should be specific, testable, and small enough to plausibly complete: "add a confirmation prompt before any `--force` flag in the deployment CLI" beats "improve deployment safety." Each action item should be a ticket in whatever system the team uses to track work, so it cannot be quietly forgotten.
+
+### The Three-Week Test
+
+There is one practical test that separates postmortems that produce improvement from postmortems that produce documentation: will someone, in three weeks, ask whether each action item is done? If the answer is yes, the action items will be done. If the answer is no, the action items will be quietly dropped. The Reliability Engineering lecture covers how error budgets give postmortem action items organizational weight; without that or some equivalent mechanism, action items live or die on individual follow-through, which is unreliable.
+
+A team's postmortem maturity is best measured not by how thoughtful the documents are but by how reliably the action items get completed. Teams that produce thirty beautifully written postmortems and complete five of the action items are not, in practice, learning. Teams that produce twenty terse postmortems and complete eighteen of the action items are.
+
+## Takeaways
+
+Incident response is the human practice that operates on top of the technical systems the rest of the course has built. It is the answer to the question "how do we behave when production breaks?" and its quality is what determines whether incidents become long, costly, and corrosive or short, contained, and educational.
+
+The five-phase lifecycle (detect, triage, mitigate, resolve, learn) is a tool for noticing what kind of posture the response is currently in and changing it deliberately. The mitigation toolkit (rollback, feature flags, traffic shifting, scaling, graceful degradation) is governed by three principles: reversibility, blast radius, and time-to-undo. The roles (IC, Ops Lead, Comms Lead, Scribe) exist to separate the cognitive functions of the response so that no one person is asked to do all of them. Communication is part of the response, not a separate concern: how the rest of the organization perceives the incident shapes how much downstream work the response will cost.
+
+The cognitive layer matters as much as the procedural one. Hindsight bias and local rationality shape both the response and the postmortem; the cultural conditions for honest reflection must be designed for, not assumed. The aviation industry's adoption of Crew Resource Management offers a four-decade case study in what it looks like to take human factors seriously in a complex operational domain. Blameless postmortems are not a generosity but a structural precondition for learning, and their value lives entirely in whether the action items they produce actually get completed.
+
+The Reliability Engineering lecture that follows takes these foundations and asks the longer-horizon question: how do you organize an engineering team around reliability as a property of the system over time? Error budgets, toil reduction, capacity planning, chaos engineering, disaster recovery, and on-call sustainability are the answers it develops. The current lecture taught how to respond when things go wrong; the next teaches how to make them go wrong less often, and recover faster when they do.
+
+## Resources
+
+- <a href="https://sre.google/workbook/incident-response/" target="_blank" rel="noopener noreferrer">Managing Incidents (Google SRE Workbook)</a>
+- <a href="https://sre.google/sre-book/managing-incidents/" target="_blank" rel="noopener noreferrer">Managing Incidents (Google SRE Book)</a>
+- <a href="https://sre.google/sre-book/postmortem-culture/" target="_blank" rel="noopener noreferrer">Postmortem Culture: Learning from Failure (Google SRE Book)</a>
+- <a href="https://response.pagerduty.com/" target="_blank" rel="noopener noreferrer">PagerDuty Incident Response Documentation</a>
+- <a href="https://www.etsy.com/codeascraft/blameless-postmortems" target="_blank" rel="noopener noreferrer">Blameless PostMortems and a Just Culture (John Allspaw, Etsy)</a>
+- <a href="https://learningfromincidents.io/" target="_blank" rel="noopener noreferrer">Learning From Incidents in Software</a>
+- <a href="https://increment.com/on-call/" target="_blank" rel="noopener noreferrer">On Call (Increment Magazine, Issue 5)</a>
+- <a href="https://www.youtube.com/watch?v=060Czud1jWw" target="_blank" rel="noopener noreferrer">Incident Response at Google (Adrienne Walcer, SREcon)</a>
+- <a href="https://asrs.arc.nasa.gov/" target="_blank" rel="noopener noreferrer">NASA Aviation Safety Reporting System</a>
+- <a href="https://www.skybrary.aero/articles/crew-resource-management-crm" target="_blank" rel="noopener noreferrer">Crew Resource Management (SKYbrary)</a>
+- <a href="https://how.complexsystems.fail/" target="_blank" rel="noopener noreferrer">How Complex Systems Fail (Richard Cook)</a>
+- <a href="https://www.youtube.com/watch?v=1xQeXOz0Ncs" target="_blank" rel="noopener noreferrer">The Field Guide to Understanding 'Human Error' (Sidney Dekker, talk)</a>

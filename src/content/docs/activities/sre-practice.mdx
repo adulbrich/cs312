@@ -13,13 +13,13 @@ import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 type: activity
 slug: sre-practice
 order: 16
-paired_lecture: site-reliability-and-capacity-planning
+paired_lecture: reliability-engineering
 practices: steady-state definition before failure injection; pod deletion and Deployment controller recovery timing; full-deployment restart and recovery observation; memory limit enforcement and OOM kill cycle with kubectl describe forensics; blast radius scoping to a single namespace; post-experiment steady-state verification
 prereq_activities: local-kubernetes-with-minikube
 output: kubectl get all output showing the student's ONID-named deployment recovered to full steady state after three chaos experiments
 */}
 
-This activity puts into practice the concepts from the [Site Reliability Engineering and Capacity Planning](/lectures/site-reliability-and-capacity-planning/) lecture. You will run three controlled chaos experiments on a Kubernetes deployment: delete a single pod, delete all pods at once, and trigger an OOM kill. At each step you will state a hypothesis before running the experiment and compare what you predicted to what you observe. By the end, you will have seen the Deployment controller, the kubelet restart policy, and the OOM killer each respond to a different failure mode under controlled conditions.
+This activity puts into practice the concepts from the [Reliability Engineering](/lectures/reliability-engineering/) lecture. You will run three controlled chaos experiments on a Kubernetes deployment: delete a single pod, delete all pods at once, and trigger an OOM kill. At each step you will state a hypothesis before running the experiment and compare what you predicted to what you observe. By the end, you will have seen the Deployment controller, the kubelet restart policy, and the OOM killer each respond to a different failure mode under controlled conditions.
 
 ## What You Will Need
 
