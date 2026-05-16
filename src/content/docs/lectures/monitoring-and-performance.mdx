@@ -402,6 +402,8 @@ Dynamic thresholds address this by comparing current behavior against historical
 
 The practical starting point is not automated anomaly detection but documented seasonality: know when your high-traffic periods are, adjust thresholds or silence windows accordingly, and annotate dashboards with traffic-event markers so you can distinguish load increases from code changes versus organic growth.
 
+For services without enough production history to build a baseline from, the baseline has to come from controlled experiments instead. Driving synthetic traffic at known rates with a load generator like [k6](https://k6.io/), [Locust](https://locust.io/), or `wrk` produces a characteristic curve of latency, error rate, and resource utilization that becomes the launch baseline. The same exercise lets you verify that alert thresholds and histogram bucket boundaries are sized for the latency distribution your service actually produces, before any users see them. The Reliability Engineering lecture treats load testing primarily as a capacity-validation tool; from a monitoring perspective, the value is the same one historical data provides for older services: a known reference point against which the next observation can mean something.
+
 ## Alerting: From Metrics to Action
 
 Dashboards are for engineers who happen to be looking at them. Alerts are for the rest of the time. The purpose of alerting is to notify the right person about the right problem at the right time, with enough context to act.

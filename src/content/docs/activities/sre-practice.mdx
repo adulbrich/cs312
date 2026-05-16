@@ -19,6 +19,8 @@ prereq_activities: local-kubernetes-with-minikube
 output: kubectl get all output showing the student's ONID-named deployment recovered to full steady state after three chaos experiments
 */}
 
+{/* TODO: consider adding a fourth experiment that uses k6 to ramp synthetic HTTP load against a service in the namespace, find the saturation knee where p99 latency turns nonlinear, and compare the gradual CPU-bound curve to the abrupt memory/connection-pool cliff already explored here. This would tie the activity to the "Validating Capacity Through Load Testing" subsection in the reliability-engineering lecture and reuse the existing Prometheus/Grafana stack from the prometheus-and-grafana activity. Open question: does k6 belong in this activity (chaos + load both stress steady-state) or as a standalone activity paired with monitoring-and-performance? */}
+
 This activity puts into practice the concepts from the [Reliability Engineering](/lectures/reliability-engineering/) lecture. You will run three controlled chaos experiments on a Kubernetes deployment: delete a single pod, delete all pods at once, and trigger an OOM kill. At each step you will state a hypothesis before running the experiment and compare what you predicted to what you observe. By the end, you will have seen the Deployment controller, the kubelet restart policy, and the OOM killer each respond to a different failure mode under controlled conditions.
 
 ## What You Will Need
