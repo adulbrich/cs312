@@ -3,7 +3,6 @@ title: "Incident Response and Postmortems"
 description: "The human practice that runs on top of monitoring and logs: severity, the incident lifecycle, mitigation as a toolkit, roles, communication, decision-making under uncertainty, and blameless postmortems as the durable learning artifact."
 sidebar:
   order: 15
-draft: true
 ---
 
 import { Aside } from '@astrojs/starlight/components';
@@ -16,7 +15,7 @@ order: 15
 covers: declaration criteria and severity tied to SLOs; lifecycle and mitigation; preparedness artifacts, roles, communication, and handoffs; decision-making under uncertainty; blameless postmortems and triggers
 prereq_lectures: monitoring-and-performance, log-management-and-analysis
 followup_lectures: reliability-engineering
-paired_activities: incident-response-tabletop
+paired_activities: incident-response-case-study
 supports_labs: cluster-operations
 */}
 
@@ -24,7 +23,7 @@ A monitoring dashboard turning red and a wall of error logs are evidence, not re
 
 This lecture is about that coordination. It picks up where the Monitoring and Log Management lectures leave off. Detection is the question those lectures answered; investigation is the discipline they introduced. The questions this lecture answers are operational and human. How do you decide how urgent a problem is? Who makes decisions during the response, and who executes them? What do you say to customers while you are still figuring out what is going on? How do you stop the bleeding before you understand the wound? And once the system is stable again, how do you turn the experience into something that makes the next failure less severe rather than just adding it to a list of war stories?
 
-The center of gravity here is not technical. The technical content of an incident, which command to run and which log to read and which knob to turn, is covered in the lectures around this one. The new material is everything that must be true for those technical actions to be performed well: the roles, the communication, the decision-making under uncertainty, and the cultural conditions that allow honest reflection afterward. Incidents are where engineering organizations show what they actually are. A team that responds to them well is a team that has done the unglamorous work of preparing for them.
+The center of gravity here is not technical. This lecture focuses on everything that must be true for technical response work to go well: the roles, the communication, the decision-making under uncertainty, and the cultural conditions that allow honest reflection afterward. Incidents are where engineering organizations show what they actually are. A team that responds to them well is a team that has done the unglamorous work of preparing for them.
 
 ## What Is an Incident?
 
@@ -36,7 +35,7 @@ Drawing this line precisely matters because the response itself is expensive. De
 
 Severity levels give a team shared vocabulary for how bad a given incident is, which in turn determines how the team responds. A common scheme uses three or four tiers. **SEV-1** means a core business function is completely unavailable, data integrity is at risk, or a security incident is in progress: the response is immediate, all-hands, and includes paging on-call regardless of time of day. **SEV-2** means the service is meaningfully degraded but partially functional: a feature is broken, a subset of users is affected, or latency is elevated enough to change user behavior. **SEV-3** is elevated risk or a non-critical feature degradation that requires attention but not immediate response. **SEV-4** covers cosmetic issues that should be tracked so they do not accumulate into something worse.
 
-The most important property of a severity scheme is that the thresholds map to measurable signals, not to gut feelings. If a service has a 99.9 percent availability SLO, an error rate above 0.1 percent means the service is burning its error budget faster than the sustainable pace. That is an objective signal worth attention, but it is not automatically a SEV-1 or an automatic wake-up. The Monitoring lecture's burn-rate framing is the better operational bridge: multiwindow burn-rate alerts such as 14.4 over 1 hour and 5 minutes or 6 over 6 hours and 30 minutes are the sort of thresholds teams page on, while slower burns may create tickets or business-hours follow-up. Tying severity to SLOs works only when the mapping also includes customer impact and scope: who is affected, how badly, and for how long.
+The most important property of a severity scheme is that the thresholds map to measurable signals, not to gut feelings. If a service has a 99.9 percent availability SLO, an error rate above 0.1 percent means the service is burning its error budget faster than the sustainable pace. That is an objective signal worth attention, but it is not automatically a SEV-1 or an automatic wake-up. The Monitoring lecture's burn-rate framing is the better operational bridge: multiwindow burn-rate alerts such as 14.4 over both 1 hour and 5 minutes or 6 over both 6 hours and 30 minutes are the sort of thresholds teams page on, while slower burns may create tickets or business-hours follow-up. Tying severity to SLOs works only when the mapping also includes customer impact and scope: who is affected, how badly, and for how long.
 
 ### When to Declare
 
@@ -56,7 +55,7 @@ Every service that matters should have a small set of response artifacts ready b
 
 ### The Live Incident Record
 
-In addition to runbooks, every incident needs a working record that is live while the response is happening. This can be a shared document, a ticket, a bot-populated incident page, or a carefully maintained pinned message in the incident channel. What matters is that it captures the current severity, the Incident Commander, the current customer impact, the leading hypothesis, the mitigations already attempted, and the next scheduled update time. The Scribe helps maintain this record, but the whole team depends on it. Without a working record, handoffs become oral tradition, and oral tradition degrades quickly under fatigue.
+In addition to runbooks, every incident needs a working record that is live while the response is happening. This can be a shared document, a ticket, a bot-populated incident page, or a carefully maintained pinned message in the incident channel. What matters is that it captures the current severity, the Incident Commander, the current customer impact, the leading hypothesis, the mitigations already attempted, and the next scheduled update time. Someone on the response team has to keep this record current, but the whole team depends on it. Without a working record, handoffs become oral tradition, and oral tradition degrades quickly under fatigue.
 
 ## The Incident Lifecycle as Posture Shifts
 
@@ -230,11 +229,11 @@ Two cognitive biases shape both the response and (more dangerously) the postmort
 
 ### A Structured Process Beats Individual Brilliance
 
-The aviation industry learned this lesson before software did. In the 1970s, several catastrophic accidents (the 1977 Tenerife runway collision, the 1972 Eastern Air Lines Flight 401 crash, the 1978 United Airlines Flight 173 fuel starvation) shared a pattern: highly skilled captains, technically capable of recovering, were unable to make use of the information available to them in the cockpit because cockpit culture did not support it. First officers and flight engineers either failed to challenge captains or were overruled when they did. The industry's response was Crew Resource Management (CRM), a body of training that explicitly teaches non-technical skills: communication, decision-making, leadership, and the responsibility of a crew to use all available resources rather than deferring to the most senior person in the room.
+The aviation industry learned this lesson before software did. In the 1970s, several catastrophic accidents (the [1977 Tenerife runway collision](https://en.wikipedia.org/wiki/Tenerife_airport_disaster), the [1972 Eastern Air Lines Flight 401 crash](https://en.wikipedia.org/wiki/Eastern_Air_Lines_Flight_401), the [1978 United Airlines Flight 173 fuel starvation](https://en.wikipedia.org/wiki/United_Airlines_Flight_173)) shared a pattern: highly skilled captains, technically capable of recovering, were unable to make use of the information available to them in the cockpit because cockpit culture did not support it. First officers and flight engineers either failed to challenge captains or were overruled when they did. The industry's response was [Crew Resource Management (CRM)](https://en.wikipedia.org/wiki/Crew_resource_management), a body of training that explicitly teaches non-technical skills: communication, decision-making, leadership, and the responsibility of a crew to use all available resources rather than deferring to the most senior person in the room.
 
 Incident response inherits this lesson. A well-run incident is not a stage for the most senior engineer to solve a problem; it is a coordinated use of every responder's attention. The IC role exists in part to make this work: by separating coordination from technical execution, the IC creates space for junior responders to raise observations without competing for the same attention that the Operations Lead is using. A good incident channel has questions from engineers who have only been on the team for a month, and good ICs treat those questions as data.
 
-Software incident management borrows the command structure more directly from the Incident Command System used in emergency response, while CRM is the useful human-factors lens on speaking up, workload management, and communication across ranks. The two ideas fit together: one gives you the organizational skeleton, and the other explains why the behavior inside that structure matters.
+Software incident management borrows the command structure more directly from the [Incident Command System](https://en.wikipedia.org/wiki/Incident_Command_System) used in emergency response, while CRM is the useful human-factors lens on speaking up, workload management, and communication across ranks. The two ideas fit together: one gives you the organizational skeleton, and the other explains why the behavior inside that structure matters.
 
 <HistoricalNote title="Crew Resource Management and Software Operations">
 Crew Resource Management emerged from a 1979 NASA-sponsored workshop on cockpit communication and spread widely through commercial aviation in the 1980s. It is widely regarded as one contributor to aviation's broader safety gains because it made communication, challenge-response behavior, and workload management explicit training topics rather than informal habits. Software operations later borrowed adjacent ideas about briefings, role clarity, and speaking up under pressure. The direct organizational template for many software incident programs, including Google's, is the Incident Command System rather than CRM itself, but CRM remains a valuable human-factors lens for understanding why hierarchy, fatigue, and communication patterns matter during incidents.
@@ -283,13 +282,13 @@ Smaller events can still deserve a lighter incident review. The important distin
 
 A postmortem is blameless not as a politeness but as a structural requirement. The information needed to make the system better is held by the engineers who were closest to the failure. If those engineers expect to be blamed, they will omit details, qualify their actions, and decline to volunteer information that might look bad. The postmortem becomes a defensive document rather than an analytical one, and the durable improvements that would have come from it do not appear.
 
-The aviation industry built part of its safety record on this principle. For decades, the FAA has relied on NASA's Aviation Safety Reporting System (ASRS) as a confidential third-party reporting channel. Reports are de-identified and analyzed for systemic patterns. The legal protection is narrower than blanket immunity: the FAA generally does not use ASRS reports in enforcement, and qualifying inadvertent, noncriminal violations may receive a waiver of sanction if specific conditions are met. The point is not to copy aviation law exactly, but to notice the incentive design: people report more honestly when the reporting system is credibly oriented toward learning rather than punishment.
+The aviation industry built part of its safety record on this principle. For decades, the FAA has relied on NASA's [Aviation Safety Reporting System (ASRS)](https://en.wikipedia.org/wiki/Aviation_Safety_Reporting_System) as a confidential third-party reporting channel. Reports are de-identified and analyzed for systemic patterns. The legal protection is narrower than blanket immunity: the FAA generally does not use ASRS reports in enforcement, and qualifying inadvertent, noncriminal violations may receive a waiver of sanction if specific conditions are met. The point is not to copy aviation law exactly, but to notice the incentive design: people report more honestly when the reporting system is credibly oriented toward learning rather than punishment.
 
 The structural argument is what matters here. Blameless culture is not a generous gesture made by leadership; it is a precondition for getting the information the organization needs in order to improve. An organization that punishes individuals for incidents is choosing not to have that information. Some organizations make this choice and pay for it in slower learning and accumulating brittleness over time.
 
 ### Just Culture
 
-The concept of **Just Culture**, developed by Sidney Dekker and others in safety-critical industries, refines the idea further. A purely blameless culture, taken literally, becomes uncomfortable in the cases where individual judgment genuinely was poor: a deliberately reckless action, a knowing violation of policy, sabotage. Just Culture distinguishes between *human error* (a slip, a mistake, an honest misreading of the situation), *at-risk behavior* (a shortcut taken because the engineer did not perceive the risk), and *reckless behavior* (knowingly taking a substantial and unjustifiable risk). The first calls for system change. The second calls for coaching and removal of the incentives that pushed toward the shortcut. Only the third calls for accountability of the individual, and even then in the context of asking why the organization allowed reckless behavior to occur in the first place.
+The concept of [Just Culture](https://en.wikipedia.org/wiki/Just_culture), developed by Sidney Dekker and others in safety-critical industries, refines the idea further. A purely blameless culture, taken literally, becomes uncomfortable in the cases where individual judgment genuinely was poor: a deliberately reckless action, a knowing violation of policy, sabotage. Just Culture distinguishes between *human error* (a slip, a mistake, an honest misreading of the situation), *at-risk behavior* (a shortcut taken because the engineer did not perceive the risk), and *reckless behavior* (knowingly taking a substantial and unjustifiable risk). The first calls for system change. The second calls for coaching and removal of the incentives that pushed toward the shortcut. Only the third calls for accountability of the individual, and even then in the context of asking why the organization allowed reckless behavior to occur in the first place.
 
 Most incidents are in the first category. The engineer who deleted the wrong database had a system that allowed deletion of the wrong database. The engineer who deployed the broken release had a pipeline that allowed the broken release to reach production. Almost always, the work that prevents the next incident is system-level, not individual.
 
@@ -327,15 +326,11 @@ The Reliability Engineering lecture that follows takes these foundations and ask
 
 ## Resources
 
-- <a href="https://sre.google/workbook/incident-response/" target="_blank" rel="noopener noreferrer">Managing Incidents (Google SRE Workbook)</a>
-- <a href="https://sre.google/sre-book/managing-incidents/" target="_blank" rel="noopener noreferrer">Managing Incidents (Google SRE Book)</a>
-- <a href="https://sre.google/sre-book/postmortem-culture/" target="_blank" rel="noopener noreferrer">Postmortem Culture: Learning from Failure (Google SRE Book)</a>
-- <a href="https://response.pagerduty.com/" target="_blank" rel="noopener noreferrer">PagerDuty Incident Response Documentation</a>
-- <a href="https://www.etsy.com/codeascraft/blameless-postmortems" target="_blank" rel="noopener noreferrer">Blameless Postmortems and a Just Culture (John Allspaw, Etsy)</a>
-- <a href="https://learningfromincidents.io/" target="_blank" rel="noopener noreferrer">Learning From Incidents in Software</a>
-- <a href="https://increment.com/on-call/" target="_blank" rel="noopener noreferrer">On-Call (Increment Magazine, Issue 1)</a>
-- <a href="https://www.youtube.com/watch?v=060Czud1jWw" target="_blank" rel="noopener noreferrer">Incident Response at Google (Adrienne Walcer, SREcon)</a>
-- <a href="https://asrs.arc.nasa.gov/" target="_blank" rel="noopener noreferrer">NASA Aviation Safety Reporting System</a>
-- <a href="https://www.skybrary.aero/articles/crew-resource-management-crm" target="_blank" rel="noopener noreferrer">Crew Resource Management (SKYbrary)</a>
+- <a href="https://sre.google/workbook/incident-response/" target="_blank" rel="noopener noreferrer">Incident Response (Google SRE)</a>
+- <a href="https://sre.google/sre-book/managing-incidents/" target="_blank" rel="noopener noreferrer">Managing Incidents (Google SRE)</a>
+- <a href="https://sre.google/sre-book/postmortem-culture/" target="_blank" rel="noopener noreferrer">Postmortem Culture: Learning from Failure (Google SRE)</a>
+- <a href="https://www.pagerduty.com/ops-guides/" target="_blank" rel="noopener noreferrer">PagerDuty's Ops Guides</a>
+- <a href="https://www.etsy.com/codeascraft/blameless-postmortems" target="_blank" rel="noopener noreferrer">Blameless Postmortems and a Just Culture (John Allspaw) (Etsy Engineering)</a>
+- <a href="https://increment.com/on-call/" target="_blank" rel="noopener noreferrer">On-Call (Increment Magazine, Issue 1, April 2017)</a>
 - <a href="https://how.complexsystems.fail/" target="_blank" rel="noopener noreferrer">How Complex Systems Fail (Richard Cook)</a>
-- <a href="https://www.youtube.com/watch?v=1xQeXOz0Ncs" target="_blank" rel="noopener noreferrer">The Field Guide to Understanding 'Human Error' (Sidney Dekker, talk)</a>
+- <a href="https://www.youtube.com/playlist?list=PL590L5WQmH8dsxxz7ooJAgmijwOz0lh2H" target="_blank" rel="noopener noreferrer">HACKING GOOGLE Series (YouTube)</a>
