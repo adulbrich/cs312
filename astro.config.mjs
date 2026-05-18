@@ -85,31 +85,31 @@ export default defineConfig({
       sidebar: [
         {
           label: "Overview",
-          autogenerate: { directory: "introduction" },
+          items: [{ autogenerate: { directory: "introduction" } }],
         },
         {
           label: "Practicalities",
-          autogenerate: { directory: "practicalities" },
+          items: [{ autogenerate: { directory: "practicalities" } }],
         },
         {
           label: "Lecture Notes",
-          autogenerate: { directory: "lectures" },
+          items: [{ autogenerate: { directory: "lectures" } }],
         },
         {
           label: "Activities",
-          autogenerate: { directory: "activities" },
+          items: [{ autogenerate: { directory: "activities" } }],
         },
         {
           label: "Labs",
-          autogenerate: { directory: "labs" },
+          items: [{ autogenerate: { directory: "labs" } }],
         },
         {
           label: "Assignments",
-          autogenerate: { directory: "assignments" },
+          items: [{ autogenerate: { directory: "assignments" } }],
         },
         {
           label: "About",
-          autogenerate: { directory: "about" },
+          items: [{ autogenerate: { directory: "about" } }],
         },
       ],
       customCss: ["./src/styles/global.css"],
