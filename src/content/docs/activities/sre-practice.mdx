@@ -1,6 +1,6 @@
 ---
-title: "Chaos Engineering: Controlled Failures on Kubernetes"
-description: "Run three controlled chaos experiments on a Kubernetes deployment: inject pod failures, trigger an OOM kill, and verify the cluster recovers to steady state each time."
+title: "Measure Error Budget During Controlled Failures"
+description: "Define a simple SLO, load-test a personalized Kubernetes service with k6, and compare how much error budget three controlled failures spend."
 sidebar:
   order: 16
 draft: true
@@ -14,289 +14,398 @@ type: activity
 slug: sre-practice
 order: 16
 paired_lecture: reliability-engineering
-practices: steady-state definition before failure injection; pod deletion and Deployment controller recovery timing; full-deployment restart and recovery observation; memory limit enforcement and OOM kill cycle with kubectl describe forensics; blast radius scoping to a single namespace; post-experiment steady-state verification
-prereq_activities: local-kubernetes-with-minikube
-output: kubectl get all output showing the student's ONID-named deployment recovered to full steady state after three chaos experiments
+practices: SLI/SLO and error-budget definition for a user-visible HTTP service; k6 steady-state measurement with thresholds; single-pod failure under load and bounded blast radius; full replica loss and user-visible budget burn; failed rollout with rollback and preserved availability; post-experiment steady-state verification
+prereq_activities: minikube
+output: k6 summaries and kubectl output showing the student's ONID-named service stayed within or spent its error budget during three controlled failures, then returned to steady state
 */}
 
-{/* TODO: consider adding a fourth experiment that uses k6 to ramp synthetic HTTP load against a service in the namespace, find the saturation knee where p99 latency turns nonlinear, and compare the gradual CPU-bound curve to the abrupt memory/connection-pool cliff already explored here. This would tie the activity to the "Validating Capacity Through Load Testing" subsection in the reliability-engineering lecture and reuse the existing Prometheus/Grafana stack from the prometheus-and-grafana activity. Open question: does k6 belong in this activity (chaos + load both stress steady-state) or as a standalone activity paired with monitoring-and-performance? */}
-
-This activity puts into practice the concepts from the [Reliability Engineering](/lectures/reliability-engineering/) lecture. You will run three controlled chaos experiments on a Kubernetes deployment: delete a single pod, delete all pods at once, and trigger an OOM kill. At each step you will state a hypothesis before running the experiment and compare what you predicted to what you observe. By the end, you will have seen the Deployment controller, the kubelet restart policy, and the OOM killer each respond to a different failure mode under controlled conditions.
+This activity puts into practice the concepts from the [Reliability Engineering](/lectures/reliability-engineering/) lecture. You will define a simple SLO for a personalized web service, probe it with k6, and then repeat the same one-minute test while you inject three controlled Kubernetes failures. By the end, you will have measured which failures actually spent error budget, which ones Kubernetes absorbed, and whether your service returned to steady state.
 
 ## What You Will Need
 
-- Minikube installed and your cluster from the [Local Kubernetes with Minikube](/activities/local-kubernetes-with-minikube/) activity
-- Two terminal windows open side by side: one for watching, one for running commands
-- Your ONID
+- Your cluster from the [Minikube](/activities/minikube/) activity
+- `kubectl` already working against that cluster
+- `k6` installed before class using the [official k6 install guide](https://grafana.com/docs/k6/latest/set-up/install-k6/) and verified with `k6 version`
+- Three terminal windows or tabs: one for `kubectl port-forward`, one for `k6`, and one for Kubernetes commands
 
 ---
 
-## Deploy the Test Environment
+## Deploy the Test Service
 
-Before injecting any failures, you need a known-good state to test against. This is what the lecture calls the steady-state definition: a measurable description of what normal looks like before you change anything.
-
-<Steps>
-
-1. Make sure your Minikube cluster is running:
-
-   ```bash
-   minikube status
-   ```
-
-   If you see `host: Running` and `kubelet: Running`, you are ready. If minikube is stopped, start it:
-
-   ```bash
-   minikube start
-   ```
-
-2. Create a dedicated namespace for this activity. Scoping the experiment to its own namespace limits the blast radius if something goes wrong:
-
-   ```bash
-   kubectl create namespace chaos-lab
-   ```
-
-3. Create a Deployment named with your ONID. Replace `<your-onid>` with your actual ONID:
-
-   ```bash
-   kubectl create deployment <your-onid>-web \
-     --image=nginx:alpine \
-     --replicas=3 \
-     -n chaos-lab
-   ```
-
-4. Expose the Deployment as a Service so it has a stable endpoint:
-
-   ```bash
-   kubectl expose deployment <your-onid>-web --port=80 -n chaos-lab
-   ```
-
-5. Wait for all three replicas to become ready:
-
-   ```bash
-   kubectl rollout status deployment/<your-onid>-web -n chaos-lab
-   ```
-
-   You will see:
-   ```
-   Waiting for deployment "<your-onid>-web" rollout to finish: 0 of 3 updated replicas are available...
-   deployment "<your-onid>-web" successfully rolled out
-   ```
-
-6. Confirm steady state:
-
-   ```bash
-   kubectl get pods -n chaos-lab
-   ```
-
-   All three pods should show `1/1 Running` and zero restarts:
-   ```
-   NAME                         READY   STATUS    RESTARTS   AGE
-   jdoe-web-7d5b9dbb4b-4xk2p   1/1     Running   0          30s
-   jdoe-web-7d5b9dbb4b-8qnrv   1/1     Running   0          30s
-   jdoe-web-7d5b9dbb4b-nwmpj   1/1     Running   0          30s
-   ```
-
-   Note the three pod names. You will use one of them in the next section.
-
-</Steps>
-
----
-
-## Experiment 1: One Pod Fails
-
-In production, a single pod can die from a crash, a bug, or a node issue. Test whether the Deployment controller notices and replaces it.
-
-Before running this experiment, write your hypothesis in one sentence: how quickly do you expect a replacement pod to appear?
+Before you inject any failures, give yourself a small service with a stable name, a readiness probe, and content that clearly belongs to you. This gives k6 a concrete target and gives you a known-good steady state to return to after each experiment.
 
 <Steps>
 
-1. In your second terminal, start a live watch of the pods:
+1. In every terminal that will run `kubectl`, set your ONID in a shell variable:
 
    ```bash
-   watch kubectl get pods -n chaos-lab
+   export ONID=your-onid
    ```
 
-   This refreshes every 2 seconds. Keep this window visible.
+   Replace `your-onid` with your actual ONID, with no angle brackets. Any later command that uses `$ONID` assumes you ran this first in that terminal.
 
-2. In the first terminal, delete one of the three pods. Use one of the names you recorded above:
+2. Create a working directory for this activity and an idempotent namespace:
 
    ```bash
-   kubectl delete pod <pod-name> -n chaos-lab
+   mkdir -p ~/cs312-reliability
+   cd ~/cs312-reliability
+   kubectl create namespace reliability-lab --dry-run=client -o yaml | kubectl apply -f -
    ```
 
-   The command returns as soon as the delete request is accepted, not when the replacement is ready.
+   This keeps the files together and makes it safe to rerun the setup commands.
 
-3. Watch the second terminal. The deleted pod enters `Terminating` and disappears within a few seconds. A new pod appears in `ContainerCreating`, then transitions to `Running`.
-
-4. Check the age of the replacement to confirm it is new:
+3. Write the manifest for a three-replica nginx deployment, a personalized home page, and a Service:
 
    ```bash
-   kubectl get pods -n chaos-lab --sort-by=.metadata.creationTimestamp
-   ```
-
-   The newest pod appears at the bottom with a much younger `AGE` than the other two.
-
-5. Compare the result to your hypothesis. Did recovery take longer or shorter than you expected?
-
-</Steps>
-
-<ActivityQuestion>
-The Deployment controller replaced the deleted pod, but it created a completely new pod rather than restarting the same one. What does this tell you about how Kubernetes models the relationship between a Deployment and its Pods? Why does this behavior matter for the blast-radius principle the lecture describes?
-</ActivityQuestion>
-
----
-
-## Experiment 2: Total Deployment Failure
-
-A complete replica loss can happen from a bad rollout, a node pool restart, or accidental deletion. Test how the cluster behaves when every replica disappears at once.
-
-Write your hypothesis before running: will recovery from zero take longer than recovery from one? How long do you predict the Service will have no healthy endpoints?
-
-<Steps>
-
-1. Note the current time in your first terminal.
-
-2. Delete all pods in the namespace simultaneously:
-
-   ```bash
-   kubectl delete pods --all -n chaos-lab
-   ```
-
-3. Watch the second terminal. All three pods enter `Terminating` at the same time. New pods start appearing in `ContainerCreating` almost immediately; the Deployment controller does not wait for the old pods to finish terminating before requesting replacements.
-
-4. Time how long it takes from the delete command until all three replacement pods show `1/1 Running`. Record this number.
-
-5. Confirm the Service is still present and now points to the new pods:
-
-   ```bash
-   kubectl get endpoints -n chaos-lab
-   ```
-
-   You will see three IP addresses in the `ENDPOINTS` column, one for each new pod. The Service was never deleted; it selected the new pods by label as soon as they became ready.
-
-</Steps>
-
-<ActivityQuestion>
-During the gap between deleting all pods and the replacements becoming ready, the Service had no healthy endpoints. The lecture covers this as part of release safety and blast radius. Based on the timing you measured, how long was that window? If this deployment were serving real user traffic, what would users have experienced during that window?
-</ActivityQuestion>
-
----
-
-## Experiment 3: Memory Saturation
-
-CPU pressure degrades performance gradually. Memory exhaustion kills a container abruptly. The OOM (out-of-memory) killer terminates containers that exceed their limit and leaves a specific trace you can inspect.
-
-<Steps>
-
-1. Apply a manifest that runs a container designed to allocate more memory than its limit allows. The `stress` tool allocates a fixed block of memory and holds it:
-
-   ```bash
-   kubectl apply -n chaos-lab -f - <<'EOF'
+   cat <<EOF > web.yaml
    apiVersion: v1
-   kind: Pod
+   kind: ConfigMap
    metadata:
-     name: oom-demo
+     name: ${ONID}-site
+   data:
+     index.html: |
+       <!doctype html>
+       <html>
+         <body>
+           <h1>${ONID} reliability lab</h1>
+           <p>This page is the steady-state target for k6.</p>
+         </body>
+       </html>
+   ---
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: ${ONID}-web
    spec:
-     restartPolicy: Always
-     containers:
-     - name: oom-demo
-       image: polinux/stress
-       resources:
-         limits:
-           memory: "64Mi"
-       command: ["stress"]
-       args: ["--vm", "1", "--vm-bytes", "128M", "--vm-hang", "1"]
+     replicas: 3
+     selector:
+       matchLabels:
+         app: ${ONID}-web
+     template:
+       metadata:
+         labels:
+           app: ${ONID}-web
+       spec:
+         containers:
+           - name: web
+             image: nginx:alpine
+             ports:
+               - containerPort: 80
+             readinessProbe:
+               httpGet:
+                 path: /
+                 port: 80
+               initialDelaySeconds: 2
+               periodSeconds: 2
+             volumeMounts:
+               - name: site
+                 mountPath: /usr/share/nginx/html/index.html
+                 subPath: index.html
+         volumes:
+           - name: site
+             configMap:
+               name: ${ONID}-site
+   ---
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: ${ONID}-web
+   spec:
+     selector:
+       app: ${ONID}-web
+     ports:
+       - port: 80
+         targetPort: 80
    EOF
    ```
 
-   This container is limited to 64 MiB but tries to allocate 128 MiB. Watch the second terminal.
+   This manifest gives you three identical serving Pods behind one stable Service. The readiness probe makes later rollout behavior visible.
 
-2. You will see the pod move through these states in quick succession:
-
-   - `ContainerCreating`: the image is being pulled and the container is starting
-   - `Running`: the stress tool is running and allocating memory
-   - `OOMKilled`: the kernel kills the container when it exceeds 64 MiB
-   - `CrashLoopBackOff`: kubelet backs off before restarting the container again
-
-   This entire cycle typically completes within 30 seconds.
-
-3. Once you see `OOMKilled` or `CrashLoopBackOff`, inspect the pod:
+4. Apply the manifest and wait for the deployment to become ready:
 
    ```bash
-   kubectl describe pod oom-demo -n chaos-lab
+   kubectl apply -n reliability-lab -f web.yaml
+   kubectl rollout status deployment/${ONID}-web -n reliability-lab
    ```
 
-   Look for the `Last State` block near the top of the output:
-
-   ```
-   Last State:     Terminated
-     Reason:       OOMKilled
-     Exit Code:    137
-     Started:      ...
-     Finished:     ...
+   You should see:
+   ```text
+   deployment "${ONID}-web" successfully rolled out
    ```
 
-   Exit code 137 is SIGKILL (128 + 9). The OOM killer sends SIGKILL directly: no graceful shutdown, no cleanup, no warning to the container process.
-
-4. Check how many times kubelet has restarted the container:
+5. In a dedicated terminal, forward the Service to your laptop:
 
    ```bash
-   kubectl get pod oom-demo -n chaos-lab
+   kubectl port-forward service/${ONID}-web 8080:80 -n reliability-lab
    ```
 
-   The `RESTARTS` column shows the count. If the pod has been running long enough, you will see the count climbing as kubelet applies an exponential backoff before each restart attempt.
+   Leave this command running. It makes the Service available at `http://127.0.0.1:8080/` for both `curl` and `k6`.
 
-5. Delete the oom-demo pod:
+6. In another terminal, verify the user-visible steady state:
 
    ```bash
-   kubectl delete pod oom-demo -n chaos-lab
+   curl http://127.0.0.1:8080/
    ```
+
+   You should see an HTML page whose `<h1>` contains your ONID. At this point the service exists, the readiness probe is green, and the request path is working.
 
 </Steps>
 
+---
+
+## Define the SLO and Measure the Baseline
+
+Before you break anything, make the steady state measurable. In this section you will turn the lecture's SLI, SLO, and error-budget language into a one-minute k6 test with a concrete pass or fail result.
+
+For this activity, use this SLI: a request is good only if it returns HTTP 200 and finishes in under 300 ms. At 10 requests per second for 60 seconds, one run sends about 600 requests, so an SLO of 99.5% allows about 3 bad requests.
+
+<Steps>
+
+1. Write the k6 script:
+
+   ```bash
+   cat <<'EOF' > probe.js
+   import http from 'k6/http';
+   import { check } from 'k6';
+   import { Rate } from 'k6/metrics';
+
+   const sliOk = new Rate('sli_ok');
+   const targetUrl = __ENV.TARGET_URL || 'http://127.0.0.1:8080/';
+
+   export const options = {
+     scenarios: {
+       steady: {
+         executor: 'constant-arrival-rate',
+         rate: 10,
+         timeUnit: '1s',
+         duration: '60s',
+         preAllocatedVUs: 10,
+         maxVUs: 20,
+       },
+     },
+     thresholds: {
+       sli_ok: ['rate>0.995'],
+       http_req_duration: ['p(95)<300', 'p(99)<500'],
+     },
+   };
+
+   export default function () {
+     const res = http.get(targetUrl);
+     const good = res.status === 200 && res.timings.duration < 300;
+
+     check(res, {
+       'status is 200': (r) => r.status === 200,
+     });
+
+     sliOk.add(good);
+   }
+   EOF
+   ```
+
+   `sli_ok` is the course version of a user-visible success rate. It only counts a request as good if both the status code and the latency requirement are satisfied.
+
+2. Run the baseline measurement:
+
+   ```bash
+   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js
+   ```
+
+   This sends about 600 requests over one minute. The summary at the end is your steady-state measurement.
+
+3. Check the end-of-run summary. Focus on two lines:
+
+   - `sli_ok`: this should be at or above 99.5%
+   - `http_req_duration`: p95 should stay under 300 ms
+
+   If the baseline already fails, stop here and fix the service first. A chaos experiment without a healthy baseline is not measuring anything useful.
+
+</Steps>
+
+<Aside type="note" title="A failed threshold can be the expected result">
+In this activity, a failed `k6` threshold means the experiment spent more error budget than your SLO allowed. During the failure sections below, that is the measurement, not automatically a mistake.
+</Aside>
+
 <ActivityQuestion>
-The lecture says memory saturation is sudden rather than gradual, while CPU saturation degrades performance slowly. Did you observe that distinction here? If `oom-demo` had been your WordPress database container instead of a stress tool, how would the user-visible effect have differed from a CPU-throttled container hitting the same load?
+If `kubectl get pods` showed three Running Pods but `sli_ok` failed, which signal would you trust as the steady-state definition, and why? How does that connect to the lecture's warning that an SLO must match user reality rather than implementation details?
 </ActivityQuestion>
 
 ---
 
-## Verify Steady State
+## Experiment 1: One Pod Fails Under Load
 
-The last step of every chaos experiment is confirming the system returned to its defined steady state. After three experiments, check that the original deployment is healthy and the namespace is clean.
+Start with the smallest blast radius that still touches the request path. Deleting one serving Pod tests whether replica redundancy and the Deployment controller can absorb a routine failure without burning much budget.
+
+Write your hypothesis before running: will one deleted Pod spend any meaningful error budget while three replicas exist? If it does, how much?
 
 <Steps>
 
-1. Confirm the deployment has its full replica count:
+1. In the k6 terminal, rerun the same one-minute test:
 
    ```bash
-   kubectl rollout status deployment/<your-onid>-web -n chaos-lab
+   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js
    ```
 
-   You should see:
-   ```
-   deployment "<your-onid>-web" successfully rolled out
-   ```
-
-2. Check that all pods are running with low restart counts:
+2. In the Kubernetes terminal, list the Pods and delete one of the three serving replicas:
 
    ```bash
-   kubectl get pods -n chaos-lab
+   kubectl get pods -n reliability-lab
+   kubectl delete pod <one-pod-name> -n reliability-lab
    ```
 
-   All three pods should show `1/1 Running`. The restart count may be non-zero if the Deployment replicas were restarted during the experiments, but all should be in `Running` state now.
+   The delete request returns immediately. The replacement Pod is created afterward by the Deployment controller.
 
-3. Get a full view of everything in the namespace:
+3. Wait until the deployment reports three ready replicas again:
 
    ```bash
-   kubectl get all -n chaos-lab
+   kubectl wait --for=jsonpath='{.status.readyReplicas}'=3 deployment/${ONID}-web -n reliability-lab --timeout=60s
    ```
 
-   You will see the Deployment, ReplicaSet, three Pods, and the Service. Your ONID appears in the Deployment and Pod names, and all resources show healthy status.
+   When this finishes, the service has returned to its original replica count.
+
+4. When k6 completes, compare the summary to the baseline:
+
+   - Did `sli_ok` stay above 99.5%?
+   - Did p95 latency stay comfortably below 300 ms?
+   - If there was budget spend, was it tiny or obvious?
+
+</Steps>
+
+<ActivityQuestion>
+If this experiment stayed within budget, what protected the user-visible SLO: Kubernetes in the abstract, or the specific combination of three replicas, a Service, and a small blast radius? What would change if the deployment only had one replica?
+</ActivityQuestion>
+
+---
+
+## Experiment 2: Zero Healthy Replicas
+
+Now make the failure large enough that the service disappears from the request path. This is the clearest way to see budget burn and to distinguish a healthy Kubernetes object model from a healthy user experience.
+
+Write your hypothesis before running: once the deployment reaches zero ready replicas, how badly will the one-minute run miss the 99.5% SLO?
+
+<Steps>
+
+1. Start the same k6 run again:
+
+   ```bash
+   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js
+   ```
+
+2. In the Kubernetes terminal, scale the deployment to zero and wait for all serving Pods to disappear:
+
+   ```bash
+   kubectl scale deployment/${ONID}-web --replicas=0 -n reliability-lab
+   kubectl wait --for=delete pod -l app=${ONID}-web -n reliability-lab --timeout=60s
+   ```
+
+   At this moment the Service object still exists, but it has no healthy serving Pods behind it.
+
+3. Restore the deployment to three replicas:
+
+   ```bash
+   kubectl scale deployment/${ONID}-web --replicas=3 -n reliability-lab
+   kubectl wait --for=jsonpath='{.status.readyReplicas}'=3 deployment/${ONID}-web -n reliability-lab --timeout=60s
+   ```
+
+4. When k6 finishes, inspect the summary carefully:
+
+   - `sli_ok` should drop well below the baseline
+   - the threshold for `sli_ok rate>0.995` may fail
+   - the bad fraction is the part of the budget you spent during this one-minute window
+
+</Steps>
+
+<ActivityQuestion>
+During this experiment the Service object never disappeared, only the healthy endpoints behind it. Why is that distinction operationally important? If a dashboard only told you that the Service still existed, what wrong conclusion might you draw?
+</ActivityQuestion>
+
+---
+
+## Experiment 3: Failed Rollout, Safe Rollback
+
+A failed change is less dangerous than a failed service when the rollout mechanics keep old replicas serving traffic while you undo the mistake. This section connects chaos engineering to the lecture's release-safety discussion.
+
+Write your hypothesis before running: can a rollout be broken and still stay within the SLO because the old Pods continue serving?
+
+<Steps>
+
+1. Start the same k6 run again:
+
+   ```bash
+   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js
+   ```
+
+2. In the Kubernetes terminal, intentionally set a bad image tag on the deployment:
+
+   ```bash
+   kubectl set image deployment/${ONID}-web web=nginx:this-tag-does-not-exist -n reliability-lab
+   ```
+
+   Kubernetes now tries to create new Pods from an image that cannot be pulled.
+
+3. Inspect the Pods while the bad rollout is in progress:
+
+   ```bash
+   kubectl get pods -n reliability-lab
+   ```
+
+   You should see at least one new Pod enter `ErrImagePull` or `ImagePullBackOff` while older Pods remain `Running`. That is the safety property you are testing.
+
+4. Undo the rollout and wait for the deployment to settle:
+
+   ```bash
+   kubectl rollout undo deployment/${ONID}-web -n reliability-lab
+   kubectl rollout status deployment/${ONID}-web -n reliability-lab
+   ```
+
+5. When k6 finishes, compare the summary to the earlier runs:
+
+   - Did `sli_ok` stay above 99.5% despite the failed rollout?
+   - Did the old Pods preserve availability while the new image failed?
+   - Was the bad change reversible before it became a user-visible outage?
+
+</Steps>
+
+<ActivityQuestion>
+Why can this rollout be operationally unhealthy while the user-visible SLO still stays green? What does that tell you about release safety, rollback readiness, and the difference between "a deployment is progressing" and "users are fine"?
+</ActivityQuestion>
+
+---
+
+## Record the Final Steady State
+
+The last step of a reliability exercise is confirming that the system is healthy again and keeping a concrete record of what happened. The result should show both the user-visible SLI and the cluster state with your ONID in it.
+
+<Steps>
+
+1. Run one final clean baseline and save the summary to a file:
+
+   ```bash
+   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js | tee final-check.txt
+   ```
+
+   This final run should pass all thresholds again. If it does not, the system is not back to steady state.
+
+2. Append one user-visible check and the Kubernetes state:
+
+   ```bash
+   curl -s http://127.0.0.1:8080/ | grep h1 | tee -a final-check.txt
+   kubectl get deployment,replicaset,pods,service -n reliability-lab | tee -a final-check.txt
+   ```
+
+   The first command writes the page header containing your ONID. The second command writes the deployment, ReplicaSets, Pods, and Service that now make up the recovered system.
+
+3. Print the record you just created:
+
+   ```bash
+   cat final-check.txt
+   ```
+
+   You should see a passing `k6` summary, your personalized page header, and healthy Kubernetes objects named with your ONID. This is the concrete end state of the activity.
 
 </Steps>
 
 ## Going Further
 
-You have run three of the experiments the lecture lists as natural starting points for a chaos engineering practice: single pod failure, full replica loss, and memory limit enforcement. Each tested a failure mode Kubernetes is designed to handle.
+You have measured error-budget spend at one fixed request rate. The next step is to ask where the service stops meeting the SLO, and to line up that moment with better observability.
 
-The next step is testing a failure mode it is not designed to handle automatically: network partition. [LitmusChaos](https://litmuschaos.io/) and [Chaos Mesh](https://chaos-mesh.org/) both run as Kubernetes controllers and can inject network latency, packet loss, and partition failures between specific pods, with blast radius controls and rollback built in. Install either in your cluster, then run one of their built-in network chaos experiments against your `<your-onid>-web` deployment. Observe whether the Service continues routing traffic around a partitioned pod, and check what the nginx access logs show for requests that hit the partitioned replica during the experiment window.
+Edit `probe.js` so the load rises in stages instead of staying at 10 requests per second. Increase the rate every 30 seconds until `sli_ok` drops below 99.5%, and record the first rate where your budget starts burning. If you have already completed [Prometheus and Grafana](/activities/prometheus-and-grafana/), rerun that staged test while watching the RED panels so you can compare `k6`'s end-of-run summary to the dashboard's p95 latency and error-rate curves. After that, if you want a more realistic failure than Pod deletion, install [LitmusChaos](https://litmuschaos.io/) or [Chaos Mesh](https://chaos-mesh.org/) in minikube and repeat the same `k6` harness during a network-latency experiment.

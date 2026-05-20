@@ -1,6 +1,6 @@
 ---
 title: "On-Premises Infrastructure and Data Center Architecture"
-description: "Physical network design, VLAN segmentation, enterprise routing, server hardware, and data center architecture: the infrastructure stack that underlies cloud and on-premises deployments."
+description: "The physical layer underneath every cloud region: server hardware at production scale, enterprise storage, data center network topology, and the racks, power, and cooling that turn boxes into infrastructure."
 sidebar:
   order: 17
 draft: true
@@ -8,33 +8,251 @@ draft: true
 
 import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
+import FigureWithCaption from '/src/components/FigureWithCaption.astro';
 
 {/* ai-summary
 type: lecture
 slug: on-premises-infrastructure
 order: 17
-covers: hierarchical three-tier network design; VLANs and 802.1Q trunking; ARP security and Dynamic ARP Inspection; enterprise Wi-Fi and 802.1X; DHCP relay and reservations; OSPF; BGP; link aggregation; underlay vs overlay; server CPU platforms (EPYC/Xeon); NUMA; custom silicon (ARM Graviton/Cobalt/Axion, Grace Hopper, TPU, Trainium); ECC/RDIMM memory; storage interfaces (SATA/SAS/NVMe/NVMe-oF); DAS/NAS/SAN; NFS/SMB; RAID and ZFS; server specialization; spine-leaf topology; data center design
-prereq_lectures: hardware-fundamentals, virtualization-basics, container-orchestration, networking-fundamentals
+covers: hosting model decision and what an availability zone physically is; server CPU platforms (EPYC, Xeon) and NUMA; ARM and AI accelerators in one paragraph; memory at server scale (scrubbing, Chipkill, LRDIMM); server specialization (virtualization host, storage, GPU, blade); out-of-band management (BMC, IPMI, Redfish, virtual KVM, management VLAN); enterprise storage interfaces (SAS, NVMe, NVMe-oF, U.2/U.3, hot-swap); DAS, NAS (NFS, SMB), SAN (Fibre Channel, iSCSI); RAID levels condensed; three-tier vs spine-leaf topology; VLAN operations (access vs trunk, inter-VLAN routing); access-layer hardening (DAI, DHCP snooping, port security, 802.1X); DHCP relay; OSPF inside, BGP at the edge; racks and structured cabling; hot/cold aisle; power infrastructure (PDU, UPS, dual feed, A/B power); cooling (CRAC/CRAH, in-row, liquid); Uptime Institute tiers; high-speed fabric (25/100/400 GbE); RDMA, RoCE, InfiniBand; SmartNICs and DPUs; oversubscription
+prereq_lectures: hardware-fundamentals, virtualization-basics, networking-fundamentals, cloud-computing, container-orchestration, network-services-and-application-delivery
 followup_lectures: system-security-and-hardening
 paired_activities: cisco-packet-tracer, storage-planning
 supports_labs:
 */}
 
-Cloud infrastructure looks like magic until the bill arrives or a region goes down. Every EC2 instance is a physical server in a data center, connected by real cables to real switches, with cooling, power, and a network fabric that determines whether a workload runs smoothly or thrashes against hardware limits. When a cloud provider introduces a new instance type with higher network throughput, or adds a storage performance tier, those decisions reflect physical constraints at the hardware layer. When latency spikes without explanation, the cause often traces to a hardware decision made by the person who racked the server years ago.
+Cloud infrastructure looks like magic until the bill arrives or a region goes down. Every EC2 instance is a physical server in a data center, connected by real cables to real switches, drawing real watts from a power distribution unit that ultimately traces back to a substation. When a cloud provider introduces a new instance family with higher network throughput, it is reflecting physical constraints at the hardware layer. When latency spikes without explanation, the cause often traces to a hardware decision made by the person who racked the server years ago. And when an AWS Availability Zone fails, what fails is a building, with its own power, cooling, and network fabric.
 
-Many organizations also run infrastructure on-premises: offices with local servers, colocation facilities, on-premises Kubernetes clusters, or hybrid deployments that extend cloud VPCs to physical sites. In those environments, you manage the network topology, the switch configuration, and the server hardware yourself. This lecture covers that full stack. The first half addresses physical network design, from the three-tier switch hierarchy through VLANs, wireless networking, DHCP, and enterprise routing protocols. The second half covers server hardware: CPU platforms, custom silicon, memory, storage, server specialization, high-speed networking, and data center design. Together, they describe the physical layer that cloud providers operate and that on-premises teams manage directly.
+This lecture is the one place in the course that treats those physical realities as a designed system rather than as an abstraction underneath an API. It pulls together hardware concepts from the Hardware Fundamentals lecture, the addressing and ARP behavior from Networking Fundamentals, the regions and Availability Zones from the Cloud Computing lecture, and the underlay-versus-overlay framing from the Network Services and Application Delivery lecture, and answers the question those lectures kept deferring: what does the physical layer actually look like, and what decisions does it force on the people who own it?
 
-## Hierarchical network design
+## Where Physical Infrastructure Lives
 
-Large networks are difficult to manage as a single flat layer. The Cisco hierarchical model organizes a network into three functional layers, each with a distinct role.
+The Cloud Computing lecture already introduced the four hosting models in use today: public cloud from a hyperscaler, a budget public cloud such as Hetzner, a private cloud built on OpenStack or Proxmox, and colocation. It even named the cloud-computer category represented by Oxide. The lecture you are reading does not redefine those models. It picks up where that one stopped: even when you choose public cloud, you are renting time on someone else's physical infrastructure, and that infrastructure follows the same design rules as the colocation cage your competitor rented down the street.
 
-**The Access Layer** is where end devices connect to the network. It handles layer-2 switching, port security, QoS classification and marking (identifying and labeling traffic so the network knows what to prioritize), ARP inspection (preventing ARP spoofing attacks), VLAN assignment, spanning tree, and Power over Ethernet (PoE) for devices like VoIP phones and wireless access points.
+An AWS region such as `us-east-1` is not a single building. It is a geographic cluster of data centers grouped into Availability Zones, where each Availability Zone is an isolated location with independent power, cooling, and networking. AWS's own infrastructure documentation describes an AZ as one or more discrete data centers, and AWS does not publish precise building counts. The safe operational takeaway is the one that matters: AZs are physically separated failure domains within a region, connected by low-latency regional fiber under different physical paths. The reason your application can survive a single-AZ outage by spreading across two or three is that those zones are physically separated facilities with separately sourced power and separately routed fiber. The reason a region-wide outage is rare and catastrophic is that it usually means a control-plane failure that cuts across all of them at once.
 
-**The Distribution Layer** aggregates traffic from access switches and mediates between switching (layer 2) and routing (layer 3). It enforces policy-based security using access control lists (ACLs), provides routing between VLANs and between different routing domains, handles redundancy and load balancing, and controls broadcast domains. Routers and layer-3 switches do not forward broadcast traffic, so the distribution layer acts as a boundary between broadcast domains. Route summarization here keeps the core routing tables compact: instead of advertising four `/24` subnets separately, the distribution layer can advertise a single `/22` summary route to the core.
+The same physics governs whether you operate the building yourself, rent space in someone else's, or rent only the workloads. The capex-versus-opex shape of those choices was already covered in the Cloud Computing lecture and is not worth restating here. What matters for the rest of this lecture is that the components are the same regardless of who owns them: server hardware, storage, switches, racks, power distribution, cooling, and a network design that holds them all together. Whether you are evaluating an EC2 instance type, racking your own gear in a colo, or planning a hybrid that extends a VPC to a branch office over Direct Connect or ExpressRoute (covered in the Network Services lecture), the underlying decisions trace back to the same physical building blocks.
 
-**The Core Layer** is the network backbone: the high-speed switching fabric interconnecting distribution devices. It prioritizes fast transport and fault tolerance over feature richness. CPU-intensive tasks such as security inspection, QoS classification, and deep packet inspection are deliberately avoided at this layer; the goal is forwarding as fast as possible with maximum reliability.
+## Server Hardware at Production Scale
 
-In small-to-medium networks, the distribution and core layers are often collapsed into a single layer-3 switch, reducing hardware cost while preserving the logical separation between access and routing functions.
+The Hardware Fundamentals lecture covered consumer-grade platforms: ATX boards, DDR5 UDIMMs, M.2 NVMe drives, ATX 3.x power supplies. Server hardware is a separate product line, shaped by a different set of constraints: continuous load instead of bursty workstation use, multi-socket designs, very large memory capacities, and product lifecycles measured in years rather than months. The same vocabulary applies (CPU, memory, storage, PCIe lanes), but the values and tradeoffs are different.
+
+### Server CPUs and NUMA
+
+The two dominant server CPU families remain **AMD EPYC** and **Intel Xeon**. Modern server parts support ECC RDIMMs and LRDIMMs, far more memory channels than consumer platforms, often eight to twelve per socket, and PCIe lane counts (128 or more per socket on high-end parts) that consumer chipsets cannot match. These are not "faster" CPUs in the headline sense; they are wider, with more cores, more memory bandwidth, and more I/O than a desktop part can deliver.
+
+<FigureWithCaption
+  src="./hardware-components/server-chipset.png"
+  alt="Dual-socket server board topology"
+  caption="Dual-socket server board topology (GIGABYTE G293-S41-AAP1)"
+  imageHeight="h-96"
+/>
+
+The single biggest conceptual difference for a sysadmin is **Non-Uniform Memory Access (NUMA)**. In a two-socket server, each CPU has local memory banks it can access at full speed and remote memory banks on the other socket that it reaches over an inter-socket interconnect (AMD Infinity Fabric or Intel UPI). The latency difference between local and remote memory is typically two to three times. A workload whose threads and buffers are pinned to one socket runs at one speed; a workload whose memory ends up split across sockets runs measurably slower.
+
+```mermaid
+flowchart LR
+  subgraph N0["NUMA Node 0"]
+    CPU0["CPU Socket 0"]
+    M0["Local DIMMs\nfast access"]
+    CPU0 --- M0
+  end
+  subgraph N1["NUMA Node 1"]
+    CPU1["CPU Socket 1"]
+    M1["Local DIMMs\nfast access"]
+    CPU1 --- M1
+  end
+  CPU0 <-->|"Infinity Fabric / UPI\n2-3x latency"| CPU1
+  CPU0 -.->|"remote access"| M1
+  CPU1 -.->|"remote access"| M0
+```
+
+Linux tools `numactl` and `numastat` expose the topology and let you pin processes and memory to a specific node. Many enterprise databases, JVM-based services, and high-throughput packet processors are NUMA-aware by default; many ordinary application servers are not, and that is the difference between predictable and surprising performance on a dual-socket node. Within a single CPU socket, modern EPYC parts also expose multiple **NUMA domains per socket** (NPS settings), which means even a single-socket server can have intra-socket NUMA effects worth knowing about.
+
+### ARM and AI Accelerators
+
+For most of computing history "server CPU" meant Xeon or EPYC. That is no longer a safe assumption. The hyperscalers each have an in-house ARM line aimed at general-purpose cloud workloads: **Amazon Graviton**, **Microsoft Cobalt**, and **Google Axion**. AWS markets Graviton as offering better price-performance than comparable x86 instances on many cloud-native Linux workloads, and porting is often as cheap as rebuilding your container for `linux/arm64`. **Ampere Altra** brings the same architecture to colocation and on-prem deployments through partners like Oracle Cloud and select OEM servers. Alongside the ARM CPUs are a generation of custom AI accelerators built for matrix multiplication rather than general compute: **NVIDIA Grace Hopper** and **GB200** packages, **Google TPU**, **AWS Trainium** and **Inferentia**, and **Microsoft Maia**. These are not interchangeable with x86 servers; they require their own software stacks and their own networking. For this course, the operational implication is the same one Container Orchestration already hinted at: build and push multi-architecture container images so the same workload can land on whichever fleet is cheapest.
+
+<Aside type="tip" title="Checking Architecture in Linux">
+`uname -m` reports `x86_64` on Intel or AMD and `aarch64` on ARM servers. Container images must match the host architecture unless emulation (QEMU) is in play, which is significantly slower. `docker buildx build --platform linux/amd64,linux/arm64` produces a multi-arch image that the registry serves to whichever architecture pulls it.
+</Aside>
+
+### Memory at Server Scale
+
+The Hardware Fundamentals lecture introduced ECC, RDIMMs, and LRDIMMs as concepts. At server scale these features carry their weight in ways that are easy to underestimate on a desktop. ECC is not a "nice to have"; in a virtualization host with 768 GB of DDR5, the statistical rate of cosmic-ray and electrical-noise bit flips means a non-ECC machine will eventually corrupt VM state, and the corruption will be silent. **Patrol scrubbing** is the firmware feature that walks memory in the background and forces ECC checks on idle pages, surfacing latent errors before an application happens to read the affected line. **Chipkill** and related **Single Device Data Correction (SDDC)** modes are stronger ECC/RAS features that can tolerate the failure of an entire DRAM chip on a DIMM, not just a single bit. That is a different feature from memory-encryption technologies such as **AMD Memory Guard**, which protect data confidentiality rather than correcting memory errors. **LRDIMM (Load-Reduced DIMM)** buffers the data lines so the memory controller can drive more DIMMs per channel at full speed, which is how a server reaches 2 to 6 TB of installed memory without sacrificing throughput.
+
+Two operational notes follow from this. First, ECC errors logged by the BMC (covered in the Log Management and Incident Investigation lecture) are an early-warning system: a DIMM logging increasing correctable errors is a planned replacement, not an emergency. Second, mixing UDIMM and RDIMM in the same server prevents boot, and mixing DIMMs of different rank or organization can quietly force the memory controller to a lower speed. Server memory population follows a vendor table that is genuinely worth reading before purchase.
+
+### Server Specialization by Workload
+
+"Server" is a generic word. Production environments use several distinct classes of hardware that look broadly similar but are optimized for different jobs.
+
+**Compute and virtualization hosts** are the default 1U or 2U rackmount nodes that fill most racks. A typical dense virtualization host carries two EPYC or Xeon sockets, several hundred gigabytes of ECC RDIMM, a small number of NVMe drives for VM images, and a 25 GbE or faster network connection. The hypervisor (ESXi, Proxmox VE, KVM, Hyper-V, or a hyperscaler's proprietary stack) divides the box into VMs that the rest of the course already takes for granted.
+
+**Storage servers** invert the priorities: many drives, modest CPU and memory, and high-throughput networking. A 4U storage chassis can hold 60 to 90 spinning disks on a SAS expander backplane, or an equivalent count of NVMe drives in a JBOF (Just a Bunch of Flash) enclosure. The operating system is typically a storage-focused distribution: TrueNAS for ZFS-based deployments, Ceph for distributed object and block storage, or a vendor appliance OS. A **JBOD** (Just a Bunch of Disks) is the simplest variant: a disk shelf with no embedded compute, presenting drives to an attached server over SAS or NVMe-oF and leaving RAID and filesystem logic to the host.
+
+**GPU and AI servers** are a different physical animal entirely. A purpose-built AI node such as the NVIDIA DGX H100 houses eight H100 SXM GPUs interconnected by a fourth-generation NVLink fabric that NVIDIA documents as providing 900 GB/s of GPU-to-GPU bandwidth, and the appliance is rated for a little over 10 kW of maximum system power. Inference-tier servers built around L4, L40S, AWS Inferentia, or TPU v5e chips are cheaper per query because inference is latency-bound and benefits from more, smaller accelerators rather than fewer high-memory training GPUs. The networking story (covered later in this lecture) is what separates these from ordinary racks: a 64-GPU training job is bottlenecked by the all-reduce step across the network, not by the GPUs themselves.
+
+**Blade servers** pack thin compute modules into a shared chassis with common power, cooling, and a networking backplane. The density is excellent and the per-node cabling drops dramatically. The tradeoff is vendor lock-in (blades from one vendor do not fit another's chassis) and limited per-blade expansion. Blade designs were dominant in the 2000s and remain common in enterprises with long-standing HPE or Dell relationships, but most new builds use rackmount servers with top-of-rack switching instead.
+
+<div class="**:mx-auto">
+  ![](./hardware-components/server-chipset.png)
+</div>
+<p class="text-center italic text-sm m-0 p-0">2U HPC/AI Server <a href="https://www.gigabyte.com/Enterprise/GPU-Server/G293-S41-AAP1" target="_blank" rel="noopener noreferrer">G293-S41-AAP1</a> from GIGABYTE</p>
+
+### Out-of-Band Management
+
+Every production server has a second computer inside it. The **Baseboard Management Controller (BMC)** is a small ARM-based system-on-chip with its own CPU, memory, firmware, and dedicated network port that operates independently of the main CPU and OS. Vendor names for the BMC's full feature set are familiar: **iDRAC** on Dell, **iLO** on HPE, **XCC** on Lenovo, **CIMC** on Cisco UCS. The protocol that has historically tied them together is **IPMI**; the modern HTTPS-and-JSON replacement is **Redfish**, which is now the standard interface for new automation.
+
+Operationally, the BMC is the answer to questions that have no software-side answer. You can power-cycle a hung server when SSH is unresponsive. You can attach to the console as if you were standing in front of the rack with a monitor and keyboard, through a virtual KVM session in a browser. You can mount an ISO image as a virtual CD-ROM and reinstall the operating system on a remote machine over the management network. You can read the System Event Log (covered in the Log Management lecture) for hardware events the OS never saw, including the ECC errors and fan failures that signal an impending hardware problem.
+
+The network design implication is the part most relevant here. The BMC has its own NIC, on its own MAC address, and it should be on its own **management VLAN** that is reachable only from operator workstations and a small set of automation hosts. Putting BMCs on the same VLAN as production traffic exposes a powerful, often weakly-authenticated control surface to anyone who reaches that broadcast domain. A separate, firewalled, MFA-gated management VLAN is the standard pattern, and it is one of the reasons VLAN segmentation matters operationally rather than as a theoretical layer-2 nicety.
+
+```mermaid
+flowchart LR
+  subgraph Server["Production Server"]
+    OS["Host OS\napps, hypervisor"]
+    BMC["BMC\nindependent SoC"]
+    NIC1["Data NIC\n25 GbE"]
+    NIC2["BMC NIC\n1 GbE"]
+    OS --- NIC1
+    BMC --- NIC2
+  end
+  ProdSW["Production Switch\nVLAN 10: app traffic"]
+  MgmtSW["Management Switch\nVLAN 99: BMC only"]
+  NIC1 --> ProdSW
+  NIC2 --> MgmtSW
+  Ops["Operator workstation\n+ automation hosts"]
+  MgmtSW --- Ops
+  FW["Firewall + MFA\nno public exposure"]
+  Ops --- FW
+```
+
+<Aside type="caution" title="BMC Security Is Not Optional">
+A BMC with default credentials and a routable address is one of the most direct paths to total compromise of a server: it can mount arbitrary media, capture the console, and survive an OS reinstall because it is not part of the OS. Treat BMC credentials like root credentials, keep firmware patched, and never expose the BMC interface to the public internet.
+</Aside>
+
+## Enterprise Storage
+
+The Hardware Fundamentals lecture covered the basics of HDD and SSD media and the M.2 NVMe drives common in consumer machines. The Linux Server Planning lecture covered RAID as a concept and introduced ZFS and Btrfs as integrity-aware filesystems. At server and data center scale, the new questions are how drives attach (interface and form factor), how storage is delivered to consumers (locally, over the network as files, or over a fabric as blocks), and how the redundancy is organized when a single array carries dozens of terabytes that nobody wants to restore from tape.
+
+### Interfaces: SATA, SAS, NVMe, NVMe-oF
+
+| Interface | Representative throughput | Duplex | Hot-Swap | Use Case |
+|---|---|---|---|---|
+| **SATA III** | ~600 MB/s | Half | Backplane-dependent | Budget servers, bulk storage |
+| **SAS-3 (12G)** | ~1,200 MB/s | Full | Yes (SAS expanders) | High-density enterprise storage |
+| **SAS-4 (24G)** | ~2,400 MB/s | Full | Yes | Tier-1 storage arrays |
+| **NVMe (PCIe 4.0 x4)** | ~7,000 MB/s | Full | Via U.2/U.3 backplane | Low-latency databases, AI |
+| **NVMe-oF** | Fabric-dependent | Full | N/A | Disaggregated storage over fabric |
+
+The interesting interface-level details for a server administrator are the ones that do not appear on the desktop. **SAS** runs full-duplex, so it can read and write simultaneously on the same link, while SATA is half-duplex. **SAS expanders** allow one host bus adapter to address up to 256 drives, which is why high-density storage chassis are built on SAS rather than direct SATA. **U.2** and **U.3** are 2.5-inch hot-swap form factors that carry the NVMe protocol over PCIe lanes through a server backplane, giving you the throughput of M.2 NVMe with the serviceability of a SAS hot-swap bay. Hot-swap matters: pulling a drive from a running production system is normal procedure, and consumer SATA backplanes typically do not guarantee it.
+
+**NVMe over Fabrics (NVMe-oF)** extends the NVMe protocol across a network, so a JBOF in one rack can present block devices to compute nodes in another rack. On fast transports such as RDMA or Fibre Channel, the added latency can be low enough to support disaggregated designs that still behave much more like local block storage than NAS. NVMe-oF transports include RDMA (RoCE, iWARP, InfiniBand), Fibre Channel, and TCP. Storage disaggregation built on NVMe-oF is increasingly common in hyperscale deployments because it lets compute and storage scale independently, and it is one of the reasons the network speed tiers later in this lecture climbed past 100 GbE.
+
+### Direct-Attached, Network-Attached, and Storage Area Networks
+
+The three storage attachment models differ in where the network boundary falls relative to the storage device.
+
+**Direct-Attached Storage (DAS)** is storage connected directly to a single host: internal drives, an external SAS enclosure, or a JBOD shelf. It provides the fastest access and no network overhead, but only the attached host can use it.
+
+**Network-Attached Storage (NAS)** is a device or cluster that presents a filesystem over a standard TCP/IP network. The two dominant NAS protocols are NFS and SMB. **NFS** (Network File System), developed by Sun Microsystems, is the standard in Linux and UNIX environments; NFSv4 adds stronger security and operational improvements over NFSv3, which lacks native encryption and is a poor choice on untrusted networks. **SMB** (Server Message Block) is the standard in mixed-OS environments; SMB 3.x adds encryption and stronger authentication and is now the default file-sharing protocol on macOS and Windows. Multiple clients can mount the same NAS export simultaneously, which makes NAS the right answer for shared home directories, build artifacts, and backups.
+
+**Storage Area Networks (SANs)** use a dedicated high-speed fabric (Fibre Channel, iSCSI over Ethernet, or NVMe-oF) to present raw block-level storage to servers. A server with a SAN-attached **LUN** (Logical Unit Number) sees it as a locally attached block device and formats its own filesystem on top. SANs are used in enterprise environments for databases and virtual machine datastores because they deliver low latency, high throughput, and the multipath failover behavior that NAS protocols cannot match at the same scale.
+
+```mermaid
+flowchart LR
+  subgraph DAS["DAS: drives attached to one host"]
+    DH["Host"]
+    DD["Drives\n(internal / SAS shelf)"]
+    DH --- DD
+  end
+  subgraph NAS["NAS: file access over TCP/IP"]
+    NH1["Client A"]
+    NH2["Client B"]
+    NET1["Ethernet\nNFS / SMB"]
+    NBOX["NAS appliance\nowns filesystem"]
+    NH1 --- NET1
+    NH2 --- NET1
+    NET1 --- NBOX
+  end
+  subgraph SAN["SAN: block access over fabric"]
+    SH1["Server A"]
+    SH2["Server B"]
+    FAB["FC / iSCSI / NVMe-oF\nfabric switch"]
+    SARR["Block array\nLUNs"]
+    SH1 --- FAB
+    SH2 --- FAB
+    FAB --- SARR
+  end
+```
+
+The diagram shows where the network boundary falls in each model. In DAS, there is no network between the host and its drives. In NAS, the network sits between the client and a filesystem that the appliance owns; clients see files. In SAN, the fabric sits between the server and raw block devices; the server owns the filesystem on top of the LUNs.
+
+| | SAN | NAS |
+|-|-----|-----|
+| Storage type | Block | File |
+| Network | Fibre Channel / iSCSI | TCP/IP Ethernet |
+| Performance | High | Moderate |
+| Cost and complexity | High | Low |
+| Use case | Databases, VM datastores | File shares, backups, home directories |
+
+Network storage failures have distinctive signatures that differ from ordinary connectivity failures, and the diagnostic tools are different. An NFS mount that succeeded during provisioning may go stale after a network partition: the server is reachable, the mount point exists, but read and write operations block until the kernel times out. The NFS mount options `soft` and `hard` control this: a `soft` mount returns an error after a timeout, while a `hard` mount retries forever, protecting data integrity but risking hung processes. SMB authentication failures usually manifest as "access denied" rather than a timeout, often because a Kerberos ticket expired or the client's domain membership does not match the server's ACL. SAN failures are more abrupt: if a Fibre Channel HBA loses zoning or an iSCSI session drops, block devices disappear from the OS and filesystems on them go read-only to prevent corruption. The right diagnostic tools at that point are `multipath -ll` for multipath state and `iscsiadm -m session` for iSCSI sessions, not `ping` or `dig`.
+
+### RAID Levels and Integrity-Aware Filesystems
+
+The Linux Server Planning lecture already introduced RAID as a concept and described ZFS and Btrfs as integrity-aware alternatives. The remaining piece is the catalog of RAID levels themselves and the tradeoff between traditional RAID and modern filesystem-managed redundancy.
+
+| Level | Min. Drives | Fault Tolerance | Capacity Overhead | Read / Write Profile | Typical Use |
+|---|---|---|---|---|---|
+| **RAID 0** | 2 | None: any drive failure loses everything | 0% | Highest read and write throughput | Scratch space, ephemeral caches |
+| **RAID 1** | 2 | One drive per mirror | 50% (with 2 drives) | Fast reads, write speed of one drive | Boot volumes, small critical pairs |
+| **RAID 5** | 3 | One drive | One drive's worth | Good reads, slower writes (parity calc) | General-purpose arrays (small drives) |
+| **RAID 6** | 4 | Two drives | Two drives' worth | Slower writes than RAID 5 | Large-drive arrays where rebuilds are long |
+| **RAID 10** | 4 | One drive per mirror pair | 50% | High read and write throughput | Databases, VM datastores |
+
+RAID 6 has become the practical default over RAID 5 on modern multi-terabyte drives because the rebuild window after a single failure is long enough that a second failure during the rebuild is a realistic event. Single-parity RAID 5 on 16 TB drives is a configuration you read about in postmortems.
+
+Software RAID such as Linux `mdadm` runs in the kernel and uses host CPU for parity calculations, which is cheap on modern processors and easy to move between machines. Hardware RAID offloads the same work to a dedicated controller card with battery-backed cache, which can deliver more predictable write performance but introduces vendor lock-in: a failed controller can render an array unreadable on a different model. Modern filesystems take a different approach entirely. ZFS, Btrfs, and Ceph's BlueStore checksum every block at write time and detect silent corruption on every read, so a "RAID-Z" pool or a Ceph erasure-coded pool is not only redundant but self-healing in a way traditional RAID is not. That is why software-managed pools have largely replaced classic hardware RAID outside of specific enterprise appliances.
+
+<Aside type="tip" title="RAID Is Not Backup">
+If a RAID 1 array loses a disk and, during the rebuild, a directory is accidentally deleted, the deletion is instantly mirrored to the surviving disk. Only an external, versioned backup can restore it. Redundancy protects against hardware failure; only backups protect against everything else.
+</Aside>
+
+### Distributed and Parallel Filesystems
+
+Beyond the single-machine filesystems that the Linux Server Planning lecture introduced (ext4, XFS, ZFS, Btrfs), enterprise and HPC environments increasingly use filesystems that span many physical nodes. These systems trade some of the simplicity of a local filesystem for the ability to scale capacity and throughput linearly with node count, present a single namespace to many clients, and survive node failures without taking the data offline. The right way to read the rest of this subsection is on the single-node-versus-multi-node axis: ZFS and Btrfs scale up by adding disks to one server; Ceph, Lustre, IBM Storage Scale, and BeeGFS scale out by adding entire nodes.
+
+**ZFS and Btrfs**, already introduced in the Linux Server Planning lecture, are single-node integrity-aware filesystems. ZFS in particular has shaped how a generation of storage administrators think about pools, snapshots, and end-to-end checksums; it is the foundation of TrueNAS, OpenZFS on Linux, and the storage layer of many homelab and small-business NAS appliances. ZFS pools can reach multiple petabytes on a single host, but the server itself is the failure boundary: if the chassis goes down, the pool goes with it.
+
+**Ceph** is the dominant open-source distributed storage system and the one worth knowing by name. It spreads data across a cluster of nodes using the CRUSH algorithm, a deterministic placement function that decides which nodes store each object without a central metadata server. The same cluster can present object storage (RGW, S3-compatible), block storage (RBD, used as backing for VM disks and Kubernetes PersistentVolumes through Rook), and file storage (CephFS). When a node fails, surviving nodes rebalance the affected data automatically, so the cluster heals itself rather than requiring a human-driven rebuild. Ceph is the storage backbone underneath OpenStack, Proxmox VE clusters, and many on-prem Kubernetes deployments, and it powers some hyperscaler internal storage tiers. The operational tradeoff is complexity: a healthy Ceph cluster requires careful tuning of OSD layout, placement group counts, and network configuration, and it is not a system you stand up casually for a single workload.
+
+**GlusterFS** is a simpler distributed file system that aggregates many servers' local storage into a single namespace through a stack of translators. It was popular for shared application storage in the 2010s, but Red Hat ended commercial support for Red Hat Gluster Storage in 2024, and new deployments today more often choose Ceph or one of the parallel filesystems below.
+
+**Lustre** is the parallel filesystem most associated with classical HPC. It separates metadata operations onto dedicated **Metadata Servers (MDS)** and bulk data operations onto **Object Storage Servers (OSS)**, so a single large file can be striped across many storage targets and read or written in parallel by thousands of compute nodes simultaneously. Most of the top supercomputers on the TOP500 list run Lustre on their primary scratch filesystem. Lustre is built for raw throughput on highly concurrent scientific workloads; it is not a good fit for ordinary enterprise file sharing because the metadata path is optimized for a small number of very large files rather than many small ones.
+
+**IBM Storage Scale** (formerly GPFS, General Parallel File System) is the proprietary equivalent at IBM, common in large enterprise HPC sites, weather forecasting, life sciences, and financial services. It supports parallel access from thousands of clients with strong POSIX semantics and integrates with IBM's tape archive systems for hierarchical storage management, where rarely-accessed data is transparently migrated to slower, cheaper media.
+
+**BeeGFS** is a newer parallel filesystem developed at the Fraunhofer Institute and now maintained by ThinkParQ. It is often chosen for smaller HPC clusters and AI training environments where Lustre is more than the team wants to operate. It scales well into the multi-petabyte range, supports RDMA transports (covered later in this lecture), and has gained traction in GPU clusters where reading training datasets in parallel is the dominant I/O pattern.
+
+| Filesystem | Scale | License | Architecture | Primary Use Case | Operational Complexity |
+|---|---|---|---|---|---|
+| **ZFS** | Single node, up to multi-PB pool | Open source (CDDL) | Pooled storage with copy-on-write and checksums | NAS appliances, storage servers, homelab | Low to moderate |
+| **Ceph** | Tens to thousands of nodes | Open source (LGPL) | CRUSH-placed objects; RBD, CephFS, RGW interfaces | Private cloud, Kubernetes PVs, S3-compatible object store | High |
+| **GlusterFS** | Tens to hundreds of nodes | Open source (GPL) | Translator stack over local bricks | Legacy shared application storage | Moderate (declining adoption) |
+| **Lustre** | Hundreds to thousands of nodes | Open source (GPL) | Separate MDS and OSS roles, striped files | Classical HPC, TOP500 supercomputers | High |
+| **IBM Storage Scale (GPFS)** | Thousands of nodes | Proprietary | Parallel POSIX with HSM integration | Enterprise HPC, financial services, life sciences | High |
+| **BeeGFS** | Tens to hundreds of nodes | Open source / commercial | Parallel metadata and storage targets, RDMA | Smaller HPC, AI training clusters | Moderate |
+
+The decision between these is not "which is best." It is "which one matches your workload, your operations team, and your hardware budget." A storage server backing a few hundred home directories should probably run ZFS. A multi-tenant private cloud or a Kubernetes cluster that needs persistent volumes for many tenants should probably run Ceph. A scientific cluster reading multi-terabyte datasets into a thousand compute nodes should probably run Lustre or BeeGFS. The wrong choice does not show up at install time; it shows up six months in, when the access pattern has settled and the filesystem is asked to do something it was not designed for.
+
+## Enterprise Network Topology
+
+The Networking Fundamentals lecture covered the protocols (TCP/IP, ARP, DHCP DORA, NAT, routing tables) and the small-network role of managed switches, VLANs, and routers. The Network Services and Application Delivery lecture extended the picture to reverse proxies, load balancers, TLS, and CNI underlay versus overlay in Kubernetes. What is left for this lecture is the topology that ties all of those things together into a network you can rack, cable, and operate.
+
+### From Three-Tier to Spine-Leaf
+
+The Cisco hierarchical model organizes a network into three functional layers. The **Access Layer** is where end devices connect; it handles layer-2 switching, port security, VLAN assignment, and Power over Ethernet for things like phones and access points. The **Distribution Layer** aggregates access switches and acts as the boundary between layer-2 switching and layer-3 routing; it enforces ACL-based policy, performs inter-VLAN routing, and summarizes routes upward. The **Core Layer** is the high-speed backbone that interconnects distribution devices; it does as little policy work as possible and prioritizes fast forwarding and redundancy. In small-to-medium networks, the distribution and core layers are often collapsed into a single layer-3 switch.
 
 ```mermaid
 flowchart TD
@@ -52,327 +270,7 @@ flowchart TD
   D2 --- A3
 ```
 
-## VLANs and network segmentation
-
-The Networking Fundamentals lecture introduced VLANs as a way to segment a switch into multiple logical broadcast domains. In company networks, the operational question is how that segmentation is implemented on real switch ports and what breaks when a port is assigned incorrectly.
-
-On tagged links in a VLAN-aware network, Ethernet frames carry an [802.1Q tag](https://en.wikipedia.org/wiki/IEEE_802.1Q), a small header inserted after the source MAC address that identifies which VLAN the frame belongs to. Switch ports operate in one of two modes.
-
-**Access ports** connect to end devices such as servers, workstations, and printers. The switch assigns all traffic on an access port to a single VLAN and strips the 802.1Q tag before delivering the frame to the device. The device never sees the tag. Traffic on an access port is untagged: no VLAN ID is present in the Ethernet frame, so untagged traffic on a port can only belong to one VLAN.
-
-**Trunk ports** connect switches to each other or to routers. A trunk carries traffic for multiple VLANs simultaneously, preserving the 802.1Q tag (a 4-byte addition to each Ethernet frame containing the VLAN ID) so the receiving switch knows which VLAN each frame belongs to. This is the only way to carry multiple VLANs on a single physical cable.
-
-```mermaid
-flowchart LR
-  Server["Server\nuntagged VLAN 10"]
-  PC["Workstation\nuntagged VLAN 20"]
-  SW1["Switch A"]
-  SW2["Switch B"]
-
-  Server -->|"access port\nVLAN 10, untagged"| SW1
-  SW1 -->|"trunk port\n802.1Q tagged\nVLAN 10+20+30"| SW2
-  SW2 -->|"access port\nVLAN 20, untagged"| PC
-```
-
-A common source of VLAN-related trouble: a patch cable moved to a different switch port that is configured for the wrong VLAN. The server's IP address is correct, but it is now in a broadcast domain that cannot reach the gateway. You can verify VLAN membership from the switch CLI or, on the server side, by checking whether ARP resolution works for the gateway:
-
-```bash
-ip neighbor show
-```
-
-If the gateway entry is missing or marked `FAILED`, the server cannot reach it at layer 2. That points to a VLAN mismatch, a bad cable, or a misconfigured switch port before you ever touch IP configuration.
-
-To route traffic between VLANs, you need a layer-3 device, either a router or a layer-3 switch, configured with an interface or sub-interface in each VLAN. Without inter-VLAN routing, hosts on different VLANs simply cannot communicate regardless of their IP configuration.
-
-## ARP Security and Dynamic ARP Inspection
-
-The Networking Fundamentals lecture introduced the Address Resolution Protocol (ARP) as the layer-2 mapping that lets a host send a packet to an IP address on its own broadcast domain. The protocol works because every host on the segment trusts every other host's announcements at face value. That same trust gives ARP a security dimension that becomes operational at the access layer, where unauthorized devices may plug into switch ports.
-
-**ARP spoofing** (also called ARP poisoning) exploits the fact that ARP has no authentication. Any host on a broadcast domain can send a gratuitous ARP reply claiming any IP address, including the default gateway's. A malicious host that does this causes other devices on the segment to update their ARP caches and send traffic intended for the gateway to the attacker instead, creating a man-in-the-middle position or a denial of service. Neither is visible at the IP layer: routing tables look fine, `ping` succeeds, traffic just silently passes through an extra host.
-
-Managed switches mitigate this with **Dynamic ARP Inspection (DAI)**. The switch builds a trusted binding table from DHCP snooping (the switch watching DHCP exchanges to record which IP addresses were leased to which MAC addresses on which ports), and validates every ARP reply against it. A reply claiming that `10.0.1.1` belongs to a MAC address not in the binding table is dropped. Servers with statically configured addresses must have manual bindings added to the DAI table, or their own ARP packets will be dropped as untrusted: this is one of the more common DAI rollout footguns, where a newly hardened access switch breaks specific servers that nobody remembered were not using DHCP. DAI is a standard hardening step on access-layer switches in environments where unauthorized devices could plug into switch ports, paired with **port security** (limiting how many MAC addresses a port will learn) and **802.1X authentication** (requiring devices to authenticate before being granted access to a VLAN at all).
-
-## Wireless networking
-
-Wireless networking adds complexity because the physical medium is shared, unpredictable, and invisible. Understanding a few core concepts helps you deploy and troubleshoot Wi-Fi efficiently.
-
-### Standards and bands
-
-The [802.11 family of standards](https://en.wikipedia.org/wiki/IEEE_802.11) defines how Wi-Fi operates. The most relevant standards today are 802.11ac (Wi-Fi 5) on the 5 GHz band and 802.11ax (Wi-Fi 6) on the 2.4 GHz and 5 GHz bands. Wi-Fi 6E extends the same 802.11ax protocol into the 6 GHz band where regulators permit it. Older standards like 802.11n (Wi-Fi 4) are still common in legacy environments.
-
-The 2.4 GHz band offers longer range but only three non-overlapping channels (1, 6, and 11 in North America). The 5 GHz band provides more channels and higher throughput but shorter range. In a dense office, 5 GHz is usually preferable because the additional channels reduce co-channel interference. The 6 GHz band provides substantially more non-overlapping channels and is well-suited to high-density deployments where client devices and local regulations support it.
-
-### Channels and interference
-
-When two nearby access points transmit on the same channel or on overlapping channels, they compete for airtime and degrade each other's performance. On 2.4 GHz, only channels 1, 6, and 11 are non-overlapping in North America. Always use one of these three; using channel 3 or 9 partially overlaps adjacent channels and creates worse interference than sharing a standard channel, because collisions affect both channels simultaneously.
-
-<Aside type="caution" title="2.4 GHz Interference Sources">
-Microwave ovens, Bluetooth devices, and cordless phones all operate near 2.4 GHz. If users report intermittent Wi-Fi problems in a break room or kitchen, interference from appliances is a likely culprit. Prefer 5 GHz or 6 GHz in those environments.
-</Aside>
-
-### Access point placement
-
-When deploying wireless access points in a building, start with a site survey: understanding the physical layout, wall materials (concrete and metal attenuate signals significantly), and expected user density determines both how many APs are needed and where to place them. A dense lecture hall and an empty corridor require very different coverage plans.
-
-Every AP in the same area should transmit on a different non-overlapping channel. Configure all APs with the same SSID and credentials so clients roam automatically to the strongest signal without user intervention. Disabling the lowest data rates (1 and 2 Mbps) that APs advertise for backwards compatibility is a simple change that fixes a common complaint: a device that latches onto a distant AP at 1 Mbps rather than roaming to a nearby AP at full speed. Modern enterprise APs include automatic power and channel adjustment to adapt to congestion and interference, reducing the need for manual tuning after initial deployment.
-
-For user segmentation, map different SSIDs to different VLANs. Staff, students, and guests can share the same physical AP infrastructure while their traffic is separated at the switch, giving each group independent firewall policies and network access controls without additional hardware.
-
-### Enterprise wireless security
-
-For organizational networks, WPA2-Enterprise or WPA3-Enterprise is the standard. These protocols authenticate each user individually via [802.1X](https://en.wikipedia.org/wiki/IEEE_802.1X) and a RADIUS server (Remote Authentication Dial-In User Service, a centralized protocol for verifying network access credentials), rather than sharing a single pre-shared key across all users. Individual authentication means you can revoke access for a single person without changing the password for everyone.
-
-WPA3-SAE improves on PSK by providing forward secrecy and resistance to offline dictionary attacks, but enterprise authentication remains the gold standard for organizational networks. If your organization still uses WPA2-PSK, rotate the key regularly and treat it as a credential that must be protected.
-
-## DHCP: dynamic addressing
-
-The Networking Fundamentals lecture covered the DORA exchange that delivers an IP address to a client. In company networks, the harder questions are where that broadcast traffic can and cannot go, when a relay agent is required, and how to keep critical devices on predictable addresses.
-
-### Operational constraints
-
-DHCP starts as a broadcast, so clients normally need the server to be on the same broadcast domain unless a router or layer-3 switch is configured as a DHCP relay agent. The relay agent forwards the broadcast to the DHCP server as a unicast packet, and the server's response travels back through the relay to the client. Without a relay, clients on a different VLAN or subnet never receive a response. Lease duration matters operationally as well: short leases create more renewal traffic, while very long leases mean addressing mistakes and moved devices take longer to correct automatically.
-
-### Static vs. dynamic allocation
-
-Servers, network printers, and infrastructure devices should use static allocation: either a manually configured IP address or a DHCP reservation that always assigns the same address based on the device's MAC address. Workstations and mobile devices typically use dynamic allocation from a pool.
-
-<Aside type="note" title="DHCP Reservations">
-DHCP reservations give you the convenience of DHCP (centralized configuration, logged in one place) with the predictability of static addressing. Use them for any device that other systems need to reach by IP address.
-</Aside>
-
-If a server recently lost power and came back up without a reservation, it may have received a different IP address from the dynamic pool. Any DNS records or firewall rules pointing to the old address would now be wrong. This is exactly why servers should use static allocation or DHCP reservations rather than drawing from the general pool.
-
-## Enterprise routing and connectivity
-
-Static routes work for small, stable networks. Once a network grows to multiple sites, multiple routers, or dynamic paths, you need routing protocols that automatically exchange reachability information and adapt when paths change.
-
-### OSPF and BGP
-
-**OSPF (Open Shortest Path First)** is the interior routing protocol you are most likely to encounter in on-premises enterprise networks. It is a link-state protocol: each router builds a complete map of the network topology, calculates the shortest path tree, and sends only incremental updates when topology changes. OSPF converges quickly after a failure and supports hierarchical design through its area concept, which keeps routing tables compact as networks grow. It is an open standard and runs on nearly every enterprise router and layer-3 switch. OSPF is what lets the distribution switches in a three-tier design automatically learn routes from each other without manual static route configuration.
-
-**BGP (Border Gateway Protocol)** is the routing protocol of the internet and appears in enterprise environments in two specific contexts. The first is multi-homing: when your network connects to more than one ISP, BGP lets you announce your IP block to both and control routing preferences. The second is cloud connectivity: AWS Direct Connect and Azure ExpressRoute both use BGP to exchange routes between your on-premises network and your cloud VPC. BGP also appears inside Kubernetes clusters when a CNI plugin advertises pod CIDRs to the physical network, making pod IP addresses routable from outside the cluster without an overlay encapsulation step. BGP is a path-vector protocol designed for routing between autonomous systems, and its configuration is significantly more complex than OSPF; in most on-premises environments, you encounter BGP at the edge rather than inside the campus network.
-
-### Link aggregation
-
-**Link Aggregation (LAG)**, defined by the 802.3ad standard and also called LACP (Link Aggregation Control Protocol), bonds multiple physical network interfaces into a single logical interface. Two 10 Gbps links bonded together present as one 20 Gbps interface to the operating system. Beyond throughput, LAG provides redundancy: if one physical link fails, traffic shifts to the remaining links without interruption. On Linux, bonded interfaces are managed via `systemd-networkd` or NetworkManager. You will encounter LAG on server NICs connecting to switches, and on the uplinks between access and distribution switches where aggregate bandwidth matters most.
-
-### Underlay and overlay
-
-The physical network infrastructure you operate, the switches, routers, and WAN links, is the **underlay**: the ordinary IP network that actually moves packets. Systems such as SD-WAN and most container network plugins build an **overlay** on top, encapsulating traffic so a logical network can span many physical segments.
-
-Kubernetes east-west traffic illustrates this clearly. Depending on the CNI plugin, pod traffic may ride a VXLAN overlay, where pod packets are wrapped inside UDP packets and decoded at the destination node, or it may use BGP to advertise pod CIDRs directly into the underlay without encapsulation. When cluster networking breaks, a good operator asks first whether the overlay is broken or whether the underlay never had a valid path. A VXLAN overlay cannot function if nodes cannot reach each other on the UDP port VXLAN uses; a BGP-based CNI cannot function if the physical network refuses to propagate pod CIDRs. Understanding the physical network topology matters even when you are debugging a Kubernetes networking problem.
-
-## Server CPU Platforms
-
-Consumer CPUs (Ryzen, Core i-series) are optimized for single-socket operation, low idle power, and burst performance. Server CPUs are a different product line designed for continuous multi-threaded load, multi-socket configurations, very large memory capacities, and long product lifecycles. The two dominant server CPU families are **AMD EPYC** (SP5 socket) and **Intel Xeon** (LGA4677 socket). Both support ECC RDIMMs and LRDIMMs, many more memory channels than consumer platforms (up to 12 channels on high-end EPYC), and PCIe lane counts that consumer chipsets cannot match.
-
-<div class="**:mx-auto">
-  ![](./hardware-components/chipset.jpg)
-</div>
-<p class="text-center italic text-sm m-0 p-0">Modern <a href="https://en.wikipedia.org/wiki/Intel_X99" target="_blank" rel="noopener noreferrer">Intel X99</a> from Wikipedia</p>
-
-Multi-socket servers introduce **Non-Uniform Memory Access (NUMA)**. In a two-socket system, each CPU has local memory banks it can access at full speed, and remote memory banks on the other socket that it must reach over an inter-socket interconnect (AMD Infinity Fabric or Intel UPI). The latency difference between local and remote memory is typically 2-3x. Applications that are not NUMA-aware may run significantly slower if the OS schedules threads across sockets or allocates memory on the remote node. Linux tools `numactl` and `numastat` expose NUMA topology and allow you to pin processes and memory allocation to a specific node.
-
-<Aside type="tip" title="Reading a Server Spec Sheet">
-An AMD EPYC 9354P spec sheet lists 32 cores, 128 PCIe 5.0 lanes, and 12 memory channels supporting up to 3 TB of DDR5 ECC RDIMM. The "P" suffix means single-socket. A dual-socket board using two 9354 (no P) CPUs doubles core count, memory bandwidth, and PCIe lanes, but the OS now sees two NUMA nodes. Any workload that allocates large buffers should be tested with `numactl --interleave=all` to confirm whether cross-socket memory access is causing latency.
-</Aside>
-
-## Beyond x86: Custom Silicon and the New Server Landscape
-
-For most of computing history, "server CPU" meant Intel Xeon or (later) AMD EPYC. That assumption no longer holds. Hyperscalers and major vendors now design and manufacture their own chips, driven by workload specialization, cost control, and the strategic value of silicon independence. As a sysadmin, you will operate hardware built on many of these platforms.
-
-### ARM-based server CPUs
-
-The original dominance of x86 in the server market came from software compatibility and manufacturing scale, not architectural superiority. ARM's 64-bit server ISA (AArch64) delivers competitive performance per watt and has attracted both hyperscaler investment and independent CPU vendors.
-
-**Amazon Graviton** is AWS's in-house ARM server CPU, now in its fourth generation. Graviton4 (2024) uses 96 Neoverse V2 cores, supports up to 3 TB of DDR5 ECC memory, and is available across a wide range of EC2 instance types. AWS consistently reports 40-60% better price-performance for Graviton vs. comparable x86 instances for workloads compiled or containerized for ARM. Because you build your containers once and target an architecture, porting to Graviton is often as simple as a recompile.
-
-**Ampere Altra / Altra Max** is a third-party ARM server CPU aimed at cloud-native workloads. Altra Max scales to 128 cores per socket, with high memory bandwidth and a focus on consistent, predictable performance. It powers some Oracle Cloud and Microsoft Azure instances.
-
-**Microsoft Cobalt 100** is Microsoft's ARM Neoverse N2-based processor for Azure virtual machine infrastructure, purpose-built for cloud-native Linux workloads.
-
-**Google Axion** is Google's ARM Neoverse V2-based CPU for GCP compute instances, analogous to Amazon Graviton.
-
-### Custom AI accelerators and hybrid packages
-
-**NVIDIA** is no longer just a GPU company. The **Grace CPU** (an ARM Neoverse V2 design) can be combined with an H100 or H200 GPU on a single module called the **Grace Hopper Superchip**. The CPU and GPU share a 900 GB/s NVLink-C2C interconnect rather than the 64-128 GB/s of a typical PCIe 5.0 link, and they use a common coherent memory space. This eliminates the copy overhead that limits traditional discrete CPU and GPU systems and is designed specifically for large-model AI inference and scientific computing. The **Blackwell** generation (GB200) extends this to clusters of NVLink-connected superchips.
-
-**Google TPU (Tensor Processing Unit)** chips are matrix multiply ASICs designed specifically for training and serving neural networks. TPU v4 pods contain 4,096 chips interconnected by a custom 3D torus network. TPUs are not general-purpose; they run a narrower programming model (XLA/JAX) optimized for Google's own frameworks.
-
-**Amazon Trainium and Inferentia** are AWS's own AI chips, competing with NVIDIA for ML training (Trainium2) and inference (Inferentia2) workloads, exposed as `trn1` and `inf2` EC2 instance families. They run models through the Neuron SDK, which compiles PyTorch and TensorFlow graphs for the custom architecture.
-
-**Microsoft Maia 100** is Microsoft's AI accelerator for Azure, targeting large-language model training and inference for Azure OpenAI Service. Like TPUs and Trainium, it is designed for specific workloads, not general compute.
-
-### What this means for sysadmins
-
-The practical takeaway is that the server CPU market is no longer a duopoly. When you provision cloud infrastructure, you should evaluate whether ARM instances (Graviton, Cobalt, Axion) or specialized accelerators offer better cost-performance for your specific workload. On-premises, AMD EPYC and Intel Xeon remain the defaults, but ARM-based options from Ampere are beginning to appear in managed products like edge servers and NAS appliances.
-
-<Aside type="note" title="Checking Architecture in Linux">
-`uname -m` reports `x86_64` on Intel/AMD and `aarch64` on ARM servers. Container images must match the host architecture unless emulation (QEMU) is used, which carries a significant performance penalty. Always build and push multi-arch images (`docker buildx`) for workloads that may run on both.
-</Aside>
-
-## Memory Architectures: ECC and Registered DIMMs
-
-Memory reliability and speed are crucial for both performance and data integrity at the server scale. Modern systems use several types of memory modules, each with trade-offs.
-
-**Error-Correcting Code (ECC)** memory adds extra bits to detect and correct single-bit errors, protecting against silent data corruption from cosmic rays or electrical noise. Without ECC, a single bit flip in a running virtual machine's memory can silently corrupt data in ways that are nearly impossible to diagnose after the fact.
-
-**Registered DIMMs (RDIMM/LRDIMM)** use a register chip to stabilize signals, allowing servers to support more memory modules at higher capacities. Unbuffered DIMMs (UDIMM) connect directly to the memory controller, offering lower latency but less scalability. Most platforms support either UDIMM or RDIMM, not both, and mixing them will prevent the system from starting.
-
-ECC and RDIMM are especially important in servers, virtualization hosts, and scientific computing, where data integrity and large memory footprints matter. Consumer desktops and laptops often prioritize lower latency and cost, using UDIMM and non-ECC memory.
-
-<Aside type="tip" title="Choosing Memory for a Homelab Server">
-If you are building a virtualization server for home or research use, ECC RDIMM lets you run many virtual machines with confidence that memory errors will not silently corrupt your data. Attempting to mix UDIMM and RDIMM, however, will prevent the system from booting.
-</Aside>
-
-## Enterprise Storage: Media, Interfaces, and Data Integrity
-
-The Hardware Fundamentals lecture covers the basics of HDD and SSD technology: spinning platters, NAND flash, wear leveling, TRIM, and SMART monitoring. At the server and data center scale, the focus shifts to interface selection, density, hot-swap support, and the data integrity mechanisms that protect against silent corruption.
-
-### SATA, SAS, and NVMe: choosing the right interface
-
-| Interface | Representative throughput | Duplex | Hot-Swap | Use Case |
-|---|---|---|---|---|
-| **SATA III** | ~600 MB/s | Half | Backplane-dependent | Budget servers, bulk storage |
-| **SAS-3 (12G)** | ~1,200 MB/s | Full | Yes (SAS expanders) | High-density enterprise storage |
-| **SAS-4 (24G)** | ~2,400 MB/s | Full | Yes | Tier-1 storage arrays |
-| **NVMe (PCIe 4.0 x4)** | ~7,000 MB/s | Full | Via U.2/U.3 backplane | Low-latency databases, AI |
-| **NVMe-oF** | Fabric-dependent | Full | N/A | Disaggregated storage over fabric |
-
-Full-duplex means SAS can read and write simultaneously on the same link, unlike SATA which is half-duplex. This matters in high-throughput server workloads where concurrent reads and writes are common. **SAS expanders** allow a single HBA to address up to 256 drives, making SAS the traditional choice for high-density storage enclosures.
-
-**NVMe over Fabrics (NVMe-oF)** extends the NVMe protocol across a network, making remote SSDs appear as locally attached block devices with near-local latency. NVMe-oF transports include RDMA (RoCE, iWARP, InfiniBand), Fibre Channel, and TCP. Storage disaggregation using NVMe-oF is increasingly common in hyperscale and cloud deployments where compute and storage nodes are separate.
-
-Hot-swapping, replacing a drive without powering down the system, is supported on SAS and enterprise SATA backplanes and is essential in production environments. Consumer SATA typically does not guarantee safe hot-swap.
-
-### Direct-attached, network-attached, and storage area networks
-
-The three storage attachment models differ in where the network boundary falls relative to the storage device.
-
-**Direct-Attached Storage (DAS)** is storage connected directly to a single host: internal drives, an external SAS enclosure, or a JBOD shelf. It provides the fastest access and no network overhead, but is accessible only to the attached host.
-
-**Network-Attached Storage (NAS)** is a device or cluster that presents a filesystem over a standard TCP/IP network. The two dominant NAS protocols are NFS and SMB. **NFS (Network File System)**, developed by Sun Microsystems, is the standard in Linux and UNIX environments; NFSv4 adds stronger security and operational improvements over older NFSv3, which lacks native encryption and is a poor choice on untrusted networks. **SMB (Server Message Block)** is the standard in mixed-OS environments; SMB 3.x adds encryption and stronger authentication and is now the default file-sharing protocol on macOS and Windows. Multiple clients can access the same NAS simultaneously, making it appropriate for file shares, home directories, and backups at small-to-medium scale.
-
-**Storage Area Networks (SANs)** use a dedicated high-speed fabric (Fibre Channel, iSCSI, or NVMe-oF) to present raw block-level storage to servers. A server with a SAN-attached LUN (Logical Unit Number) sees it as a locally attached block device and formats its own filesystem on top. SANs are used in enterprise environments for databases and virtual machine storage pools because they deliver high throughput, low latency, and failover capability that NAS cannot match at that scale.
-
-| | SAN | NAS |
-|-|-----|-----|
-| Storage type | Block | File |
-| Network | Fibre Channel / iSCSI | TCP/IP Ethernet |
-| Performance | High | Moderate |
-| Cost and complexity | High | Low |
-| Use case | Databases, VM datastores | File shares, backups, home directories |
-
-Network storage failures have distinctive signatures that differ from ordinary network connectivity failures. An NFS mount that succeeded during provisioning may go stale after a network partition: the server is reachable, the mount point exists, but read and write operations block indefinitely until the kernel times out. The NFS mount options `soft` and `hard` control this behavior: a `soft` mount returns an error after a timeout, while a `hard` mount retries forever, protecting data integrity but risking hung processes. SMB authentication failures typically manifest as "access denied" rather than a timeout, often because a Kerberos ticket has expired or the client's domain membership does not match the server's ACL. SAN failures are more abrupt: if a Fibre Channel HBA loses zoning or an iSCSI session drops, block devices disappear from the OS and filesystems on them go read-only to prevent corruption. The right diagnostic tools are `multipath -ll` for multipath state and `iscsiadm -m session` for iSCSI sessions, not `ping` or `dig`.
-
-### Data integrity: RAID, ZFS, and Btrfs
-
-Traditional **Redundant Array of Independent Disks (RAID)** combines multiple drives for redundancy or performance, but does not provide end-to-end data integrity; silent errors can go undetected, especially during rebuilds. Modern filesystems like **ZFS** and **Btrfs** use copy-on-write and checksumming to detect and correct errors, offer built-in redundancy, and support features like snapshots and scrubbing for ongoing health checks.
-
-RAID levels serve different goals:
-
-- **RAID 0** (striping): data is split across drives for speed, with no redundancy; any drive failure loses all data.
-- **RAID 1** (mirroring): identical data on two or more drives; full redundancy but capacity equals the smallest drive.
-- **RAID 5** (striping with parity): data and a single parity block are distributed across three or more drives; survives one drive failure.
-- **RAID 6**: like RAID 5 but with two parity blocks; survives two simultaneous drive failures.
-- **RAID 10** (1+0): mirrored pairs that are then striped; good performance and redundancy but requires at least four drives and wastes half capacity.
-
-Parity in RAID 5/6 is computed using XOR across the data blocks on each stripe. If drive B fails, its content can be reconstructed as XOR(block A, block C, parity). RAID with a single parity disk tolerates one failure; double parity (RAID 6) tolerates two.
-
-| | Software RAID | Hardware RAID |
-|---|---|---|
-| **Where it runs** | OS kernel (e.g., Linux `mdadm`) | Dedicated RAID controller card |
-| **CPU usage** | Uses host CPU for parity/rebuild | Offloaded to controller |
-| **Cost** | Free (included in OS) | More expensive |
-| **Flexibility** | Easy to move arrays between systems | Vendor lock-in; controller failure can trap data |
-| **Best for** | NAS, small/medium workloads | Performance- and reliability-critical environments |
-
-Software RAID is often the better choice for home labs and small deployments using ZFS or Btrfs, which provide their own RAID-like implementations (RAID-Z, mirrors) with the added benefit of checksumming. Hardware RAID is common in enterprise servers where consistent write performance and boot-from-array support matter.
-
-| **Feature** | **RAID (Traditional)** | **ZFS/Btrfs** |
-|---|---|---|
-| **Redundancy** | Yes (RAID 1/5/6/10) | Yes (mirrors, RAID-Z, etc.) |
-| **Checksumming** | No | Yes (detects/corrects errors) |
-| **Silent Data Corruption** | Possible | Detected and self-healed |
-| **Snapshots** | No | Yes |
-| **Online Expansion** | Limited | Yes (with caveats) |
-| **Backup Replacement** | No | No |
-
-<Aside type="tip" title="RAID vs. Backup">
-If a RAID 1 array loses a disk and, during the rebuild, a directory is accidentally deleted, the deletion is instantly mirrored to the surviving disk. Only an external backup can restore it. Redundancy is not backup.
-</Aside>
-
-Operational best practices include maintaining separate, versioned, offline or offsite backups. Schedule regular scrubs (ZFS/Btrfs) to catch errors early, label drive bays for easy replacement, and monitor SMART data for signs of impending failure.
-
-## Server Specialization by Workload
-
-"Server" is a generic term. In production environments, different classes of server hardware are optimized for different workloads. Understanding these categories helps you match hardware to requirements and interpret vendor product lines.
-
-### Compute servers and virtualization hosts
-
-Standard 1U and 2U rackmount servers with dual-socket CPUs, a large amount of RAM, and a small number of NVMe boot and scratch drives are the workhorses of most data centers. As **virtualization hosts** (hypervisor nodes running VMware ESXi, Proxmox, or KVM), they are maximized for RAM capacity (to host many VMs) and CPU core count (to share cores across VMs without contention). A typical dense virtualization node might have 2 × AMD EPYC 9354P (64 cores total), 768 GB of DDR5 ECC RDIMM, and 4 NVMe drives for VM images.
-
-**Blade servers** pack compute nodes (blades) into a shared chassis that provides common power, cooling, and networking backplane. Each blade is a thin compute module; the chassis aggregates network uplinks, reducing per-node cable count. The trade-off is vendor lock-in (blades from one vendor rarely fit another's chassis) and limited per-blade expansion.
-
-### Storage servers and JBOD/JBOF enclosures
-
-A **storage server** prioritizes drive count over CPU and RAM. A 4U storage server may hold 60-90 3.5" drives on a SAS/SATA expander backplane, with a modest dual-socket CPU and a pair of 10/25 GbE or Fibre Channel NICs. Storage servers run operating systems like TrueNAS (ZFS-based), Ceph, or Windows Server with Storage Spaces Direct.
-
-A **JBOD (Just a Bunch of Disks)** is a disk enclosure with no embedded compute: it presents drives directly to an attached server over SAS or NVMe, leaving RAID and filesystem logic entirely to the host. A **JBOF (Just a Bunch of Flash)** is the NVMe equivalent, housing dozens of NVMe SSDs in a disaggregated enclosure connected to servers over NVMe-oF. These form the storage backend of Ceph clusters, large-scale object stores, and distributed databases.
-
-### AI/GPU servers
-
-AI training and inference workloads require high-density GPU configurations and the interconnects to match. A purpose-built AI server such as the **NVIDIA DGX H100** hosts 8 × H100 SXM GPUs, connected to each other via **NVLink** (900 GB/s bidirectional per GPU pair) and to the host CPU over **PCIe 5.0**. The chassis provides 10 kW of power capacity and liquid cooling.
-
-**Inference servers** are configured differently from training servers: lower-tier GPUs (NVIDIA L4, L40S) or purpose-built accelerators (AWS Inferentia, Google TPU v5e) offer better cost per query for serving trained models, because inference workloads are latency-bound and benefit from higher parallelism across smaller accelerators rather than fewer high-memory training GPUs.
-
-<div class="**:mx-auto">
-  ![](./hardware-components/server-chipset.png)
-</div>
-<p class="text-center italic text-sm m-0 p-0">2U HPC/AI Server <a href="https://www.gigabyte.com/Enterprise/GPU-Server/G293-S41-AAP1" target="_blank" rel="noopener noreferrer">G293-S41-AAP1</a> from GIGABYTE</p>
-
-### Edge servers
-
-An **edge server** runs close to users or sensors: in a remote office, a retail location, a telecom central office, or an industrial site. The requirements diverge sharply from data center servers: small form factor (often Mini-ITX or short-depth 1U), wide operating temperature range, vibration tolerance, no moving storage parts, and often a fanless design. Edge servers typically run a subset of data center workloads: local inference, data aggregation before upload, or OT/IoT integration.
-
-## High-Speed Networking and Data Center Fabrics
-
-As compute density increases and storage disaggregates over the network, the network fabric itself becomes a critical hardware layer. The networking requirements of a data center are fundamentally different from a campus LAN.
-
-### Ethernet speed tiers
-
-Consumer and small office equipment operates at 1 GbE. Servers and storage have moved well beyond this:
-
-| Speed | Common Use |
-|---|---|
-| **10 GbE** | Basic server uplinks, storage replication, legacy data centers |
-| **25 GbE** | Standard modern server NIC (replaces 10 GbE in new deployments) |
-| **40 GbE** | Older aggregation and storage; largely replaced by 100 GbE |
-| **100 GbE** | Top-of-rack switch uplinks, storage servers, GPU cluster nodes |
-| **400 GbE** | Spine switches, hyperscale core, AI cluster interconnects |
-| **800 GbE / 1.6 TbE** | Emerging standards for next-generation AI clusters |
-
-A standard modern server ships with a dual-port 25 GbE NIC for primary data traffic, and a separate 1 GbE or 10 GbE port dedicated to the BMC (Baseboard Management Controller) out-of-band management network.
-
-### RDMA, RoCE, and InfiniBand
-
-Standard Ethernet networking requires the CPU to copy data between application memory and network buffers, consuming CPU cycles and adding latency. **Remote Direct Memory Access (RDMA)** allows a NIC to write data directly into the remote host's memory without involving the remote CPU, reducing latency to microseconds and CPU overhead to near zero.
-
-**InfiniBand (IB)** is the original RDMA fabric, still dominant in HPC clusters. HDR InfiniBand runs at 200 Gbps per port; NDR at 400 Gbps. InfiniBand requires dedicated switches and HCAs (Host Channel Adapters) but offers the lowest possible latency.
-
-**RoCE (RDMA over Converged Ethernet)** runs the same RDMA protocol (IB transport) over standard Ethernet hardware. RoCEv2 is now widely deployed in AI clusters; NVIDIA uses RoCE to interconnect NIC-attached GPU nodes in its SuperPOD reference design. RoCE requires PFC (Priority Flow Control) and ECN (Explicit Congestion Notification) for lossless behavior.
-
-**iWARP** is RDMA over TCP/IP. It has lower performance than RoCE but works on any Ethernet network without lossless configuration.
-
-### SmartNICs and DPUs
-
-A **SmartNIC** is a NIC with an embedded ARM CPU and programmable packet processing logic. A **DPU (Data Processing Unit)** extends this further into a complete system-on-chip capable of running a general-purpose OS alongside its network processing. NVIDIA BlueField-3 and Intel IPU (Infrastructure Processing Unit) are the main examples.
-
-DPUs offload infrastructure functions from the host CPU: overlay networking (VXLAN, GENEVE), storage encryption, firewall rules, hypervisor vSwitch, and telemetry. In cloud environments, placing the hypervisor network stack on a DPU frees the entire host CPU budget for tenant workloads. AWS Nitro Cards are a well-known production example of this architecture: they offload the network, storage, and security planes from the host to dedicated silicon, which is how AWS can offer bare-metal instances at the same price as virtualized ones.
-
-### Spine-leaf topology and oversubscription
-
-Traditional three-tier data center networks (core, distribution, access) are replaced by **spine-leaf** (also called fat-tree or Clos) topologies in modern data centers. Every leaf switch connects to every spine switch; no two leaf switches connect directly. This ensures any leaf-to-leaf path is always exactly two hops, providing predictable and uniform latency across the fabric.
+This design is the right answer for a campus: users connect at the access layer, traffic flows up to a central core, and a small number of expensive policy points see everything. It is the wrong answer for a modern data center. Data center workloads are dominated by east-west traffic between servers: replicas in a distributed database, Kubernetes pods on different nodes, gradient synchronization in a training cluster, NVMe-oF reads from a storage server. In a three-tier topology those flows climb to the core and back down, doubling hop count and creating oversubscription bottlenecks. Modern data centers therefore use **spine-leaf** (also called fat-tree or Clos) topologies instead. Every leaf switch connects to every spine switch, and no two leaf switches connect directly. Any server-to-server path is exactly two hops, latency is uniform regardless of source and destination, and bandwidth scales by adding spines rather than upgrading a central core.
 
 ```mermaid
 flowchart TD
@@ -390,25 +288,61 @@ flowchart TD
   S2 --- L3
 ```
 
-**Oversubscription ratio** is the ratio of total downlink bandwidth (to servers) to total uplink bandwidth (to spine). A 4:1 ratio means four servers sharing a single server's worth of uplink capacity. For most workloads this is acceptable; AI training clusters that do heavy gradient synchronization may require 1:1 (non-blocking) fabric to avoid communication bottlenecks during distributed training.
+The **oversubscription ratio** is the design knob: the ratio of total downlink bandwidth (toward servers) to total uplink bandwidth (toward spines). A 4:1 ratio means four servers share one server's worth of uplink capacity. For ordinary web and database workloads this is fine. For AI training clusters whose all-reduce step has to move terabytes of gradients per epoch, 4:1 turns a 64-GPU cluster into a 16-GPU cluster in practice, and the right answer is a non-blocking 1:1 fabric, which is why AI cluster networking is the most expensive line item in the rack after the GPUs themselves.
 
 <HistoricalNote title="From Three-Tier to Spine-Leaf">
-The traditional three-tier campus network model was designed for the traffic patterns of the 1990s and early 2000s, when most traffic flowed north-south: from user desktops to central servers and then out to the internet. The three-tier model optimized for that pattern, with a high-bandwidth core, aggregate distribution, and access switching at the edge.
-
-Modern data center workloads flipped that pattern. Virtualization, distributed databases, Hadoop clusters, and Kubernetes nodes generate significant east-west traffic: server-to-server communication within the data center. In a three-tier design, this traffic must travel up to the core and back down, doubling hop count and creating oversubscription points. The spine-leaf (fat-tree / Clos) topology derives from telephony switching research in the 1950s by Charles Clos. It provides uniform any-to-any connectivity with predictable two-hop latency regardless of source and destination, and became the standard for data center design in the late 2000s as east-west traffic began to dominate.
+The three-tier model was designed for the traffic patterns of the 1990s and early 2000s, when most traffic flowed north-south from user desktops to central servers and out to the internet. Virtualization, distributed databases, Hadoop, and later Kubernetes flipped that pattern: most data center traffic is now east-west, server-to-server within the same building. The spine-leaf topology was not new in 2010 when it began replacing three-tier in data centers. It descends from telephony switching research published by Charles Clos in 1952. The shape of the network finally caught up with the shape of the traffic.
 </HistoricalNote>
 
-<Aside type="tip" title="AI Cluster Network Design">
-A distributed training job running on 64 GPUs does an all-reduce (gradient synchronization) after each batch. If the network is oversubscribed 4:1, the all-reduce step stalls waiting for bandwidth, turning 64 GPUs into 16 effective GPUs from a throughput perspective. Non-blocking 100 GbE RoCE fabric eliminates this bottleneck. This is why AI cluster networking is often the most expensive line item after the GPUs themselves.
-</Aside>
+### VLAN Operations in Practice
 
-## Server and Data Center Design: Availability, Efficiency, and Scale
+VLANs were introduced in the Networking Fundamentals lecture as a way to segment a switch into multiple logical broadcast domains. At enterprise scale, the operational details that matter are how VLAN membership is implemented on physical ports and what happens when a port is configured wrong. Switch ports operate in one of two modes.
 
-As you move from single workstations to servers and data centers, priorities shift toward availability, manageability, density, and predictable power and cooling. Server hardware adds features specifically for this: ECC RDIMM and LRDIMM (Load-Reduced DIMM, which buffers the memory load further for very high capacities), multi-socket support, hot-swap backplanes, redundant power supplies and fans, and a Baseboard Management Controller (BMC) for out-of-band control such as remote power cycling and KVM access.
+**Access ports** connect to end devices: servers, workstations, printers, IP phones. The switch assigns all traffic on an access port to a single VLAN and strips the 802.1Q tag before delivering frames to the device. The device never sees the tag. **Trunk ports** connect switches to each other, or switches to routers. A trunk preserves the 802.1Q tag so the receiving switch knows which VLAN each frame belongs to, which is the only way to carry multiple VLANs across a single physical cable.
 
-A complete data center deployment involves more than just servers. The full hardware stack includes racks (typically 42U standard enclosures), structured cabling (copper and fiber runs with cable management arms), cooling and ventilation (CRAC units, hot/cold aisle containment, and liquid cooling for high-density GPU nodes), power infrastructure (branch circuits, PDUs, and Uninterruptible Power Supplies), a network fabric (top-of-rack switches, spine/leaf core, and a separate out-of-band management network), and the servers themselves.
+```mermaid
+flowchart LR
+  Server["Server\nuntagged VLAN 10"]
+  PC["Workstation\nuntagged VLAN 20"]
+  SW1["Switch A"]
+  SW2["Switch B"]
 
-Server form factors include rackmount (1U/2U/4U), blade (ultra-dense, shared power/network), and tower (quiet, serviceable for edge or small office). Modern data centers enforce hot/cold aisle airflow and plan power using an 80% derating rule for continuous load. On a 208 V 30 A circuit (approximately 6.2 kVA), using the 80% continuous guideline gives around 5 kW usable. If a 2U storage server draws 350 W and each compute node 400 W, you can fit about 11 nodes in theory, but should deploy 8-9 to allow for growth and power spikes.
+  Server -->|"access port\nVLAN 10, untagged"| SW1
+  SW1 -->|"trunk port\n802.1Q tagged\nVLAN 10+20+30"| SW2
+  SW2 -->|"access port\nVLAN 20, untagged"| PC
+```
+
+The most common VLAN failure mode is a patch cable moved to a port configured for a different VLAN. The server's IP address is correct, but it is now in a broadcast domain that cannot reach the gateway. The Networking Fundamentals lecture already named the symptom: `ip neighbor show` on the host reports the gateway entry as `FAILED`, because ARP resolution at layer 2 never completes. That is the diagnostic before anyone touches IP configuration. To route traffic between VLANs at all, you need a layer-3 device (a router or a layer-3 switch) with an interface or sub-interface in each VLAN. Without inter-VLAN routing, two hosts on different VLANs cannot communicate regardless of how their IP addresses are configured.
+
+### Access-Layer Hardening
+
+A managed switch with default configuration trusts everything plugged into it. In an enterprise environment where the access ports run to rooms, conference tables, and wall jacks, that trust is unsafe. Three features together harden the access layer.
+
+**DHCP snooping** turns the switch into a witness for DHCP exchanges. It learns which IP address was leased to which MAC address on which port and stores that mapping in a binding table. **Dynamic ARP Inspection (DAI)** then uses that binding table to validate every ARP reply on the network. A reply claiming that `10.0.1.1` belongs to a MAC address not in the binding table is dropped, which neutralizes ARP spoofing attacks where a malicious host on the segment tries to impersonate the default gateway. Servers with static addresses must have manual bindings added to the DAI table or their ARP traffic will also be dropped; this is one of the more common DAI rollout footguns. **Port security** limits how many MAC addresses a single port will learn, which prevents a rogue switch or hub from extending an access port into a multi-device fan-out. **802.1X authentication** is the strongest layer: the port stays disabled until the connecting device authenticates through a RADIUS server, and the RADIUS response can place the device into a specific VLAN. Together, these four features are the baseline configuration on enterprise access switches anywhere unauthorized devices could plug in.
+
+### DHCP Relay
+
+DHCP starts as a broadcast, so by default a client only reaches a DHCP server on the same broadcast domain. In a network with dozens of VLANs that is not how DHCP runs: a single DHCP server cluster usually serves the whole campus, and routers or layer-3 switches act as **DHCP relay agents**, forwarding the broadcast as a unicast packet to the configured DHCP server and routing the response back. The Networking Fundamentals lecture already covered DORA, lease times, and the case for DHCP reservations on servers and infrastructure; relay is the operational piece that lets one server provide leases across many segments.
+
+### OSPF Inside, BGP at the Edge
+
+Static routes work for small, stable networks. Once a network grows to multiple sites, multiple routers, or paths that may change, you need a routing protocol that exchanges reachability information automatically. The Networking Fundamentals lecture promised that OSPF and BGP would be covered "later"; this is later.
+
+**OSPF (Open Shortest Path First)** is the interior routing protocol you are most likely to encounter on premises. It is a link-state protocol: each router builds a complete map of the topology, calculates shortest paths, and sends incremental updates when something changes. OSPF converges quickly after a failure and scales through its area concept, which keeps routing tables compact as the network grows. It runs on essentially every enterprise router and layer-3 switch and is what lets distribution switches in a three-tier or leaf switches in a spine-leaf learn routes from each other without manual configuration.
+
+**BGP (Border Gateway Protocol)** is the routing protocol of the public internet and shows up in enterprises in three specific places. The first is multi-homing: when your organization peers with more than one ISP, BGP announces your IP block to both and lets you control routing preferences. The second is cloud connectivity: AWS Direct Connect and Azure ExpressRoute (both covered in the Network Services lecture) use BGP to exchange routes between your network and the cloud VPC. The third is inside Kubernetes clusters where a CNI plugin advertises pod CIDRs to the physical network through BGP rather than using an overlay encapsulation. BGP is more complex to configure than OSPF; in most on-prem environments you meet it at the edge rather than inside the campus. **Link Aggregation (LAG)**, the 802.3ad protocol that bonds multiple physical interfaces into one logical link, was already named in the Networking Fundamentals lecture; it remains the way you scale uplinks and add redundancy between switches and between servers and their top-of-rack switch.
+
+The underlay-versus-overlay question (Kubernetes pod traffic riding a VXLAN encapsulation on top of the physical network, versus a BGP-speaking CNI announcing pod CIDRs into the underlay directly) was already covered in the Network Services and Application Delivery lecture. The reason it belongs in both lectures is that the same question shows up from two angles: as a Kubernetes networking decision, and as a physical-network capability. If you do not control the physical network, BGP-based CNIs are not available to you. If you do, they can avoid the encapsulation overhead of VXLAN at the cost of pushing pod CIDRs into your routing tables.
+
+## The Data Center as a Designed System
+
+A server in a rack is just a server. A rack full of servers, with structured cabling to a top-of-rack switch, hot/cold aisle airflow management, A/B power feeds, and a high-speed fabric tying it to the rest of the building, is infrastructure. The data center is not an accumulation of hardware; it is a deliberately designed system, and the design choices determine what kind of failures the building can survive.
+
+### Racks, Cabling, and Airflow
+
+Standard data center racks are 42U or 48U tall, 19 inches wide internally, and either 600 or 800 mm deep. Each rack holds rackmount servers (most commonly 1U or 2U), one or two top-of-rack switches, a pair of vertical PDUs along the rear posts, and a tangle of structured cabling that should not be a tangle in a well-run facility. Structured cabling means cables are routed along defined paths in overhead trays or under raised floors, terminated in patch panels rather than directly into devices, labeled at both ends, and documented so a cable can be traced from one rack to another without unplugging anything to find out. Copper twisted-pair runs handle access links at 10 GbE or below; fiber handles spine uplinks and inter-rack runs because copper at 25 GbE and above is limited to short distances.
+
+Airflow management is what keeps the building's cooling investment from being wasted. Servers draw cool air through the front and exhaust hot air out the back. In a well-designed facility, racks are arranged in alternating **hot aisles** and **cold aisles**, with all server fronts facing into the cold aisle. **Aisle containment** uses physical barriers (ceilings, end-of-row doors, plastic curtains) to prevent the hot exhaust from one row from being inhaled as intake by the next, which keeps the temperature delta between the two aisles high and the cooling efficient. Blanking panels in empty rack units prevent hot air from recirculating through unused slots back into the cold aisle. None of this is glamorous; all of it is what determines the **PUE (Power Usage Effectiveness)** of the building, the ratio of total facility energy to IT-load energy, which is the dominant operating cost in any non-trivial data center.
 
 <div class="**:mx-auto **:h-64 **:w-auto **:object-contain">
   ![](./hardware-components/server-top.png)
@@ -421,28 +355,111 @@ Server form factors include rackmount (1U/2U/4U), blade (ultra-dense, shared pow
 </div>
 <p class="text-center italic text-sm m-0 p-0">2U HPC/AI Server <a href="https://www.gigabyte.com/Enterprise/GPU-Server/G293-S41-AAP1" target="_blank" rel="noopener noreferrer">G293-S41-AAP1</a> from GIGABYTE</p>
 
-Key availability concepts include N+1 redundancy (extra power or fan units so the failure of one does not interrupt service), hot-swap components to minimize downtime, and NUMA pinning to maintain memory locality in dual-socket nodes. Always verify component compatibility, size power for growth, and document rack layouts for future expansion.
+### Power: From Utility to Server
+
+Power in a data center is delivered in multiple layers. Utility power enters the building through a transformer and switchgear, passes through **Uninterruptible Power Supplies (UPSes)** that bridge short outages from a battery bank, and is backed by diesel or natural-gas **generators** that take over for longer events once they spin up (typically within 10 to 60 seconds, covered by the UPS battery in the meantime). An **Automatic Transfer Switch (ATS)** sits between the utility feed, the UPS, and the generator and decides which source feeds the building at any moment.
+
+Inside the building, power is distributed to racks through **PDUs (Power Distribution Units)**. A rack-level PDU is a vertical strip with monitored outlets that meters per-port current and reports it over the management network. Production racks almost always have **two PDUs**, one on each side, fed by independent branch circuits (often labeled the **A feed** and **B feed**), so a single circuit breaker trip or PDU failure does not take down the rack. Servers with dual power supplies plug one cord into each, and the supplies share load when both are healthy and carry the full load alone when one feed disappears. Sizing follows the **80 percent derating rule** for continuous load: on a 208 V 30 A circuit (about 6.2 kVA), you should plan for around 5 kW of usable continuous load and leave the remaining headroom for spikes and growth.
+
+```mermaid
+flowchart LR
+  Utility["Utility\ngrid"]
+  Gen["Diesel /\ngas generator"]
+  ATS["ATS\nautomatic\ntransfer switch"]
+  UPS["UPS\nbattery"]
+  PDU_A["Rack PDU A\n(A feed)"]
+  PDU_B["Rack PDU B\n(B feed)"]
+  PSU1["Server PSU 1"]
+  PSU2["Server PSU 2"]
+  Server["Dual-PSU server"]
+
+  Utility --> ATS
+  Gen --> ATS
+  ATS --> UPS
+  UPS --> PDU_A
+  UPS --> PDU_B
+  PDU_A --> PSU1
+  PDU_B --> PSU2
+  PSU1 --> Server
+  PSU2 --> Server
+```
+
+The redundancy story reads off the diagram: utility loss flips the ATS to the generator (with the UPS bridging the gap while the generator spins up), and a failure of either PDU still leaves the server fed by the other one. A rack that runs on only one PDU, or a server with only one power supply, is a single point of failure regardless of how good the upstream design is.
+
+### Cooling: Matched to the Load
+
+Air cooling is the default and dominant technology for racks up to roughly 15 to 20 kW per rack. **CRAC (Computer Room Air Conditioner)** units use direct-expansion refrigerant loops and were the historical standard. **CRAH (Computer Room Air Handler)** units use chilled water from a central plant and have replaced CRACs in most new builds because chilled-water plants are more efficient at scale and easier to combine with **free cooling** that uses outside air when the climate allows. **In-row cooling** places the heat exchangers between the racks rather than at the perimeter of the room, which shortens the air path and supports higher densities. **Rear-door heat exchangers** mount a water-cooled coil onto the back of each rack, removing heat right where the servers exhaust it.
+
+Above 20 to 30 kW per rack, air cooling stops being practical and **liquid cooling** takes over. **Direct-to-chip** cooling routes a water or dielectric loop through cold plates bolted to the CPU and GPU dies; the rest of the server stays air-cooled. **Immersion cooling** submerges entire servers in a dielectric fluid, either single-phase (the fluid is pumped through a heat exchanger) or two-phase (the fluid boils on contact with hot components and condenses on a cold plate above). Modern AI training racks routinely exceed 50 kW; the GB200 NVL72 rack that pairs Grace CPUs with Blackwell GPUs is a representative example in the well-over-100-kW class and is impossible to cool without liquid. The cooling decision shapes the building: a facility designed for 8 kW racks cannot host AI workloads without renovation.
+
+| Technology | Coolant | Heat Exchange Location | Rack Density Supported | Typical Use |
+|---|---|---|---|---|
+| **CRAC** | Refrigerant | Room perimeter | Up to ~10 kW | Legacy data centers |
+| **CRAH** | Chilled water | Room perimeter | Up to ~15 kW | Most new air-cooled builds, free-cooling friendly |
+| **In-row cooling** | Chilled water | Between racks in the row | Up to ~30 kW | High-density air-cooled rows |
+| **Rear-door heat exchanger** | Chilled water | Rear door of each rack | Up to ~40 kW | Per-rack densification without room redesign |
+| **Direct-to-chip liquid** | Water or dielectric | Cold plate on CPU/GPU dies | 40 to 100+ kW | Modern AI and HPC nodes |
+| **Single-phase immersion** | Dielectric fluid | External heat exchanger | 50 to 150+ kW | Crypto, HPC, dense GPU clusters |
+| **Two-phase immersion** | Boiling dielectric fluid | Condenser above the tank | 100+ kW | Bleeding-edge AI, research deployments |
 
 <div class="**:mx-auto">
   ![](./hardware-components/server-racks.png)
 </div>
 <p class="text-center italic text-sm m-0 p-0">Server Racks Organisation to Maximize Airflow</p>
 
+### Tier Classification
+
+The **Uptime Institute** publishes a four-tier classification that sets vocabulary for data center reliability.
+
+| Tier | Annual Availability | Redundancy | Concurrently Maintainable | Fault Tolerant | Typical Use |
+|---|---|---|---|---|---|
+| **Tier I** | ~99.671% (~29 hr downtime/yr) | None (N) | No | No | Small business server rooms |
+| **Tier II** | ~99.741% (~22 hr/yr) | Redundant components (N+1) on a single path | No | No | Small enterprise |
+| **Tier III** | ~99.982% (~1.6 hr/yr) | N+1 with multiple distribution paths (one active) | Yes | No | Enterprise, most colo deployments |
+| **Tier IV** | ~99.995% (~26 min/yr) | 2N active power and cooling | Yes | Yes | Banks, government, critical national infrastructure |
+
+Tier III is the practical baseline for serious enterprise and colocation deployments. Tier IV is rare and expensive; most hyperscaler data centers are not classified by Uptime at all because hyperscalers prefer to handle redundancy at the application layer across multiple Availability Zones rather than paying for fault tolerance within a single building.
+
+### High-Speed Fabric
+
+Consumer and small office equipment operates at 1 GbE. Servers and storage have moved well beyond that.
+
+| Speed | Common Use |
+|---|---|
+| **10 GbE** | Legacy server uplinks, storage replication, older deployments |
+| **25 GbE** | Standard modern server NIC in new builds |
+| **40 GbE** | Older aggregation; largely replaced by 100 GbE |
+| **100 GbE** | Top-of-rack uplinks, storage servers, GPU cluster nodes |
+| **400 GbE** | Spine switches, hyperscale core, AI cluster interconnects |
+| **800 GbE / 1.6 TbE** | Emerging standards for next-generation AI clusters |
+
+A modern compute server ships with a dual-port 25 GbE NIC for data traffic and a separate 1 GbE port for the BMC management VLAN. A storage or AI server scales up: dual-port 100 GbE is common, and the AI nodes go to 400 GbE per port with multiple ports per chassis.
+
+Standard Ethernet requires the host CPU to copy data between application memory and network buffers, which costs cycles and adds latency. **Remote Direct Memory Access (RDMA)** lets a NIC write data directly into the remote host's memory without involving the remote CPU, dropping latency to microseconds and CPU overhead to near zero. **InfiniBand** is the original RDMA fabric, still dominant in classical HPC and increasingly common in the largest AI clusters; HDR runs at 200 Gbps per port and NDR at 400 Gbps. **RoCE (RDMA over Converged Ethernet)** runs the same RDMA protocol over standard Ethernet hardware, which is how the same physical fabric can carry general traffic and lossless RDMA traffic. RoCEv2 appears frequently in NVIDIA SuperPOD reference designs and similar large AI deployments. RoCE requires careful network configuration (PFC for lossless behavior, ECN for congestion control); it is not a feature you toggle on at the last minute.
+
+A **SmartNIC** is a NIC with an embedded ARM CPU and programmable packet-processing logic. A **DPU (Data Processing Unit)** extends that into a complete system-on-chip that runs its own operating system alongside its network processing. NVIDIA BlueField and Intel IPU are the main commercial examples. DPUs offload infrastructure functions from the host CPU: overlay networking encapsulation, storage encryption, firewall rules, the hypervisor's virtual switch, and telemetry. **AWS Nitro Cards** are the well-known production instance of this architecture: they offload the network, storage, and security planes from the EC2 host to dedicated silicon, which is part of how AWS keeps virtualization overhead low and separates infrastructure control functions from customer workloads. From the rack's perspective, the DPU is the point where some of what used to be Kubernetes CNI plugin behavior or hypervisor vSwitch behavior has migrated from the host CPU into a piece of network hardware.
+
+<Aside type="tip" title="AI Cluster Network Design">
+A distributed training job on 64 GPUs runs an all-reduce after each batch to synchronize gradients. If the fabric is oversubscribed 4:1, the all-reduce stalls waiting for bandwidth and your 64 GPUs deliver the throughput of 16. A non-blocking 100 or 400 GbE RoCE fabric eliminates that bottleneck. This is why AI cluster networking is often the second-largest line item in the rack after the GPUs themselves.
+</Aside>
+
 ## Takeaways
 
-On-premises infrastructure means managing two converging layers: the network that connects servers and the hardware that runs workloads. They are not independent. The hierarchical network you design directly determines how servers communicate: the VLAN that isolates the storage network from user traffic, the trunk port that carries replication traffic between nodes, the DHCP reservation that gives a storage server a predictable address for NFS exports. And the hardware capabilities of the servers determine what the network must deliver: a storage server with an NVMe-oF backplane requires 100 GbE RDMA fabric; an AI training cluster with 64 GPUs requires a non-blocking spine-leaf topology, or the all-reduce step will serialize across an oversubscribed link.
+The physical layer is not a separate subject from the rest of this course. It is the substrate that every other layer rides on, and once you can see it, the abstractions higher up read differently. An EC2 instance type is a slice of a specific server, plugged into a specific top-of-rack switch, in a specific rack, in a specific Availability Zone. The reason `r5n.large` and `m5.large` have different network performance is that one has more share of the host's network bandwidth, which is itself a share of the rack's 100 GbE uplink, which is itself a share of the spine fabric. When a region outage hits the news, it is almost always a control-plane or networking failure at this layer: a BGP misconfiguration, a routing-table change, a DNS dependency that turned out to be co-located with the systems it was supposed to direct traffic to. The physics underneath the API is not exotic; it is the rack you read about in this lecture.
 
-Server hardware has grown significantly more varied than it was a decade ago. AMD EPYC and Intel Xeon remain the defaults for on-premises deployments, but ARM-based options from Amazon (Graviton), Google (Axion), and Microsoft (Cobalt) offer strong price-performance for cloud-native Linux workloads. Custom AI accelerators such as Google TPUs, Amazon Trainium/Inferentia, and NVIDIA Grace Hopper Superchips represent a category of hardware purpose-built for specific mathematical operations rather than general computation. ECC RDIMM memory, SAS and NVMe storage interfaces, RAID redundancy, and ZFS checksumming protect data integrity across these workloads at scales where silent corruption and drive failures are not edge cases but regular operational events.
+On-premises operations make those same constraints unavoidable rather than invisible. A disaggregated storage design built on NVMe-oF often needs very fast networking, commonly 100 GbE or better and sometimes RDMA, or the flash tier stops behaving like flash from the application's point of view. An AI training cluster with 64 GPUs requires a non-blocking spine-leaf fabric or its all-reduce step will serialize on an oversubscribed uplink. A VLAN that segregates BMC management traffic from production data is the difference between a hardening exercise and an unrecoverable compromise. A pair of independent PDU feeds and dual-supply servers is the difference between "one breaker tripped" and "the rack went dark." Tier III concurrent maintainability is the difference between scheduled maintenance and a planned outage.
 
-The data center as a whole, its rack layout, cooling strategy, power budgeting, and spine-leaf fabric, is a designed system rather than an accumulation of hardware. SmartNICs and DPUs are blurring the line between network hardware and compute, taking over functions like VXLAN overlay encapsulation and storage encryption that previously ran in software on the host CPU. That shift connects directly to the Container Orchestration lecture, where the CNI plugin's VXLAN overlay may now run on a BlueField DPU rather than the host kernel. The physical layer is not static; it evolves to absorb work that software previously handled. Understanding both layers positions you to reason about where a problem actually lives, to evaluate hardware tradeoffs in purchasing decisions, and to design infrastructure that is reliable without being overbuilt.
+The hardware itself has grown more varied, not less. EPYC and Xeon are still the defaults, but ARM in the cloud (Graviton, Cobalt, Axion) and Ampere on premises have become real options for cloud-native workloads, and the AI accelerators (Trainium, Inferentia, TPU, Grace Hopper) sit on top of all of this as a category of hardware purpose-built for one class of computation. The job has not gotten simpler. What has changed is that the operator who can read across layers (from the rack power budget to the spine uplink to the NUMA topology of the host to the Kubernetes scheduler) is the one who can decide whether a problem actually lives where the alert says it does. That cross-layer reading is what this lecture, and the rest of the course, is ultimately preparing you to do.
 
 ## Resources
 
 - <a href="https://www.youtube.com/watch?v=GR2GB6Qknlw" target="_blank" rel="noopener noreferrer">VLANs Explained (NetworkChuck, YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=lwArmpjGHpM" target="_blank" rel="noopener noreferrer">How To Design Your Own Enterprise Network: Cisco CCNA (YouTube)</a>
 - <a href="https://www.cloudflare.com/learning/network-layer/what-is-ospf/" target="_blank" rel="noopener noreferrer">What Is OSPF? (Cloudflare, Article)</a>
-- <a href="https://www.youtube.com/watch?v=TQCr9RV7twk" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #19: Memory and Storage (YouTube)</a>
-- <a href="https://www.youtube.com/watch?v=KN8YgJnShPM" target="_blank" rel="noopener noreferrer">Crash Course Computer Science #20: Files and File Systems (YouTube)</a>
+- <a href="https://uptimeinstitute.com/tiers" target="_blank" rel="noopener noreferrer">Tier Classification System (Uptime Institute)</a>
 - <a href="https://www.youtube.com/watch?v=wFCc3ts74pQ" target="_blank" rel="noopener noreferrer">A Day in the Life of the Data Centre: Racking Servers (YouTube)</a>
-- <a href="https://www.youtube.com/watch?v=Kn_P9nG0zsA" target="_blank" rel="noopener noreferrer">The history of servers, the cloud, and what's next – with Oxide Computer (The Pragmatic Engineer Podcast, YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=Kn_P9nG0zsA" target="_blank" rel="noopener noreferrer">The history of servers, the cloud, and what's next, with Oxide Computer (The Pragmatic Engineer Podcast, YouTube)</a>
+- <a href="https://aws.amazon.com/blogs/aws/the-floor-is-lava-a-look-inside-an-aws-data-center/" target="_blank" rel="noopener noreferrer">A Look Inside an AWS Data Center (AWS, Blog)</a>
 - <a href="https://www.redhat.com/sysadmin/troubleshooting-slow-servers" target="_blank" rel="noopener noreferrer">Troubleshooting slow servers: CPU, RAM, and Disk I/O (Red Hat Enable Sysadmin, Article)</a>
+- <a href="https://www.snia.org/education/storage_networking_primer" target="_blank" rel="noopener noreferrer">Storage Networking Primer (SNIA)</a>
+- <a href="https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-h100/latest/index.html" target="_blank" rel="noopener noreferrer">NVIDIA DGX SuperPOD Reference Architecture (NVIDIA, Documentation)</a>
