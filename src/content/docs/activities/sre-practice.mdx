@@ -1,6 +1,6 @@
 ---
 title: "Measure Error Budget"
-description: "Define a simple SLO, load-test a personalized Kubernetes service with k6, and compare how much error budget three controlled failures spend."
+description: "Define a simple SLO, probe and stress-test a personalized Kubernetes service with k6, and compare how much error budget four controlled experiments spend."
 sidebar:
   order: 16
 ---
@@ -13,19 +13,19 @@ type: activity
 slug: sre-practice
 order: 16
 paired_lecture: reliability-engineering
-practices: SLI/SLO and error-budget definition for a user-visible HTTP service; k6 steady-state measurement with thresholds; single-pod failure under load and bounded blast radius; full replica loss and user-visible budget burn; failed rollout with rollback and preserved availability; post-experiment steady-state verification
+practices: SLI/SLO and error-budget definition for a user-visible HTTP service; k6 steady-state and ramping stress measurement with thresholds; saturation-knee discovery; single-pod failure under load and bounded blast radius; full replica loss and user-visible budget burn; graceful degradation via NGINX fail-open fallback; failed rollout with rollback and preserved availability; post-experiment steady-state verification
 prereq_activities: minikube
-output: k6 summaries and kubectl output showing the student's ONID-named frontend and backend services stayed within or spent error budget during three controlled failures, then returned to steady state
+output: k6 summaries and kubectl output showing the student's ONID-named frontend and backend services stayed within or spent error budget during a stress ramp and four controlled experiments, then returned to steady state
 */}
 
-This activity puts into practice the concepts from the [Reliability Engineering](/lectures/reliability-engineering/) lecture. You will define a simple SLO for a personalized web service, probe it with k6, and then repeat the same one-minute test while you inject three controlled Kubernetes failures. By the end, you will have measured which failures actually spent error budget, which ones Kubernetes absorbed, and whether your service returned to steady state.
+This activity puts into practice the concepts from the [Reliability Engineering](/lectures/reliability-engineering/) lecture. You will define a simple SLO for a personalized web service, probe it with k6, ramp the load past the steady state to find where the service breaks, and then repeat a one-minute test across four controlled experiments including a graceful-degradation fallback at the edge. By the end, you will have measured the saturation knee of your service, seen which failures spent error budget, observed how a fail-open fallback changes the user-visible result, and verified that the system returned to steady state.
 
 ## What You Will Need
 
 - Your cluster from the [Minikube](/activities/minikube/) activity
 - `kubectl` already working against that cluster
 - `k6` installed before class using the [official k6 install guide](https://grafana.com/docs/k6/latest/set-up/install-k6/) and verified with `k6 version`
-- Three terminal windows or tabs: one for `kubectl port-forward`, one for `k6`, and one for Kubernetes commands
+- Four terminal windows or tabs: one for `kubectl port-forward`, one for `k6`, one for Kubernetes commands, and one for the short sampling loop in Experiment 3
 
 ---
 
@@ -92,6 +92,13 @@ Before you inject any failures, give yourself a small backend service and a tiny
              image: nginx:alpine
              ports:
                - containerPort: 80
+             resources:
+               requests:
+                 cpu: "20m"
+                 memory: "32Mi"
+               limits:
+                 cpu: "50m"
+                 memory: "64Mi"
              readinessProbe:
                httpGet:
                  path: /
@@ -187,7 +194,7 @@ Before you inject any failures, give yourself a small backend service and a tiny
    EOF
    ```
 
-   The backend Service still load balances across the three web Pods. The edge Deployment is the stable front door you will port-forward into. Its one-second upstream timeouts turn a missing backend into quick bad requests instead of one-minute hangs.
+   The backend Service still load balances across the three web Pods. Each web Pod has a 50 millicore CPU limit so the cluster has a known capacity ceiling instead of "as fast as your laptop can go"; this will matter when you stress-test it shortly. The edge Deployment is the stable front door you will port-forward into. Its one-second upstream timeouts turn a missing backend into quick bad requests instead of one-minute hangs.
 
    The shape of our deployment is:
 
@@ -214,7 +221,7 @@ Before you inject any failures, give yourself a small backend service and a tiny
      end
    ```
 
-   This is somewhat realstic but a little fabricated because of minikube's port-forward limitations. Ideally, we could do with a proxy and not edge services to illustrate the same thing but it's more work to set up and not the point of the activity. The important part is that the local tunnel stays up (connected to the edge Pods) while the backend (web) Pods fail behind it.
+   This setup is slightly artificial because minikube port-forwarding gives you a local tunnel instead of a real external load balancer. The extra edge layer is here only to keep that tunnel up while the backend Pods fail behind it.
 
 4. Apply the manifest and wait for both deployments to become ready:
 
@@ -296,7 +303,7 @@ For this activity, use this SLI: a request is good only if it returns HTTP 200 a
      },
      thresholds: {
        // The run fails if fewer than 99.5% of requests are good.
-       sli_ok: ['rate>0.995'],
+       sli_ok: ['rate >= 0.995'],
        // These latency thresholds are a second check on user experience.
        http_req_duration: ['p(95)<300', 'p(99)<500'],
      },
@@ -343,6 +350,122 @@ In this activity, a failed `k6` threshold means the experiment spent more error 
 
 <ActivityQuestion>
 If `kubectl get pods` showed three Running Pods but `sli_ok` failed, which signal would you trust as the steady-state definition, and why? What does that tell you about the difference between internal object health and user-visible health?
+</ActivityQuestion>
+
+---
+
+## Find the Saturation Knee
+
+The baseline tells you the service is healthy at 10 requests per second. It does not tell you how much headroom exists before it stops being healthy. A stress test answers that second question by stepping the load past the steady state at five discrete rates and asking, at each rate, whether the SLI still holds.
+
+<Steps>
+
+1. Write a second k6 script that runs five back-to-back scenarios at increasing rates, with per-stage thresholds:
+
+   ```bash
+   cat <<'EOF' > ~/cs312-reliability/stress.js
+   import http from 'k6/http';
+   import { Rate } from 'k6/metrics';
+
+   const sliOk = new Rate('sli_ok');
+   const targetUrl = __ENV.TARGET_URL;
+
+   if (!targetUrl) {
+     throw new Error('Set TARGET_URL before running k6.');
+   }
+
+   export const options = {
+     scenarios: {
+       rate_50: {
+         executor: 'constant-arrival-rate',
+         rate: 50, timeUnit: '1s', duration: '20s',
+         preAllocatedVUs: 50, maxVUs: 200,
+         startTime: '0s',
+       },
+       rate_200: {
+         executor: 'constant-arrival-rate',
+         rate: 200, timeUnit: '1s', duration: '20s',
+         preAllocatedVUs: 100, maxVUs: 500,
+         startTime: '25s',
+       },
+       rate_500: {
+         executor: 'constant-arrival-rate',
+         rate: 500, timeUnit: '1s', duration: '20s',
+         preAllocatedVUs: 200, maxVUs: 1000,
+         startTime: '50s',
+       },
+       rate_750: {
+         executor: 'constant-arrival-rate',
+         rate: 750, timeUnit: '1s', duration: '20s',
+         preAllocatedVUs: 300, maxVUs: 1500,
+         startTime: '75s',
+       },
+       rate_1000: {
+         executor: 'constant-arrival-rate',
+         rate: 1000, timeUnit: '1s', duration: '20s',
+         preAllocatedVUs: 500, maxVUs: 2000,
+         startTime: '100s',
+       },
+     },
+     thresholds: {
+       'sli_ok{scenario:rate_50}':              ['rate >= 0.995'],
+       'sli_ok{scenario:rate_200}':             ['rate >= 0.995'],
+       'sli_ok{scenario:rate_500}':             ['rate >= 0.995'],
+       'sli_ok{scenario:rate_750}':             ['rate >= 0.995'],
+       'sli_ok{scenario:rate_1000}':            ['rate >= 0.995'],
+       'http_req_duration{scenario:rate_50}':   ['p(95)<300'],
+       'http_req_duration{scenario:rate_200}':  ['p(95)<300'],
+       'http_req_duration{scenario:rate_500}':  ['p(95)<300'],
+       'http_req_duration{scenario:rate_750}':  ['p(95)<300'],
+       'http_req_duration{scenario:rate_1000}': ['p(95)<300'],
+     },
+   };
+
+   export default function () {
+     const res = http.get(targetUrl);
+     const good = res.status === 200 && res.timings.duration < 300;
+     sliOk.add(good);
+   }
+   EOF
+   ```
+
+   Each scenario is a `constant-arrival-rate` test that holds one target rate for 20 seconds. The `startTime` values stagger them so they run back to back with a 5-second gap between stages. k6 automatically tags every metric sample with the `scenario` name it came from, which is what the threshold expressions `sli_ok{scenario:rate_500}` and `http_req_duration{scenario:rate_500}` filter on. The result is one pass-or-fail line per stage in the end-of-run summary.
+
+2. Run the stress test:
+
+   ```bash
+   k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/stress.js
+   ```
+
+   This takes about 2 minutes 20 seconds. k6 shows a per-scenario progress bar in the terminal but does not print pass/fail counts during the run; the per-stage verdict lands in the summary at the end.
+
+3. Read the summary's threshold block. You will see ten lines, two per stage, each marked with a green check or red cross:
+
+   ```text
+   ✓ sli_ok{scenario:rate_50}
+   ✓ http_req_duration{scenario:rate_50}........: p(95)=...
+   ✗ sli_ok{scenario:rate_200}
+   ✓ http_req_duration{scenario:rate_200}.......: p(95)=...
+   ✗ sli_ok{scenario:rate_500}
+   ✓ http_req_duration{scenario:rate_500}.......: p(95)=...
+   ✗ sli_ok{scenario:rate_750}
+   ✗ http_req_duration{scenario:rate_750}.......: p(95)=...
+   ✗ sli_ok{scenario:rate_1000}
+   ✗ http_req_duration{scenario:rate_1000}......: p(95)=...
+   ```
+
+   The exact stage where the first red mark appears depends on your laptop, but with these limits it should fall somewhere between 200 and 1000 requests per second. Your run may not match this example exactly, and the two thresholds do not have to flip at the same stage.
+
+4. Notice which threshold trips first at the knee, or whether they flip together. The two checks are measuring different failure shapes. `sli_ok` allows only 0.5 percent bad requests, while the p95 latency check still passes until more than 5 percent of requests cross 300 ms. That means `sli_ok` can fail first if you have a small pocket of slow or non-200 responses, while the latency threshold can fail first if slowdown spreads across a larger share of requests.
+
+</Steps>
+
+<Aside type="note" title="Stress test, not load test">
+A load test asks "does the service meet its SLO at a target rate?" A stress test asks "at what rate does the service stop meeting its SLO?" Both are useful, but they answer different questions. A failed threshold on a stress test is the measurement, not a failure of the run.
+</Aside>
+
+<ActivityQuestion>
+Which kind of test did you just run, and what specific question does it answer that the baseline could not? At your saturation knee, which threshold tripped first, or did they flip together? What does that tell you about whether the service failed as a small number of bad requests or as a broader slowdown? What would change about the knee if you doubled the CPU limit, or doubled the replica count?
 </ActivityQuestion>
 
 ---
@@ -406,27 +529,21 @@ Write your hypothesis before running: once the deployment reaches zero ready rep
    k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
-2. In the Kubernetes terminal, scale the deployment to zero and wait for all serving Pods to disappear:
+2. In the Kubernetes terminal, run the same four-command outage and recovery sequence you will reuse in the next experiment:
 
    ```bash
    kubectl scale deployment/${ONID}-web --replicas=0 -n reliability-lab
    kubectl wait --for=delete pod -l app=${ONID}-web -n reliability-lab --timeout=60s
-   kubectl get pods -n reliability-lab -l app=${ONID}-web
-   ```
-
-   The last command should report `No resources found`. At this moment the Service object still exists, but it has no healthy serving Pods behind it.
-
-3. Restore the deployment to three replicas:
-
-   ```bash
    kubectl scale deployment/${ONID}-web --replicas=3 -n reliability-lab
    kubectl wait --for=jsonpath='{.status.readyReplicas}'=3 deployment/${ONID}-web -n reliability-lab --timeout=60s
    ```
 
-4. When k6 finishes, inspect the summary carefully:
+   The second line returns only after the old serving Pods are gone. The third line starts recovery immediately, so this experiment and the next one use the same no-backend window.
+
+3. When k6 finishes, inspect the summary carefully:
 
    - `sli_ok` should drop well below the baseline
-   - the threshold for `sli_ok rate>0.995` should fail
+   - the threshold for `sli_ok rate >= 0.995` should fail
    - the bad fraction is the part of the budget you spent during this one-minute window
 
 </Steps>
@@ -437,7 +554,112 @@ During this experiment the Service object never disappeared, only the healthy en
 
 ---
 
-## Experiment 3: Failed Rollout, Safe Rollback
+## Experiment 3: Graceful Degradation at the Edge
+
+The zero-replicas experiment showed the worst case: when the backend disappears, the user sees nothing. That is a binary failure mode. A reduced response is the alternative: when the backend is gone, serve something limited but still useful. In this experiment you reconfigure the edge to fail open with a static fallback, then rerun the same scale-to-zero failure to compare.
+
+Write your hypothesis before running: if the edge serves a fallback page when the backend is unreachable, how much of the user-visible SLO survives a zero-backend window?
+
+<Steps>
+
+1. Write a new edge ConfigMap that intercepts upstream errors and serves a personalized fallback page:
+
+   ```bash
+   cat <<EOF > ~/cs312-reliability/edge-degraded.yaml
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: ${ONID}-edge-config
+   data:
+     nginx.conf: |
+       events {}
+       http {
+         server {
+           listen 80;
+           location / {
+             proxy_connect_timeout 1s;
+             proxy_read_timeout 1s;
+             proxy_send_timeout 1s;
+             proxy_next_upstream off;
+             proxy_intercept_errors on;
+             proxy_pass http://${ONID}-web;
+             proxy_set_header Host \$host;
+             proxy_set_header X-Real-IP \$remote_addr;
+             error_page 502 503 504 = @fallback;
+           }
+           location @fallback {
+             default_type text/html;
+             return 200 '<!doctype html><html><body><h1>${ONID} reliability lab</h1><p>Reduced mode: serving cached content while the backend recovers.</p></body></html>';
+           }
+         }
+       }
+   EOF
+   kubectl apply -n reliability-lab -f ~/cs312-reliability/edge-degraded.yaml
+   ```
+
+   `proxy_intercept_errors on` tells NGINX to catch any upstream 5xx response instead of passing it straight through. `error_page 502 503 504 = @fallback` redirects those failures to a named location. `location @fallback` returns a hand-written 200 with the personalized fallback page. The `@` prefix makes the location internal: clients cannot request it directly.
+
+2. Restart the edge Deployment so the new ConfigMap is picked up:
+
+   ```bash
+   kubectl rollout restart deployment/${ONID}-edge -n reliability-lab
+   kubectl rollout status deployment/${ONID}-edge -n reliability-lab
+   ```
+
+   `kubectl rollout restart` recreates the edge Pods. This is necessary because ConfigMaps mounted with `subPath` are not refreshed automatically in running Pods.
+
+3. With the backend still healthy, verify nothing visible changed in steady state:
+
+   ```bash
+   curl "$TARGET_URL"
+   ```
+
+   You should still see the original page with your ONID. The fallback only fires when the backend cannot answer, so a healthy request still goes through the proxy_pass path.
+
+4. Start the same one-minute k6 run as before:
+
+   ```bash
+   k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
+   ```
+
+5. In a third terminal, start a short sampling loop before you cut the backend:
+
+   ```bash
+   for i in $(seq 1 20); do curl -s "$TARGET_URL" | grep -E 'h1|Reduced'; sleep 1; done
+   ```
+
+   This loop runs long enough to overlap the outage window and show the page change from steady state to fallback and back.
+
+6. In the Kubernetes terminal, repeat the exact same outage and recovery sequence from Experiment 2:
+
+   ```bash
+   kubectl scale deployment/${ONID}-web --replicas=0 -n reliability-lab
+   kubectl wait --for=delete pod -l app=${ONID}-web -n reliability-lab --timeout=60s
+   kubectl scale deployment/${ONID}-web --replicas=3 -n reliability-lab
+   kubectl wait --for=jsonpath='{.status.readyReplicas}'=3 deployment/${ONID}-web -n reliability-lab --timeout=60s
+   ```
+
+   While the backend has zero ready replicas, the sampling loop should show the `Reduced mode` line instead of the steady-state page. When the backend recovers, the original page returns.
+
+7. When k6 finishes, compare the summary to Experiment 2:
+
+   - Did `sli_ok` stay higher than the zero-replicas run from Experiment 2?
+   - Did the status-code share of requests stay close to 100 percent, even though no backend Pods existed for part of the window?
+   - Did latency still suffer briefly while the proxy decided that the upstream was unreachable?
+
+</Steps>
+
+<Aside type="tip" title="If the fallback never fires">
+If the sampling loop only ever shows the steady-state page, start it before you run the four-command outage sequence. The fallback should appear after the old Pods are gone and disappear once the replacement Pods are ready. If the loop still never shows `Reduced mode`, recheck that `proxy_intercept_errors on` made it into the applied ConfigMap with `kubectl get configmap ${ONID}-edge-config -n reliability-lab -o yaml`.
+</Aside>
+
+<ActivityQuestion>
+An SLI should reflect actual user experience. After this experiment, the same failure (zero backend replicas) produced very different `sli_ok` numbers depending on what the edge did. Is a fallback page that says "Reduced mode" a good response in the SLI's sense, or should the SLI be expanded to detect that the user is seeing degraded content? What does this tell you about the difference between "the service returned 200" and "the user got what they came for"?
+</ActivityQuestion>
+
+---
+
+## Experiment 4: Failed Rollout, Safe Rollback
 
 A failed change is less dangerous than a failed service when the rollout mechanics keep old replicas serving traffic while you undo the mistake. This section tests whether a broken rollout can stay operationally unhealthy without becoming a user-visible outage.
 
@@ -523,6 +745,8 @@ The last step of a reliability exercise is confirming that the system is healthy
 
 ## Going Further
 
-You have measured error-budget spend at one fixed request rate. The next step is to ask where the service stops meeting the SLO, and to line up that moment with better observability.
+You measured a load test, a stress ramp, and four controlled experiments. The next steps are to vary the failure shape, the recovery mechanism, and the observability that sits underneath all of it.
 
-Edit `probe.js` so the load rises in stages instead of staying at 10 requests per second. Increase the rate every 30 seconds until `sli_ok` drops below 99.5%, and record the first rate where your budget starts burning. If you want a subtler controller-healing comparison, delete all three Pods with `kubectl delete pods -l app=${ONID}-web -n reliability-lab` without changing the replica count and compare that run to the scale-to-zero run. If you have already completed [Prometheus and Grafana](/activities/prometheus-and-grafana/), rerun one of those staged tests while watching the RED panels so you can compare `k6`'s end-of-run summary to the dashboard's p95 latency and error-rate curves. After that, if you want a more realistic failure than Pod deletion, install [LitmusChaos](https://litmuschaos.io/) or [Chaos Mesh](https://chaos-mesh.org/) in minikube and repeat the same `k6` harness during a network-latency experiment.
+The closest hands-on equivalent of what you just built is a spike test driven by autoscaling. Attach a [HorizontalPodAutoscaler](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/) to the backend (`kubectl autoscale deployment/${ONID}-web --min=2 --max=8 --cpu-percent=50 -n reliability-lab` is the one-line version), then write a third k6 scenario that jumps from 10 to 100 requests per second instantly. Watch `kubectl get hpa,pods -w` in another terminal while the run is in flight, and look for the gap between the moment the spike arrives and the moment new Pods are ready. That gap is the budget the autoscaler cannot save you from.
+
+For a subtler controller-healing comparison, delete all three Pods at once with `kubectl delete pods -l app=${ONID}-web -n reliability-lab` without changing the replica count, and compare that run to the scale-to-zero run from Experiment 2. If you have already completed [Prometheus and Grafana](/activities/prometheus-and-grafana/), rerun the stress ramp while watching the RED panels so you can compare `k6`'s end-of-run summary to the dashboard's p95 latency and error-rate curves. And if you want a more realistic failure than Pod deletion, install [LitmusChaos](https://litmuschaos.io/) or [Chaos Mesh](https://chaos-mesh.org/) in minikube and repeat the same `k6` harness during a network-latency experiment.
