@@ -50,7 +50,7 @@ Not if your main goal is horizontal scaling of one shared Minecraft world. A sin
 - Start from your Ops 3 baseline: reuse or adapt your Terraform/OpenTofu project, pinned ECR image source, S3 backup location, and IAM instance profile pattern.
 - Kubernetes must run on EC2; use k3s unless your instructor explicitly approves an alternative.
 - Infrastructure must be provisioned via Terraform/OpenTofu.
-- Use an IAM instance profile for S3 access; do not hardcode AWS credentials in manifests or environment variables.
+- Use an IAM instance profile for AWS access from the EC2 host, including S3 backup access and any ECR authentication path you configure. Do not hardcode AWS credentials in manifests, Kubernetes Secrets, or environment variables.
 - Minimize public exposure: restrict SSH access to a known source, and open only ports required for Minecraft.
 - Document cost controls: instance size, stop schedule, and at least one additional guardrail.
 - State handling must be explicit and defensible; for k3s single-node, simplicity is acceptable if well-justified.
@@ -107,7 +107,7 @@ Your PDF must be usable by another operator with no prior knowledge of your setu
 k3s is a lightweight Kubernetes distribution designed for single-node operation, but stateful workloads like Minecraft require careful configuration.
 
 - You can and should reuse your Ops 3 Terraform, IAM instance profile pattern, S3 backup location, and image pipeline. The new work here is replacing Docker Compose with Kubernetes resources, not inventing a second artifact chain.
-- k3s uses `containerd` as its container runtime. Your ECR images push and pull normally, but k3s must be configured to authenticate against ECR. One common approach: store your ECR credentials in a Kubernetes `imagePullSecret` and reference it in your Deployment spec.
+- k3s uses `containerd` as its container runtime. Your ECR images push and pull normally, but k3s still needs an authentication path for private ECR pulls. On EC2, prefer a node-level approach that uses the attached IAM instance profile to obtain short-lived ECR credentials at pull time. If you instead use a Kubernetes `imagePullSecret`, treat it as a fallback and document how the temporary ECR token is created and refreshed.
 - Minecraft does not expose a standard HTTP health endpoint. A TCP socket probe (`tcpSocket: { port: 25565 }`) is an acceptable baseline when your chosen server image exposes no stronger health signal, but document the limitation: an open port is weaker evidence than true application readiness.
 - Minecraft startup can be slow, especially when loading a world. A `startupProbe`, or conservative liveness/readiness timing, can prevent Kubernetes from killing the server during JVM warmup.
 - The default k3s storage class (`local-path`) provisions volumes on the node's local disk. This is sufficient for this assignment; document the tradeoff relative to a cloud-managed persistent volume.
