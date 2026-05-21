@@ -1,9 +1,8 @@
 ---
-title: "Measure Error Budget During Controlled Failures"
+title: "Measure Error Budget"
 description: "Define a simple SLO, load-test a personalized Kubernetes service with k6, and compare how much error budget three controlled failures spend."
 sidebar:
   order: 16
-draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
@@ -16,7 +15,7 @@ order: 16
 paired_lecture: reliability-engineering
 practices: SLI/SLO and error-budget definition for a user-visible HTTP service; k6 steady-state measurement with thresholds; single-pod failure under load and bounded blast radius; full replica loss and user-visible budget burn; failed rollout with rollback and preserved availability; post-experiment steady-state verification
 prereq_activities: minikube
-output: k6 summaries and kubectl output showing the student's ONID-named service stayed within or spent its error budget during three controlled failures, then returned to steady state
+output: k6 summaries and kubectl output showing the student's ONID-named frontend and backend services stayed within or spent error budget during three controlled failures, then returned to steady state
 */}
 
 This activity puts into practice the concepts from the [Reliability Engineering](/lectures/reliability-engineering/) lecture. You will define a simple SLO for a personalized web service, probe it with k6, and then repeat the same one-minute test while you inject three controlled Kubernetes failures. By the end, you will have measured which failures actually spent error budget, which ones Kubernetes absorbed, and whether your service returned to steady state.
@@ -32,17 +31,19 @@ This activity puts into practice the concepts from the [Reliability Engineering]
 
 ## Deploy the Test Service
 
-Before you inject any failures, give yourself a small service with a stable name, a readiness probe, and content that clearly belongs to you. This gives k6 a concrete target and gives you a known-good steady state to return to after each experiment.
+Before you inject any failures, give yourself a small backend service and a tiny front-end NGINX layer. You will port-forward into the front layer, so the local tunnel stays up while the backend Pods fail behind it.
 
 <Steps>
 
-1. In every terminal that will run `kubectl`, set your ONID in a shell variable:
+1. In every terminal that will run `kubectl` or `k6`, set your ONID, local forward port, and target URL:
 
    ```bash
    export ONID=your-onid
+   export FORWARD_PORT=8080 # or 8081, 8082, ... if 8080 is in use
+   export TARGET_URL=http://127.0.0.1:${FORWARD_PORT}/
    ```
 
-   Replace `your-onid` with your actual ONID, with no angle brackets. Any later command that uses `$ONID` assumes you ran this first in that terminal.
+   Replace `your-onid` with your actual ONID, with no angle brackets. Any later command that uses `$ONID`, `$FORWARD_PORT`, or `$TARGET_URL` assumes you ran this first in that terminal.
 
 2. Create a working directory for this activity and an idempotent namespace:
 
@@ -54,7 +55,7 @@ Before you inject any failures, give yourself a small service with a stable name
 
    This keeps the files together and makes it safe to rerun the setup commands.
 
-3. Write the manifest for a three-replica nginx deployment, a personalized home page, and a Service:
+3. Write the manifest for the backend service, the front-end edge layer, and the two Services:
 
    ```bash
    cat <<EOF > web.yaml
@@ -116,46 +117,147 @@ Before you inject any failures, give yourself a small service with a stable name
      ports:
        - port: 80
          targetPort: 80
+   ---
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: ${ONID}-edge-config
+   data:
+     nginx.conf: |
+       events {}
+       http {
+         server {
+           listen 80;
+           location / {
+             proxy_connect_timeout 1s;
+             proxy_read_timeout 1s;
+             proxy_send_timeout 1s;
+             proxy_next_upstream off;
+             proxy_pass http://${ONID}-web;
+             proxy_set_header Host \$host;
+             proxy_set_header X-Real-IP \$remote_addr;
+           }
+         }
+       }
+   ---
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: ${ONID}-edge
+   spec:
+     replicas: 2
+     selector:
+       matchLabels:
+         app: ${ONID}-edge
+     template:
+       metadata:
+         labels:
+           app: ${ONID}-edge
+       spec:
+         containers:
+           - name: edge
+             image: nginx:alpine
+             ports:
+               - containerPort: 80
+             readinessProbe:
+               httpGet:
+                 path: /
+                 port: 80
+               initialDelaySeconds: 2
+               periodSeconds: 2
+             volumeMounts:
+               - name: edge-config
+                 mountPath: /etc/nginx/nginx.conf
+                 subPath: nginx.conf
+         volumes:
+           - name: edge-config
+             configMap:
+               name: ${ONID}-edge-config
+   ---
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: ${ONID}-edge
+   spec:
+     selector:
+       app: ${ONID}-edge
+     ports:
+       - port: 80
+         targetPort: 80
    EOF
    ```
 
-   This manifest gives you three identical serving Pods behind one stable Service. The readiness probe makes later rollout behavior visible.
+   The backend Service still load balances across the three web Pods. The edge Deployment is the stable front door you will port-forward into. Its one-second upstream timeouts turn a missing backend into quick bad requests instead of one-minute hangs.
 
-4. Apply the manifest and wait for the deployment to become ready:
+   The shape of our deployment is:
+
+   ```mermaid
+   flowchart TB
+     Client["client"] --> EdgeService
+
+     subgraph Cluster[" "]
+       EdgeService["edge Service"]
+       Edge1["edge 1"]
+       Edge2["edge 2"]
+       WebService["web Service"]
+       Web1["web 1"]
+       Web2["web 2"]
+       Web3["web 3"]
+
+       EdgeService --> Edge1
+       EdgeService --> Edge2
+       Edge1 --> WebService
+       Edge2 --> WebService
+       WebService --> Web1
+       WebService --> Web2
+       WebService --> Web3
+     end
+   ```
+
+   This is somewhat realstic but a little fabricated because of minikube's port-forward limitations. Ideally, we could do with a proxy and not edge services to illustrate the same thing but it's more work to set up and not the point of the activity. The important part is that the local tunnel stays up (connected to the edge Pods) while the backend (web) Pods fail behind it.
+
+4. Apply the manifest and wait for both deployments to become ready:
 
    ```bash
    kubectl apply -n reliability-lab -f web.yaml
    kubectl rollout status deployment/${ONID}-web -n reliability-lab
+   kubectl rollout status deployment/${ONID}-edge -n reliability-lab
    ```
 
    You should see:
+
    ```text
    deployment "${ONID}-web" successfully rolled out
+   deployment "${ONID}-edge" successfully rolled out
    ```
 
-5. In a dedicated terminal, forward the Service to your laptop:
+5. In a dedicated terminal, forward the edge Service to your laptop:
 
    ```bash
-   kubectl port-forward service/${ONID}-web 8080:80 -n reliability-lab
+   kubectl port-forward service/${ONID}-edge ${FORWARD_PORT}:80 -n reliability-lab
    ```
 
-   Leave this command running. It makes the Service available at `http://127.0.0.1:8080/` for both `curl` and `k6`.
+   Leave this command running. The activity never changes the edge Deployment, so the local tunnel stays up while the backend deployment changes behind it.
 
-6. In another terminal, verify the user-visible steady state:
+6. In another terminal, point `curl` at the local URL and verify the steady state:
 
    ```bash
-   curl http://127.0.0.1:8080/
+   curl "$TARGET_URL"
    ```
 
    You should see an HTML page whose `<h1>` contains your ONID. At this point the service exists, the readiness probe is green, and the request path is working.
 
 </Steps>
 
+<Aside type="note" title="If the local port is already in use">
+If `kubectl port-forward` reports `bind: address already in use`, pick another local port such as `8081`, rerun the export lines from the first step in every terminal you are using for this activity, and then restart the port-forward command.
+</Aside>
+
 ---
 
 ## Define the SLO and Measure the Baseline
 
-Before you break anything, make the steady state measurable. In this section you will turn the lecture's SLI, SLO, and error-budget language into a one-minute k6 test with a concrete pass or fail result.
+Before you break anything, make the steady state measurable. In this section you will turn that request path into a one-minute k6 test with a concrete pass or fail result.
 
 For this activity, use this SLI: a request is good only if it returns HTTP 200 and finishes in under 300 ms. At 10 requests per second for 60 seconds, one run sends about 600 requests, so an SLO of 99.5% allows about 3 bad requests.
 
@@ -164,32 +266,44 @@ For this activity, use this SLI: a request is good only if it returns HTTP 200 a
 1. Write the k6 script:
 
    ```bash
-   cat <<'EOF' > probe.js
+   cat <<'EOF' > ~/cs312-reliability/probe.js
    import http from 'k6/http';
    import { check } from 'k6';
    import { Rate } from 'k6/metrics';
 
+   // Track the share of requests that satisfy the full SLI.
    const sliOk = new Rate('sli_ok');
-   const targetUrl = __ENV.TARGET_URL || 'http://127.0.0.1:8080/';
+
+   // Read the port-forward URL from the shell environment.
+   const targetUrl = __ENV.TARGET_URL;
+
+   if (!targetUrl) {
+     throw new Error('Set TARGET_URL before running k6.');
+   }
 
    export const options = {
      scenarios: {
        steady: {
+         // Keep the test at 10 requests per second for one minute.
          executor: 'constant-arrival-rate',
          rate: 10,
          timeUnit: '1s',
          duration: '60s',
+         // Start with 10 workers ready and grow to 20 if needed.
          preAllocatedVUs: 10,
          maxVUs: 20,
        },
      },
      thresholds: {
+       // The run fails if fewer than 99.5% of requests are good.
        sli_ok: ['rate>0.995'],
+       // These latency thresholds are a second check on user experience.
        http_req_duration: ['p(95)<300', 'p(99)<500'],
      },
    };
 
    export default function () {
+     // Each VU sends one request and records whether it met the SLI.
      const res = http.get(targetUrl);
      const good = res.status === 200 && res.timings.duration < 300;
 
@@ -202,12 +316,14 @@ For this activity, use this SLI: a request is good only if it returns HTTP 200 a
    EOF
    ```
 
-   `sli_ok` is the course version of a user-visible success rate. It only counts a request as good if both the status code and the latency requirement are satisfied.
+   This writes `probe.js` into `~/cs312-reliability` even if this terminal is somewhere else. `probe.js` expects a `TARGET_URL` environment variable when you run `k6`. `sli_ok` only counts a request as good if both the status code and the latency requirement are satisfied.
+
+   VUs are `k6` virtual users: lightweight workers that repeatedly run the `default` function in the script. In this test, `k6` keeps 10 requests per second flowing by starting with 10 ready VUs and using up to 20 if it needs more workers to hold that rate.
 
 2. Run the baseline measurement:
 
    ```bash
-   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js
+   k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
    This sends about 600 requests over one minute. The summary at the end is your steady-state measurement.
@@ -226,7 +342,7 @@ In this activity, a failed `k6` threshold means the experiment spent more error 
 </Aside>
 
 <ActivityQuestion>
-If `kubectl get pods` showed three Running Pods but `sli_ok` failed, which signal would you trust as the steady-state definition, and why? How does that connect to the lecture's warning that an SLO must match user reality rather than implementation details?
+If `kubectl get pods` showed three Running Pods but `sli_ok` failed, which signal would you trust as the steady-state definition, and why? What does that tell you about the difference between internal object health and user-visible health?
 </ActivityQuestion>
 
 ---
@@ -242,7 +358,7 @@ Write your hypothesis before running: will one deleted Pod spend any meaningful 
 1. In the k6 terminal, rerun the same one-minute test:
 
    ```bash
-   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js
+   k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
 2. In the Kubernetes terminal, list the Pods and delete one of the three serving replicas:
@@ -278,7 +394,7 @@ If this experiment stayed within budget, what protected the user-visible SLO: Ku
 
 ## Experiment 2: Zero Healthy Replicas
 
-Now make the failure large enough that the service disappears from the request path. This is the clearest way to see budget burn and to distinguish a healthy Kubernetes object model from a healthy user experience.
+Now make the failure large enough that the service disappears from the request path. Because your port-forward terminates at the edge layer instead of the backend itself, the local tunnel stays up while the backend disappears. Scaling the deployment to zero gives you a clean no-backend window; deleting all three Pods can also cause failures, but the Deployment starts replacements immediately, so the outage duration depends more on timing.
 
 Write your hypothesis before running: once the deployment reaches zero ready replicas, how badly will the one-minute run miss the 99.5% SLO?
 
@@ -287,7 +403,7 @@ Write your hypothesis before running: once the deployment reaches zero ready rep
 1. Start the same k6 run again:
 
    ```bash
-   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js
+   k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
 2. In the Kubernetes terminal, scale the deployment to zero and wait for all serving Pods to disappear:
@@ -295,9 +411,10 @@ Write your hypothesis before running: once the deployment reaches zero ready rep
    ```bash
    kubectl scale deployment/${ONID}-web --replicas=0 -n reliability-lab
    kubectl wait --for=delete pod -l app=${ONID}-web -n reliability-lab --timeout=60s
+   kubectl get pods -n reliability-lab -l app=${ONID}-web
    ```
 
-   At this moment the Service object still exists, but it has no healthy serving Pods behind it.
+   The last command should report `No resources found`. At this moment the Service object still exists, but it has no healthy serving Pods behind it.
 
 3. Restore the deployment to three replicas:
 
@@ -309,7 +426,7 @@ Write your hypothesis before running: once the deployment reaches zero ready rep
 4. When k6 finishes, inspect the summary carefully:
 
    - `sli_ok` should drop well below the baseline
-   - the threshold for `sli_ok rate>0.995` may fail
+   - the threshold for `sli_ok rate>0.995` should fail
    - the bad fraction is the part of the budget you spent during this one-minute window
 
 </Steps>
@@ -322,7 +439,7 @@ During this experiment the Service object never disappeared, only the healthy en
 
 ## Experiment 3: Failed Rollout, Safe Rollback
 
-A failed change is less dangerous than a failed service when the rollout mechanics keep old replicas serving traffic while you undo the mistake. This section connects chaos engineering to the lecture's release-safety discussion.
+A failed change is less dangerous than a failed service when the rollout mechanics keep old replicas serving traffic while you undo the mistake. This section tests whether a broken rollout can stay operationally unhealthy without becoming a user-visible outage.
 
 Write your hypothesis before running: can a rollout be broken and still stay within the SLO because the old Pods continue serving?
 
@@ -331,7 +448,7 @@ Write your hypothesis before running: can a rollout be broken and still stay wit
 1. Start the same k6 run again:
 
    ```bash
-   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js
+   k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
 2. In the Kubernetes terminal, intentionally set a bad image tag on the deployment:
@@ -380,19 +497,19 @@ The last step of a reliability exercise is confirming that the system is healthy
 1. Run one final clean baseline and save the summary to a file:
 
    ```bash
-   k6 run -e TARGET_URL=http://127.0.0.1:8080/ probe.js | tee final-check.txt
+   k6 run --quiet -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js | tee final-check.txt
    ```
 
-   This final run should pass all thresholds again. If it does not, the system is not back to steady state.
+   The `--quiet` flag suppresses the live progress meter, so `final-check.txt` gets the final summary instead of a stream of progress updates. This final run should pass all thresholds again. If it does not, the system is not back to steady state.
 
 2. Append one user-visible check and the Kubernetes state:
 
    ```bash
-   curl -s http://127.0.0.1:8080/ | grep h1 | tee -a final-check.txt
+   curl -s "$TARGET_URL" | grep h1 | tee -a final-check.txt
    kubectl get deployment,replicaset,pods,service -n reliability-lab | tee -a final-check.txt
    ```
 
-   The first command writes the page header containing your ONID. The second command writes the deployment, ReplicaSets, Pods, and Service that now make up the recovered system.
+   The first command writes the page header containing your ONID. The second command writes the edge and backend Deployments, ReplicaSets, Pods, and Services that now make up the recovered system.
 
 3. Print the record you just created:
 
@@ -408,4 +525,4 @@ The last step of a reliability exercise is confirming that the system is healthy
 
 You have measured error-budget spend at one fixed request rate. The next step is to ask where the service stops meeting the SLO, and to line up that moment with better observability.
 
-Edit `probe.js` so the load rises in stages instead of staying at 10 requests per second. Increase the rate every 30 seconds until `sli_ok` drops below 99.5%, and record the first rate where your budget starts burning. If you have already completed [Prometheus and Grafana](/activities/prometheus-and-grafana/), rerun that staged test while watching the RED panels so you can compare `k6`'s end-of-run summary to the dashboard's p95 latency and error-rate curves. After that, if you want a more realistic failure than Pod deletion, install [LitmusChaos](https://litmuschaos.io/) or [Chaos Mesh](https://chaos-mesh.org/) in minikube and repeat the same `k6` harness during a network-latency experiment.
+Edit `probe.js` so the load rises in stages instead of staying at 10 requests per second. Increase the rate every 30 seconds until `sli_ok` drops below 99.5%, and record the first rate where your budget starts burning. If you want a subtler controller-healing comparison, delete all three Pods with `kubectl delete pods -l app=${ONID}-web -n reliability-lab` without changing the replica count and compare that run to the scale-to-zero run. If you have already completed [Prometheus and Grafana](/activities/prometheus-and-grafana/), rerun one of those staged tests while watching the RED panels so you can compare `k6`'s end-of-run summary to the dashboard's p95 latency and error-rate curves. After that, if you want a more realistic failure than Pod deletion, install [LitmusChaos](https://litmuschaos.io/) or [Chaos Mesh](https://chaos-mesh.org/) in minikube and repeat the same `k6` harness during a network-latency experiment.

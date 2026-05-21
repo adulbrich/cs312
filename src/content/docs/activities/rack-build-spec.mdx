@@ -1,0 +1,250 @@
+---
+title: "Rack Build Specification"
+description: "Design a 42U rack for a chosen workload: servers, storage, top-of-rack networking, power, and cooling."
+sidebar:
+  order: 17
+draft: true
+---
+
+{/* TODO: build and host the rack specification template file (Google Sheets or a printable PDF) and replace the placeholder link in "What You Will Need". */}
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+import ActivityQuestion from '/src/components/ActivityQuestion.astro';
+
+{/* ai-summary
+type: activity
+slug: rack-build-spec
+order: 17
+paired_lecture: on-premises-infrastructure
+practices: server SKU selection by workload; NUMA and memory population; RAID level and drive-type tradeoffs; DAS vs SAN vs distributed storage selection; top-of-rack switch sizing and uplink oversubscription; out-of-band management VLAN planning; PSU and PDU sizing with 80% derating; A/B power feed; rack power density and cooling technology match; Uptime Tier reasoning
+prereq_activities: hardware-build-spec
+output: a one-page rack specification for a chosen scenario covering servers, storage, networking, management, power, cooling, and supported Uptime Tier
+*/}
+
+This activity puts into practice the concepts from the [On-Premises Infrastructure and Data Center Architecture](/lectures/on-premises-infrastructure/) lecture. Where the Hardware Build Specification activity speced a single machine, you will spec a whole rack: the servers in it, the storage architecture behind them, the top-of-rack switch and its uplinks, the out-of-band management plumbing, the power budget, and the cooling envelope. By the end you will have a one-page rack specification that names real vendor SKUs, totals worst-case watts, names an Uptime Tier the design supports, and would survive a sanity check from a data center operator.
+
+## What You Will Need
+
+{/* TODO: provide template */}
+- A copy of the rack specification template (link provided by the instructor in class)
+- Access to vendor configurators in a browser: [Dell PowerEdge](https://www.dell.com/en-us/shop/dell-poweredge-servers/sc/servers), [HPE ProLiant](https://buy.hpe.com/us/en/servers/proliant-servers/c/241224), [Supermicro](https://www.supermicro.com/en/products/system)
+
+## Pick Your Scenario
+
+Read all three scenarios before choosing. Each one stresses a different concept from the lecture; picking deliberately is part of the activity.
+
+**A. Virtualization Rack.** A mid-sized company is consolidating 200 modest internal-app virtual machines (typical VM: 4 vCPU, 8 GB RAM, 100 GB disk) into one rack. The workload is general-purpose: web apps, internal tools, a couple of dev environments. Optimize for VM density per U and per watt. The rack will live in a regional colocation facility with a 5 kW per rack cooling allowance.
+
+**B. Data Platform Rack.** A growing analytics team needs a small, durable data platform in one rack: one PostgreSQL primary plus one read replica (each backing a 4 TB working set), and a Ceph object storage cluster sized for 200 TB usable at three-way replication. Optimize for IOPS on the database tier and durability on the object tier. The rack will live in your own data hall with a 7 kW per rack cooling allowance.
+
+**C. AI Inference Rack.** A product team needs to serve large-language-model inference in production. Eight GPU servers (each holding eight accelerators), plus two head nodes for orchestration and one storage server holding model weights. Optimize for power density, east-west bandwidth between GPU servers, and resilience to a single PSU loss. The rack will live in a purpose-built AI hall with direct-to-chip liquid cooling rated at 40 kW per rack.
+
+<Aside type="tip" title="Stay with your scenario">
+Every later section refers back to the scenario you pick here. Switching scenarios partway through means redoing earlier sections. Pick once and commit.
+</Aside>
+
+Open the rack specification template and fill in the **Scenario** field. The template is a single page divided into the six sections that follow: Servers, Storage, Networking, Management, Power, and Cooling.
+
+---
+
+## Server Selection
+
+The lecture introduced server-class hardware as deliberately different from desktops: more cores, far more memory per socket, two-socket NUMA, ECC and Chipkill, redundant PSUs, hot-swap drive bays, dedicated BMC. The first decision is which SKU fits your scenario, and how many of those servers you need.
+
+<Steps>
+1. **Open a vendor configurator.** Dell's PowerEdge configurator and HPE's ProLiant configurator are the most approachable; Supermicro is a good third option if you want to see the broadest set of GPU-dense chassis. Pick one vendor and stay with it for this activity.
+
+2. **Pick the chassis form factor.**
+   - **Scenario A:** A 1U or 2U two-socket server (Dell R660 / R760, HPE DL360 / DL380). 1U packs more servers per rack but constrains drive bays and PCIe slots.
+   - **Scenario B:** A 1U or 2U for the database servers, and a 2U-with-many-bays chassis for Ceph nodes (Dell R760xd, HPE DL380, or a Supermicro storage-dense 4U).
+   - **Scenario C:** A 4U or 5U GPU server (Dell XE9680, HPE Cray XD, or Supermicro SYS-821GE) that holds eight accelerators with the airflow and PCIe topology to feed them.
+
+3. **Pick the CPU.** The lecture covered AMD EPYC and Intel Xeon as the current server CPU families. Pick one socket count and one SKU per server role.
+   - Note the per-socket core count, base and boost frequencies, and supported memory channels per socket. Server CPUs typically support eight or twelve memory channels per socket.
+   - Two sockets means two NUMA nodes; record this.
+
+4. **Populate memory.** Pick a single DIMM capacity and quantity per server. The goal is to fill memory channels evenly across both sockets so the BIOS reports balanced NUMA nodes.
+   - For a two-socket server with eight channels per socket, one DIMM per channel means 16 DIMMs total. Most chassis support two DIMMs per channel (2 DPC), at which point speed often drops a tier and LRDIMMs become the right choice for the densest configurations.
+   - Record total RAM per server.
+
+5. **Pick drive bays.** Decide which drive bays each server needs for boot only versus boot plus local data. Most bulk data lives on the storage architecture chosen in the next section; for now, ensure each server has two small SSDs in a boot mirror.
+
+6. **Note the redundancy items.** Confirm dual PSUs are configured (almost always the default for rack servers). Confirm the BMC is the standard one for the vendor (iDRAC on Dell, iLO on HPE, IPMI/Redfish on Supermicro).
+
+7. **Calculate quantity.** How many of this server SKU do you need to meet the scenario's demand? Show your math.
+   - **Scenario A:** Enough servers to host 200 VMs with the per-VM resources stated. Plan for at least one server's worth of headroom so a single failure does not break the scenario.
+   - **Scenario B:** One primary plus one replica for PostgreSQL (two database servers). For Ceph, enough OSD nodes to hold 200 TB usable at three-way replication, which means roughly 600 TB raw plus headroom; pick a node SKU and calculate.
+   - **Scenario C:** Eight GPU servers, two head nodes, and one storage server, all given.
+
+</Steps>
+
+<ActivityQuestion>
+Your scenario specifies a workload, but you chose a specific CPU SKU and memory configuration. Trace the chain of decisions backward: which property of your workload drove the choice of socket count? Which one drove the choice of per-socket memory bandwidth? If the workload doubled in working-set size, would you keep the same SKU and add servers, or change the SKU?
+</ActivityQuestion>
+
+Fill in the **Servers** section of the template: vendor and model, CPU SKU, RAM total per server, drive bay configuration, BMC type, quantity, and rack units (U) consumed per server.
+
+---
+
+## Storage Architecture
+
+The lecture distinguished DAS, NAS, and SAN by where the network boundary falls and what protocol crosses it. Each scenario stresses a different choice.
+
+<Steps>
+1. **Pick the storage model for the scenario.**
+   - **Scenario A:** Each virtualization host likely uses some local NVMe for VM data plus a shared NFS or iSCSI back-end so VMs can migrate between hosts. Decide whether you are running fully shared storage (NAS or SAN with a separate storage server in the rack) or local storage per host with replication at the hypervisor layer.
+   - **Scenario B:** PostgreSQL almost always lives on local NVMe for latency. Ceph is a distributed system that places data on every OSD node and presents it as object, block, or filesystem to clients on the network. There is no separate "storage server" in Ceph; the OSD nodes are the storage.
+   - **Scenario C:** Model weights live on a fast shared filesystem (NFS over RDMA, or a parallel filesystem like Lustre or IBM Storage Scale). GPU servers stream weights at job start. Decide whether the storage server in the rack runs NFS, or whether a parallel filesystem is justified.
+
+2. **Pick drive types.** Decide HDD, SATA SSD, or NVMe SSD per role.
+   - PostgreSQL data: NVMe, with the highest sustained-write endurance class your budget allows.
+   - Ceph object data: SATA or NVMe SSDs for hot capacity, or large HDDs (16 TB or 20 TB) for cold capacity. Mixed-tier Ceph clusters are common.
+   - Virtualization shared back-end: NVMe is the default in new deployments.
+   - Boot drives: small SATA SSDs in a mirror; reliability matters more than performance.
+
+3. **Pick the RAID level for each role.** For shared back-ends and database local storage, recall the RAID table from the lecture. For Ceph, RAID is replaced by replication; record the replication factor instead.
+
+   <Aside type="note" title="A note on RAID 5 and large drives">
+   The lecture flagged that RAID 5 has become risky for large drives because rebuilds on multi-terabyte arrays take many hours, and a second drive failure during rebuild loses everything. Default to RAID 6 or RAID 10 for any array with drives larger than 4 TB.
+   </Aside>
+
+4. **Calculate usable capacity.** For each storage role, compute usable capacity from drive count, drive size, and RAID level (or replication factor for Ceph). Show your work in the template.
+
+</Steps>
+
+<ActivityQuestion>
+Compare your storage choice for this scenario against the storage choice that would be wrong for it. For example, if you picked NVMe with RAID 10 for PostgreSQL, what specifically would happen if you instead used 8 TB HDDs in RAID 5? Name the operational failure mode that choice would surface.
+</ActivityQuestion>
+
+Fill in the **Storage** section of the template: storage model (DAS / NAS / SAN / distributed), drive type per role, RAID level or replication factor, drive count, drive size, and usable capacity per role.
+
+---
+
+## Top-of-Rack Networking and Uplinks
+
+The lecture covered the move from three-tier to spine-leaf and emphasized two numbers: the access-layer port speed (the speed at which servers connect) and the oversubscription ratio (how much the uplinks can carry compared to the sum of access ports).
+
+<Steps>
+1. **Count access ports needed.** Each server typically needs two data NICs for redundancy plus one BMC NIC. Total the data ports first.
+   - For Scenario C, GPU servers often have two or four data NICs at higher speed; count carefully.
+
+2. **Pick a top-of-rack switch.** Look at a real vendor data sheet: [Arista 7050X](https://www.arista.com/en/products/7050x-series), [Juniper QFX5120](https://www.juniper.net/us/en/products/switches/qfx-series/qfx5120-ethernet-switch-datasheet.html), or [Cisco Nexus 9300](https://www.cisco.com/c/en/us/products/switches/nexus-9300-series-switches/index.html). Pick one with enough access ports at the speed your scenario needs.
+   - **Scenario A:** 10 or 25 GbE access ports are fine for general-purpose VMs.
+   - **Scenario B:** 25 GbE access ports; Ceph rebuilds saturate links.
+   - **Scenario C:** 100 GbE or higher access ports for the GPU servers, with RoCE (RDMA over Converged Ethernet) enabled. Lossless behavior on the fabric matters here.
+
+3. **Plan uplinks to the spine.** Count the uplink ports your chosen ToR has at the higher speed tier (usually 100 GbE or 400 GbE). Decide how many of those uplinks to use.
+   - The oversubscription ratio is (sum of access port bandwidth) divided by (sum of uplink bandwidth). 3:1 is a reasonable target for general workloads; 1:1 (non-blocking) is what AI fabrics aim for; storage fabrics typically run 1.5:1 or better.
+   - Record your computed oversubscription ratio for the scenario and explain whether it is appropriate.
+
+4. **Decide on a second ToR for redundancy.** A single ToR is a single point of failure for the whole rack. Most production designs use two ToRs and bond each server's two NICs across them (an MLAG or EVPN multi-homing arrangement). Note this decision; it doubles your switch count.
+
+</Steps>
+
+<ActivityQuestion>
+Your oversubscription ratio is one number, but it implies an assumption about how much of the access-port bandwidth is used at once. Under what workload pattern would a 3:1 ratio still feel non-blocking, and under what pattern would the same 3:1 design cause visible problems? Tie your answer to the scenario you picked.
+</ActivityQuestion>
+
+Fill in the **Networking** section of the template: ToR vendor and model, access port count and speed, uplink port count and speed, computed oversubscription ratio, and whether the rack uses one or two ToRs.
+
+---
+
+## Out-of-Band Management
+
+The lecture described the BMC and the importance of a separate management VLAN that is not exposed to the production data path. Every server you placed in the rack has a BMC; every BMC needs a port and an address.
+
+<Steps>
+1. **Count BMC ports needed.** One BMC NIC per server, plus one per ToR (most switches have a dedicated management port).
+
+2. **Pick a 1U management switch.** A simple 1 GbE switch is enough. List a real model from the same vendor as your ToR or from a separate small vendor.
+
+3. **Note the management VLAN.** All BMC ports terminate in one VLAN, separate from any production VLAN, reachable only through a jump host or firewall with MFA. Record the VLAN ID you would use (any number; 99 is conventional).
+
+4. **Decide how operators reach the rack.** Do operators reach the BMC over the corporate LAN through a firewall, over a dedicated out-of-band management WAN, or both? One sentence is enough.
+
+</Steps>
+
+Fill in the **Management** section of the template: management switch model, BMC NIC count, management VLAN ID, and operator access path.
+
+---
+
+## Power Budget
+
+Every server has a maximum-rated PSU draw. Power-supply ratings reflect what the PSU can deliver, not what the server actually draws under load, but they are the conservative number you use for capacity planning.
+
+<Steps>
+1. **Find the worst-case power per server.** Look up the maximum PSU rating on the vendor data sheet. A typical 1U/2U server has redundant 800 W to 1400 W PSUs. A GPU server may have six 3000 W PSUs.
+
+2. **Multiply by server count.** Sum the worst-case watts across all servers in the rack, plus a small overhead for the ToR switches and the management switch.
+
+3. **Apply 80% derating.** PDUs and circuits are typically rated to be loaded to no more than 80% of their nameplate capacity, to leave headroom for inrush and to comply with electrical code. Divide your total by 0.8 to get the PDU capacity you actually need to specify.
+
+4. **Pick a PDU model and amperage.** A real example: a 30A 208V three-phase PDU delivers roughly 8.6 kW per PDU; a 60A 415V three-phase PDU delivers roughly 35 kW. Pick a real Eaton, APC, or ServerTech model from a vendor data sheet that meets your derated total.
+
+5. **Confirm A/B feeds.** State explicitly that the rack has two PDUs fed from independent power paths (A and B), each sized to carry the full rack load alone, and that every dual-PSU server is wired one PSU per PDU. This is what lets you survive the loss of one feed.
+
+6. **Name an Uptime Tier.** Looking at the lecture's Uptime Tier table, which tier does the power design you just described support, and which tier would it fall short of? One sentence each.
+
+</Steps>
+
+<ActivityQuestion>
+Your A/B feed design is what makes the rack tolerant of a PDU failure. But the rack alone is not Tier IV; the data center facility around it is what determines the achievable tier. Name the part of the design that lives outside this rack and must also be present for Tier IV to apply.
+</ActivityQuestion>
+
+Fill in the **Power** section of the template: worst-case watts per server, total rack watts, derated total, PDU model and rating, A/B feed confirmation, and supported Uptime Tier.
+
+---
+
+## Cooling Envelope
+
+The lecture's cooling table maps power density (kW per rack) to cooling technology. Your power total from the previous section tells you which row of that table you live in.
+
+<Steps>
+1. **Read the kW per rack** from your derated power total. (Use kW, not W.)
+
+2. **Match it to a cooling technology** from the lecture's table:
+   - Up to about 8 kW per rack: standard CRAC or CRAH room cooling is fine.
+   - 8 to 20 kW per rack: in-row cooling or rear-door heat exchangers.
+   - 20 kW per rack and above: direct-to-chip liquid cooling, or immersion.
+
+3. **Cross-check the scenario.** The scenario named a cooling envelope at the start (5 kW for A, 7 kW for B, 40 kW for C). Does your rack design fit inside that envelope?
+   - If your design exceeds the envelope, you have two options: redesign the rack to fit (fewer servers, lower-TDP CPUs, smaller GPUs), or choose a different facility class. State which you would do and why.
+
+</Steps>
+
+<ActivityQuestion>
+The same servers in the same rack require dramatically different cooling depending on the facility they live in. Why is the cooling decision a facility decision rather than a rack decision? Name one upstream consequence of needing direct-to-chip liquid cooling that would not exist with air cooling.
+</ActivityQuestion>
+
+Fill in the **Cooling** section of the template: kW per rack, chosen cooling technology, and whether the design fits the scenario's stated envelope.
+
+---
+
+## Your Rack Specification
+
+You now have every section of the template filled in. Take one last pass over it as a coherent document.
+
+<Steps>
+1. **Sanity-check the U count.** Sum the rack units consumed by all servers, ToRs, the management switch, and the PDUs. Confirm the total fits in a 42U rack. If it does not, note what you would do (a second rack, denser servers, fewer storage nodes).
+
+2. **Sanity-check the network.** Confirm that every server has the right number of NICs at the right speed to reach your chosen ToR. Confirm the uplink count and the resulting oversubscription ratio.
+
+3. **Sanity-check the power.** Confirm worst-case watts fit inside the cooling envelope and inside the derated PDU capacity.
+
+4. **Add your name and student ID** to the header of the template.
+
+5. **Save the completed template as a PDF.** Open it side-by-side with the lecture in another window so you can see your rack and the lecture's section headings at the same time. Walk through the lecture sections one more time and confirm your spec has a decision in each.
+
+</Steps>
+
+You should now see a one-page document that names a real vendor, real models, real numbers, and one Uptime Tier the design supports. That is what a junior infrastructure engineer hands their senior on day one of a real rack build.
+
+## Going Further
+
+You speced one rack. A real data center has hundreds. The natural next step is to think about how those racks connect to each other, and what the facility around them looks like.
+
+If you want to see a real published rack design, the [Open Compute Project](https://www.opencompute.org/projects) publishes the hardware specifications used by Meta, Microsoft, and others. Read one OCP server spec and note three ways it differs from the Dell or HPE SKU you picked.
+
+If you want to push on the facility side, read the [Uptime Institute Tier classification](https://uptimeinstitute.com/tiers) overview and look up the closest commercial colocation provider to where you live. Read their facility brief and identify which Tier they claim and what features back the claim: dual utility feeds, generator runtime, N+1 cooling, concurrent maintainability.
+
+If you want to push on the network side, the Cisco Packet Tracer extra-credit activity for this lecture builds an enterprise LAN with VLANs, inter-VLAN routing, DHCP, and internal DNS, which is the access-layer story your rack's BMC management VLAN already touches at one cable.
