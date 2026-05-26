@@ -18,6 +18,7 @@ This repository contains the source code for the CS312 website.
 - [ ] Use LLMs, when helpful, as stakeholder simulators and critique partners for async work, not as the sole judge of student decisions.
 - [ ] Update assignment rubrics so a working system is necessary but not sufficient. Weight rollback plans, runbooks, alert quality, blast radius control, capacity and cost reasoning, and written justification more heavily.
 - [ ] Include a few intentionally flawed or risky requirements so students practice pushing back and proposing safer alternatives.
+- [ ] Test everything on Windows and Ubuntu in addition to macOS
 
 ### Course Design Backlog
 
@@ -58,7 +59,7 @@ This repository contains the source code for the CS312 website.
 
 ### Research Queue
 
-- [ ] Watch [If I would start DevOps from 0 - How would I start and what would I learn](https://www.youtube.com/watch?v=Cpy20DnIDTI).
+- [x] Watch [If I would start DevOps from 0 - How would I start and what would I learn](https://www.youtube.com/watch?v=Cpy20DnIDTI).
 - [ ] Watch [Observability: the present and future, with Charity Majors](https://www.youtube.com/watch?v=SvEjS4-2WJQ).
 
 ## Instructor Checklist
@@ -69,8 +70,8 @@ Every term:
 - [x] Add TAs to AWS Academy
 - [x] Add students to AWS Academy
 - [x] Add TAs to Canvas
-- [ ] Create **GitHub Classroom** class and add TAs (optional for students)
-- [ ] Update GitHub Classroom link in Canvas
+- [x] Create **GitHub Classroom** class and add TAs (optional for students)
+- [x] Update GitHub Classroom link in Canvas
 - [ ] Update the version of this repository if making changes (`package.json`)
 
 ## PDFs
@@ -90,6 +91,13 @@ To generate slides from marp, use:
 ```shell
 cd slides
 bun x @marp-team/marp-cli@latest intro.md --pdf --allow-local-files
+```
+
+To generate a PDF from a single MD file, use:
+
+```shell
+# TODO: improve because this is very average
+pandoc input.md --pdf-engine=wkhtmltopdf -V margin=1in -o output.pdf
 ```
 
 ## 🚀 Project Structure
