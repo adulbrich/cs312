@@ -3,7 +3,6 @@ title: "On-Premises Infrastructure and Data Center Architecture"
 description: "The physical layer underneath every cloud region: server hardware at production scale, enterprise storage, data center network topology, and the racks, power, and cooling that turn boxes into infrastructure."
 sidebar:
   order: 17
-draft: true
 ---
 
 import Latex from '../../../components/Latex.astro';
@@ -117,7 +116,7 @@ Nearly every production server has a second computer inside it. The **Baseboard 
 
 Operationally, the BMC is the answer to questions that have no software-side answer. You can power-cycle a hung server when SSH is unresponsive. You can attach to the console as if you were standing in front of the rack with a monitor and keyboard, through a **virtual KVM** session that runs in a modern HTML5 browser without requiring Java plugins. You can mount an ISO image as a virtual CD-ROM and reinstall the operating system on a remote machine over the management network. You can read the System Event Log for hardware events the OS never saw, including the ECC errors and fan failures that signal an impending hardware problem. All of these functions work whether the host operating system is running, hung, or missing entirely, because the BMC is a separate computer that shares only power, network, and in some cases a serial console with the host.
 
-The network design implication is the part most relevant here. The BMC presents its own management interface, with its own MAC and IP identity even when it shares cabling with a host NIC, and it should be on its own **management VLAN** that is reachable only from operator workstations and a small set of automation hosts. Putting BMCs on the same VLAN as production traffic exposes a powerful control surface to anyone who reaches that broadcast domain. A separate, firewalled, MFA-gated management VLAN is the standard pattern, and it is one of the reasons VLAN segmentation matters operationally rather than as a theoretical layer-2 nicety.
+The network design implication is the part most relevant here. The BMC presents its own management interface, with its own MAC and IP identity even when it shares cabling with a host NIC, and it should be on its own **management VLAN** that is reachable only from operator workstations and a small set of automation hosts. The specific VLAN number is just a local convention; what matters is that the management network is separate and tightly controlled. Putting BMCs on the same VLAN as production traffic exposes a powerful control surface to anyone who reaches that broadcast domain. A separate, firewalled, MFA-gated management VLAN is the standard pattern, and it is one of the reasons VLAN segmentation matters operationally rather than as a theoretical layer-2 nicety.
 
 ```mermaid
 flowchart LR
@@ -130,7 +129,7 @@ flowchart LR
     BMC --- NIC2
   end
   ProdSW["Production Switch\nVLAN 10: app traffic"]
-  MgmtSW["Management Switch\nVLAN 99: BMC only"]
+  MgmtSW["Management Switch\nExample VLAN 120: BMC only"]
   NIC1 --> ProdSW
   NIC2 --> MgmtSW
   Ops["Operator workstation\n+ automation hosts"]
@@ -363,17 +362,30 @@ Standard data center racks are 42U or 48U tall, 19 inches wide internally, and e
 
 Airflow management is what keeps the building's cooling investment from being wasted. Servers draw cool air through the front and exhaust hot air out the back. In a well-designed facility, racks are arranged in alternating **hot aisles** and **cold aisles**, with all server fronts facing into the cold aisle. **Aisle containment** uses physical barriers (ceilings, end-of-row doors, plastic curtains) to prevent the hot exhaust from one row from being inhaled as intake by the next, which keeps the temperature delta between the two aisles high and the cooling efficient. Blanking panels in empty rack units prevent hot air from recirculating through unused slots back into the cold aisle. None of this is glamorous; all of it affects the **PUE (Power Usage Effectiveness)** of the building, the ratio of total facility energy to IT-load energy, and therefore how much overhead you are paying on top of the IT load in what is usually the dominant operating cost category, electricity.
 
-{/* Use FigureWithCaption here */}
-<div class="**:mx-auto **:h-64 **:w-auto **:object-contain">
-  ![](./hardware-components/server-top.png)
-</div>
-<div class="**:mx-auto **:h-auto **:w-96 **:object-contain">
-  ![](./hardware-components/server-front.png)
-</div>
-<div class="**:mx-auto **:h-auto **:w-96 **:object-contain">
-  ![](./hardware-components/server-back.png)
-</div>
-<p class="text-center italic text-sm m-0 p-0">2U HPC/AI Server <a href="https://www.gigabyte.com/Enterprise/GPU-Server/G293-S41-AAP1" target="_blank" rel="noopener noreferrer">G293-S41-AAP1</a> from GIGABYTE</p>
+import ServerTop from '/src/content/docs/lectures/hardware-components/server-top.png';
+import ServerFront from '/src/content/docs/lectures/hardware-components/server-front.png';
+import ServerBack from '/src/content/docs/lectures/hardware-components/server-back.png';
+
+<FigureWithCaption
+  src={ServerTop}
+  alt="Top view of a dense 2U GPU server"
+  caption="Top view of a dense 2U GPU server. We can see 4 GPU bays, 2 CPU sockets with 24 DIMMs (8-Channel), the serviceable drive bay in front (left), and dual PSUs in the back (right). Example: GIGABYTE G293-S41-AAP1."
+  imageHeight="h-24"
+/>
+
+<FigureWithCaption
+  src={ServerFront}
+  alt="Front view of a dense 2U GPU server with intake area and serviceable drive bays"
+  caption="Front view of a dense 2U GPU server. The front face is dominated by intake area and serviceable drives, which is why cold-aisle orientation and blanking panels matter operationally. Example: GIGABYTE G293-S41-AAP1."
+  imageHeight="h-24"
+/>
+
+<FigureWithCaption
+  src={ServerBack}
+  alt="Rear view of a dense 2U GPU server with redundant power supplies and high-speed I/O"
+  caption="Rear view of the same 2U GPU server. Redundant power supplies, management ports, high-speed I/O, and exhaust airflow all compete for limited rear-panel space, which is why structured cabling and A/B power planning are part of rack design rather than afterthoughts. Example: GIGABYTE G293-S41-AAP1."
+  imageHeight="h-24"
+/>
 
 ### Power: From Utility to Server
 
@@ -469,6 +481,8 @@ On-premises operations make those same constraints unavoidable rather than invis
 The hardware itself has grown more varied, not less. EPYC and Xeon are still the defaults, but ARM in the cloud (Graviton, Cobalt, Axion) and Ampere on premises have become real options for cloud-native workloads, and the AI accelerators (Trainium, Inferentia, TPU, Grace Hopper) sit on top of all of this as a category of hardware purpose-built for one class of computation. The job has not gotten simpler. What has changed is that the operator who can read across layers (from the rack power budget to the spine uplink to the NUMA topology of the host to the Kubernetes scheduler) is the one who can decide whether a problem actually lives where the alert says it does. That cross-layer reading is what this lecture, and the rest of the course, is ultimately preparing you to do.
 
 ## Resources
+
+These references are useful if you want to see the same physical-infrastructure ideas from operator, vendor, and standards perspectives. They work best as follow-up reading after the lecture, because they assume you already have the vocabulary for racks, fabrics, power, and facility design.
 
 - <a href="https://www.youtube.com/watch?v=GR2GB6Qknlw" target="_blank" rel="noopener noreferrer">VLANs Explained (NetworkChuck, YouTube)</a>
 - <a href="https://www.youtube.com/watch?v=lwArmpjGHpM" target="_blank" rel="noopener noreferrer">How To Design Your Own Enterprise Network: Cisco CCNA (YouTube)</a>

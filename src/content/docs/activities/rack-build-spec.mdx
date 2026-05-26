@@ -3,7 +3,6 @@ title: "Rack Build Specification"
 description: "Design a 42U rack for a chosen workload and record the servers, storage, networking, power, and cooling decisions in a rack specification document."
 sidebar:
   order: 17
-draft: true
 ---
 
 import { Aside, Steps } from '@astrojs/starlight/components';
@@ -74,7 +73,7 @@ In a two-socket server, each CPU has its own local memory banks. Populate DIMMs 
 6. **Note the redundancy items.** Confirm dual power supply units (PSUs) are configured (almost always the default for rack servers). Confirm the **Baseboard Management Controller (BMC)** is the standard one for the vendor (iDRAC on Dell, iLO on HPE, IPMI/Redfish on Supermicro).
 
 7. **Calculate quantity.** How many of this server SKU do you need to meet the scenario's demand? Show your math.
-   - **Scenario A:** Enough servers to host 200 VMs with the stated memory requirement. You may assume a moderate 2:1 vCPU-to-physical-core consolidation ratio if you state it explicitly. Here, 2:1 means planning that two virtual CPUs can share one physical CPU core on average because not every VM is busy at the same moment. Do not overcommit memory. Leave at least one whole host worth of headroom so a single failure does not break the scenario.
+   - **Scenario A:** Enough servers to host 200 VMs with the stated memory requirement. You may start with a conservative 2:1 vCPU-to-physical-core consolidation ratio if you state it explicitly. Here, 2:1 means planning that two virtual CPUs can share one physical CPU core on average because not every VM is busy at the same moment. In a very tight power envelope, you may justify a somewhat higher ratio for bursty internal workloads, but explain why that tradeoff is still acceptable. Do not overcommit memory. Leave at least one whole host worth of headroom so a single failure does not break the scenario.
    - **Scenario B:** One primary plus one replica for PostgreSQL (two database servers). For Ceph, enough storage nodes to hold 200 TB usable at three-way replication. These are often called **OSD nodes** because they run Ceph's **Object Storage Daemon (OSD)** processes, which are the software components that actually store the data. Three-way replication means roughly 600 TB raw plus headroom. Three Ceph nodes is the smallest practical starting point; use more if losing one node would drop you below target usable capacity.
    - **Scenario C:** Eight GPU servers, two head nodes, and one storage server, all given.
 
@@ -129,7 +128,7 @@ In the **Storage** section of your document, record the storage model (DAS / NAS
 Every server needs a path into the rack network, and some workloads need much more than simple connectivity. Focus on two numbers: access speed, which is the bandwidth of the server-facing ports, and oversubscription, which is the ratio between all server-facing bandwidth and the rack's uplinks toward the rest of the data center.
 
 <Steps>
-1. **Count access ports needed.** Each server typically needs two data Network Interface Cards (NICs) for redundancy plus one BMC NIC. Total the data ports first.
+1. **Count access ports needed.** Each server typically needs two redundant data network ports, often presented as one dual-port Network Interface Card (NIC), plus one BMC NIC. Total the data ports first.
    - For Scenario C, GPU servers often have two or four data NICs at higher speed; count carefully.
 
 2. **Pick a top-of-rack switch.** Look at a real vendor data sheet: [Arista 7050X](https://www.arista.com/en/products/7050x-series), [Juniper QFX5120](https://www.juniper.net/documentation/us/en/hardware/qfx5120/topics/topic-map/qfx5120-system-overview.html), or [Cisco Nexus 9300](https://www.cisco.com/site/us/en/products/networking/cloud-networking-switches/nexus-9300-series-switches/index.html). Pick one with enough access ports at the speed your scenario needs.
