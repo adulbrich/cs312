@@ -1,37 +1,29 @@
 ---
 title: System Security and Hardening
-description: "Hardening a public server and the identity foundation every operations practice rests on: threat models, authentication and authorization, Identity Providers and federation protocols, least privilege, SSH keys, firewalls, patching, and the retrospective identity and access view across the course."
+description: "A security retrospective across the entire course stack (Linux, networking, containers, cloud, IaC, CI/CD, Kubernetes, and observability) plus the identity foundation underpinning every layer: threat models, authentication and authorization, Identity Providers, federation protocols (SAML, OIDC, SCIM), Kubernetes RBAC and admission control, secrets management, Zero Trust, and DevSecOps."
 sidebar:
   order: 18
-draft: true
 ---
 
-{/* TODO: Reframe this lecture as a security retrospective across prior topics (Linux, networking, containers, cloud, IaC, configuration management, CI/CD) with a forward-look at cluster security concerns for Lab 7. Update title and description once the reframing is drafted.
 
-  Cluster security topics that belong here (moved from container-orchestration lecture):
-  - Admission controllers: validating and mutating webhooks, built-in controllers (LimitRanger, PodSecurity), external policy engines (OPA Gatekeeper, Kyverno), sidecar injection via webhooks
-  - Detailed RBAC model: Role vs. ClusterRole, RoleBinding vs. ClusterRoleBinding; why a default cluster is not a secure cluster; Namespaces as an organizational boundary vs. a security boundary; multi-tenancy limits (cluster-scoped resources, open pod-to-pod traffic, kernel escape risks)
-  - Secrets hardening: RBAC least-privilege access, encryption at rest in etcd
-  - NetworkPolicy enforcement and CNI requirements
-*/}
-
-import { Aside, Steps } from '@astrojs/starlight/components';
+import { Aside } from '@astrojs/starlight/components';
 import HistoricalNote from '/src/components/HistoricalNote.astro';
+import FigureWithCaption from '/src/components/FigureWithCaption.astro';
 
 {/* ai-summary
 type: lecture
 slug: system-security-and-hardening
 order: 18
-covers: threat modeling and CIA triad; authentication vs authorization; Identity Providers and the federation pattern; SAML, OAuth 2.0, OIDC, SCIM; Kerberos in context; human vs workload identity; MFA and passkeys/WebAuthn; RBAC, ABAC, and policy-as-code; Linux hardening (SSH keys, least privilege, UFW, Fail2Ban, patching); container and image security; cloud IAM least privilege; IaC secrets management; CI/CD pipeline security; Kubernetes RBAC and NetworkPolicy; admission controllers; secrets encryption at rest; audit logging; security retrospective across all course topics
+covers: threat modeling and CIA triad; authentication vs authorization; Identity Providers and federation (SAML, OAuth 2.0, OIDC, SCIM); Kerberos in context; human vs workload identity; MFA, passkeys, WebAuthn (FIDO2/NIST SP 800-63-4); RBAC, ABAC, policy-as-code, ReBAC; security retrospective across all course layers (Linux, networking, containers, IaC, CI/CD, observability); Linux hardening (SSH key auth, least privilege, UFW, Fail2Ban, unattended-upgrades, AppArmor); Kubernetes security (RBAC Role/ClusterRole/Binding, admission controllers, Pod Security admission, OPA Gatekeeper, Kyverno, NetworkPolicy and CNI requirements, Secrets encryption at rest with KMS v2); secrets management (Vault dynamic secrets, PKI engine, AWS/GCP managed secrets); Zero Trust; DevSecOps (shift-left, pre-commit scanning, SCA, SAST, image scanning with Trivy, runtime security with Falco); CIS benchmarks; file integrity; backups
 prereq_lectures: linux-server-planning-and-configuration, networking-fundamentals, containerization-with-docker, cloud-computing, infrastructure-as-code, configuration-management, ci-cd, container-orchestration, network-services-and-application-delivery, monitoring-and-performance, log-management-and-analysis, incident-response-and-postmortems, reliability-engineering, on-premises-infrastructure
 followup_lectures: windows-server-and-active-directory
 paired_activities: security-audit
 supports_labs:
 */}
 
-Imagine you have just provisioned a fresh Ubuntu server and attached it to a public IP address. Within minutes, automated scanners will discover it. Within hours, bots will begin probing SSH, HTTP, and any other open port for default credentials and known vulnerabilities. This is not hypothetical; it is the baseline reality of operating a public-facing server.
+Imagine you have just provisioned a fresh Ubuntu server and attached it to a public IP address. Within minutes, automated scanners will discover it. Within hours, bots will begin probing SSH (Secure Shell), HTTP, and any other open port for default credentials and known vulnerabilities. This is not hypothetical; it is the baseline reality of operating a public-facing server.
 
-This chapter has two intertwined goals. The first is to walk through the practical steps you would take to harden that server, starting from the moment you first log in: reduce the attack surface so that the only things reachable from the network are services you intentionally chose to expose, configured in the most restrictive way that still allows them to function. The second is to step back and view the entire course through a security lens, with particular attention to the one concern that has appeared in every prior lecture without being named as a single subject: identity. Authentication, authorization, Identity Providers, and the federation protocols that connect them are the substrate every other security control rests on, and they are the connective tissue that links the Linux users from Week 2, the AWS IAM roles from Week 3, the GitHub Actions OIDC from Week 5, the Kubernetes RBAC from Week 6, and the AD and Entra material that the next lecture will dive into.
+This chapter has two intertwined goals. The first is to walk through the practical steps you would take to harden that server, starting from the moment you first log in: reduce the attack surface so that the only things reachable from the network are services you intentionally chose to expose, configured in the most restrictive way that still allows them to function. The second is to step back and view the entire course through a security lens, with particular attention to the one concern that has appeared in every prior lecture without being named as a single subject: identity. Authentication, authorization, Identity Providers, and the federation protocols that connect them are the substrate every other security control rests on, and they are the connective tissue that links the Linux users from Week 2, the AWS IAM (Identity and Access Management) roles from Week 3, the GitHub Actions OIDC (OpenID Connect) from Week 5, the Kubernetes RBAC (Role-Based Access Control) from Week 6, and the AD and Entra material that the next lecture will dive into.
 
 ## Why Security Matters
 
@@ -39,7 +31,7 @@ Security failures have real consequences: data breaches expose private user info
 
 **Confidentiality** means that only authorized users and processes can access or modify data. Authentication (proving you are who you claim to be: passwords, biometrics, cryptographic keys) and authorization (verifying that you have the right to access what you are requesting: file permissions, access control lists) are the primary mechanisms. A data breach is a loss of confidentiality.
 
-**Integrity** means that data is maintained in a correct state and cannot be improperly modified, either accidentally or maliciously. Read/write permissions, checksums, backups, and ECC RAM all protect integrity. Altering business records to influence decision-making or defacing a website's source code are examples of integrity violations.
+**Integrity** means that data is maintained in a correct state and cannot be improperly modified, either accidentally or maliciously. Read/write permissions, checksums, backups, and ECC (Error-Correcting Code) RAM all protect integrity. Altering business records to influence decision-making or defacing a website's source code are examples of integrity violations.
 
 **Availability** means that authorized users can access data and services when they need to. Systems must handle expected load, hardware must be maintained, infrastructure must be monitored, and a Disaster Recovery (DR) plan must be in place. A Denial-of-Service (DoS) attack (or its distributed variant, DDoS, which floods a target with traffic from many sources) is a direct attack on availability.
 
@@ -51,16 +43,19 @@ A useful illustration: an ATM covers all three CIA properties. It enforces confi
 
 Understanding the attack surface is the first step toward defending it. Common attack vectors include:
 
-- **Social engineering.** Phishing emails, pretexting, and other manipulation techniques that trick legitimate users into handing over credentials or executing malicious code.
-- **Software vulnerabilities.** Unpatched bugs in the OS, libraries, or applications that allow an attacker to execute arbitrary code or escalate privileges.
+- **Social engineering.** Phishing emails, pretexting, and other manipulation techniques that trick legitimate users into handing over credentials or executing malicious code. Spear-phishing targets specific individuals with personalized lures and is the most common initial vector in targeted attacks.
+- **Software vulnerabilities.** Unpatched bugs in the OS, libraries, or applications that allow an attacker to execute arbitrary code or escalate privileges. Zero-day vulnerabilities (flaws that are not yet publicly known or patched) are particularly dangerous because no defensive update exists.
+- **Supply chain compromise.** Malicious or tampered code inserted into dependencies, build tools, or package registries. When an application installs a compromised npm, PyPI, or RubyGems package, every deployment of that application carries the attacker's code. The 2020 SolarWinds breach inserted a backdoor into a software update delivered to thousands of organizations; the 2024 xz utils backdoor was inserted over months by a contributor who had earned legitimate commit access. Defenders cannot audit every package they depend on, which is why dependency pinning and provenance verification matter.
+- **Credential theft and reuse.** Credentials exposed in one breach are tested against other services at scale, a technique called credential stuffing. Secrets accidentally committed to a repository (an API key, a database password, an AWS access key) are discovered by automated scanners within minutes of a push to a public repo. A stolen or leaked credential bypasses every authentication control, because from the server's perspective the login looks legitimate.
+- **Web application vulnerabilities.** Injection attacks (SQL injection, command injection), cross-site scripting (XSS), and server-side request forgery (SSRF) exploit bugs in application code rather than in the underlying OS or network. An SSRF vulnerability, for example, can be used to reach internal services or cloud metadata endpoints from inside the application's trust boundary. The [OWASP Top Ten](https://owasp.org/www-project-top-ten/) is the canonical catalog of the most widely exploited web application vulnerability classes.
 - **Distributed Denial-of-Service (DDoS).** Flooding a service with traffic from many sources (often a botnet) until it exhausts available bandwidth or server resources.
-- **Insider abuse.** Employees or contractors who misuse their legitimate access, whether for personal gain, espionage, or sabotage.
-- **Misconfiguration.** A database listening on a public IP with no authentication, an open S3 bucket, or a debug endpoint left exposed; these are responsible for a large fraction of real breaches.
-- **Hardware-level attacks.** Side-channel attacks that extract secrets by monitoring power consumption, electromagnetic emissions, or CPU frequency/temperature behavior.
+- **Insider abuse.** Employees or contractors who misuse their legitimate access, whether for personal gain, espionage, or sabotage. Insiders are difficult to defend against at the authentication layer because they already have valid credentials; limiting blast radius through least-privilege access control is the primary mitigation.
+- **Misconfiguration.** A database listening on a public IP with no authentication, an open S3 bucket, or a debug endpoint left exposed; these are responsible for a large fraction of real breaches. Misconfiguration is especially common when infrastructure is provisioned quickly or when defaults are not reviewed.
+- **Hardware-level attacks.** Side-channel attacks that extract secrets by monitoring power consumption, electromagnetic emissions, or CPU frequency/temperature behavior. These are less common in cloud environments because the attacker must have physical or co-tenant access, but they matter for on-premises hardware and embedded systems.
 
 ## The Threat Model for a Public Server
 
-Before locking anything down, it helps to think clearly about what you are defending against. A **threat model** identifies the assets you care about (the data on the server, the services it provides, the trust your users place in you), the adversaries who might target them, and the attack vectors those adversaries are likely to use.
+The attack vectors above affect every internet-connected system to varying degrees. Deciding which ones to prioritize for a specific system requires narrowing the question, which is what a **threat model** does: it identifies the assets you care about (the data on the server, the services it provides, the trust your users place in you), the adversaries who might target them, and the attack vectors those adversaries are most likely to exploit against this particular target.
 
 For a typical web-facing Ubuntu server, the most common attack vectors are:
 
@@ -75,8 +70,8 @@ No single security control is sufficient on its own. A layered approach (sometim
 
 - **Access control and authentication:** user management, multi-factor authentication (MFA), single sign-on (SSO), and strong password policies.
 - **Endpoint security:** anti-malware software, host-based firewalls, and patch management.
-- **Network security:** firewalls at multiple network layers, VPNs for remote access, and network segmentation.
-- **Encryption:** data protected both at rest (stored on disk or in a database) and in transit (using TLS/HTTPS).
+- **Network security:** firewalls at multiple network layers, VPNs (Virtual Private Networks) for remote access, and network segmentation.
+- **Encryption:** data protected both at rest (stored on disk or in a database) and in transit (using TLS (Transport Layer Security) / HTTPS (Hypertext Transfer Protocol Secure)).
 - **Backups:** regular, tested, off-site copies of critical data.
 - **Hardware and software redundancy:** failover systems that maintain availability under partial failure.
 - **Incident response:** a documented plan for detecting breaches, containing damage, recovering data, and communicating with affected parties.
@@ -89,7 +84,7 @@ Access control sits first in the defense-in-depth list for a reason. Every layer
 
 **Authorization** is the decision, made after authentication has succeeded, about whether the identified actor is permitted to perform the requested operation on the requested resource. It answers "what may you do?" Authorization is layered on top of authentication and is meaningless without it: granting permissions to an unverified identity defeats the purpose.
 
-The two concerns are easiest to see when they are clearly separated. On a Linux server, your SSH key proves that you are the user `deploy` (authentication, handled by sshd); the kernel's file permissions and the contents of `/etc/sudoers` decide what `deploy` may do once logged in (authorization, handled by the kernel and PAM). In AWS, the EC2 Instance Metadata Service issues short-lived credentials that prove a request originates from a particular IAM role (authentication); the policies attached to that role decide which API calls are allowed (authorization). In Kubernetes, the service account token mounted into a pod identifies it to the API server (authentication); RoleBinding and ClusterRoleBinding resources decide what the service account may read or change (authorization). The same two-step pattern repeats at every layer of the stack the course has built.
+The two concerns are easiest to see when they are clearly separated. On a Linux server, your SSH key proves that you are the user `deploy` (authentication, handled by sshd); the kernel's file permissions and the contents of `/etc/sudoers` decide what `deploy` may do once logged in (authorization, handled by the kernel and PAM (Pluggable Authentication Modules)). In AWS, the EC2 Instance Metadata Service (IMDS) issues short-lived credentials that prove a request originates from a particular IAM (Identity and Access Management) role (authentication); the policies attached to that role decide which API calls are allowed (authorization). In Kubernetes, the service account token mounted into a pod identifies it to the API server (authentication); RoleBinding and ClusterRoleBinding resources decide what the service account may read or change (authorization). The same two-step pattern repeats at every layer of the stack the course has built.
 
 A practical implication of the distinction: hardening authentication and hardening authorization are different jobs. Strong key-based SSH and MFA on cloud consoles raise the cost of impersonation, but they do nothing about a role that grants `s3:*` on every bucket. Tight RBAC and least-privilege IAM policies constrain blast radius, but they protect nothing if an attacker can phish a privileged user's credentials. A defensible system needs both, and the rest of this lecture spends time on each.
 
@@ -113,6 +108,21 @@ Several protocols define how the assertion actually travels between IdP and rely
 
 A worked trace of a typical OIDC sign-in clarifies the moving parts. A user clicks "Sign in with Google" on a SaaS application. The application redirects the browser to Google's authorization endpoint, including parameters identifying the application and the scopes it is requesting. The user authenticates to Google (entering a password, completing MFA, or relying on an existing Google session). Google redirects the browser back to the application with a one-time authorization code. The application's backend exchanges that code, over a direct server-to-server call to Google's token endpoint, for an ID token and an access token. The application validates the ID token's signature against Google's published public keys, decodes the JWT to learn the user's identifier and verified claims (email, name, organization), and creates a local session. At no point did the application see or store the user's Google password.
 
+```mermaid
+sequenceDiagram
+    participant U as User / Browser
+    participant A as App (Relying Party)
+    participant I as Identity Provider
+    U->>A: 1. Click "Sign in with Google"
+    A->>U: 2. Redirect to IdP (HTTP 302)
+    U->>I: 3. Browser loads IdP login page
+    I->>U: 4. User authenticates - IdP redirects with auth code
+    U->>A: 5. Browser delivers auth code
+    A-->>I: 6a. Exchange code for tokens (server to server)
+    I-->>A: 6b. ID token + access token returned
+    Note over U,I: The app never sees the user's IdP password.
+```
+
 | Protocol | Year | Encoding | Primary purpose | Where you encounter it |
 |---|---|---|---|---|
 | SAML 2.0 | 2005 | Signed XML | Enterprise web SSO | Large-SaaS-to-enterprise federation |
@@ -123,10 +133,10 @@ A worked trace of a typical OIDC sign-in clarifies the moving parts. A user clic
 Kerberos, which the next lecture covers in detail, predates all of these by decades. Designed at MIT in the 1980s for trusted local-area networks, Kerberos solves the same single-sign-on problem with a fundamentally different mechanism: a central key distribution center issues time-limited tickets that clients present to services, with no browser redirects involved. Kerberos assumes a tightly-coupled trust domain (the Windows Active Directory forest is the modern descendant) and synchronized clocks; SAML and OIDC assume the much looser trust of the open internet. Both end up answering the same question for the user, "log in once and reach many services," but the substrate differs.
 
 <HistoricalNote title="The IdP Pattern Predates the Web">
-The intellectual lineage of modern federation reaches back to [Project Athena](https://en.wikipedia.org/wiki/Project_Athena) at MIT in the 1980s, where Kerberos was designed alongside the X Window System and the AFS distributed filesystem. The problem was already recognizable: thousands of workstations in dorms and labs needed to authenticate students against a central directory, and per-application password databases were not viable at that scale. Kerberos's ticket-granting model was the first widely deployed single-sign-on system in production. When Microsoft adopted it for Active Directory in Windows 2000, the protocol became the authentication backbone of essentially every enterprise on the planet. SAML, OAuth, and OIDC are, in a real sense, the same idea reworked for a different network: instead of a tightly synchronized LAN, the loose, redirect-driven world of the web.
+The intellectual lineage of modern federation reaches back to [Project Athena](https://en.wikipedia.org/wiki/Project_Athena) at MIT (1983-1991), where Kerberos was designed alongside the X Window System and the AFS distributed filesystem. The problem was already recognizable: thousands of workstations in dorms and labs needed to authenticate students against a central directory, and per-application password databases were not viable at that scale. Kerberos's ticket-granting model was the first widely deployed single-sign-on system in production. When Microsoft adopted it for Active Directory in Windows 2000, the protocol became the authentication backbone of essentially every enterprise on the planet. SAML, OAuth, and OIDC are, in a real sense, the same idea reworked for a different network: instead of a tightly synchronized LAN, the loose, redirect-driven world of the web.
 </HistoricalNote>
 
-The choice of where the IdP itself lives is its own operational decision. A SaaS IdP (Okta, Entra, Auth0, Google Workspace) hands off the operational burden but creates a hard dependency: if the IdP is unreachable, nothing in the organization can authenticate. A self-hosted IdP (Keycloak is the most common open-source option, sometimes paired with FreeIPA on Linux) keeps the system under direct control but means the operations team now runs the identity infrastructure that the rest of the company depends on. Most organizations of any size choose a SaaS IdP for human identity precisely because the operational guarantees of a vendor are stronger than what a small ops team can sustain.
+The choice of where the IdP itself lives is its own operational decision. A SaaS IdP (Okta, Entra, Auth0, Google Workspace) hands off the operational burden but creates a hard dependency: if the IdP is unreachable, new logins and token refreshes across federated applications can fail. A self-hosted IdP (Keycloak is the most common open-source option, sometimes paired with FreeIPA on Linux) keeps the system under direct control but means the operations team now runs the identity infrastructure that the rest of the company depends on. Most organizations of any size choose a SaaS IdP for human identity precisely because the operational guarantees of a vendor are stronger than what a small ops team can sustain.
 
 ## Identity and Access in Practice
 
@@ -134,7 +144,7 @@ The protocols described above are the formal vocabulary. The practical question 
 
 A first useful split is between **human identity** and **workload identity**, two genuinely distinct problems that share the same vocabulary. Human identity is what the IdP pattern was originally built for: people sign in, possibly with MFA, and receive a session that lets them reach many systems. Workload identity is the equivalent problem for software: a CI/CD job, a running container, an EC2 instance, or a microservice all need to prove to other systems who they are, but the mechanisms (and the threat models) are different. Humans authenticate intermittently, with browsers and MFA prompts; workloads authenticate constantly, with no human present, and any long-lived credential they hold is a target.
 
-The course has already built examples of both. Human-identity surfaces include the SSH key that proves you are `deploy` on a server, the IAM Identity Center sign-in that gets a console session in AWS, the `kubeconfig` file that authenticates a user to a Kubernetes cluster, and the GitHub login that authorizes a push. Workload-identity surfaces include the IMDS endpoint that issues temporary credentials to applications running on an EC2 instance, the OIDC token a GitHub Actions workflow exchanges for short-lived AWS credentials (covered in the CI/CD lecture), the projected service-account JWT mounted into a Kubernetes pod, and the mutual-TLS certificates services use to authenticate to each other inside a service mesh. The unifying pattern is short-lived, automatically-rotating, narrowly-scoped credentials issued by a trusted authority, with no long-lived secret sitting on disk.
+The course has already built examples of both. Human-identity surfaces include the SSH key that proves you are `deploy` on a server, the IAM Identity Center sign-in that gets a console session in AWS, the `kubeconfig` file that authenticates a user to a Kubernetes cluster, and the GitHub login that authorizes a push. Workload-identity surfaces include the IMDS endpoint that issues temporary credentials to applications running on an EC2 instance, the OIDC token a GitHub Actions workflow exchanges for short-lived AWS credentials (covered in the CI/CD lecture), the projected service-account JWT mounted into a Kubernetes pod, and the mTLS (mutual TLS) certificates services use to authenticate to each other inside a service mesh. The unifying pattern is short-lived, automatically-rotating, narrowly-scoped credentials issued by a trusted authority, with no long-lived secret sitting on disk.
 
 Mapped against the layers of the course, the identity surfaces line up like this:
 
@@ -149,9 +159,9 @@ Mapped against the layers of the course, the identity surfaces line up like this
 
 The takeaway from the table is not the list of acronyms but the recurrence of the same two-question structure across every layer. Once you recognize that recurrence, troubleshooting a denied request becomes a disciplined exercise: first determine which layer rejected it, then ask which of the two questions the layer was answering when it said no.
 
-**Multi-factor authentication** deserves a closer look because the practical landscape has changed quickly in the last few years. Time-based one-time passwords (TOTP), generated by an authenticator app from a shared secret and the current time, are a major improvement over passwords alone and are the operational baseline for cloud consoles and developer accounts today. They are, however, phishable: a convincing fake login page can capture both the password and the TOTP code in real time and replay them against the real service within the 30-second window. SMS-based codes are weaker still because of SIM-swap attacks, in which an attacker convinces a mobile carrier to transfer a target's phone number; SMS-based MFA has been formally discouraged by NIST since the 2017 update of [SP 800-63B](https://pages.nist.gov/800-63-3/sp800-63b.html).
+**Multi-factor authentication** deserves a closer look because the practical landscape has changed quickly in the last few years. Time-based one-time passwords (TOTP), generated by an authenticator app from a shared secret and the current time, are a major improvement over passwords alone and are the operational baseline for cloud consoles and developer accounts today. They are, however, phishable: a convincing fake login page can capture both the password and the TOTP code in real time and replay them against the real service within the 30-second window. SMS-based codes are weaker still because of SIM-swap attacks, in which an attacker convinces a mobile carrier to transfer a target's phone number; NIST [SP 800-63-4](https://pages.nist.gov/800-63-4/) restricts authenticators that rely on the public switched telephone network, including SMS-based OTPs, and its [syncable-authenticator supplement](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-63Bsup1.pdf) formally incorporates passkeys as a supported authenticator class.
 
-The current direction of travel is toward **WebAuthn** and **passkeys**, both built on the FIDO2 standards from the FIDO Alliance and the W3C. The mechanism is public-key cryptography bound to the origin: during registration, the user's authenticator (a hardware key like a YubiKey, the secure enclave on a phone, or the OS keychain on a laptop) generates a key pair specific to the site and stores the private key locally; at sign-in, the site sends a challenge, the authenticator signs it with the private key, and the site verifies the signature against the stored public key. The cryptographic binding to the legitimate origin is what makes the scheme phishing-resistant: an authenticator presented with a request from a lookalike domain will simply produce a signature that does not validate against the real site. Passkeys add synchronization across a user's devices through the operating system's keychain (iCloud Keychain, Google Password Manager) so that the user does not lose access when their primary device is replaced. The longer-term trajectory is toward eliminating passwords from primary authentication entirely.
+The current direction of travel is toward [**WebAuthn**](https://www.w3.org/TR/webauthn-3/) and passkeys, both built on the FIDO2 (Fast IDentity Online 2) standards from the FIDO Alliance and the W3C (World Wide Web Consortium). The mechanism is public-key cryptography bound to the origin: during registration, the user's authenticator (a hardware key like a YubiKey, the secure enclave on a phone, or the OS keychain on a laptop) generates a key pair specific to the site and stores the private key locally; at sign-in, the site sends a challenge, the authenticator signs it with the private key, and the site verifies the signature against the stored public key. The cryptographic binding to the legitimate origin is what makes the scheme phishing-resistant: an authenticator presented with a request from a lookalike domain will simply produce a signature that does not validate against the real site. Passkeys add synchronization across a user's devices through the operating system's keychain (iCloud Keychain, Google Password Manager) so that the user does not lose access when their primary device is replaced. The longer-term trajectory is toward eliminating passwords from primary authentication entirely.
 
 Authentication, however strong, is only half of the story. Authorization choices determine what an authenticated identity can actually do. Several models recur across the systems the course has covered. **Role-based access control (RBAC)** assigns identities to roles and grants permissions at the role level; Kubernetes RBAC, AD security groups, and AWS IAM Identity Center permission sets are all RBAC implementations. RBAC is easy to reason about and easy to audit, but it tends to drift toward over-permissioning: as organizations grow, roles accumulate permissions they no longer need, and removing a permission is harder than adding one.
 
@@ -159,60 +169,79 @@ Authentication, however strong, is only half of the story. Authorization choices
 
 **Policy-as-code** is the engineering practice of expressing authorization rules in version-controlled declarative files that a policy engine evaluates at request time. AWS IAM JSON policies are de facto policy-as-code; the [Open Policy Agent (OPA)](https://www.openpolicyagent.org/) and its Kubernetes-focused descendants Gatekeeper and Kyverno generalize the pattern to any system willing to consult an external decision point; HashiCorp Sentinel applies the same idea to Terraform runs. The benefit is reviewability: a change to an authorization rule is a pull request, with diff, history, and approval just like any other code change. The cost is the learning curve of the policy language itself.
 
-A fourth model, **relationship-based access control (ReBAC)**, has emerged from SaaS products with deeply nested collaborative resources (documents in a folder, projects under an organization, tasks assigned to a team). The [Google Zanzibar paper](https://research.google/pubs/zanzibar-googles-consistent-global-authorization-system/) from 2019 is the influential reference; [SpiceDB](https://authzed.com/spicedb) and AuthZed are open-source implementations. Permissions in ReBAC follow relationships in a graph: "Alice can edit document D because she is a member of team T, which is part of project P, which owns D." ReBAC is most useful when the natural authorization question is shaped like "does this user have any path to this resource?" rather than "does this user hold this permission directly?"
+A fourth model, **relationship-based access control (ReBAC)**, has emerged from SaaS products with deeply nested collaborative resources (documents in a folder, projects under an organization, tasks assigned to a team). The [Google Zanzibar paper](https://research.google/pubs/zanzibar-googles-consistent-global-authorization-system/) from 2019 is the influential reference; [SpiceDB](https://authzed.com/spicedb) is an open-source implementation. Permissions in ReBAC follow relationships in a graph: "Alice can edit document D because she is a member of team T, which is part of project P, which owns D." ReBAC is most useful when the natural authorization question is shaped like "does this user have any path to this resource?" rather than "does this user hold this permission directly?"
 
-The architectural endpoint of all of this, for an operator, is what is sometimes called the **IdP-centric architecture**. Humans authenticate against a single IdP, ideally with passkeys, and every application federates to it via OIDC or SAML. SCIM keeps user lifecycle synchronized so that deprovisioning is automatic. Workloads use short-lived credentials federated from a single trust root: GitHub OIDC to AWS, IMDS to AWS, projected service account tokens to Kubernetes, mTLS between services. Long-lived secrets stop being checked into repositories or stored on instances; the secret store (HashiCorp Vault, AWS Secrets Manager, Kubernetes Secrets backed by a KMS) becomes itself an identity-aware service. Identity events (sign-ins, role assumptions, permission changes) flow to centralized logs because they are the highest-value security signal an organization produces.
+The architectural endpoint of all of this, for an operator, is what is sometimes called the **IdP-centric architecture**. Humans authenticate against a single IdP, ideally with passkeys, and every application federates to it via OIDC or SAML. SCIM keeps user lifecycle synchronized so that deprovisioning is automatic. Workloads use short-lived credentials federated from a single trust root: GitHub OIDC to AWS, IMDS to AWS, projected service account tokens to Kubernetes, mTLS between services. Long-lived secrets stop being checked into repositories or stored on instances; the secret store (HashiCorp Vault, AWS Secrets Manager, Kubernetes Secrets backed by a KMS (Key Management Service)) becomes itself an identity-aware service. Identity events (sign-ins, role assumptions, permission changes) flow to centralized logs because they are the highest-value security signal an organization produces.
 
 <Aside type="note" title="Identity is the Substrate of Every Other Control">
 A perfect default-deny firewall in front of a service whose IAM role grants `s3:*` on every bucket is a serious incident waiting to happen. A perfectly hardened Linux server with a leaked deploy key is a serious incident waiting to happen. A perfectly tuned alerting stack with no audit log of who authenticated where is investigation-blind during an incident. Hardening the host, the network, and the pipeline matters; what makes those controls cohere into a defensible system is a clear identity model that humans and workloads both inherit from.
 </Aside>
 
+## Security Retrospective Across the Stack
+
+The conceptual framework established above (the CIA Triad, defense in depth, and the authentication-authorization distinction) does not exist in isolation. Every domain this course has covered carries its own security surface, one that was present in every configuration built along the way even when it was not explicitly named as a security concern. This section revisits each domain with a security lens.
+
+### Linux Hosts
+
+A freshly provisioned Ubuntu server commonly exposes SSH on port 22, runs no host firewall, and does not automatically apply every security update. Depending on the image and installer choices, password authentication may also still be enabled. None of this is a mistake; it is a reasonable baseline for initial access. The mistake is treating that baseline as acceptable for a publicly reachable machine. Password-authenticated SSH is trivially brute-forced: bots begin attempting logins within minutes of a new public IP becoming reachable. In the absence of upstream network controls, every port a service binds to is immediately reachable from the public internet. The absence of patching means every published CVE for the installed packages is a live, exploitable vulnerability on the machine.
+
+The underlying principle: a server is hardened by subtracting exposure, not by layering monitoring on top of a wide-open surface. The hardening sections that follow address each of these directly.
+
+### Networking and Cloud Infrastructure
+
+The networking lectures established routing, NAT (Network Address Translation), DNS (Domain Name System), and load balancing. Each has a corresponding attack surface. Every listening port is an entry point for automated scanners. A service bound to `0.0.0.0` (all interfaces) instead of `127.0.0.1` (loopback only) is reachable from any network path to the machine, not just the paths the operator intended.
+
+In AWS, security groups operate at the virtual network level and are distinct from the host firewall. A misconfigured security group that opens port 5432 (PostgreSQL) to the public internet is independent of whether the host firewall blocks that port. Defense in depth requires both layers because they fail independently: a security group closing a port stops traffic before the host ever receives it, while a host firewall remains effective even if the VPC (Virtual Private Cloud) routing or the security group is later misconfigured.
+
+IMDS v1 is reachable from any process on an EC2 instance without authentication. A [Server-Side Request Forgery (SSRF)](https://owasp.org/www-community/attacks/Server_Side_Request_Forgery) vulnerability in a web application is sufficient to fetch the instance's temporary AWS credentials from the metadata service. IMDSv2 substantially mitigates this by requiring a PUT request with a TTL (time-to-live) header to obtain a session token before any metadata is accessible, making the SSRF path significantly harder to exploit. It reduces the risk rather than making metadata theft impossible, because some application bugs can still let an attacker inject the headers or request shape IMDSv2 expects. New EC2 instances should enforce IMDSv2 in the launch configuration.
+
+### Containers and Images
+
+Docker images accumulate CVEs over time. An image built from a clean Ubuntu base today inherits every vulnerability disclosed in those packages after that build date if it is not rebuilt. Scanning images at build time, before pushing to a registry, catches known CVEs before they reach production. Scanning only at runtime catches them only after exposure has already occurred. The CI/CD pipeline is the right place for image scanning.
+
+Containers run as root inside the container namespace by default. Container namespaces isolate processes from the host kernel, but that isolation is not absolute: container escape vulnerabilities, privileged container configurations, and `hostPath` volume mounts can all bridge the namespace boundary. A container running as a non-root user with a read-only root filesystem and dropped Linux capabilities provides substantially fewer escalation paths if the application inside it is compromised.
+
+The Docker socket (`/var/run/docker.sock`) deserves particular attention. A container with access to the Docker socket can spawn new containers, including privileged ones, giving it effective root access to the host. This is a common pattern for CI runners and monitoring agents and should be treated as an explicit trust grant, not a convenience default.
+
+### Infrastructure as Code
+
+Terraform state files record the full resolved configuration of every managed resource, including values passed as sensitive inputs. A state file stored in an S3 bucket without access restrictions or encryption at rest contains plaintext database passwords, TLS private keys, and API tokens. Backend state should be encrypted and accessible only to the IAM role that executes Terraform.
+
+The wider IaC secrets problem is that the path of least resistance when writing a module is to put a secret in a variable and pass it as input. Pre-commit hooks that scan for secrets before a commit reaches the remote catch accidental inclusions early. The durable answer is that secrets should not appear in IaC inputs at all: they should be fetched at runtime from a secrets manager, which the Secrets Management section below addresses.
+
+### CI/CD Pipelines
+
+The CI/CD pipeline has write access to production. Compromising it achieves more than compromising a single server, because the attacker gains access to the build, the artifact store, and the deployment credentials simultaneously.
+
+Supply chain attacks target the inputs to a build: a malicious package in a dependency graph, a compromised GitHub Action, or a workflow that runs arbitrary code from an untrusted pull request. The [SolarWinds compromise in 2020](https://www.cisa.gov/eviction-strategies-tool/dialog-content/TMPL0002) attacked the build system itself; the [xz utils backdoor discovered in 2024](https://en.wikipedia.org/wiki/XZ_Utils_backdoor) was inserted into a widely distributed compression library over an extended period by a contributor who had earned commit access through sustained engagement with the project. SCA (Software Composition Analysis) tools that flag dependency changes and workflows that pin actions to specific commit SHAs (Secure Hash Algorithms) reduce but do not eliminate this risk.
+
+Before GitHub Actions OIDC federation became available, the standard practice was to store a long-lived cloud provider access key in repository secrets. That key was valid indefinitely. OIDC federation replaces the long-lived key: the workflow proves its identity via a signed JWT issued by GitHub, the cloud provider issues short-lived temporary credentials scoped to that specific run, and the credentials expire when the job ends. The CI/CD lecture covered this pattern; the security lens makes explicit why the long-lived key model is a liability regardless of how carefully the key is rotated.
+
+### Observability and Incident Response
+
+The monitoring, log management, and incident response lectures built the operational visibility layer. Security visibility is a distinct concern from operational visibility. CPU and memory metrics tell you whether the system is healthy. Auth logs tell you who authenticated, from where, and when. Sudo event logs tell you who escalated privileges and what they ran. API server audit logs tell you who read or modified Kubernetes resources and from which IP.
+
+An attacker who gains access generates events in exactly these logs. Without collecting and retaining them, investigation is blind: you can see that something is wrong but not what happened, when it started, or how far it spread. Cloud provider audit trails such as AWS CloudTrail and Linux auth logs should be treated as write-once forensic evidence sent to a destination the attacker cannot reach. An attacker who can delete your audit logs can erase the evidence of their own access.
+
 ## Principle of Least Privilege
 
-The principle of least privilege states that every user, process, and program should operate with the minimum set of permissions necessary to complete its task. On a Linux server, this principle shows up in three places: user accounts, file permissions, and sudo access.
+The principle of least privilege states that every user, process, and program should operate with the minimum set of permissions necessary to complete its task. On a Linux server, this principle shows up in three interconnected places: user accounts, file permissions, and sudo access.
 
-Your server should never run application workloads as root. Instead, create a dedicated non-root user for administration:
+**User accounts.** Running application workloads as root is the most common way least privilege gets violated. Root is the identity with the broadest access the kernel normally allows: it can bypass ordinary file-permission checks, change system configuration, and control other processes. A compromised application running as root can usually take over the whole host. The fix is simple in concept and easy to overlook in practice: each long-running service should run under a dedicated, low-privilege account whenever possible. A web server might run as `www-data`, a database as `postgres`, and a deployment account as `deploy`. If that process is compromised, the attacker inherits that account's permissions rather than immediate full control of the machine.
 
-```bash
-sudo adduser deploy
-sudo usermod -aG sudo deploy
-```
+**File permissions.** Basic Unix file permissions encode the principle directly: every file and directory carries an owner, a group, and a permission mode for three audiences (owner, group, and everyone else). A configuration file that contains credentials has no business being world-readable. A common posture is to own it as root, assign it to the application's dedicated user or group, and restrict read access to only that identity. This way the application process can read its own configuration, human administrators with sudo can inspect it, and unrelated users cannot read it casually. An overly permissive configuration file is a common path from a low-privilege compromise to credential exposure.
 
-Sensitive configuration files should be readable only by the accounts that need them. If you find a config file that is world-readable and contains credentials, tighten it:
-
-```bash
-sudo chmod 640 /etc/myapp/config.yml
-sudo chown root:myapp /etc/myapp/config.yml
-```
-
-The `sudo` tool grants temporary elevated privileges. You can refine access in `/etc/sudoers` (always edited with `visudo`) to restrict specific users to specific commands:
-
-```bash
-# Allow deploy to restart nginx without a password prompt
-deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
-```
-
-<Aside type="caution">
-Never edit `/etc/sudoers` directly with a text editor. A syntax error in that file can lock you out of sudo entirely. Always use `visudo`, which validates the file before saving.
-</Aside>
+**Sudo access.** The `sudo` tool grants temporary elevated privileges, but on Ubuntu the default `sudo` group is a broad grant: it typically allows the user to run almost any command as root, and often as another user as well, after authenticating. The sudo policy lives in `/etc/sudoers` and optional drop-in files under `/etc/sudoers.d/`; these should be edited through `visudo`, which validates syntax before saving. An account that only needs to restart a web server can be granted exactly that permission and nothing else. A syntax error in a sudoers rule can lock administrators out of elevated access, which is why `visudo` exists: it refuses to install a broken policy. The principle applies to sudo the same way it applies everywhere else: grant the minimum scope the job actually requires.
 
 ### Kernel-Level Access Controls: AppArmor and SELinux
 
 Beyond user-level permissions, the Linux kernel offers Mandatory Access Control (MAC) frameworks that constrain what individual programs can do, regardless of which user runs them.
 
-**AppArmor** (the default on Ubuntu) defines per-application profiles that specify which files, capabilities, and network operations a program is permitted to use. If a web server is compromised, an AppArmor profile can prevent it from reading `/etc/shadow` or spawning a shell, even though the process itself might have a path to those actions.
+[**AppArmor**](https://www.apparmor.net/) (the default on Ubuntu) defines per-application profiles that specify which files, capabilities, and network operations a program is permitted to use. If a web server is compromised, an AppArmor profile can prevent it from reading `/etc/shadow` or spawning a shell, even though the process itself might have a path to those actions.
 
-**SELinux** (the default on Red Hat-based distributions such as RHEL, CentOS, and Fedora) provides finer-grained control through security labels on every file, process, and socket. SELinux is more powerful but significantly more complex to configure.
+[**SELinux**](https://www.redhat.com/en/topics/linux/what-is-selinux) (the default on Red Hat-based distributions such as RHEL, CentOS, and Fedora) provides finer-grained control through security labels on every file, process, and socket. SELinux is more powerful but significantly more complex to configure.
 
 The key difference in practice: AppArmor is path-based and relatively straightforward to manage; SELinux is label-based and suitable for environments with strict regulatory requirements. AppArmor is the practical starting point for Ubuntu servers.
-
-```bash
-# Check AppArmor status
-sudo aa-status
-
-# Enforce a specific profile
-sudo aa-enforce /etc/apparmor.d/usr.sbin.nginx
-```
 
 ## SSH Hardening
 
@@ -220,14 +249,9 @@ SSH is the primary way you will manage your server, which makes it both essentia
 
 ### Key-Based Authentication
 
-Password authentication over SSH is vulnerable to brute-force attacks. Key-based authentication eliminates this vector entirely. On your local machine, generate a key pair and copy it to the server:
+Password authentication over SSH is vulnerable to brute-force attacks because an attacker who can reach the port can attempt passwords indefinitely (or until Fail2Ban intervenes). Key-based authentication eliminates that vector entirely: the server stores only a public key, which is mathematically useless to an attacker without the corresponding private key, which never leaves the client machine.
 
-```bash
-ssh-keygen -t ed25519 -C "yourname@example.com"
-ssh-copy-id deploy@your-server-ip
-```
-
-Verify that you can log in with the key before proceeding. If you disable password authentication before confirming key access, you will lock yourself out.
+The `ssh-keygen` command generates a key pair. The Ed25519 algorithm is the current recommended choice: it uses smaller keys than comparable RSA deployments, verifies quickly, and was designed to be easier to implement safely than older public-key schemes. The `ssh-copy-id` utility appends the public key to `~/.ssh/authorized_keys` on the server. Before disabling password authentication, confirm that a key-based login succeeds. Once password auth is disabled, a configuration error that prevents key auth from working will lock the account out entirely.
 
 <HistoricalNote title="SSH Was Written After a Password Sniffing Attack (1995)">
 SSH was written by Tatu Ylönen, a researcher at Helsinki University of Technology, in 1995, not out of academic interest but because his own accounts had just been compromised. A password-sniffing attack swept through the university network, capturing credentials transmitted in plaintext by telnet and rlogin, the standard remote login protocols at the time. Ylönen wrote the first version of SSH in a few months and released it for free in July 1995. It spread to tens of thousands of hosts within weeks. He founded SSH Communications Security to commercialize the protocol. When the company's licensing became restrictive in 1999, the OpenBSD project rewrote the entire codebase from scratch as OpenSSH, the version that ships with virtually every Linux and macOS system today. The protocol that secures billions of server connections worldwide was born entirely from one researcher getting hacked.
@@ -235,7 +259,7 @@ SSH was written by Tatu Ylönen, a researcher at Helsinki University of Technolo
 
 ### Hardening sshd_config
 
-Once key-based login works, edit `/etc/ssh/sshd_config` on the server and set the following directives:
+With key-based authentication working, `/etc/ssh/sshd_config` controls which authentication methods and users the daemon accepts. The most important directives for a public server:
 
 ```text
 PasswordAuthentication no
@@ -244,29 +268,17 @@ PubkeyAuthentication yes
 AllowUsers deploy
 ```
 
-The `AllowUsers` directive limits SSH access to a specific list of usernames. Even if another account has a valid shell and key, SSH will reject the connection if that user is not listed.
+`PasswordAuthentication no` closes the brute-force vector entirely. `PermitRootLogin no` means that even if an attacker guesses the root password (or finds a credential somewhere), they cannot log in directly as root; they must first compromise a non-privileged account and then escalate. The `AllowUsers` directive is a second layer: it restricts SSH access to a named list of accounts, so even a valid shell account that is not on the list will be rejected at the SSH layer before PAM is consulted.
 
-You may also consider changing the SSH port from 22 to a high-numbered port (e.g., 2222). This does not provide real security against a determined attacker, but it dramatically reduces log noise from automated scanners:
+Port-knocking and changing the SSH port from 22 to a high-numbered port do not provide meaningful security against a targeted attacker (any competent port scan finds the service), but they dramatically reduce log noise from automated scanners that probe only the standard ports. The tradeoff is operational friction: every client and every firewall rule must reference the custom port.
 
-```text
-Port 2222
-```
-
-<Aside type="tip">
-If you change the SSH port, update your firewall rules before restarting the SSH service. Otherwise you will be locked out.
-</Aside>
-
-After making changes, restart the SSH daemon and test from a second terminal before closing your current session:
-
-```bash
-sudo systemctl restart sshd
-```
+Changes to `sshd_config` take effect only after the daemon restarts, which immediately drops the ability to make new connections under the old settings. Always test a new session with the updated configuration before terminating the current one.
 
 ## Firewall Configuration with UFW
 
-A firewall controls which network traffic is allowed to reach your server and which is silently dropped. Ubuntu ships with `ufw` (Uncomplicated Firewall), a user-friendly frontend for the underlying `iptables`/`nftables` rules.
+A firewall controls which network traffic is allowed to reach your server and which is silently dropped. Ubuntu ships with `ufw` ([UncomplicatedFirewall](https://wiki.ubuntu.com/UncomplicatedFirewall)), a user-friendly frontend for the underlying `iptables`/`nftables` rules.
 
-The most important firewall principle is "default deny." Start by blocking all incoming traffic and allowing all outgoing traffic, then open only the ports your server actually needs:
+The most important firewall principle is "default deny": block all incoming traffic, allow all outgoing, then explicitly open only the ports the server needs. UFW translates that principle into a simple command sequence:
 
 ```bash
 sudo ufw default deny incoming
@@ -274,45 +286,16 @@ sudo ufw default allow outgoing
 sudo ufw allow 22/tcp
 sudo ufw allow 80/tcp
 sudo ufw allow 443/tcp
-```
-
-UFW includes a built-in rate limiting feature that temporarily blocks IP addresses making too many connections in a short period. This is especially useful for SSH:
-
-```bash
-sudo ufw limit 22/tcp
-```
-
-The `limit` rule allows six connection attempts within a 30-second window, then blocks the source IP. Enable the firewall and review:
-
-```bash
 sudo ufw enable
-sudo ufw status verbose
 ```
 
-You should see output similar to:
+UFW also provides a built-in rate-limiting rule (`ufw limit 22/tcp`) that blocks a source IP after six connection attempts within thirty seconds. This is a shallow version of what Fail2Ban provides: Fail2Ban tracks failed authentications in application logs and applies configurable thresholds, while the UFW limit rule tracks raw connection attempts at the network layer regardless of whether they result in a login attempt. Both are useful; they protect against different points in the attack sequence.
 
-```text
-Status: active
-Default: deny (incoming), allow (outgoing), disabled (routed)
+`ufw status verbose` shows the current rule set. `ss -tlnp` (or `nmap -Pn` from another machine) shows which ports are actually listening; the combination of "what UFW allows in" and "what is listening" should match exactly what the threat model expects to be publicly reachable.
 
-To                         Action      From
---                         ------      ----
-22/tcp                     LIMIT IN    Anywhere
-80/tcp                     ALLOW IN    Anywhere
-443/tcp                    ALLOW IN    Anywhere
-```
-
-<Aside type="caution">
-Always confirm that your SSH port is allowed before enabling UFW. If you enable the firewall without an SSH allow rule, you will lose remote access to the server.
+<Aside type="caution" title="Enable the firewall only after allowing SSH">
+Enabling UFW without an SSH allow rule in place will immediately cut off remote access to the server. Verify the rule set with `ufw status` before running `ufw enable`.
 </Aside>
-
-You can verify the firewall from another machine:
-
-```bash
-nmap -Pn your-server-ip
-```
-
-Only the ports you explicitly allowed should appear as open.
 
 ## Keeping Software Updated
 
@@ -349,64 +332,123 @@ Automatic reboots should be used carefully on production servers. Consider wheth
 
 ## Fail2Ban: Brute-Force Protection
 
-Even with key-based SSH authentication, your server will still receive thousands of failed login attempts that fill your logs and consume resources. Fail2Ban monitors log files for patterns of repeated failures and temporarily bans offending IP addresses by adding firewall rules.
+Even with key-based SSH authentication, a server will receive thousands of failed login attempts. These attempts fill logs and consume resources even when they cannot succeed. Fail2Ban monitors log files for repeated-failure patterns and temporarily bans offending IP addresses by writing firewall rules.
 
-```bash
-sudo apt install -y fail2ban
-sudo systemctl enable --now fail2ban
-```
+The configuration model uses three concepts: a **filter** defines the log pattern that identifies a failure (for SSH, a failed authentication line in `/var/log/auth.log`); a **jail** pairs a filter with an action and threshold (five failures within ten minutes); an **action** defines what happens when the threshold is crossed (in most configurations, adding a UFW block rule for the offending IP for one hour). The main configuration file should not be edited directly, because package updates overwrite it. Local overrides go in `/etc/fail2ban/jail.local`, which Fail2Ban merges with the package defaults.
 
-The main configuration file, `jail.conf`, should not be edited directly because package updates will overwrite it. Instead, create a local override file at `/etc/fail2ban/jail.local`:
-
-```ini
-[sshd]
-enabled  = true
-port     = ssh
-filter   = sshd
-backend  = systemd
-maxretry = 5
-findtime = 600
-bantime  = 3600
-banaction = ufw
-```
-
-This tells Fail2Ban to watch for failed SSH logins. If the same IP fails five times within 600 seconds (10 minutes), it will be banned for 3600 seconds (one hour) via a UFW rule. After saving, restart the service:
-
-```bash
-sudo systemctl restart fail2ban
-```
-
-You can check the status of any jail and see currently banned IPs:
-
-```bash
-sudo fail2ban-client status sshd
-```
-
-```text
-Status for the jail: sshd
-|- Filter
-|  |- Currently failed: 2
-|  |- Total failed:     847
-|  `- File list:        /var/log/auth.log
-`- Actions
-   |- Currently banned: 3
-   |- Total banned:     41
-   `- Banned IP list:   203.0.113.50 198.51.100.23 192.0.2.17
-```
-
-To manually unban an IP (if you accidentally triggered a ban from your own location):
-
-```bash
-sudo fail2ban-client set sshd unbanip 203.0.113.50
-```
+Fail2Ban is an effective response to automated scanners and brute-force bots. It is not a defense against a determined attacker with access to many IP addresses: a distributed brute-force campaign simply rotates source IPs faster than the ban list can grow. The right mental model is that Fail2Ban reduces log noise and eliminates low-effort automated threats; it complements key-based auth rather than substituting for it. It ships with filters for Nginx, Apache, Postfix, and many other services, so the same jail-and-action model extends beyond SSH to any service that produces structured failure logs.
 
 <Aside type="tip">
 Fail2Ban is not limited to SSH. It ships with filters for Apache, Nginx, Postfix, and many other services. Once you are comfortable with the SSH jail, consider enabling jails for other public-facing services.
 </Aside>
 
+## Kubernetes Security
+
+A default Kubernetes cluster is not a secure cluster. The API server is reachable from every pod in the cluster by default. All pods share a flat network where traffic flows freely across namespace boundaries unless explicitly restricted. Pods run as root inside the container namespace unless a security context specifies otherwise. RBAC exists but, outside the `kube-system` namespace, the `default` service account gets only minimal API-discovery permissions by default; the security problems in real clusters arise from what operators grant when moving quickly. This section covers the four primary hardening surfaces.
+
+### The RBAC Model in Detail
+
+The container orchestration lecture introduced RBAC at the level of "roles control what a service account can do." The full model uses four object types that are easy to confuse. A **Role** defines permitted operations (API groups, resources, and verbs: get, list, watch, create, update, delete) within a single namespace. A **ClusterRole** defines the same set of permissions but applies cluster-wide, covering cluster-scoped resources such as nodes, PersistentVolumes, and namespaces themselves. A **RoleBinding** attaches a Role or ClusterRole to a subject (a user, group, or ServiceAccount) within one namespace. A **ClusterRoleBinding** attaches a ClusterRole to a subject across the entire cluster.
+
+```mermaid
+flowchart LR
+    subgraph NS["Namespace-scoped"]
+        Role["Role\nverbs on resources within one namespace"]
+        RB["RoleBinding\nattaches Role or ClusterRole to Subject\nwithin one namespace"]
+    end
+    subgraph CS["Cluster-scoped"]
+        CR["ClusterRole\nverbs on resources cluster-wide"]
+        CRB["ClusterRoleBinding\nattaches ClusterRole to Subject\nacross all namespaces"]
+    end
+    Subject["Subject\nUser / Group / ServiceAccount"]
+
+    RB -- references --> Role
+    RB -. "can also reference\n(namespace access only)" .-> CR
+    CRB -- references --> CR
+    RB -- "binds to" --> Subject
+    CRB -- "binds to" --> Subject
+```
+
+The distinction has a practical consequence: a ClusterRoleBinding granting the built-in `cluster-admin` ClusterRole gives the bound subject root-equivalent access across every namespace. That level of access is necessary for almost no production workload. Most application service accounts need only namespace-scoped permissions, so a RoleBinding referencing a narrowly defined Role is both sufficient and safer. To audit what a service account can actually do at runtime:
+
+```bash
+kubectl auth can-i list secrets \
+  --namespace production \
+  --as system:serviceaccount:production:my-app
+```
+
+Namespaces are organizational boundaries, not security boundaries. A pod in namespace A can make network requests to a pod in namespace B without restriction unless NetworkPolicy says otherwise. Cluster-scoped resources (nodes, ClusterRoles, PersistentVolumes) are visible and, if poorly bound, modifiable from any namespace. Running workloads for genuinely untrusting tenants on the same cluster requires substantially more than namespace separation: separate node pools, separate clusters, or a hypervisor-level isolation layer such as Kata Containers.
+
+### Admission Controllers and Policy Enforcement
+
+Admission controllers are the gatekeeping layer between "a resource was submitted to the API server" and "the resource is written to etcd (the distributed key-value store that is Kubernetes' database)." After authentication succeeds and RBAC permits the operation, admission controllers inspect or modify the resource. Two categories matter for security.
+
+**Validating admission webhooks** call an external HTTPS endpoint with the incoming resource manifest and accept or reject it based on the response. This is the mechanism behind policy engines. Projects such as [OPA Gatekeeper](https://open-policy-agent.github.io/gatekeeper/) and [Kyverno](https://kyverno.io/) are common examples. OPA Gatekeeper uses the Rego policy language; Kyverno uses a Kubernetes-native YAML syntax that is more approachable for teams already fluent in writing Kubernetes manifests. Typical policies block containers running as root, require images from an approved registry, or mandate that every pod specifies resource limits.
+
+**Mutating admission webhooks** modify resources before they are written to storage. Service meshes such as Istio and Linkerd use mutating webhooks to inject sidecar proxy containers automatically. Security tooling uses them to set secure defaults (non-root user, read-only root filesystem, dropped capabilities) on pods that do not specify a security context.
+
+The built-in [Pod Security admission controller](https://kubernetes.io/docs/concepts/security/pod-security-admission/), which enforces the [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/), has been stable since Kubernetes 1.25, the same release that removed the older PodSecurityPolicy mechanism. The `privileged` profile imposes no restrictions. The `baseline` profile blocks the most dangerous configurations: host namespace sharing, privileged containers, and dangerous host path mounts. The `restricted` profile requires non-root execution, disallows privilege escalation, and requires tighter seccomp and capability settings:
+
+```bash
+kubectl label namespace production \
+  pod-security.kubernetes.io/enforce=restricted
+```
+
+Third-party policy engines complement the built-in controller when policies need to be more expressive: matching on image digests, enforcing organization-specific naming conventions, or applying rules that span multiple related resources.
+
+### NetworkPolicy and Pod-to-Pod Segmentation
+
+Kubernetes accepts [NetworkPolicy](https://kubernetes.io/docs/concepts/services-networking/network-policies/) objects regardless of whether the installed CNI (Container Network Interface) plugin actually enforces them. If the CNI does not support NetworkPolicy, the objects exist in the API server and are silently ignored: traffic flows freely even though policies appear to be in place. Calico, Cilium, and Antrea enforce NetworkPolicy; the built-in `kubenet` fallback does not. Verify CNI support before relying on NetworkPolicy for any security boundary.
+
+Without any NetworkPolicy, the default behavior is to allow all pod-to-pod and pod-to-internet traffic in both directions. A default-deny policy for a namespace blocks everything and requires explicit allow rules per service:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: production
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+```
+
+The empty `podSelector` matches all pods in the namespace. Individual services then layer in specific allow rules on top. [Cilium](https://docs.cilium.io/en/stable/security/policy/) also adds `CiliumNetworkPolicy` and `CiliumClusterwideNetworkPolicy` resources for Layer 7 HTTP and DNS-aware rules. Its L3/L4 datapath and much of its observability rely on eBPF (extended Berkeley Packet Filter), and Hubble exposes that flow visibility to operators.
+
+### Secrets Encryption at Rest
+
+Kubernetes Secrets are base64-encoded by default, not encrypted. Base64 is an encoding scheme, not encryption: anyone with direct etcd access can decode any Secret trivially. The confirmation is a single command: `kubectl get secret my-secret -o jsonpath='{.data.password}' | base64 --decode` returns the plaintext. This is by design and documented; the expectation is that access to etcd itself is restricted.
+
+Encrypting Secrets at rest requires configuring the API server with an `EncryptionConfiguration` manifest. The recommended approach uses the [KMS v2 provider](https://kubernetes.io/docs/tasks/administer-cluster/kms-provider/) (stable since Kubernetes 1.29), which implements envelope encryption: a fresh DEK (data encryption key) encrypts each write, and that DEK is itself encrypted by a KEK (key encryption key) stored in an external KMS such as AWS KMS, GCP Cloud KMS, or HashiCorp Vault's Transit engine. The plaintext DEK is never written to disk. A stolen etcd backup is unreadable without access to the external key store.
+
+```mermaid
+flowchart TD
+    subgraph KMS["External KMS (AWS KMS / GCP Cloud KMS / Vault Transit)"]
+        KEK["KEK - key encryption key\nnever leaves the KMS"]
+    end
+    Plain["Plaintext Secret"]
+    DEK["DEK - data encryption key\nrandom · unique per Secret · ephemeral in API server memory"]
+    Cipher["Ciphertext\nSecret data encrypted with DEK"]
+    EncDEK["Encrypted DEK\nDEK encrypted with KEK"]
+    ETCD[("etcd\nboth stored here together")]
+
+    KEK -->|encrypts| DEK
+    Plain -->|"DEK encrypts plaintext"| Cipher
+    DEK -. "used to encrypt" .-> Cipher
+    DEK -->|"encrypted by KEK"| EncDEK
+    Cipher -->|stored| ETCD
+    EncDEK -->|stored| ETCD
+```
+
+Managed Kubernetes offerings (EKS, GKE, AKS) can enable etcd encryption as a cluster configuration option. On self-managed clusters, it requires explicit API server flags and a tested key-rotation procedure: rotating the KEK without re-encrypting the DEKs leaves old data encrypted under the old key.
+
+Even with at-rest encryption, the RBAC question remains: which service accounts can `get` or `list` Secrets in the namespace? Encryption at rest protects against etcd storage compromise. It does not protect against an overly permissive RoleBinding that allows any pod in the namespace to read every Secret. Both controls are necessary.
+
 ## Zero Trust: Never Trust, Always Verify
 
-Traditional network security assumed that everything inside the corporate perimeter was safe. The **Zero Trust** model rejects that assumption entirely: it treats every request as if it originates from an untrusted network, regardless of whether it comes from inside or outside the firewall.
+Every hardening step covered so far has operated on one implicit assumption: that you can draw a boundary around a trusted zone and protect what is inside it. That assumption breaks whenever an attacker gets past the perimeter, whether by compromising a server, stealing a credential, or exploiting a misconfigured service. **Zero Trust** is the architectural model built on rejecting that assumption: it treats every request as if it originates from an untrusted network, regardless of whether it comes from inside or outside the firewall.
 
 Zero Trust is built on three principles:
 
@@ -415,21 +457,26 @@ Zero Trust is built on three principles:
 3. **Assume breach.** Segment networks and workloads to minimize the blast radius of any compromise. Enforce end-to-end encryption and use analytics to detect lateral movement early.
 
 <Aside type="note">
-Zero Trust is not a single product; it is an architectural philosophy. It is now mandated for US federal agencies under White House memorandum M-22-09, and it underpins modern identity platforms like Microsoft Entra ID and Google BeyondCorp.
+Zero Trust is not a single product; it is an architectural philosophy. It is now required for US federal executive agencies under [White House memorandum M-22-09](https://www.whitehouse.gov/wp-content/uploads/2022/01/M-22-09.pdf), and it underpins modern identity platforms like Microsoft Entra ID, [Google BeyondCorp](https://research.google/pubs/beyondcorp-a-new-approach-to-enterprise-security/), or [Twingate](https://www.twingate.com/).
 </Aside>
 
-## Secrets Management with HashiCorp Vault
+## Secrets Management
 
-SSH keys, API tokens, database passwords, and TLS certificates are all secrets that need protection beyond what a configuration file or environment variable can provide. **HashiCorp Vault** is an open-source tool for centralized secrets management.
+Every layer of the stack the course has built produces secrets: SSH private keys, IAM access keys, database passwords, TLS certificates, API tokens. These secrets share a common failure mode: they end up in places they should not be. A database password in a `.env` file checked into version control. An AWS access key hardcoded in a Terraform template. A Kubernetes Secret with base64 encoding that anyone with namespace access can read. A production credential that was valid for three years because nobody rotated it and nobody knew where it was used.
 
-Vault's key capabilities include:
+The security principle that addresses this is not "store secrets more carefully" but "minimize the lifetime and blast radius of any credential." A secret that expires in thirty minutes and is only valid for one specific operation is not worth stealing. A secret that was valid for three years and grants broad permissions is a catastrophic breach waiting to happen.
 
-- **Secret engines** that store and serve different types of secrets (key/value pairs, PKI certificates, cloud provider credentials, etc.).
-- **Dynamic secrets** that are generated on demand and automatically expire: a database credential that exists for only 30 minutes dramatically reduces the window of exposure if it is leaked.
-- **Fine-grained policies** that determine which applications and identities can access which secrets.
-- **Audit logging** of every secret access event.
+[**HashiCorp Vault**](https://developer.hashicorp.com/vault/docs) is the most widely deployed open-source tool for secrets management. Its architecture is built around the idea that applications should not hold secrets statically: they should request credentials at startup, use them for a bounded time, and let them expire. Vault provides this through several mechanisms.
 
-For system administrators, Vault is the answer to the question: "where do I store the production database password so that the application can read it, but it is not hard-coded in a config file or visible in the repository?"
+**Static key-value secrets** are the simplest case: Vault stores a secret and returns it on request to an authenticated caller. This replaces a secrets-in-environment-variables approach with an authenticated API call, adding audit logging and fine-grained access control without changing the fundamental pattern.
+
+**Dynamic secrets** are the more powerful capability. Instead of storing a static database password, Vault generates a unique database credential on demand (a short-lived username and password created in the database itself), issues it to the requesting application, and automatically revokes it when the TTL expires. The credential that exists for thirty minutes is nearly worthless to an attacker who captures it: by the time they attempt to use it, it is already gone. Dynamic secrets are available for PostgreSQL, MySQL, AWS IAM, and many other backends.
+
+**PKI (Public Key Infrastructure) secrets** let Vault act as an internal certificate authority, issuing short-lived TLS certificates to services. Combined with service mesh mTLS, this is the mechanism behind "every service proves its identity with a certificate that expires in 24 hours" rather than "every service carries a long-lived certificate installed manually."
+
+The course has already encountered Vault's identity integration. The IaC security concern (secrets in Terraform state) is addressed by configuring the database or cloud provider backend directly in Vault and having Terraform fetch dynamic credentials at plan time. The CI/CD OIDC federation pattern (GitHub workflow exchanging a JWT for short-lived AWS credentials) is the same envelope pattern as Vault's AWS secrets engine, both implementing the principle that workloads should authenticate to obtain credentials rather than carry credentials.
+
+AWS Secrets Manager and GCP Secret Manager provide managed versions of the static key-value use case with automatic rotation and IAM-controlled access, without the operational overhead of running Vault. For most teams starting out, a managed secrets service is the practical first step; Vault becomes worthwhile when dynamic secrets, custom policies, or a multi-cloud deployment model are required.
 
 ## Staying Current on Vulnerabilities
 
@@ -437,10 +484,10 @@ Hardening a server is not a one-time event. New vulnerabilities are disclosed co
 
 Authoritative sources for tracking security vulnerabilities:
 
-- **NVD (National Vulnerability Database)** at [nvd.nist.gov](https://nvd.nist.gov/): the US government's catalog of known CVEs, with severity scores (CVSS, Common Vulnerability Scoring System, a 0-10 numeric scale rating vulnerability severity).
-- **CVE (Common Vulnerabilities and Exposures)** at [cve.org](https://www.cve.org/): the canonical identifier system for publicly known vulnerabilities.
-- **SecLists.Org** at [seclists.org](https://seclists.org/): an archive of security mailing lists.
-- **Vendor security advisories**: Ubuntu Security Notices (USN), Red Hat Security Advisories (RHSA), and similar feeds from your OS and software vendors.
+- [**NVD (National Vulnerability Database)**](https://nvd.nist.gov/): the US government's catalog of known CVEs, with severity scores (CVSS, Common Vulnerability Scoring System, a 0-10 numeric scale rating vulnerability severity).
+- [**CVE (Common Vulnerabilities and Exposures)**](https://www.cve.org/): the canonical identifier system for publicly known vulnerabilities.
+- [**SecLists.Org**](https://seclists.org/): an archive of security mailing lists.
+- **Vendor security advisories**: [Ubuntu Security Notices (USN)](https://ubuntu.com/security/notices), Red Hat Security Advisories (RHSA), and similar feeds from your OS and software vendors.
 - **Security blogs** such as Krebs on Security and the SANS Internet Storm Center for news and analysis.
 
 <Aside type="tip">
@@ -461,13 +508,15 @@ sha256sum /usr/bin/sshd /etc/ssh/sshd_config > /root/baseline.sha256
 sha256sum -c /root/baseline.sha256
 ```
 
-For production environments, tools like `AIDE` (Advanced Intrusion Detection Environment) automate this across the entire filesystem with nightly checks and email reports.
+For production environments, tools like [`AIDE`](https://aide.github.io/) (Advanced Intrusion Detection Environment) automate this across the entire filesystem with nightly checks and email reports.
 
 Linux logs are your audit trail. The most relevant logs for security monitoring are `/var/log/auth.log` (authentication events), `/var/log/syslog` (general system messages), and the systemd journal. A few useful commands:
 
+On Debian and Ubuntu, the OpenSSH service unit is usually named `ssh`; on many Red Hat-family systems it is `sshd`.
+
 ```bash
 # Recent failed SSH login attempts
-journalctl -u sshd --since "1 hour ago" | grep "Failed"
+journalctl -u ssh --since "1 hour ago" | grep "Failed"
 
 # Sudo commands executed today
 journalctl _COMM=sudo --since today
@@ -492,7 +541,7 @@ No technology, policy, or security control is more important than having a worki
 Cloud sync services (Dropbox, Google Drive) and version control (Git) are not backups. They are useful tools, but a ransomware infection that encrypts your files can propagate through a sync client and overwrite cloud copies within minutes. Proper off-site backups are a separate, purpose-built system.
 </Aside>
 
-On Linux, `rsync` remains a widely-used tool for scripted backups:
+On Linux, [`rsync`](https://rsync.samba.org/) remains a widely-used tool for scripted backups:
 
 ```bash
 # Incremental backup with compression to a remote server
@@ -501,53 +550,29 @@ rsync -avzh /var/data/ backup-server:/backups/$(date +%F)/
 
 Pair this with a cron job for automation, and store snapshots far enough back to detect a slow-moving infection before all clean copies are overwritten.
 
-## DevSecOps: Integrating Security into the Pipeline
+## DevSecOps: Security in the Pipeline
 
-**DevSecOps** extends the DevOps philosophy by integrating security practices at every stage of the development and operations lifecycle rather than treating security as a final gate before deployment. The guiding concept is **Shift-Left Security**: move security checks earlier in the process, where fixes are cheaper and faster.
+**DevSecOps** extends the DevOps philosophy by treating security as a continuous practice embedded in the pipeline, not a gate applied at the end before deployment. The core insight is economic: the cost of finding a vulnerability grows significantly as it moves further through the delivery process. A secret caught by a pre-commit hook costs five seconds to fix. The same secret caught in a production security audit costs hours of incident response, mandatory rotation of all potentially exposed credentials, and possible breach notification. The principle "shift security left" means running security checks as early in the process as possible, where the developer who introduced the issue is still the person looking at the code.
 
-DevSecOps tools organized by pipeline stage:
+The CI/CD lecture built a pipeline that validates and deploys code automatically. The same automation infrastructure supports security checks at every stage. At the pre-commit stage, tools such as [TruffleHog](https://github.com/trufflesecurity/trufflehog) scan outgoing changesets for secrets before they reach the remote. This is the most valuable single DevSecOps investment: once a secret is in version history, every clone of the repository has a copy, and removing it requires rewriting history.
 
-**Pre-Commit Hooks** run before code is even committed to a repository. Tools like [Talisman](https://github.com/thoughtworks/talisman) and [TruffleHog](https://github.com/trufflesecurity/trufflehog) scan outgoing changesets for secrets (tokens, passwords, private keys) that should not enter version control.
+After code reaches the repository, SCA (Software Composition Analysis) tools scan the dependency graph for known CVEs. [Dependabot](https://github.com/dependabot) (built into GitHub) and [Snyk](https://snyk.io/) both provide this automatically on push, alerting on packages with known vulnerabilities and optionally opening pull requests to update them. The attack surface of most applications is dominated by its dependencies; a project with dozens of third-party libraries has dozens of attack surfaces that require no code from the developer to be exploited.
 
-**Software Composition Analysis (SCA)** identifies known vulnerabilities in open-source dependencies. Tools include [Dependabot](https://github.com/dependabot) (built into GitHub) and [Snyk](https://snyk.io/product/open-source-security-management/). SCA runs automatically on every push.
+SAST (Static Application Security Testing) analyzes source code without executing it, looking for patterns that indicate injection vulnerabilities, insecure API usage, hardcoded credentials, or dangerous function calls. [Bandit](https://github.com/PyCQA/bandit) is a Python-specific example; [SonarQube](https://www.sonarsource.com/products/sonarqube/) covers multiple languages. SAST produces false positives and requires tuning, but it is the right tool for catching classes of vulnerability that code review misses under time pressure.
 
-**Static Application Security Testing (SAST)** analyzes source code without executing it, looking for injection vulnerabilities, insecure authentication patterns, and unsafe API usage. Tools include [SonarQube](https://www.sonarsource.com/products/sonarqube/) and [Bandit](https://github.com/PyCQA/bandit) (Python-specific). SAST integrates into CI pipelines and provides developers with immediate feedback.
+Container image scanning extends the SCA concept to the full image layer stack. [Trivy](https://aquasecurity.github.io/trivy/) scans an image for CVEs in OS packages and language runtime dependencies in seconds. Adding `trivy image --exit-code 1 --severity HIGH,CRITICAL my-image:latest` as a CI step means that a build with a high- or critical-severity CVE in any layer cannot be pushed to the registry. This is the most direct way to prevent the "image built from a year-old base" problem identified in the containers retrospective section above.
 
-**Dynamic Application Security Testing (DAST)** tests a running application by simulating attacks and observing how it responds. Unlike SAST, DAST can discover vulnerabilities that only appear at runtime. Tools include [OWASP ZAP](https://www.zaproxy.org/).
+Runtime security tools such as [Falco](https://falco.org/) monitor running containers and system calls for anomalous behavior: a shell spawning inside a web server container, an unexpected write to `/etc/passwd`, a network connection to an unknown IP from a database process. These are the signals of a compromise in progress that no static analysis can detect. Falco uses eBPF to observe kernel events with low overhead and can emit structured events to the same logging pipeline built in earlier lectures.
 
-**Container and Image Security** scans Docker images for known CVEs before they are deployed. Tools include [Grype](https://github.com/anchore/grype) and [Trivy](https://github.com/aquasecurity/trivy). [Falco](https://falco.org/) monitors running containers for anomalous behavior.
+RASP (Runtime Application Self-Protection) instruments the application itself to detect and block attacks as they occur, rather than relying on network perimeter controls. RASP is less commonly deployed in open-source stacks and more common in enterprise Java and .NET environments, but it represents the same philosophy applied inside the application boundary.
 
-**Runtime Application Self-Protection (RASP)** embeds security controls directly into an application's runtime environment, detecting and blocking attacks as they occur rather than relying solely on perimeter defenses.
-
-<Aside type="note">
-For a sysadmin or DevOps engineer, the most immediately actionable DevSecOps practices are: adding secret scanning pre-commit hooks to every repository, enabling Dependabot on GitHub projects, and scanning container images in CI before pushing to a registry.
-</Aside>
+The practical priority order for a team starting with DevSecOps: pre-commit secret scanning first (highest return, lowest cost), then SCA on dependencies, then image scanning in CI. SAST, DAST (Dynamic Application Security Testing, e.g., tools like [OWASP ZAP](https://www.zaproxy.org/) that simulate attacks against a running application), and RASP require more investment to configure and maintain and should follow once the first three are stable.
 
 ## Security Checklists and CIS Benchmarks
 
-When hardening a server, it helps to work from a structured checklist rather than relying on memory. The **Center for Internet Security (CIS)** publishes detailed benchmarks for most major operating systems, including Ubuntu. These provide hundreds of specific recommendations, each with a rationale, audit procedure, and remediation command.
+When hardening a server, it helps to work from a structured checklist rather than relying on memory. The [**Center for Internet Security (CIS)**](https://www.cisecurity.org/benchmark/ubuntu_linux) publishes detailed benchmarks for most major operating systems, including Ubuntu. These provide hundreds of specific recommendations, each with a rationale, audit procedure, and remediation command. On the Kubernetes side of the same problem, the project also publishes a [Security Checklist](https://kubernetes.io/docs/concepts/security/security-checklist/) that covers the cluster-control-plane equivalent of these host-hardening questions.
 
-A simplified hardening checklist for a new Ubuntu server, drawn from the themes in this chapter:
-
-<Steps>
-
-1. **Update all packages** and enable unattended security upgrades.
-
-2. **Create a non-root admin user**, add it to the sudo group, and lock the root account for direct login.
-
-3. **Configure SSH** with key-based authentication, disable password auth, disable root login, and restrict access with AllowUsers.
-
-4. **Enable UFW** with a default deny policy, then allow only the specific ports your services require.
-
-5. **Install and configure Fail2Ban** to protect SSH and any other public-facing service from brute-force attacks.
-
-6. **Review open ports** with `ss -tulpen` and verify that nothing unexpected is listening.
-
-7. **Set up log monitoring** for visibility into authentication events, sudo usage, and service health.
-
-8. **Create a file integrity baseline** for critical system binaries and configuration files.
-
-</Steps>
+A simplified hardening checklist for a new Ubuntu server covers the eight areas this chapter has addressed, in roughly the order they should be applied. First, update all packages and enable unattended security upgrades so that the baseline is current before anything else is configured. Second, create a non-root admin user, add it to the sudo group, and ensure the root account cannot log in directly. Third, configure SSH with key-based authentication, disable password auth, disable root login, and restrict the allowed user list. Fourth, enable UFW with a default-deny incoming policy, then open only the ports the server's services require. Fifth, install and configure Fail2Ban to protect SSH and other public-facing services from brute-force attempts. Sixth, review open ports with `ss -tlnp` and verify that nothing unexpected is listening: a service bound to `0.0.0.0` that is not in the allow list is an exposure, regardless of whether the firewall blocks it. Seventh, set up log collection for authentication events, sudo usage, and service health, directed to a destination the server cannot overwrite. Eighth, create a file integrity baseline for critical system binaries and configuration files so that unauthorized changes are detectable.
 
 The full CIS benchmarks go much further, covering kernel parameters, filesystem mount options, network stack tuning, and audit daemon configuration. Working through the CIS benchmark for your distribution is an excellent way to deepen your understanding of Linux security.
 
@@ -561,4 +586,16 @@ This chapter traced two paths through the same territory. The first runs from a 
 
 The second path runs through identity. Authentication and authorization are not one concept but two, and every layer the course has built (Linux hosts, AWS accounts, CI/CD pipelines, Kubernetes clusters, email servers, and the AD-based desktops in the next lecture) has its own surface for each. The Identity Provider pattern unifies the authentication side: instead of every application maintaining its own user database, a single trusted IdP issues signed assertions over SAML, OAuth, OIDC, and SCIM that every application accepts. Workloads inherit the same model through short-lived federated credentials such as GitHub Actions OIDC tokens, instance profiles via IMDS, and projected Kubernetes service-account tokens, eliminating the long-lived secrets that used to litter repositories and instances. The authorization side, separately, demands a deliberate choice of model: RBAC for clarity, ABAC for expressiveness, policy-as-code for reviewability, ReBAC where permissions follow relationships in a graph.
 
-Beyond the individual server and the identity plane, the Zero Trust model extends these principles to entire architectures: never assume a request is safe based on where it comes from; always verify identity and context. The DevSecOps philosophy carries security left into the development pipeline itself, catching secrets, vulnerabilities in dependencies, and insecure code patterns before they ever reach production. Work from a checklist so you do not skip a step under pressure. These practices are not exotic; they are the baseline that the next lecture's deep dive into Active Directory, and every system you operate after this course, ultimately rests on.
+Beyond the individual server and the identity plane, the Zero Trust model extends these principles to entire architectures: never assume a request is safe based on where it comes from; always verify identity and context. The DevSecOps philosophy carries security left into the development pipeline itself, catching secrets, vulnerabilities in dependencies, and insecure code patterns before they ever reach production. Work from a checklist so you do not skip a step under pressure.
+
+Active Directory and Microsoft Entra ID, covered in the next lecture, are concrete implementations of every pattern this lecture established in the abstract. Active Directory Domain Services is an Identity Provider running inside a Windows domain. Kerberos, its authentication protocol, solves the same SSO (Single Sign-On) problem as OIDC but for a tightly synchronized LAN rather than the open internet. AD group membership is RBAC. Group Policy is policy-as-code. Entra ID extends that on-premises identity model into a cloud-based IdP that federates to SaaS applications over SAML and OIDC. The vocabulary and patterns are exactly the same; only the implementation and the trust model change. Understanding the abstraction here makes the specific implementation in the next lecture far easier to reason about.
+
+## Resources
+
+- <a href="https://www.youtube.com/watch?v=urVf2oNqtXU" target="_blank" rel="noopener noreferrer">Code security for software engineers (The Pragmatic Engineer) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=nrhxNNH5lt0" target="_blank" rel="noopener noreferrer">What is DevSecOps? DevSecOps explained in 8 Mins (TechWorld with Nana) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=fbSVgC8nGz4" target="_blank" rel="noopener noreferrer">Authentication fundamentals: The basics (Microsoft Azure) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=tCNcG1lcCHY" target="_blank" rel="noopener noreferrer">Authentication fundamentals: Web applications (Microsoft Azure) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=51B-jSOBF8U" target="_blank" rel="noopener noreferrer">Authentication fundamentals: Web single sign-on (Microsoft Azure) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=CjarTgjKcX8" target="_blank" rel="noopener noreferrer">Authentication fundamentals: Federation (Microsoft Azure) (YouTube)</a>
+- <a href="https://www.youtube.com/watch?v=5Kq64vOgE10" target="_blank" rel="noopener noreferrer">What Is Zero Trust Architecture (ZTA) ? NIST 800-207 Explained (The CISO Perspective) (YouTube)</a>

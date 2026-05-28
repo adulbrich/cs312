@@ -18,6 +18,8 @@ prereq_activities: hardware-build-spec
 output: a completed rack specification document for a chosen scenario covering servers, storage, networking, management, power, cooling, and supported Uptime Tier
 */}
 
+{/* TODO: need to review activity to be much more prescriptive, i.e., choose a rack server vendor that has clear and easy to use spreadsheets, same for network vendor + recommend specific models to students and ask them to calculate - this will save a TON of time */}
+
 This activity puts into practice the concepts from the [On-Premises Infrastructure and Data Center Architecture](/lectures/on-premises-infrastructure/) lecture. Where the Hardware Build Specification activity stopped at one machine, this one scales the same thinking up to an entire rack. By the end you will have a concise rack specification document that names real vendor stock keeping units (SKUs), meaning concrete sellable configurations rather than generic server categories, totals worst-case watts, identifies the highest Uptime Tier the rack can participate in, and would survive a basic sanity check from a data center operator.
 
 ## What You Will Need
@@ -53,7 +55,7 @@ Server selection is the backbone of the rack. Chassis height, socket count, memo
 In a two-socket server, each CPU has its own local memory banks. Populate DIMMs evenly across both sockets so the server exposes balanced memory channels instead of leaving memory bandwidth idle.
 
 <Steps>
-1. **Open a vendor configurator.** Dell's PowerEdge configurator and HPE's ProLiant configurator are the most approachable; Supermicro is a good third option if you want to see the broadest set of GPU-dense chassis. Pick one vendor and stay with it for this activity.
+1. **Open a vendor configurator.** The [Dell PowerEdge rack-server catalog](https://www.dell.com/en-us/shop/dell-poweredge-servers/sc/servers), [HPE rack-server catalog](https://buy.hpe.com/us/en/servers-systems), and [Supermicro system selector](https://www.supermicro.com/en/products/system) are the quickest starting points. Pick one vendor and stay with it for this activity.
 
 2. **Pick the chassis form factor.**
    - **Scenario A:** A dense 1U or 2U virtualization host. Single-socket systems can win on core density per watt, while two-socket systems can win on per-host memory capacity and expansion (Dell R660 / R760, HPE DL360 / DL380, or a single-socket EPYC platform are all reasonable starting points).
@@ -71,6 +73,7 @@ In a two-socket server, each CPU has its own local memory banks. Populate DIMMs 
 5. **Pick drive bays.** Decide which drive bays each server needs for boot only versus boot plus local data. Most bulk data lives on the storage architecture chosen in the next section; for now, ensure each server has two small SSDs in a boot mirror.
 
 6. **Note the redundancy items.** Confirm dual power supply units (PSUs) are configured (almost always the default for rack servers). Confirm the **Baseboard Management Controller (BMC)** is the standard one for the vendor (iDRAC on Dell, iLO on HPE, IPMI/Redfish on Supermicro).
+   - If the configurator or data sheet lists a maximum system power or maximum input wattage, record it now. You will use that number in the Power section instead of inferring load only from PSU sizes.
 
 7. **Calculate quantity.** How many of this server SKU do you need to meet the scenario's demand? Show your math.
    - **Scenario A:** Enough servers to host 200 VMs with the stated memory requirement. You may start with a conservative 2:1 vCPU-to-physical-core consolidation ratio if you state it explicitly. Here, 2:1 means planning that two virtual CPUs can share one physical CPU core on average because not every VM is busy at the same moment. In a very tight power envelope, you may justify a somewhat higher ratio for bursty internal workloads, but explain why that tradeoff is still acceptable. Do not overcommit memory. Leave at least one whole host worth of headroom so a single failure does not break the scenario.
@@ -101,7 +104,7 @@ The key choice is where the failure boundary sits: inside one chassis for DAS, a
 
 2. **Pick drive types.** Decide HDD, SATA SSD, or NVMe SSD per role.
    - PostgreSQL data: NVMe, with the highest sustained-write endurance class your budget allows.
-   - Ceph object data: SATA or NVMe SSDs for hot capacity, or large HDDs (16 TB or 20 TB) for cold capacity. Mixed-tier Ceph clusters are common.
+   - Ceph object data: NVMe SSDs are the preferred choice for new all-flash deployments; SATA SSDs are still acceptable when budget or an older platform constrains you. Large HDDs (16 TB or 20 TB) are still common for colder capacity tiers. Mixed-tier Ceph clusters are common.
    - Virtualization shared back-end: NVMe is the default in new deployments.
    - Boot drives: small SATA SSDs in a mirror; reliability matters more than performance.
 
@@ -137,11 +140,11 @@ Every server needs a path into the rack network, and some workloads need much mo
    - **Scenario C:** 100 GbE or higher access ports for the GPU servers, with RoCE (RDMA over Converged Ethernet) enabled. Lossless behavior matters here. In this context, lossless means the RoCE traffic class is configured to avoid ordinary packet drops across the path, not that the whole network literally never drops traffic.
 
 3. **Plan uplinks to the spine.** Count the uplink ports your chosen ToR has at the higher speed tier (usually 100 GbE or 400 GbE). Decide how many of those uplinks to use.
-   - The oversubscription ratio is (sum of access port bandwidth) divided by (sum of uplink bandwidth). 3:1 is a reasonable target for general workloads; 1:1 (non-blocking) is what AI fabrics aim for; storage fabrics typically run 1.5:1 or better.
+   - The oversubscription ratio is (sum of access port bandwidth) divided by (sum of uplink bandwidth). 3:1 is a reasonable target for general workloads; 1:1 (non-blocking) is what AI fabrics aim for; storage fabrics typically run 1.5:1 or better. These are workload-dependent rules of thumb, not universal laws: all-to-all traffic patterns need lower oversubscription than bursty request-response workloads.
    - If you choose two active ToRs, compute the steady-state ratio using the combined access and combined uplinks across both switches. Here, steady-state means normal operation with both ToRs up and forwarding traffic. Then add one sentence describing how the ratio changes if one ToR fails.
    - Record your computed oversubscription ratio for the scenario and explain whether it is appropriate.
 
-4. **Decide on a second ToR for redundancy.** A single ToR is a single point of failure for the whole rack. Most production designs use two ToRs and bond each server's two NICs across them so either switch can fail without isolating the host. Note this decision; it doubles your switch count.
+4. **Decide on a second ToR for redundancy.** A single ToR is a single point of failure for the whole rack. Most production designs use two ToRs and cable each server to both. The exact host-side design depends on the platform: some environments use MLAG or vPC-style active-active uplinks, while others use active-standby bonding. Note this decision; it doubles your switch count.
 
 </Steps>
 
@@ -179,17 +182,17 @@ A rack design is not finished until the electrical side closes. Use conservative
 For the tier call at the end of this section, use this shorthand: Tier I means basic capacity, Tier II adds redundant components, Tier III supports concurrent maintenance, and Tier IV means the surrounding facility is fault tolerant.
 
 <Steps>
-1. **Find the worst-case power per server.** Use the maximum load one power side must be able to carry by itself. For a dual-PSU server, that is one PSU's rating. For a 3+3 GPU chassis, it is the combined rating of one side. A typical 1U or 2U server has redundant 800 W to 1400 W PSUs. A GPU server may have six 3000 W PSUs.
+1. **Find the worst-case power per server.** Prefer a vendor maximum-system-power or maximum-input-watts figure if the configurator or data sheet provides one. If not, use the load one power side must be able to carry by itself as a conservative upper bound. For a dual-PSU server, that usually means one PSU's rating; for a 3+3 GPU chassis, it is the combined rating of one side. A typical 1U or 2U server has redundant 800 W to 1400 W PSUs. A GPU server may have six 3000 W PSUs.
 
 2. **Multiply by server count.** Sum the worst-case watts across all servers in the rack, then add the network gear. If the switch data sheet lists maximum system power, use that number. If it only lists PSU sizes, use a stated planning estimate instead: about 200 W to 300 W per ToR and 25 W to 50 W for a small management switch is reasonable for this activity.
 
 3. **Apply 80% derating.** Rack **Power Distribution Units (PDUs)** and circuits are typically rated to be loaded to no more than 80% of their nameplate capacity, to leave headroom for inrush and to comply with electrical code. Divide your total by 0.8 to get the PDU capacity you actually need to specify.
 
-4. **Pick a PDU model and amperage.** A real example: after 80% derating, a 30A 208V three-phase PDU supports roughly 8.6 kW of usable continuous load, while a 60A 415V three-phase PDU supports roughly 34.5 kW. Pick a real Eaton, APC, or ServerTech model from a vendor data sheet that meets your derated total.
+4. **Pick a PDU model and amperage.** A real example: after 80% derating, a 30A 208V three-phase PDU supports roughly 8.6 kW of usable continuous load, while a 60A 415V three-phase PDU supports roughly 34.5 kW. Confirm the phase count before you do the math: a 30A 208V single-phase circuit is only about 5.0 kW usable after derating. Pick a real Eaton, APC, or ServerTech model from a vendor data sheet that meets your derated total.
 
 5. **Confirm A/B feeds.** State explicitly that the rack has two PDUs fed from independent power paths (A and B), each sized to carry the full rack load alone, and that every dual-PSU server is wired one PSU per PDU. This is what lets you survive the loss of one feed.
 
-6. **Name an Uptime Tier.** Based on that shorthand, which tier can this rack participate in, and which higher tier would still require facility features outside the rack? Write one sentence for each.
+6. **Name an Uptime Tier.** Based on that shorthand, which tier can this rack participate in, and which higher tier would still require facility features outside the rack? Write one sentence for each. For the official terminology and certification criteria, see the [Uptime Institute Tier classification](https://uptimeinstitute.com/tiers).
 
 </Steps>
 
@@ -206,12 +209,13 @@ In the **Power** section of your document, record the worst-case watts per serve
 Electrical load becomes heat. Once you know the rack's kW, you can match it to a cooling method and check whether the facility named in the scenario can actually support the design.
 
 <Steps>
-1. **Read the kW per rack** from your derated power total. (Use kW, not W.)
+1. **Read the kW per rack** from your actual worst-case rack load, not from the derated PDU capacity you sized to support it. (Use kW, not W.)
 
 2. **Match it to a cooling technology:**
-   - Up to about 8 kW per rack: standard CRAC or CRAH room cooling is fine.
-   - 8 to 20 kW per rack: in-row cooling or rear-door heat exchangers.
+   - Up to about 8 kW per rack: standard CRAC or CRAH room cooling is often fine.
+   - 8 to 20 kW per rack: in-row cooling or rear-door heat exchangers are common choices.
    - 20 kW per rack and above: direct-to-chip liquid cooling, or immersion.
+   - Treat these as conservative planning guidelines. Actual limits depend on the facility's airflow design, rack spacing, containment, and cooling plant.
 
 3. **Cross-check the scenario.** The scenario named a cooling envelope at the start (5 kW for A, 7 kW for B, 40 kW for C). Does your rack design fit inside that envelope?
    - If your design exceeds the envelope, you have two options: redesign the rack to fit (fewer servers, lower-TDP CPUs, smaller GPUs), or choose a different facility class. State which you would do and why.
