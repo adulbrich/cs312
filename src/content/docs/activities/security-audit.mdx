@@ -5,7 +5,7 @@ sidebar:
   order: 18
 ---
 
-import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
 
 {/* ai-summary
@@ -13,9 +13,9 @@ type: activity
 slug: security-audit
 order: 18
 paired_lecture: system-security-and-hardening
-practices: SSH key-based authentication and sshd_config hardening; UFW default-deny firewall with rate limiting; Fail2Ban jail configuration; least-privilege user creation and sudoers restriction; open port auditing with ss; file integrity baseline with sha256sum
+practices: SSH key-based authentication and sshd_config hardening; UFW default-deny firewall with rate limiting; Fail2Ban jail configuration; least-privilege user creation and sudoers restriction; open port auditing with ss; AppArmor status inspection with aa-status
 prereq_activities: scripting
-output: a hardened EC2 instance with key-only SSH, a configured firewall, Fail2Ban active, and a signed verification entry in /var/log/cs312-hardened.log
+output: a hardened EC2 instance with key-only SSH, a configured firewall, Fail2Ban active, a scoped deploy sudoers rule, and a verification entry in /var/log/cs312-hardened.log
 */}
 
 This activity puts into practice the concepts from the [System Security and Hardening](/lectures/system-security-and-hardening/) lecture. You will apply the Linux hardening checklist to a real server: configure SSH key authentication, close unnecessary ports with a default-deny firewall, install and configure Fail2Ban, and create a least-privilege deploy user. By the end, you will have a server whose attack surface is substantially smaller than the default Ubuntu configuration, and you will be able to describe what each change closes and why it matters.
@@ -23,7 +23,7 @@ This activity puts into practice the concepts from the [System Security and Hard
 ## What You Will Need
 
 - An EC2 instance running Ubuntu 26.04 that you can SSH into
-- Your SSH keypair (e.g., `cs312-key.pem`) that you used to launch the instance
+- Your SSH keypair (e.g., `cs312.pem`) that you used to launch the instance
 - A terminal on your local machine with SSH access to the instance
 - The instance's public IP address
 
@@ -57,7 +57,7 @@ Before hardening anything, document what the server looks like right now. The go
    sudo sshd -T | grep -E "passwordauthentication|permitrootlogin|allowusers|pubkeyauthentication"
    ```
 
-   `sshd -T` prints the effective sshd configuration after all includes and defaults are resolved. This is more reliable than reading `sshd_config` directly because it shows the actual values in use. On a default AWS Ubuntu instance you will typically see `passwordauthentication no` (Amazon disables it by default) and `permitrootlogin prohibit-password`. You will see only three lines, not four: `allowusers` does not appear when no `AllowUsers` directive is configured, because the absence means all accounts are implicitly permitted. You will add that directive in Part 2 and see it show up then. Note the three values you do see; you will change at least two of them.
+   `sshd -T` prints the effective sshd configuration after all includes and defaults are resolved. This is more reliable than reading `sshd_config` directly because it shows the actual values in use. On an Ubuntu cloud image on EC2 you will typically see `passwordauthentication no` and `permitrootlogin prohibit-password`. You will see only three lines, not four: `allowusers` does not appear when no `AllowUsers` directive is configured, because the absence means all accounts are implicitly permitted. You will add that directive in Part 2 and see it show up then. Note the three values you do see; you will change at least two of them.
 
 4. **List human login accounts:**
 
@@ -81,12 +81,12 @@ Before hardening anything, document what the server looks like right now. The go
    sudo aa-status
    ```
 
-   AppArmor is active by default on Ubuntu. The output lists profiles in two modes: **enforce mode** actually blocks operations the profile does not allow; **complain mode** only logs policy violations without blocking them, which is used when testing a new profile before committing to enforcement. On Ubuntu 26.04, `sshd` does not have its own AppArmor profile; Ubuntu removed it in favor of other kernel hardening mechanisms. You will see profiles for tools like `tcpdump`, `chronyd`, and `man` in enforce mode. The important observation is that AppArmor is active and enforcing profiles for many system utilities, and that its presence on this server means any application profile you later write will be enforced automatically.
+   `aa-status` reports whether AppArmor is loaded and which profiles are in two modes: **enforce mode** blocks operations the profile does not allow; **complain mode** only logs policy violations without blocking them. The exact profile list depends on which packages are installed on your image, so do not worry if your output differs from someone else's. The important observation is that AppArmor is active and already confining at least some software on the system.
 
 </Steps>
 
 <ActivityQuestion>
-Looking at the output of `sshd -T`, what is the difference between `passwordauthentication no` (which AWS sets by default) and `permitrootlogin prohibit-password`? Each one closes a different attack vector: name each one specifically, and explain why having only one of the two still leaves a gap.
+Looking at the output of `sshd -T`, what is the difference between `passwordauthentication no` and `permitrootlogin prohibit-password`? Each one closes a different attack vector: name each one specifically, and explain why having only one of the two still leaves a gap.
 </ActivityQuestion>
 
 ---
@@ -118,13 +118,13 @@ AWS EC2 instances use key pairs for the initial login, which means you already h
 
    ```bash
    sudo mkdir -p /home/deploy/.ssh
-   sudo cp ~/.ssh/authorized_keys /home/deploy/.ssh/
+   sudo cp /home/ubuntu/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
    sudo chown -R deploy:deploy /home/deploy/.ssh
    sudo chmod 700 /home/deploy/.ssh
    sudo chmod 600 /home/deploy/.ssh/authorized_keys
    ```
 
-   `authorized_keys` is the file sshd reads to determine which public keys are permitted to authenticate for an account. Each line is one public key. When you connect with SSH, the server checks whether your private key matches any public key in this file; if it does, authentication succeeds without a password. You are copying the same public key that lets you log in as `ubuntu` to the `deploy` account. The `700` and `600` permissions are required by sshd: if the `.ssh` directory or `authorized_keys` file is readable by others, sshd rejects it for security reasons.
+   `authorized_keys` is the file sshd reads to determine which public keys are permitted to authenticate for an account. Each line is one public key. When you connect with SSH, the server checks whether your private key matches any public key in this file; if it does, authentication succeeds without a password. You are copying the same public key that already lets you log in as `ubuntu` to the `deploy` account. The `700` and `600` permissions are required by sshd: if the `.ssh` directory or `authorized_keys` file is writable or broadly readable, sshd may reject it for security reasons.
 
 4. **Test the deploy login from your second terminal:**
 
@@ -151,14 +151,14 @@ AWS EC2 instances use key pairs for the initial login, which means you already h
 
    Save and exit.
 
-6. **Restart sshd and observe the lockout:**
+6. **Restart the SSH service and observe the lockout:**
 
    ```bash
-   sudo systemctl restart sshd
+   sudo systemctl restart ssh
    sudo sshd -T | grep -E "passwordauthentication|permitrootlogin|allowusers|pubkeyauthentication"
    ```
 
-   The output should now show `allowusers deploy`. From your second terminal, try connecting as ubuntu:
+   The output should now show `allowusers deploy`. On Ubuntu, the systemd unit is named `ssh` even though the daemon binary is `sshd` and the configuration file is `sshd_config`. From your second terminal, try connecting as ubuntu:
 
    ```bash
    ssh -i ~/.ssh/your-key.pem ubuntu@YOUR_INSTANCE_IP
@@ -179,7 +179,7 @@ Do not close the ubuntu session you used in steps 1 through 5. It is still activ
 </Aside>
 
 <ActivityQuestion>
-The `AllowUsers` directive rejects users at the SSH layer before PAM (Pluggable Authentication Modules) is consulted. The lecture maps authentication and authorization to every course layer. At the Linux host level: which specific mechanism handles authentication (who `deploy` is) and which handles authorization (what `deploy` may do once logged in)? Name the equivalent pair for AWS IAM and for Kubernetes." 
+The `AllowUsers` directive rejects users at the SSH layer before PAM (Pluggable Authentication Modules) is consulted. The lecture maps authentication and authorization to every course layer. At the Linux host level, which specific mechanism handles authentication and which handles authorization? Name the equivalent pair for AWS IAM and for Kubernetes.
 </ActivityQuestion>
 
 ---
@@ -241,7 +241,7 @@ With SSH secured, you will configure UFW (Uncomplicated Firewall) to default-den
    443/tcp (v6)               ALLOW IN    Anywhere (v6)
    ```
 
-   If you see this and your SSH session is still active, the firewall is correctly configured.
+   If you skipped ports 80 and 443, you will see only the SSH `LIMIT IN` rules. In either case, if your SSH session stays active, the firewall is correctly configured.
 
 5. **Confirm the port state from inside the server:**
 
@@ -249,12 +249,12 @@ With SSH secured, you will configure UFW (Uncomplicated Firewall) to default-den
    sudo ss -tlnp
    ```
 
-   Compare this output to the list you made in Part 1. Every port that is now visible here should correspond to a UFW allow rule. If you see a port listening with no corresponding allow rule, UFW's default deny policy is dropping traffic to it from all sources.
+   Compare this output to the list you made in Part 1. Any service listening on `0.0.0.0` or `::` should have a corresponding UFW allow rule. A service bound only to `127.0.0.1` or `::1` is local-only and does not need an inbound allow rule.
 
 </Steps>
 
 <ActivityQuestion>
-You now have two layers of network access control: AWS security groups (which you configured when launching the instance) and UFW on the host. The lecture describes this as defense in depth. What does each layer protect against that the other does not? Think specifically about an attacker who has already gained code execution on the instance: which layer still provides protection at that point, and which one does not?
+You now have two layers of network access control: AWS security groups (which you configured when launching the instance) and UFW on the host. The lecture describes this as defense in depth. What does each layer still protect if the other one is misconfigured? Now assume an attacker gains root on the instance: which layer can they change locally, and which one would still require AWS-side control to modify?
 </ActivityQuestion>
 
 ---
@@ -322,7 +322,7 @@ UFW's rate-limiting rule blocks raw connection attempts. Fail2Ban goes a step fu
       `- Banned IP list:
    ```
 
-   The counts start at zero. Check whether the ubuntu rejection from Part 2 appears in `Total failed`. AllowUsers rejections happen before authentication completes, so depending on the journal pattern Fail2Ban uses, it may or may not have counted it.
+   The exact counts will vary. On a quiet new instance they may all be zero; on a public IP you may already see failures from background scans. Check whether the ubuntu rejection from Part 2 appears in `Total failed`. AllowUsers rejections happen before authentication completes, so depending on the journal pattern Fail2Ban uses, it may or may not have counted it.
 
 5. **Restore ubuntu SSH access now that Fail2Ban is active:**
 
@@ -336,10 +336,10 @@ UFW's rate-limiting rule blocks raw connection attempts. Fail2Ban goes a step fu
    AllowUsers deploy ubuntu
    ```
 
-   Save, exit, and restart sshd:
+   Save, exit, and restart the SSH service:
 
    ```bash
-   sudo systemctl restart sshd
+   sudo systemctl restart ssh
    ```
 
    From your second terminal, confirm that `ssh -i ~/.ssh/your-key.pem ubuntu@YOUR_INSTANCE_IP` works again. Keep the ubuntu session open; you will use it in Part 6.
@@ -347,7 +347,7 @@ UFW's rate-limiting rule blocks raw connection attempts. Fail2Ban goes a step fu
 </Steps>
 
 <Aside type="tip" title="If you need to unban yourself">
-If you accidentally trigger a ban from your own IP address, unban it with: `sudo fail2ban-client set sshd unbanip YOUR.IP.ADDRESS`. To find your current public IP from the server: `curl -s https://ifconfig.me`.
+If you accidentally trigger a ban from your own IP address, unban it with: `sudo fail2ban-client set sshd unbanip YOUR.IP.ADDRESS`. To find your current public IP from the server on EC2, run `curl -s https://checkip.amazonaws.com`.
 </Aside>
 
 ---
@@ -367,26 +367,26 @@ The `deploy` user currently has full passwordless sudo access via the broad rule
    `visudo` validates the syntax before saving, preventing a broken sudoers file that locks you out of sudo. The `-f` flag edits the file in `/etc/sudoers.d/` directly rather than the main sudoers file. Replace the existing `NOPASSWD: ALL` line with this single line:
 
    ```text
-   deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart fail2ban, /usr/bin/systemctl status fail2ban
+   deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart fail2ban, /usr/bin/fail2ban-client status sshd
    ```
 
-   The rule format is `user host=(run-as) [flags]: command-list`. Reading this one: `deploy` is the user the rule applies to; `ALL` is the host (this machine); `(ALL)` is the user to run as (root in practice); `NOPASSWD:` is the flag that suppresses the password prompt; the command list at the end specifies exactly which executables are allowed, with full paths. Listing full paths prevents a compromised user from putting a malicious binary named `systemctl` earlier in `$PATH`. This grants `deploy` passwordless permission to restart and check Fail2Ban, and nothing else. Save and exit.
+   The rule format is `user host=(run-as) [flags]: command-list`. Reading this one: `deploy` is the user the rule applies to; `ALL` is the host (this machine); `(ALL)` is the user to run as (root in practice); `NOPASSWD:` is the flag that suppresses the password prompt; the command list at the end specifies the exact executables, and in the second case the exact arguments, that are allowed. Listing full paths prevents a compromised user from putting a malicious binary named `systemctl` or `fail2ban-client` earlier in `$PATH`. This grants `deploy` permission to restart Fail2Ban and inspect the `sshd` jail, and nothing else. Save and exit.
 
 2. **Verify the restriction works:**
 
    From your `deploy` session, test that the allowed command succeeds:
 
    ```bash
-   sudo systemctl status fail2ban
+   sudo fail2ban-client status sshd
    ```
 
-   You should see the Fail2Ban service status. Then test that a disallowed command fails:
+   You should see the `sshd` jail status. Then test that a disallowed command fails:
 
    ```bash
    sudo apt update
    ```
 
-   You should see `sudo: I'm sorry deploy. I'm afraid I can't do that`. The restriction is working. A compromised deploy account cannot install software, modify system files, or escalate further.
+   `sudo` should report that `deploy` is not allowed to run the command. The restriction is working. A compromised deploy account still has that user's normal access, but it no longer has a general-purpose sudo path to root.
 
 </Steps>
 
@@ -430,7 +430,7 @@ You have made five distinct changes to this server. Run these verification steps
 
    The only ports visible should be ones with corresponding UFW allow rules.
 
-5. **Create a signed verification entry:**
+5. **Create a timestamped verification entry:**
 
    ```bash
    echo "Hardened by $(whoami) on $(hostname) at $(date)" | sudo tee /var/log/cs312-hardened.log
@@ -443,6 +443,6 @@ You have made five distinct changes to this server. Run these verification steps
 
 ## Going Further
 
-You have applied the core Linux hardening checklist to a real server. The natural next challenge is to automate what you just did by hand. [Lynis](https://cisofy.com/lynis/) is an open-source security auditing tool that scans a system against hundreds of checks (many drawn from the CIS benchmark) and produces a prioritized hardening report. Run `sudo lynis audit system` and compare its findings against the changes you just made: which of its recommendations did you already address, and which did you miss?
+You have applied the core Linux hardening checklist to a real server. The natural next challenge is to compare your manual hardening work against an automated audit. Install [Lynis](https://cisofy.com/lynis/) with `sudo apt update && sudo apt install -y lynis`, then run `sudo lynis audit system` and compare its findings against the changes you just made: which recommendations did you already address, and which are still outstanding?
 
-If you want to go deeper into the firewall layer, look at [nftables](https://wiki.nftables.org/wiki-nftables/index.php/Main_Page), the kernel framework that replaced iptables and that UFW uses as its backend. Writing a raw nftables ruleset gives you a much clearer picture of what UFW is doing under the hood, and nftables' unified syntax for IPv4 and IPv6 is a genuine improvement over the old iptables/ip6tables split.
+If you want to go deeper into the packet-filtering layer, start with `sudo ufw show raw` to see the rules UFW is managing on the host. Then read the [nftables](https://wiki.nftables.org/wiki-nftables/index.php/Main_Page) documentation and compare that lower-level model with UFW's simplified interface. The useful exercise is to map each rule you added in this activity to the lower-level objects that actually enforce it.
