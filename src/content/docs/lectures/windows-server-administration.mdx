@@ -1,6 +1,6 @@
 ---
 title: Windows Server Administration
-description: "Windows Server 2025, Active Directory, Group Policy, SMB file services, and hybrid identity: how Windows environments centralize authentication, policy, and access control."
+description: "Windows Server 2025, Active Directory, Group Policy, Windows file services, and hybrid identity: how Windows environments centralize authentication, policy, and access control."
 sidebar:
   order: 19
 draft: true
@@ -11,7 +11,7 @@ import HistoricalNote from '/src/components/HistoricalNote.astro';
 
 {/* ai-summary
 type: lecture
-slug: windows-server-and-active-directory
+slug: windows-server-administration
 order: 19
 covers: Windows Server 2025 context; AD DS as a concrete instance of the IdP pattern; Kerberos, LDAP, DNS; OUs, groups, Group Policy; SMB and NTFS; replication, backup, hybrid identity with Entra ID
 prereq_lectures: system-security-and-hardening
@@ -20,46 +20,70 @@ paired_activities: windows-server-active-directory
 supports_labs:
 */}
 
-It is easy to think of identity as a login prompt. In operations, identity is infrastructure. When a domain controller is unreachable, or DNS points to the wrong place, the symptoms do not arrive neatly labeled. Users cannot sign in. Mapped drives disappear. Remote Desktop rejects credentials that worked an hour ago. A scheduled task running under a service account stops. A printer share that seemed unrelated suddenly vanishes from view. What looks like five small outages is often one broken control plane.
+Managing identity on a single Linux server is relatively straightforward: user accounts in `/etc/passwd`, SSH keys in `authorized_keys`, and a sudo policy in `/etc/sudoers`. As covered in the Linux Server Planning lecture, that model works for individual machines. Organizations, however, rarely run individual machines in isolation. A company might have five hundred Windows desktops across three offices, a dozen file servers, and a set of shared drives that should automatically follow department membership. At that scale, the per-machine account model breaks down entirely. Someone leaves the organization and their access needs to be revoked on every machine they ever touched. A new security policy needs to roll out to every workstation at once. A shared folder needs to be readable by everyone in one department and writable only by their manager. Doing any of that manually is not operations: it is paperwork with a password.
 
-Windows Server and Active Directory matter because they turn a loose collection of Windows machines into an administered system. They centralize who a person is, what a computer should look like, what software is allowed to run, which files a team may open, and which administrators may change which settings. This lecture looks at that system from the inside out: why organizations still run it in 2026, how Active Directory Domain Services stores and replicates identity, why DNS and time are so important, how Group Policy pushes configuration, how SMB file services fit into the picture, and where all of that sits in a hybrid world. As the Postmortems and Communications lecture argues, good operations starts with seeing the system behind the symptom. Windows identity infrastructure is a good place to practice that way of thinking.
+Active Directory is Microsoft's centralized answer to that problem. It is the identity and management platform that most enterprise Windows environments run on. The System Security and Hardening lecture introduced the Identity Provider (IdP) pattern and described Active Directory as a concrete instance of it: an IdP from an earlier era, one built for the tightly managed trust of a corporate network rather than the open internet. Where a modern software-as-a-service (SaaS) identity provider might issue JSON Web Tokens over HTTPS (Hypertext Transfer Protocol Secure), Active Directory issues Kerberos tickets inside a domain. The fundamental idea is the same: one authoritative system holds identity, and every machine in the environment defers to it for authentication and authorization rather than maintaining its own isolated account database. Today, Active Directory rarely stands alone. Most organizations extend it into Microsoft Entra ID, Microsoft's cloud identity platform on Azure, creating a hybrid setup where the same user identity works both on premises and in Microsoft 365, SaaS applications, and cloud services.
+
+When this system is healthy, it is invisible. When it breaks, the failure is not contained. Users cannot sign in. Shared drives disappear from File Explorer. A scheduled task that ran automatically yesterday stops without explanation. A printer in a remote office becomes unavailable. What looks like five separate outages is often one broken control plane radiating symptoms outward in every direction. That is the operational reality that makes Windows identity infrastructure worth understanding from the inside: the symptoms never point directly at their own cause.
+
+The easiest way to make that control plane legible is to start with the whole shape of the environment, then drill down into the parts. The lecture begins with the platform context for Windows Server, then zooms in on Active Directory Domain Services (AD DS), the protocols that make the directory usable, Group Policy as the management layer, file services as the place where permissions become tangible, and hybrid identity as the bridge to cloud systems.
+
+## The Whole System at a Glance
+
+Before drilling into editions, forests, policies, and replication, it helps to see the environment as a set of cooperating layers. In a typical Windows domain, a domain controller runs Active Directory Domain Services (AD DS), the Domain Name System (DNS) records that help clients locate it, Kerberos for ticket-based authentication, Lightweight Directory Access Protocol (LDAP) services for directory lookups, and the SYSVOL share that distributes Group Policy files. File servers, printers, scheduled tasks, and line-of-business applications all sit downstream from that control plane. If that mental model stays clear, the rest of the explanation becomes a zoom-in rather than a pile of product names.
+
+The diagram below shows the path a normal sign-in and file-share request usually follow.
+
+```mermaid
+flowchart TB
+  User["User at a domain-joined workstation"] --> Client["Windows client"]
+  Client --> DnsLookup["DNS lookup for domain services"]
+  DnsLookup --> DC["Domain controller\nAD DS\nKerberos\nLDAP\nGroup Policy / SYSVOL"]
+  DC --> Policy["Identity and policy data"]
+  Policy --> Client
+  Client --> Resource["File server, printer, or app server"]
+  DC --> Resource
+  Cloud["Microsoft Entra ID\nMicrosoft 365"] -. hybrid sync .-> DC
+```
+
+That top-level view also suggests a useful order for understanding the system. First comes the host platform itself. Then comes the directory model that makes identity central instead of per-machine. After that come policy and file services, which are the two places most users actually feel the directory. Finally, domain controller operations, recovery, and hybrid identity bring the control plane into focus under change and failure.
 
 ## Why Windows Server Still Matters
 
 If your mental model of server administration is mostly Linux, containers, and cloud APIs, Windows Server can look like legacy infrastructure that lingers only because nobody has turned it off yet. That is the wrong frame. Windows Server is still a live platform used to run authentication, file services, Remote Desktop environments, print services, internal web applications, management tools, and line-of-business software that depends on Windows APIs and domain membership. Even organizations that are aggressively adopting SaaS and cloud identity often keep some Windows Server footprint because identity, storage, and application compatibility do not all move at the same pace.
 
-The underlying problem Windows Server solves is not uniquely Microsoft-shaped. Every organization needs answers to the same operational questions: how do you create accounts once instead of on every machine, how do you enforce security settings consistently, how do you delegate administrative work without sharing one all-powerful password, and how do you make resource access follow group membership rather than manual one-off ACL edits? Linux shops often answer those questions with a mix of local system files, SSH, configuration management, FreeIPA, LDAP, Kerberos, or cloud identity. Windows Server answers them with a more integrated bundle of directory services, policy distribution, SMB file sharing, and administrative tooling.
+The underlying problem Windows Server solves is not uniquely Microsoft-shaped. Every organization needs answers to the same operational questions: how do you create accounts once instead of on every machine, how do you enforce security settings consistently, how do you delegate administrative work without sharing one all-powerful password, and how do you make resource access follow group membership rather than manual one-off access control list (ACL) edits? Linux shops often answer those questions with a mix of local system files, SSH, configuration management, FreeIPA, LDAP, Kerberos, or cloud identity. Windows Server answers them with a more integrated bundle of directory services, policy distribution, Server Message Block (SMB) file sharing, and administrative tooling.
 
-Microsoft's current server platform is [Windows Server 2025](https://learn.microsoft.com/en-us/lifecycle/products/windows-server-2025). For this lecture, the important point is not memorizing every SKU. It is understanding what Microsoft means by an edition, and which editions matter when you are reasoning about infrastructure.
+Microsoft's current server platform is [Windows Server 2025](https://learn.microsoft.com/en-us/lifecycle/products/windows-server-2025). The important point is not memorizing every SKU. It is understanding what Microsoft means by an edition, and which editions matter when you are reasoning about infrastructure.
 
 The table below summarizes the present-day platform at a level useful for operations.
 
 | Edition | What It Is For | Why You Care Operationally |
-|---|---|---|
+| --- | --- | --- |
 | Standard | General-purpose server deployments with limited virtualization rights | Common choice for domain controllers, file servers, and smaller on-prem environments |
 | Datacenter | Heavily virtualized environments and advanced datacenter features | Same core identity roles as Standard, but aimed at dense server consolidation and larger platforms |
 | Datacenter: Azure Edition | Azure and Arc-connected Windows Server deployments | Important in hybrid/cloud deployments, but not the normal baseline for learning classic AD DS concepts |
 | Essentials | Very small environments with simplified licensing and limits | Exists, but is not the model to build your conceptual picture around |
 
-For a lecture on administration and Active Directory, Standard and Datacenter are the editions that matter most. The identity concepts are the same across them. What changes is the surrounding operational context: how many hosts you run, how heavily you virtualize, and whether the directory lives entirely on premises or is part of a larger hybrid design.
+For administration and Active Directory work, Standard and Datacenter are the editions that matter most. The identity concepts are the same across them. What changes is the surrounding operational context: how many hosts you run, how heavily you virtualize, and whether the directory lives entirely on premises or is part of a larger hybrid design.
 
 One source of confusion for new administrators is the difference between a **Windows Server role** and a separate Microsoft product. Roles such as Active Directory Domain Services (AD DS), DNS Server, DHCP Server, Hyper-V, and File and Storage Services are built into Windows Server and can be installed through Server Manager or PowerShell. Products such as Exchange Server, SQL Server, and System Center are not roles. They are separate applications that may integrate tightly with the operating system and with Active Directory, but they are not part of the base server role catalog. That distinction matters because Windows Server is a platform, not a single-purpose appliance.
 
-Another important choice is installation model. **Desktop Experience** gives you the familiar graphical shell and local management tools. **Server Core** removes the full desktop shell and expects you to manage the server through PowerShell, RSAT, Windows Admin Center, or other remote tools. Server Core exists because infrastructure servers usually do not need a person clicking around on them every day. Fewer installed components means less patching, less surface area, and less temptation to treat the server like a workstation. The tradeoff is that your operational discipline must be better. If you do not know how to manage Windows remotely, Server Core feels hostile. If you do know how, it feels appropriately boring.
+Another important choice is installation model. **Desktop Experience** gives you the familiar graphical shell and local management tools. **Server Core** removes the full desktop shell and expects you to manage the server through PowerShell, RSAT (Remote Server Administration Tools), Windows Admin Center, or other remote tools. Server Core exists because infrastructure servers usually do not need a person clicking around on them every day. Fewer installed components means less patching, less surface area, and less temptation to treat the server like a workstation. The tradeoff is that your operational discipline must be better. If you do not know how to manage Windows remotely, Server Core feels hostile. If you do know how, it feels appropriately boring.
 
 <Aside type="tip" title="Roles Are the Payload, Not the Console">
-When you picture a Windows Server deployment, separate the management surface from the role the machine performs. A domain controller is not important because it has Server Manager on it. It is important because it is running AD DS, DNS, Kerberos, LDAP, and SYSVOL replication. That distinction keeps your mental model stable whether the server is managed from a GUI, PowerShell remoting, RSAT, or Windows Admin Center.
+When you picture a Windows Server deployment, separate the management surface from the role the machine performs. A domain controller is not important because it has Server Manager on it. It is important because it is running AD DS, DNS, Kerberos, LDAP, and the SYSVOL policy share. That distinction keeps your mental model stable whether the server is managed from a graphical interface, PowerShell remoting, RSAT, or Windows Admin Center.
 </Aside>
 
 <HistoricalNote title="Active Directory Was Microsoft's Answer to the Directory Wars">
-When Active Directory shipped with Windows 2000 in 2000, Microsoft was not inventing the idea of a directory from scratch. It was entering an existing world shaped by Novell NDS, LDAP directories, Kerberos authentication, and the practical need to manage large Windows fleets as a system instead of as isolated PCs. That history still shows in the product today. AD DS is deeply Microsoft in its management tooling and Windows integration, but conceptually it sits in the same family as other directory-backed identity systems: a replicated database of objects, names, credentials, and permissions that becomes the administrative center of gravity for an environment.
+When Active Directory shipped with Windows 2000 in 2000, Microsoft was not inventing the idea of a directory from scratch. It was entering an existing world shaped by Novell Directory Services (NDS), LDAP directories, Kerberos authentication, and the practical need to manage large Windows fleets as a system instead of as isolated PCs. That history still shows in the product today. AD DS is deeply Microsoft in its management tooling and Windows integration, but conceptually it sits in the same family as other directory-backed identity systems: a replicated database of objects, names, credentials, and permissions that becomes the administrative center of gravity for an environment.
 </HistoricalNote>
 
 ## Active Directory As the Identity Plane
 
-Once you stop thinking of Active Directory as "the thing that lets people log in," the design becomes much easier to understand. AD DS is a distributed directory database plus a set of services that consume that database. The database stores objects such as users, groups, computers, service accounts, printers, and policies. The services wrapped around it answer practical questions: who is this principal, may it authenticate, which groups is it in, where is the domain controller for this site, which service ticket should be issued, and which policies should apply to this machine?
+Active Directory Domain Services (AD DS) is Microsoft's on-premises Identity Provider. It is an identity provider from an earlier era, built for tightly managed trust inside a corporate network. This section explains what that means in practice. A directory stores objects: user accounts, computer accounts, security groups, service accounts, and policy containers. An authentication service built on Kerberos verifies who is requesting access and issues tickets that clients present to resources. DNS provides the naming layer that lets clients locate the right domain controller. Group Policy distributes configuration from the directory out to every managed machine in the fleet. Together those pieces let a single administrator define what ten thousand machines look like and who can use them.
 
-At a small scale, local accounts seem fine. A workstation has a local Administrator account and maybe a few local users. A file server has a few local groups. A remote system has its own password policy. That model collapses as soon as people or computers need to move. The same engineer needs access to three servers, two file shares, a VPN, a printer queue, and a remote desktop host. If every machine stores identity locally, then offboarding becomes a scavenger hunt, auditing becomes nearly impossible, and mistakes accumulate silently. A directory exists so that identity can become a shared system rather than a repeated manual task.
+At a small scale, local accounts seem fine. A workstation has a local Administrator account and a few local users. A file server has a few local groups. A remote system has its own password policy. That model collapses as soon as people or computers need to move across the environment. The same engineer needs access to three servers, two file shares, a virtual private network (VPN), and a remote desktop host. If every machine stores identity locally, offboarding becomes a scavenger hunt, auditing becomes nearly impossible, and mistakes accumulate silently. A directory exists so that identity becomes a shared system rather than a repeated manual task at every machine.
 
 ### A Domain Controller Is a Special Kind of Server
 
@@ -71,7 +95,7 @@ On a member server or workstation, local identities live in the Security Account
 
 The basic administrative boundary in AD DS is the **domain**. A domain is a set of objects that share a directory database, a naming context, and a common security boundary for many day-to-day administrative tasks. If you create `corp.example.com`, you are not just choosing a name. You are defining where user and computer objects live, where domain-level policy applies, and which domain controllers replicate that naming context.
 
-Above the domain sits the **forest**. The forest is the broadest trust and schema boundary in Active Directory. Domains in the same forest share a common schema and configuration and automatically trust one another. That sounds abstract until you think about mergers, geography, or delegated administration. A single-domain forest is common in smaller or moderately sized environments because it keeps administration simple. Multiple domains tend to exist for specific reasons such as legal separation, legacy organizational history, or a genuine need for distinct domain-level boundaries. New administrators often imagine extra domains as a neat way to organize departments. In practice, that is usually a mistake. Departments are better represented with OUs and groups. Domains are expensive in both design and operations.
+Above the domain sits the **forest**. The forest is the broadest trust and schema boundary in Active Directory. Domains in the same forest share a common schema and configuration and automatically trust one another. That sounds abstract until you think about mergers, geography, or delegated administration. A single-domain forest is common in smaller or moderately sized environments because it keeps administration simple. Multiple domains tend to exist for specific reasons such as legal separation, legacy organizational history, or a genuine need for distinct domain-level boundaries. New administrators often imagine extra domains as a neat way to organize departments. In practice, that is usually a mistake. Departments are better represented with organizational units (OUs) and groups. Domains are expensive in both design and operations.
 
 **Sites** are the part many first explanations skip, even though they matter operationally. A site models network topology, not organizational hierarchy. It tells Active Directory which subnets are close to which domain controllers so that clients authenticate locally when possible and replication across slower links is controlled intelligently. If you have offices in Seattle, Dallas, and London, the site design is how AD understands that not every domain controller is equally near every client.
 
@@ -102,15 +126,15 @@ If a domain-joined client uses public resolvers instead of the domain's DNS serv
 
 ### Kerberos, LDAP, and the Shadow of NTLM
 
-Two protocols dominate the day-to-day behavior of Active Directory: **Kerberos** for authentication and **LDAP** for directory queries. Kerberos, defined in [RFC 4120](https://www.rfc-editor.org/rfc/rfc4120), is a ticket-based authentication protocol. LDAP, defined in [RFC 4511](https://www.rfc-editor.org/rfc/rfc4511), is the protocol clients and tools use to query and update directory objects. If DNS tells a client where the directory lives, Kerberos and LDAP are how the client speaks to it.
+Two protocols dominate the day-to-day behavior of Active Directory: **Kerberos** for authentication and **LDAP** for directory queries. Kerberos is a ticket-based protocol that predates OpenID Connect (OIDC) and Security Assertion Markup Language (SAML), and it was designed for tightly coupled trust domains. Active Directory is that trust domain. Kerberos is defined formally in [RFC 4120](https://www.rfc-editor.org/rfc/rfc4120). **LDAP (Lightweight Directory Access Protocol)**, defined in [RFC 4511](https://www.rfc-editor.org/rfc/rfc4511), is the protocol clients and tools use to query and update directory objects. If DNS tells a client where the directory lives, Kerberos and LDAP are how the client speaks to it.
 
 In practical terms, Kerberos lets a user prove identity once and then obtain service-specific tickets without retyping a password every time a resource is accessed. A user signs in, the client obtains a Ticket-Granting Ticket (TGT), and later the client exchanges that for service tickets to specific resources such as a file server or web application. This is why Kerberos feels like "single sign-on" inside a domain. The user is not truly authenticated once for everything forever; rather, the client is using a ticketing system to request scoped proof for each service as needed.
 
 Kerberos has operational consequences that matter more than the abstract protocol flow. It depends on correct DNS. It depends on time being reasonably synchronized because tickets have validity windows. It depends on **Service Principal Names (SPNs)** being mapped correctly so the client knows which account is allowed to represent a given service. Many famous Windows troubleshooting sessions come down to one of these three conditions being violated: wrong name, wrong time, or wrong service identity.
 
-LDAP is less glamorous but equally important. It is how administrative tools search for users, groups, computers, and policy objects. When you open Active Directory Users and Computers and browse an OU, that GUI is not magic. It is a management layer over directory queries. PowerShell cmdlets such as `Get-ADUser`, `Get-ADComputer`, and `Get-ADGroup` do the same thing in a more automatable form.
+LDAP is less glamorous but equally important. It is how administrative tools search for users, groups, computers, and policy objects. When you open Active Directory Users and Computers and browse an organizational unit (OU), that graphical user interface (GUI) is not magic. It is a management layer over directory queries. PowerShell cmdlets such as `Get-ADUser`, `Get-ADComputer`, and `Get-ADGroup` do the same thing in a more automatable form.
 
-You will also hear about **NTLM**. NTLM is the older Microsoft authentication protocol that predates modern Kerberos-based Active Directory behavior. It still appears for compatibility in certain scenarios, especially with older applications or awkward trust and naming situations. The right mental model is not "NTLM is gone." It is "Kerberos is the design goal; NTLM is the compatibility tax." Mature Windows environments try to reduce unnecessary NTLM because it gives up many of the security and operational properties that make domain authentication predictable.
+You will also hear about **NT LAN Manager (NTLM)**. NTLM is the older Microsoft authentication protocol that predates modern Kerberos-based Active Directory behavior. It still appears for compatibility in certain scenarios, especially with older applications or awkward trust and naming situations. The right mental model is not "NTLM is gone." It is "Kerberos is the design goal; NTLM is the compatibility tax." Mature Windows environments try to reduce unnecessary NTLM because it gives up many of the security and operational properties that make domain authentication predictable.
 
 <Aside type="tip" title="Kerberos and Time Are Close Friends">
 When Windows authentication fails in strange ways, always check time synchronization earlier than your instincts tell you to. A skewed clock can make perfectly valid credentials look invalid because the ticketing system relies on time windows to prevent replay and to define ticket lifetime.
@@ -126,7 +150,7 @@ Domain naming should be boring, clear, and based on a namespace your organizatio
 
 The temptation to invent a cute private namespace usually comes from the false feeling that internal naming does not matter. It does matter. A directory name leaks into service principals, user principal names, certificates, DNS zones, scripts, documentation, backup tooling, and every future migration project. Bad naming choices do not stay politely contained. They become sediment.
 
-There is also a second naming layer that many Windows explanations underplay: the **NetBIOS domain name**. Even in modern Windows environments, shorter legacy names still appear in places like `CORP\jsmith`. That does not mean you should design around NetBIOS first, but it does mean the short name should be readable and unsurprising. The FQDN and the short name do not solve the same problem, yet both show up in real operations.
+There is also a second naming layer that many Windows explanations underplay: the **NetBIOS (Network Basic Input/Output System) domain name**. Even in modern Windows environments, shorter legacy names still appear in places like `CORP\jsmith`. That does not mean you should design around NetBIOS first, but it does mean the short name should be readable and unsurprising. The fully qualified domain name (FQDN) and the short name do not solve the same problem, yet both show up in real operations.
 
 ### OUs Organize Administration; Groups Organize Access
 
@@ -151,7 +175,7 @@ The table below gives the operational view that matters most.
 | Universal | Aggregate groups across multiple domains in a forest | Any domain in the forest | Resources in any domain in the forest |
 | Local (on one computer) | Machine-specific access on a member server or workstation | Local accounts and selected domain principals | Only that one machine |
 
-This is where the classic **AGDLP** pattern comes from: **Accounts -> Global groups -> Domain Local groups -> Permissions**. You place people into role-based global groups, place those global groups into resource-based domain local groups, and assign permissions to the domain local groups. The value is not that the acronym is cute. The value is that role membership changes often, while ACL design should change slowly. AGDLP lets the frequent change happen in the group layer without constantly rewriting resource permissions.
+This is where the classic **Accounts -> Global groups -> Domain Local groups -> Permissions (AGDLP)** pattern comes from. You place people into role-based global groups, place those global groups into resource-based domain local groups, and assign permissions to the domain local groups. The value is not that the acronym is cute. The value is that role membership changes often, while ACL design should change slowly. AGDLP lets the frequent change happen in the group layer without constantly rewriting resource permissions.
 
 Suppose you run a design share on a file server. Instead of granting the folder to 27 individual designers, you might create `GG_Design_Users` as the role group, `DL_Share_Design_RW` as the resource group, place the global group into the domain local group, and assign NTFS modify permissions to the domain local group. When one designer joins or leaves, you update the role membership. You do not edit the ACL on the share every time headcount changes.
 
@@ -169,11 +193,11 @@ That is a healthier model than the lazy alternative of one shared administrator 
 
 ## Group Policy and the Windows Management Model
 
-If Active Directory is the identity plane, **Group Policy** is the distribution mechanism that turns identity into fleet behavior. Group Policy lets administrators push security settings, scripts, registry-based configuration, software-related settings, mapped drives, and many other controls to users and computers in a domain. It is one of the clearest examples of Microsoft's integrated approach. In many Linux environments, you would reach for an external configuration management tool first. In a Windows domain, a large class of those tasks begins with GPOs.
+If Active Directory is the identity plane, **Group Policy** is the distribution mechanism that turns identity into fleet behavior. Group Policy lets administrators push security settings, scripts, registry-based configuration, software-related settings, mapped drives, and many other controls to users and computers in a domain. It is one of the clearest examples of Microsoft's integrated approach. In many Linux environments, you would reach for an external configuration management tool first. In a Windows domain, a large class of those tasks begins with Group Policy Objects (GPOs).
 
 ### What a GPO Actually Is
 
-A **Group Policy Object (GPO)** has two important halves. One half lives in the directory as the **Group Policy Container (GPC)**, which stores metadata about the object. The other half lives in the **SYSVOL** share as the **Group Policy Template (GPT)**, which stores the files and settings that must be replicated to domain controllers and made available to clients. That split matters because it explains why GPO problems can involve both directory replication and file replication.
+A **Group Policy Object (GPO)** has two important halves. One half lives in the directory as the **Group Policy Container (GPC)**, which stores metadata about the object. The other half lives in the **SYSVOL** share, the replicated domain-wide path that stores policy files and scripts, as the **Group Policy Template (GPT)**. That split matters because it explains why GPO problems can involve both directory replication and file replication.
 
 When a Windows computer starts, it processes computer-targeted policy. When a user signs in, the system processes user-targeted policy. The machine consults domain controllers, reads the applicable GPOs, and applies settings according to scope, inheritance, and precedence rules. This is why Group Policy feels powerful: one change in the directory can alter behavior across an entire fleet. It is also why it feels dangerous: one wrong setting can alter behavior across an entire fleet.
 
@@ -183,11 +207,24 @@ Policies are not all the same kind of thing. Some are true policy settings that 
 
 The beginner mnemonic for Group Policy processing is **LSDOU**: Local, Site, Domain, Organizational Unit. That is a good starting point because it explains the broad direction of policy application. But it is not enough if you want to troubleshoot real environments.
 
-Policies linked to nested OUs are processed from parent to child, so the settings closest to the object usually win when there is conflict. Within a single site, domain, or OU, **link order** matters. A GPO with the highest precedence for that container is processed last for that container. On top of that, administrators can **block inheritance** on an OU or **enforce** a higher-level GPO so it cannot be overridden below. There is also **security filtering**, which changes which principals are allowed to apply a GPO, and **WMI filtering**, which can target policies based on characteristics of the target system.
+The order is easier to reason about when you picture it as a narrowing funnel. Broad defaults apply first, and more specific containers can narrow or replace them later.
+
+```mermaid
+flowchart LR
+  Local["Local policy"] --> Site["Site-linked GPOs"]
+  Site --> Domain["Domain-linked GPOs"]
+  Domain --> Parent["Parent OU GPOs"]
+  Parent --> Child["Child OU GPOs"]
+  Child --> Result["Effective user or computer configuration"]
+```
+
+That flow is only the starting point. Link order, enforcement, security filtering, and other mechanisms can still change the final result.
+
+Policies linked to nested OUs are processed from parent to child, so the settings closest to the object usually win when there is conflict. Within a single site, domain, or OU, **link order** matters. A GPO with the highest precedence for that container is processed last for that container. On top of that, administrators can **block inheritance** on an OU or **enforce** a higher-level GPO so it cannot be overridden below. There is also **security filtering**, which changes which principals are allowed to apply a GPO, and **Windows Management Instrumentation (WMI) filtering**, which can target policies based on characteristics of the target system.
 
 This sounds like a lot of moving parts because it is. Windows policy distribution is powerful precisely because it lets you layer global defaults with local exceptions. The price is that you must reason about both scope and precedence. A finance laptop in a child OU may inherit a domain-wide password policy, a parent-OU workstation baseline, a child-OU device hardening policy, and a specific filtered GPO for BitLocker settings. All four can be correct at the same time.
 
-One especially important feature is **loopback processing**. Normally, user settings come from the user's location in the directory, and computer settings come from the computer's location. Loopback changes that behavior for certain machines. It lets the computer's OU influence which user settings apply when someone signs in there. This is useful for shared kiosks, classroom machines, Remote Desktop session hosts, and other systems where the machine's role matters more than the user's normal home OU. Loopback is one of those features that feels obscure until you need it. Then it suddenly explains why two logons by the same user behave differently on two different computers.
+One especially important feature is **loopback processing**. Normally, user settings come from the user's location in the directory, and computer settings come from the computer's location. Loopback changes that behavior for certain machines. It lets the computer's OU influence which user settings apply when someone signs in there. This is useful for shared kiosks, classroom machines, Remote Desktop Services (RDS) session hosts, and other systems where the machine's role matters more than the user's normal home OU. Loopback is one of those features that feels obscure until you need it. Then it suddenly explains why two logons by the same user behave differently on two different computers.
 
 The table below captures the knobs that administrators use most often when policy behavior gets complicated.
 
@@ -198,7 +235,7 @@ The table below captures the knobs that administrators use most often when polic
 | Enforced | Prevents lower-level GPOs from overriding the link | Make a higher-level security baseline stick |
 | Security filtering | Limits which principals may apply the GPO | Target a subset of users or computers |
 | WMI filtering | Applies the GPO only when system properties match | Target by OS version, hardware traits, or other conditions |
-| Loopback | Alters how user policy is determined on specific machines | Shared computers, kiosks, RDS hosts |
+| Loopback | Alters how user policy is determined on specific machines | Shared computers, kiosks, Remote Desktop Services hosts |
 
 ### Why GPO Troubleshooting Feels Slippery
 
@@ -226,19 +263,19 @@ If identity answers who you are, file services answer what you may touch. Window
 
 ### SMB Is the Network Doorway; NTFS Is the Detailed Lock
 
-Windows file sharing typically uses **SMB (Server Message Block)** over the network and **NTFS** permissions on the filesystem underneath. These are related but not interchangeable. Share permissions apply when the folder is accessed over the network. NTFS permissions apply to the underlying files and directories whether they are reached locally or remotely. The effective access a user receives over the network is the combination of both, with the more restrictive outcome winning.
+Windows file sharing typically uses **SMB (Server Message Block)** over the network and **NTFS (New Technology File System)** permissions on the filesystem underneath. These are related but not interchangeable. Share permissions apply when the folder is accessed over the network. NTFS permissions apply to the underlying files and directories whether they are reached locally or remotely. The effective access a user receives over the network is the combination of both, with the more restrictive outcome winning.
 
 This is why many administrators keep share permissions intentionally broad and make NTFS the place where detailed authorization lives. If the share grants authenticated domain users a broad right such as Change or Full Control, while NTFS precisely expresses who can read, modify, or traverse the directory tree, troubleshooting becomes easier. You avoid playing a two-layer guessing game every time a user sees Access Denied.
 
-In modern Windows environments, SMB is not just an old file protocol. It has become a security and performance surface in its own right. Features such as SMB signing, SMB encryption, multichannel, and improved transport behavior matter. But the conceptual point for this lecture is simpler: SMB exposes the resource; Active Directory groups describe who should have access; NTFS expresses the detailed permission model.
+In modern Windows environments, SMB is not just an old file protocol. It has become a security and performance surface in its own right. Features such as SMB signing, SMB encryption, multichannel, and improved transport behavior all matter. The core relationship is simpler to state than to get right: SMB exposes the resource; Active Directory groups describe who should have access; NTFS expresses the detailed permission model.
 
 ### Stable Paths Matter More Than One Server Name
 
 A file service design problem that novices underestimate is path stability. If users are trained to browse directly to `\\fs01\engineering`, then the server name itself becomes part of the user workflow, the documentation, and every script. If you later move the data, rename the host, or redesign the storage layer, that dependency becomes friction.
 
-Windows environments often address this with **DFS Namespaces**, which provide stable logical paths independent of the underlying server hosting the data. That is conceptually similar to using a service name or load-balanced endpoint instead of hardcoding one machine name in application infrastructure. You are separating the identity of the service from the identity of one current host.
+Windows environments often address this with **DFS (Distributed File System) Namespaces**, which provide stable logical paths independent of the underlying server hosting the data. That is conceptually similar to using a service name or load-balanced endpoint instead of hardcoding one machine name in application infrastructure. You are separating the identity of the service from the identity of one current host.
 
-This is a useful moment to step back and see the pattern across the lecture. Active Directory itself is doing the same kind of abstraction. Users authenticate to a domain, not to one specific controller. Clients look up services through DNS instead of memorizing one IP. DFS hides backend file hosts behind a logical namespace. Mature infrastructure tries to give humans and applications stable names while letting operators change the implementation behind those names.
+That pattern of stable names over changing implementations runs throughout Windows identity infrastructure. Active Directory itself does the same kind of abstraction: users authenticate to a domain, not to one specific controller. Clients look up services through DNS instead of memorizing one IP. DFS hides backend file hosts behind a logical namespace. Mature infrastructure tries to give humans and applications stable names while letting operators change the implementation behind those names.
 
 ### Design Access with Groups, Not ACL Whack-a-Mole
 
@@ -260,22 +297,22 @@ This is one reason Windows administration sometimes gets an unfair reputation fo
 
 ## What Changes When You Promote a Server to a Domain Controller
 
-A freshly installed Windows Server starts life as a general-purpose operating system. Promoting it to a domain controller changes both its responsibilities and its risk profile. This section is not about wizard clicks. It is about understanding what that promotion means technically so you can reason about the server after the ceremony is over.
+The identity and permission concepts from the previous sections are only useful if you can operate the infrastructure behind them. A domain controller is where those abstractions land on real hardware with real operational consequences. Promoting a server to a domain controller changes both its responsibilities and its risk profile in ways that ordinary server administration does not prepare you for. Understanding what that promotion means technically is what lets you reason about the server after the ceremony is over.
 
 ### A Domain Controller Is Part Database Server, Part Security Infrastructure
 
 When you install AD DS and promote a machine, the server begins hosting the directory database, typically represented operationally by `ntds.dit`, along with related logs and the **SYSVOL** content that distributes policy and scripts. The server registers itself in DNS as a place where clients can find directory and authentication services. It begins issuing or participating in Kerberos behavior for the domain. It becomes part of replication topology with peer controllers.
 
-That makes a domain controller special in several ways. First, it should not be treated like a convenient multi-purpose box that also happens to hold identity. Second, troubleshooting on a DC needs more discipline because identity outages radiate outward. Third, backup and recovery for a DC must account for both directory state and policy/file replication state. You are not protecting just an operating system install. You are protecting the control plane for a slice of the environment.
+That makes a domain controller special in several ways. First, it should not be treated like a convenient multi-purpose box that also happens to hold identity. Second, troubleshooting on a domain controller (DC) needs more discipline because identity outages radiate outward. Third, backup and recovery for a DC must account for both directory state and policy/file replication state. You are not protecting just an operating system install. You are protecting the control plane for a slice of the environment.
 
 PowerShell makes the promotion process concise, which is useful because it exposes the key actions without burying them inside a GUI walkthrough.
 
 ```powershell
 Install-WindowsFeature AD-Domain-Services -IncludeManagementTools
 
-Install-ADDSForest \
-  -DomainName "corp.example.com" \
-  -DomainNetbiosName "CORP" \
+Install-ADDSForest `
+  -DomainName "corp.example.com" `
+  -DomainNetbiosName "CORP" `
   -InstallDns:$true
 ```
 
@@ -285,7 +322,7 @@ The commands are short. The consequences are not. You are creating a new naming 
 
 Active Directory is a multi-master replicated system. That phrase matters. It means multiple domain controllers can accept changes and replicate them to one another. In ordinary operation, you do not think "the one true server holds identity." You think "the directory must remain consistent enough across the controllers that clients can authenticate and administrators can manage objects without confusion."
 
-Replication behavior is shaped by sites and by the type of data involved. Directory objects replicate through AD replication. SYSVOL content replicates through DFS Replication in modern environments. The Global Catalog provides a partial forest-wide searchable view that helps with logon and lookups beyond a single domain. These pieces are separate enough that failures can be uneven. A directory change may replicate while SYSVOL content lags, or a controller may answer LDAP queries while some policy data is stale. That unevenness is why identity troubleshooting is not just "is the server up?"
+Replication behavior is shaped by sites and by the type of data involved. Directory objects replicate through AD replication. SYSVOL content replicates through Distributed File System (DFS) Replication in modern environments. The Global Catalog provides a partial forest-wide searchable view that helps with logon and lookups beyond a single domain. These pieces are separate enough that failures can be uneven. A directory change may replicate while SYSVOL content lags, or a controller may answer LDAP queries while some policy data is stale. That unevenness is why identity troubleshooting is not just "is the server up?"
 
 In branch or semi-trusted environments, administrators may also use a **Read-Only Domain Controller (RODC)**. The idea is simple: put a domain controller near users who need local authentication performance, but reduce the consequences if that machine is physically compromised. RODCs are not the default for ordinary datacenter design, yet they are another useful reminder that identity infrastructure is designed with both performance and risk in mind.
 
@@ -297,8 +334,8 @@ Active Directory is multi-master, but not every directory task is safely handled
 |---|---|---|
 | Schema Master | Forest | Controls schema changes so directory structure evolves coherently |
 | Domain Naming Master | Forest | Controls addition or removal of domains in the forest |
-| RID Master | Domain | Allocates RID pools so SIDs remain unique |
-| PDC Emulator | Domain | Handles time sensitivity, password-change behavior, and several compatibility tasks |
+| RID Master | Domain | Allocates RID (Relative Identifier) pools so SIDs (Security Identifiers) remain unique |
+| PDC Emulator (Primary Domain Controller Emulator) | Domain | Handles time sensitivity, password-change behavior, and several compatibility tasks |
 | Infrastructure Master | Domain | Tracks certain cross-domain reference updates |
 
 In day-to-day operations, the **PDC Emulator** is usually the role you feel most often. It is central to time synchronization behavior, password-change convergence, and some account lockout flows. If you remember only one FSMO role at first, remember that one. The others matter too, but the PDC Emulator shows up in ordinary operational conversations far more frequently.
@@ -307,7 +344,7 @@ In day-to-day operations, the **PDC Emulator** is usually the role you feel most
 
 Identity infrastructure is only healthy if it is recoverable. For AD DS, that means more than keeping a VM powered on and hoping the hypervisor protects you. You need **System State** backups, documented restore procedures, and at least a basic understanding of what an authoritative restore means. If an important OU is deleted, if ransomware damages controllers, or if bad changes replicate, you need a practiced way back.
 
-Windows administrators often learn this the hard way because virtualization creates a false sense of safety. A VM snapshot can be useful for many workloads, but it is not the same thing as a tested directory recovery strategy. Modern virtualization support such as VM-Generation ID has made some older snapshot horror stories less absolute than they once were, but the practical lesson stays the same: a domain controller is part of a replicated security system, not just a disposable lab VM. Recovery planning must respect that.
+Windows administrators often learn this the hard way because virtualization creates a false sense of safety. A virtual machine (VM) snapshot can be useful for many workloads, but it is not the same thing as a tested directory recovery strategy. Modern virtualization support such as VM-Generation ID has made some older snapshot horror stories less absolute than they once were, but the practical lesson stays the same: a domain controller is part of a replicated security system, not just a disposable lab VM. Recovery planning must respect that.
 
 The **Active Directory Recycle Bin** improves recoverability for many accidental deletions, but it does not eliminate the need for backup. Recycle Bin helps when the question is "how do I restore deleted directory objects quickly?" Backup helps when the question is "how do I recover identity infrastructure after serious corruption, destructive change, or broader system loss?" Those are related questions, not identical ones.
 
@@ -331,15 +368,15 @@ Search-ADAccount -AccountInactive -TimeSpan 90.00:00:00 -ComputersOnly
 
 `repadmin` summarizes replication health. `dcdiag` performs a broad set of health tests across domain controller behavior. `Search-ADAccount` is useful for finding inactive users or computers without teaching the wrong lesson about which replicated timestamp fields are precise enough for which job. If you need an exact last logon across multiple domain controllers, that becomes a different and more explicit query problem. The broader lesson is that stale identities are security debt. Old computer accounts, disabled-but-never-removed users, and forgotten service principals all expand the attack surface of the directory.
 
-This is also where the operational themes from the Postmortems and Communications lecture come back into view. Identity outages are rarely experienced by users as "directory replication is degraded." They are experienced as business interruptions: sign-ins fail, file access disappears, or a service cannot start. A good operator learns to map those user symptoms back to the underlying identity dependencies quickly.
+This is also where incident-response thinking comes back into view. Identity outages are rarely experienced by users as "directory replication is degraded." They are experienced as business interruptions: sign-ins fail, file access disappears, or a service cannot start. A good operator learns to map those user symptoms back to the underlying identity dependencies quickly.
 
 ## Active Directory in a Hybrid World
 
-By 2026, no honest Windows infrastructure lecture can stop at classic on-prem domain controllers and pretend the cloud identity era never happened. The right response is not to abandon traditional AD concepts. It is to place them correctly. Active Directory Domain Services, Microsoft Entra ID, Intune, and hybrid synchronization solve overlapping but not identical problems.
+Classic on-prem AD DS is the foundation, but it does not exist in isolation anymore. Most organizations running Active Directory today are also running Microsoft 365, software-as-a-service (SaaS) applications, or cloud-hosted workloads that do not domain-join in the traditional sense. The right response to that coexistence is not to abandon traditional AD concepts but to place them correctly. Active Directory Domain Services, Microsoft Entra ID, Intune, and hybrid synchronization solve overlapping but not identical problems.
 
 ### AD DS Is Not Microsoft Entra ID
 
-The rename from Azure AD to **Microsoft Entra ID** helped clarify something that administrators had long needed to say plainly: Entra ID is not simply "Active Directory in the cloud." It is a cloud identity platform oriented around modern application protocols, SaaS access, conditional access policies, MFA, device identity, and federation patterns common to web applications. AD DS is a directory and authentication system centered on domain join, Kerberos, LDAP, Group Policy, SMB-oriented resource access, and the long Windows application ecosystem.
+The rename from Azure AD to **Microsoft Entra ID** helped clarify something that administrators had long needed to say plainly: Entra ID is not simply "Active Directory in the cloud." It is a cloud identity platform oriented around modern application protocols, SaaS access, conditional access policies, multi-factor authentication (MFA), device identity, and federation patterns common to web applications. AD DS is a directory and authentication system centered on domain join, Kerberos, LDAP, Group Policy, SMB-oriented resource access, and the long Windows application ecosystem.
 
 The comparison below is intentionally simplified, but it captures the difference in posture.
 
@@ -347,15 +384,15 @@ The comparison below is intentionally simplified, but it captures the difference
 |---|---|---|---|
 | AD DS | Traditional domain identity inside managed networks | Kerberos, LDAP, DNS-integrated discovery, Group Policy | Windows sign-in, file shares, legacy apps, domain-joined servers and clients |
 | Microsoft Entra ID | Cloud identity and application access | OAuth 2.0, OpenID Connect, SAML, Conditional Access, MFA | Microsoft 365, SaaS sign-in, web apps, cloud-managed devices |
-| Intune | Device management and compliance | MDM policies, compliance evaluation, app deployment | Cloud-managed laptops, mobile devices, modern endpoint policy |
+| Intune | Device management and compliance | Mobile device management (MDM) policies, compliance evaluation, app deployment | Cloud-managed laptops, mobile devices, modern endpoint policy |
 
 Understanding that difference keeps you from asking the wrong questions. If you need LDAP queries against an on-prem directory, Entra ID is not a direct drop-in replacement. If you need conditional access policies for SaaS sign-in from unmanaged networks, classic AD DS is not the right answer by itself. Many real organizations therefore run both.
 
 ### Why Hybrid Is the Normal Case
 
-The reason hybrid identity is common is not technical confusion. It is that organizations have mixed constraints. They may have Microsoft 365, cloud MFA, and SaaS applications on one side, while still running on-prem file servers, printers, legacy ERP systems, Windows-integrated database workloads, industrial devices, or branch networks that depend on traditional domain behavior on the other. Hybrid design is what happens when a business has to support both the old control plane and the new one long enough for the transition to be survivable.
+The reason hybrid identity is common is not technical confusion. It is that organizations have mixed constraints. They may have Microsoft 365, cloud MFA, and SaaS applications on one side, while still running on-prem file servers, printers, legacy enterprise resource planning (ERP) systems, Windows-integrated database workloads, industrial devices, or branch networks that depend on traditional domain behavior on the other. Hybrid design is what happens when a business has to support both the old control plane and the new one long enough for the transition to be survivable.
 
-This is why a name like **Microsoft Entra Connect Sync** matters operationally. It represents the bridge between directory worlds. The cloud identity layer becomes aware of users and some device state from the on-prem directory, while the on-prem environment continues to do the work it is still better positioned to do. The details evolve over time, but the principle is stable: identity migration is rarely one big switch flip. It is a period of coexistence with careful boundary management.
+This is why a product like **Microsoft Entra Connect Sync** matters operationally. It is the classic bridge between directory worlds. The cloud identity layer becomes aware of users and some device state from the on-prem directory, while the on-prem environment continues to do the work it is still better positioned to do. Microsoft is also steering customers toward Microsoft Entra Cloud Sync for simpler, more cloud-managed synchronization patterns, which is a useful reminder that the hybrid boundary is still evolving. The principle, however, is stable: identity migration is rarely one big switch flip. It is a period of coexistence with careful boundary management.
 
 ### Traditional Windows Infrastructure Still Teaches the Right Lessons
 
@@ -365,17 +402,17 @@ Those lessons transfer directly to modern platforms. Conditional Access policy h
 
 ## Linux and Windows Are Two Answers to the Same Problem
 
-Because this course lives across both Linux and Windows systems, it is worth ending the technical body of the lecture by comparing the ecosystems directly. The surface tools differ a great deal, but the underlying problems are the same. Every serious environment needs identity, policy, authorization, naming, remote administration, software distribution, and a reliable way to reason about failures when those systems misbehave.
+Linux and Windows look very different at the surface. The tools, the defaults, and the mental models all diverge. But every serious environment built on either platform is trying to solve the same set of problems: how to centralize identity, distribute policy, control file access, discover services, and safely delegate administrative work. The surface tools differ; the questions underneath do not.
 
 ### Same Goals, Different Default Tools
 
-In Linux, local identity often starts in `/etc/passwd`, `/etc/shadow`, and `/etc/group`, then grows outward into SSH keys, PAM, SSSD, FreeIPA, LDAP, Kerberos, Ansible, or other tools depending on scale and culture. In Windows, central identity and policy were historically pushed closer to the center of the platform through AD DS and Group Policy. That does not make one ecosystem inherently better. It means the defaults teach different habits.
+In Linux, local identity often starts in `/etc/passwd`, `/etc/shadow`, and `/etc/group`, then grows outward into SSH keys, Pluggable Authentication Modules (PAM), System Security Services Daemon (SSSD), FreeIPA, LDAP, Kerberos, Ansible, or other tools depending on scale and culture. In Windows, central identity and policy were historically pushed closer to the center of the platform through AD DS and Group Policy. That does not make one ecosystem inherently better. It means the defaults teach different habits.
 
-Windows administrators therefore tend to think in terms of domains, GPOs, MMC consoles, and PowerShell modules. Linux administrators tend to think in terms of text configuration, service units, automation playbooks, package managers, and a smaller-tool composition model. Both approaches can be elegant. Both can be awful when designed carelessly.
+Windows administrators therefore tend to think in terms of domains, GPOs, Microsoft Management Console (MMC) consoles, and PowerShell modules. Linux administrators tend to think in terms of text configuration, service units, automation playbooks, package managers, and a smaller-tool composition model. Both approaches can be elegant. Both can be awful when designed carelessly.
 
 ### The Ecosystems Meet More Often Than Newcomers Expect
 
-Many enterprises do not maintain clean Windows-only and Linux-only islands. Linux systems may join Active Directory using SSSD and Kerberos. Samba can expose SMB shares to Windows clients while integrating with directory-backed identities. Web applications running on Linux may authenticate users against AD-backed services. Certificate services, DNS, and identity federation cross the boundary all the time.
+Many enterprises do not maintain clean Windows-only and Linux-only islands. Linux systems may join Active Directory using SSSD (System Security Services Daemon, which brokers authentication requests to Kerberos and LDAP) and Kerberos. Samba can expose SMB shares to Windows clients while integrating with directory-backed identities. Web applications running on Linux may authenticate users against AD-backed services. Certificate services, DNS, and identity federation cross the boundary all the time.
 
 This is another reason Windows Server is worth studying even if your own preference is Linux. Real operations is full of seams between systems. The seam between Linux and Windows is one of the most common. Understanding both sides lets you tell whether a failure belongs to the application, the operating system, the network, the DNS layer, or the identity plane that sits underneath them all.
 
@@ -384,14 +421,14 @@ The table below shows the most useful conceptual parallels.
 | Operational Problem | Linux-Oriented Answer | Windows-Oriented Answer |
 |---|---|---|
 | Centralize user identity | LDAP, FreeIPA, Kerberos, SSSD | AD DS, Kerberos, LDAP |
-| Push configuration | Ansible, Puppet, Chef, Salt | Group Policy, Group Policy Preferences, PowerShell DSC in some environments |
+| Push configuration | Ansible, Puppet, Chef, Salt | Group Policy, Group Policy Preferences, PowerShell DSC (Desired State Configuration) in some environments |
 | Control file access | POSIX permissions and ACLs | NTFS ACLs plus SMB share permissions |
 | Discover services | DNS, service registries, config management | DNS SRV records, AD-integrated DNS |
-| Delegate admin work | sudo, role separation, automation scopes | Delegation in AD, scoped admin groups, JEA and role-based tooling |
+| Delegate admin work | sudo, role separation, automation scopes | Delegation in AD, scoped admin groups, JEA (Just Enough Administration) and role-based tooling |
 
 ### The Next Layer Down Is Physical Infrastructure
 
-One final connection is worth making before the lecture closes. Active Directory can feel abstract because it is so much about names, objects, protocols, and policy. But none of it escapes hardware. Domain controllers still run on servers. SYSVOL and `ntds.dit` still live on storage. Replication still crosses links with latency and failure modes. DNS and authentication still depend on network reachability. The next Server and Data Center Architecture lecture matters because the identity plane eventually lands on CPUs, memory channels, storage devices, and network paths. Abstract control planes are still made of machines.
+One final connection is worth making. Active Directory can feel abstract because it is so much about names, objects, protocols, and policy. But none of it escapes hardware. Domain controllers still run on servers. SYSVOL and `ntds.dit` still live on storage. Replication still crosses links with latency and failure modes. DNS and authentication still depend on network reachability. The identity plane eventually lands on CPUs, memory channels, storage devices, and network paths. Abstract control planes are still made of machines.
 
 ## Takeaways
 
@@ -399,17 +436,14 @@ If you walk away from this lecture with one strong mental model, let it be this:
 
 Imagine a Monday morning outage. Users say they cannot sign in to some machines. A file share is missing. A scheduled task fails on an application server. A printer queue is unavailable in one office. With the concepts from this lecture, you do not chase each symptom in isolation. You ask structured questions. Is the client using the correct DNS servers? Can it find a domain controller in its site? Is time synchronized closely enough for Kerberos? Did a GPO change recently alter access or policy processing? Is replication healthy, including SYSVOL? Are the relevant permissions attached to groups designed cleanly enough to inspect quickly? That is the difference between memorizing a product and understanding a system.
 
-This also ties together the surrounding part of the course. The Postmortems and Communications lecture argued that effective incident work depends on finding the real system beneath the symptom. Windows identity infrastructure is a perfect example of that idea. The next Server and Data Center Architecture lecture then pushes in the opposite direction, from control plane down into hardware and facility design. Together, those perspectives explain why administration is never only about the GUI in front of you or the command you just ran. It is about seeing how layers fit together well enough to operate them under pressure.
+This also ties together the surrounding part of the course. The Incident Response and Postmortems lecture argued that effective incident work depends on finding the real system beneath the symptom. Windows identity infrastructure is a perfect example of that idea. The On-Premises Infrastructure and Data Center Architecture lecture pushes in the opposite direction, from control plane down into hardware and facility design. Together, those perspectives explain why administration is never only about the graphical user interface in front of you or the command you just ran. It is about seeing how layers fit together well enough to operate them under pressure.
 
 ## Resources
 
 - <a href="https://learn.microsoft.com/en-us/windows-server/get-started/get-started-with-windows-server" target="_blank" rel="noopener noreferrer">Get Started with Windows Server (Microsoft Learn) (Official Documentation)</a>
 - <a href="https://learn.microsoft.com/en-us/training/modules/introduction-to-ad-ds/" target="_blank" rel="noopener noreferrer">Introduction to Active Directory Domain Services (Microsoft Learn) (Training Module)</a>
-- <a href="https://learn.microsoft.com/en-us/troubleshoot/windows-server/active-directory/naming-conventions-for-computer-domain-site-ou" target="_blank" rel="noopener noreferrer">Naming Conventions in Active Directory for Computers, Domains, Sites, and OUs (Microsoft Learn) (Official Documentation)</a>
-- <a href="https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/get-started/virtual-dc/active-directory-domain-services-overview" target="_blank" rel="noopener noreferrer">Active Directory Domain Services Overview (Microsoft Learn) (Official Documentation)</a>
 - <a href="https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/plan/security-best-practices/best-practices-for-securing-active-directory" target="_blank" rel="noopener noreferrer">Best Practices for Securing Active Directory (Microsoft Learn) (Official Documentation)</a>
+- <a href="https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/get-started/replication/active-directory-replication-concepts" target="_blank" rel="noopener noreferrer">Active Directory Replication Concepts (Microsoft Learn) (Official Documentation)</a>
 - <a href="https://learn.microsoft.com/en-us/powershell/module/activedirectory/about/about_activedirectory_filter?view=windowsserver2025-ps" target="_blank" rel="noopener noreferrer">about_ActiveDirectory_Filter (Microsoft Learn) (Official Documentation)</a>
-- <a href="https://www.rfc-editor.org/rfc/rfc4120" target="_blank" rel="noopener noreferrer">RFC 4120: The Kerberos Network Authentication Service (KRB5) (IETF) (Standard)</a>
-- <a href="https://www.rfc-editor.org/rfc/rfc4511" target="_blank" rel="noopener noreferrer">RFC 4511: Lightweight Directory Access Protocol (LDAP): The Protocol (IETF) (Standard)</a>
 - <a href="https://www.youtube.com/watch?v=xftEuVQ7kY0" target="_blank" rel="noopener noreferrer">Active Directory Crash Course (John Savill) (Video)</a>
 - <a href="https://www.youtube.com/watch?v=2BO3uhaWJH4" target="_blank" rel="noopener noreferrer">Group Policy Fundamentals (Microsoft Mechanics) (Video)</a>

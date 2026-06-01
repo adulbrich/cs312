@@ -13,7 +13,7 @@ type: lecture
 slug: documentation-teamwork-wrap-up
 order: 20
 covers: runbooks and operational documentation; architecture diagrams and ADRs; docs-as-code and version control; ticket-based collaboration; pull request workflows; postmortem documents; career paths (sysadmin, DevOps, SRE); course retrospective
-prereq_lectures: windows-server-and-active-directory
+prereq_lectures: windows-server-administration
 followup_lectures:
 paired_activities:
 supports_labs:
@@ -21,7 +21,7 @@ supports_labs:
 
 Imagine you are three weeks into a new job on a platform team. At 2 AM, your pager fires: the payment service is returning 503 errors and the on-call runbook says "ask Jordan." Jordan left the company last month. You have no architecture diagram, no record of why the service was deployed the way it was, and no step-by-step guide for restarting it safely. You are, in the language of operations, on your own.
 
-This chapter is about making sure that situation never happens on your team. Documentation is not paperwork; it is the connective tissue that lets a group of people operate a system reliably over time, across shift changes, vacations, and departures. We will examine the types of documentation that matter most, how to write them well, how teams collaborate around them, and where to go next in your career.
+This lecture is about making sure that situation never happens on your team. Documentation is not paperwork; it is the connective tissue that lets a group of people operate a system reliably over time, across shift changes, vacations, and departures. We will examine the types of documentation that matter most, how to write them well, how teams collaborate around them, and where to go next in your career.
 
 ## Why documentation matters
 
@@ -178,7 +178,7 @@ The **system administrator** role remains the foundation. Sysadmins manage serve
 
 **Cloud architects** design the overall structure of an organization's cloud infrastructure. They make decisions about which cloud services to use, how to organize accounts and networks, how to manage costs, and how to meet security and compliance requirements. Cloud architects tend to work at a higher level of abstraction, focusing on patterns and standards rather than individual systems.
 
-These roles are not rigid boxes. In practice, most operations professionals blend skills from several of them, and career paths frequently cross between them. What they share is a commitment to building systems that work reliably, and the documentation practices we have discussed in this chapter are common to all of them.
+These roles are not rigid boxes. In practice, most operations professionals blend skills from several of them, and career paths frequently cross between them. What they share is a commitment to building systems that work reliably, and the documentation practices we have discussed in this lecture are common to all of them.
 
 ## Continuing education
 
@@ -196,7 +196,7 @@ Technology changes quickly, and a career in system administration requires conti
 
 ## Bringing it all together
 
-Return to the scenario from the beginning of this chapter. This time, you are three weeks into the job, your pager fires at 2 AM, and things are different. You open the runbook for the payment service, which lists the exact steps to diagnose and restart it. The architecture diagram shows you which upstream services depend on it and which database it connects to. A decision record explains why the service runs on a dedicated host instead of in the shared Kubernetes cluster (it was a latency-sensitive choice made eight months ago). The on-call handoff note from your colleague mentions that this service had a brief hiccup two days ago and suggests checking the connection pool settings first.
+Return to the scenario from the beginning of this lecture. This time, you are three weeks into the job, your pager fires at 2 AM, and things are different. You open the runbook for the payment service, which lists the exact steps to diagnose and restart it. The architecture diagram shows you which upstream services depend on it and which database it connects to. A decision record explains why the service runs on a dedicated host instead of in the shared Kubernetes cluster (it was a latency-sensitive choice made eight months ago). The on-call handoff note from your colleague mentions that this service had a brief hiccup two days ago and suggests checking the connection pool settings first.
 
 You follow the runbook, verify the fix, update the handoff note for the next person, and go back to sleep. The incident that could have been a two-hour escalation took twelve minutes.
 
