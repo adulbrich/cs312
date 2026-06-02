@@ -3,10 +3,7 @@ title: "Windows Server and Active Directory on AWS"
 description: "Hands-on exercise: deploy a Windows Server domain controller and client on AWS, configure Active Directory, create users and OUs, and apply Group Policy."
 sidebar:
   order: 19
-draft: true
 ---
-
-{/* NOTE: This was used in Spring 2024 for labs */}
 
 import { Aside, Steps } from '@astrojs/starlight/components';
 import ActivityQuestion from '/src/components/ActivityQuestion.astro';
@@ -18,35 +15,30 @@ order: 17
 paired_lecture: windows-server-administration
 practices: Windows Server EC2 instance provisioning with RDP access; AD DS role installation via Server Manager; domain controller promotion with DNS integration; OU creation; user and security group creation; second instance domain join; Group Policy Object creation and application; gpresult verification
 prereq_activities:
-output: a working Active Directory domain with two EC2 instances, at least two OUs, multiple users, and a GPO with one policy applied and confirmed with gpresult /r
+output: a working Active Directory domain with two EC2 instances, at least two OUs, multiple users, and a GPO with one policy applied and confirmed with gpresult /scope computer /r
 */}
 
 This activity puts into practice the concepts from the [Windows Server Administration](/lectures/windows-server-administration/) lecture. You will deploy two Windows Server instances on AWS, promote one to a domain controller, join the other as a client, create users and organizational units, and apply a Group Policy Object. By the end, you will have built a working Active Directory domain from scratch.
 
 ## What You Will Need
 
+- Your AWS Academy Learner Lab session started
 - A laptop with a Remote Desktop client installed:
   - **Windows:** Remote Desktop Connection (built-in, search "Remote Desktop" in the Start menu)
   - **macOS:** [Windows App](https://apps.apple.com/us/app/windows-app/id1295203466?mt=12) from the App Store
   - **Linux:** [Remmina](https://remmina.org/) or another RDP client
-- An activated AWS Academy account with Learner Lab access
-- About 60-90 minutes
-
-<Aside type="caution">
-AWS resources cost money. The two `t3.small` Windows instances used in this activity cost approximately $0.05/hour combined in `us-west-2`. **Terminate both instances and delete the VPC when you are finished.**
-</Aside>
 
 ## Set Up the Network (VPC)
 
 Before deploying any servers, you need a Virtual Private Cloud (VPC) with subnets in two Availability Zones. This mirrors a real deployment where domain controllers and clients may sit in different data center zones for resilience.
 
 <Steps>
-1. In the AWS Console, navigate to **VPC Dashboard** (make sure you are in the **Oregon / us-west-2** region).
+1. In the AWS Console, navigate to **VPC** dashboard.
 
 2. Click **Create VPC** and select **VPC and more** to create the VPC along with its subnets and routing in one step.
 
 3. Configure:
-   - **Name tag:** `ad-lab`
+   - **Name tag:** `cs312-ad`
    - **IPv4 CIDR block:** `10.3.12.0/22`
    - **IPv6:** None
    - **Tenancy:** Default
@@ -62,13 +54,13 @@ Before deploying any servers, you need a Virtual Private Cloud (VPC) with subnet
 
 6. Edit the **Inbound Rules** of that security group. Keep the existing rule (which allows traffic within the security group) and add a new rule:
    - **Type:** RDP
-   - **Source:** Your current IP address (use "My IP" in the dropdown, or enter your campus/home CIDR if needed)
+   - **Source:** Your current IP address (use "My IP" in the dropdown, or enter the campus/home CIDR, or just 0.0.0.0/0)
 
    This allows you to connect via Remote Desktop from your machine.
 </Steps>
 
-<Aside type="note">
-**Why two Availability Zones?** In a production environment, you would place domain controllers in separate AZs so that a single data center failure does not take down authentication for the entire domain. We replicate that pattern here even though we are only deploying one DC.
+<Aside type="note" title="Why two Availability Zones?">
+In a production environment, you would place domain controllers in separate AZs so that a single data center failure does not take down authentication for the entire domain. We replicate that pattern here even though we are only deploying one DC.
 </Aside>
 
 ## Deploy the Domain Controller
@@ -78,13 +70,13 @@ Before deploying any servers, you need a Virtual Private Cloud (VPC) with subnet
 
 2. Configure the instance:
    - **Name:** `DomainController`
-   - **AMI:** Microsoft Windows Server 2022 Base
+   - **AMI:** Microsoft Windows Server 2025 Base
    - **Instance type:** `t3.small`
-   - **Key pair:** Create a new key pair (give it a name, download the `.pem` file, and keep it safe; you will need it to decrypt the Administrator password)
+   - **Key pair:** Use your existing key pair or create a new one (you will need this to retrieve the Administrator password and connect via RDP)
 
 3. Under **Network settings**, click **Edit**:
-   - **VPC:** Select `ad-lab-vpc`
-   - **Subnet:** Select the one ending in `us-west-2a`
+   - **VPC:** Select `cs312-ad-vpc`
+   - **Subnet:** Select the one ending in `a`
    - **Auto-assign public IP:** Enable
    - **Firewall:** Select existing security group, choose the `default` group for your VPC
 
@@ -127,7 +119,7 @@ Once connected to the DomainController via RDP:
 10. The server will **reboot automatically**. Wait a minute, then reconnect via RDP. The login will now show the domain: log in as `CS312LAB\Administrator`.
 </Steps>
 
-<Aside type="caution">
+<Aside type="caution" title="Be Patient After Promotion">
 The first login after promotion takes several minutes as Active Directory finishes initializing. This is normal. You can proceed to deploy the client machine while you wait.
 </Aside>
 
@@ -136,13 +128,13 @@ The first login after promotion takes several minutes as Active Directory finish
 <Steps>
 1. Return to the **EC2 Dashboard** and launch a second instance:
    - **Name:** `WindowsClient`
-   - **AMI:** Microsoft Windows Server 2022 Base
+   - **AMI:** Microsoft Windows Server 2025 Base
    - **Instance type:** `t3.small`
    - **Key pair:** Use the same key pair you created earlier
 
 2. Network settings:
-   - **VPC:** `ad-lab-vpc`
-   - **Subnet:** Select the one ending in `us-west-2b` (a different AZ from the DC)
+   - **VPC:** `cs312-ad-vpc`
+   - **Subnet:** Select the one ending in `b` (a different AZ from the DC)
    - **Auto-assign public IP:** Enable
    - **Security group:** Select the same `default` group
 
@@ -151,8 +143,8 @@ The first login after promotion takes several minutes as Active Directory finish
 4. Connect via RDP.
 </Steps>
 
-<Aside type="note">
-You might wonder why we use Windows Server as a "client" instead of Windows 10 or 11. AWS only allows server OS images on EC2. For our purposes, this does not matter: domain joining, Group Policy, and user authentication work identically on both server and desktop editions.
+<Aside type="note" title="Why Windows Server for a Client?">
+You might wonder why we use Windows Server as a "client" instead of Windows 11. AWS only allows server OS images on EC2. For our purposes, this does not matter: domain joining, Group Policy, and user authentication work identically on both server and desktop editions.
 </Aside>
 
 ## Point the Client's DNS to the Domain Controller
@@ -160,11 +152,9 @@ You might wonder why we use Windows Server as a "client" instead of Windows 10 o
 On the **WindowsClient** machine:
 
 <Steps>
-1. Open **Ethernet settings** (search "ethernet" in the Start menu).
+1. Open **Advanced network settings** (search "network" in the Start menu).
 
-2. Click **Change adapter options**.
-
-3. Right-click the Ethernet adapter and select **Properties**.
+2. Click **Edit** under "More adapter options" under the Ethernet adapter.
 
 4. Select **Internet Protocol Version 4 (TCP/IPv4)** and click **Properties**.
 
@@ -228,8 +218,8 @@ On the **DomainController**:
 
 7. Right-click the new `student` user and select **Add to a group**. Type `Domain Admins` and click OK.
 
-   <Aside type="caution">
-   Adding a user to Domain Admins is done here for simplicity. In production, you would never grant Domain Admin to regular users. The lecture discusses least-privilege principles and fine-grained access control.
+   <Aside type="caution" title="Domain Admins Warning">
+   Adding a user to Domain Admins is done here for simplicity. In production, you would never grant Domain Admin to regular users.
    </Aside>
 </Steps>
 
@@ -281,7 +271,7 @@ You linked the GPO to the `Lab Computers` OU. If you also linked a conflicting G
    - Username: `CS312LAB\student`
    - Password: the one you set when creating the user
 
-   <Aside type="tip">
+   <Aside type="tip" title="Domain Login Tip">
    If the RDP client does not show a domain login option, look for **More choices** or **Use a different account** to enter the domain-qualified username.
    </Aside>
 
@@ -307,15 +297,15 @@ You linked the GPO to the `Lab Computers` OU. If you also linked a conflicting G
    echo %PATH%
    ```
 
-   You should see `C:\Users\Public\cs312` in the output.
+   You should see `C:\Users\Public\cs312` in the output. Restart the command prompt for the change to take effect if you don't see it immediately.
 
-6. For a detailed report of which GPOs are applied to this machine, run:
+6. For a detailed report of which computer-side GPOs are applied to this machine, open **Command Prompt as administrator** and run:
 
    ```
-   gpresult /r
+   gpresult /scope computer /r
    ```
 
-   Look for `Lab Policy` under "Applied Group Policy Objects" in the Computer Settings section.
+   Look for `Lab Policy` under "Applied Group Policy Objects."
 </Steps>
 
 <ActivityQuestion>
@@ -324,14 +314,10 @@ The lecture compares GPOs to Ansible playbooks. In what ways is this analogy acc
 
 ## Cleanup
 
-<Aside type="caution">
-AWS charges for running instances even when you are not connected to them. Clean up promptly.
-</Aside>
-
 <Steps>
 1. In the **EC2 Dashboard**, select both instances (DomainController and WindowsClient). Click **Instance state** > **Terminate instance**.
 
-2. In the **VPC Dashboard**, delete the `ad-lab` VPC (this also removes its subnets, route tables, and internet gateway).
+2. In the **VPC Dashboard**, delete the `cs312-ad-vpc` VPC (this also removes its subnets, route tables, and internet gateway).
 
 3. Delete the key pair if you no longer need it.
 </Steps>
