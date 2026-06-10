@@ -44,24 +44,23 @@ This repository contains the source code for the CS312 website.
 - [ ] Revisit the journalctl activity and evaluate a container or container-cluster version for the incident-bundle and symptom-scoping sections so a full VM is not the default requirement.
 - [ ] Revisit the First Container Orchestration Deployment (k3s) lab and change the MariaDB example to use a PVC-backed deployment in a future iteration.
 - [ ] Build a small reusable To-Do application for future activities, using a frontend plus a Flask backend with Postgres, and optionally nginx as a reverse proxy.
-- [ ] Keep the To-Do app intentionally small: create, list, update, complete, and delete tasks, with a health endpoint and environment-variable configuration.
-- [ ] Package the To-Do app so it can appear in multiple activities: local development, containerization, reverse proxying, CI/CD, and Kubernetes deployment.
-- [ ] Decide whether the frontend should be server-rendered in Flask or a separate lightweight frontend so the app stays simple enough for intro infrastructure work.
+  - [ ] Keep the To-Do app intentionally small: create, list, update, complete, and delete tasks, with a health endpoint and environment-variable configuration.
+  - [ ] Package the To-Do app so it can appear in multiple activities: local development, containerization, reverse proxying, CI/CD, and Kubernetes deployment.
+  - [ ] Decide whether the frontend should be server-rendered in Flask or a separate lightweight frontend so the app stays simple enough for intro infrastructure work.
+- Alternative to the To-Do app or even WordPress lab, is to develop a game to learn sysadmin (web based, with redis and postgres, real-time) which student need to deploy and they can then use it to learn
 - [ ] Add seeded demo data and a reset path so activities can start from a known-good state without long setup.
 - [ ] Prepare a progression path for the To-Do app across the course: run locally, containerize, add Postgres persistence, put nginx in front, deploy to Kubernetes, then add monitoring and logging.
 - [ ] Decide whether GitOps should be required, optional, or discussed as one possible operating model.
 - [ ] Decide whether and where to cover email as part of operations work, especially alert delivery or scheduled job output.
-- [ ] Add the DNS exercise back from 2024.
 - [ ] Evaluate honeypot content, such as T-Pot CE, as a possible addition.
 - [ ] Investigate [Angie](https://en.angie.software/).
-- [ ] Discuss load and performance testing tools, such as k6, in the context of capacity planning and performance monitoring.
 - [ ] Create per lecture TL;DRs for the instructor to use as a quick reference in class.
 - [ ] Discuss [Resilient Network Graphs (RNGs)](https://www.tomshardware.com/tech-industry/big-tech/amazon-unveils-resilient-network-graphs-data-center-network-that-cuts-hardware-by-69-percent-and-boosts-throughput-by-33-percent-now-the-default-for-most-aws-workloads) that AWS uses now for networking in data centers
 
 ### Research Queue
 
 - [x] Watch [If I would start DevOps from 0 - How would I start and what would I learn](https://www.youtube.com/watch?v=Cpy20DnIDTI).
-- [ ] Watch [Observability: the present and future, with Charity Majors](https://www.youtube.com/watch?v=SvEjS4-2WJQ).
+- [x] Watch [Observability: the present and future, with Charity Majors](https://www.youtube.com/watch?v=SvEjS4-2WJQ).
 
 ## Instructor Checklist
 
