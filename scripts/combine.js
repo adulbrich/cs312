@@ -20,7 +20,7 @@ async function combinePDFs() {
 
   // Support passing lists via CLI flags so we don't duplicate content lists in multiple scripts.
   // Flags accepted (comma-separated values):
-  // --lectures, --studios, --assignments, --practicalities
+  // --lectures, --activities, --labs, --assignments, --practicalities
 
   function parseCsvFlag(name) {
     const arg = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -35,7 +35,8 @@ async function combinePDFs() {
   // Read lists from CLI or fall back to empty arrays. Passing values is strongly encouraged
   // to avoid duplicated lists across scripts.
   const lectureTopics = parseCsvFlag("lectures") || [];
-  const studios = parseCsvFlag("studios") || [];
+  const activities = parseCsvFlag("activities") || [];
+  const labs = parseCsvFlag("labs") || [];
   const assignments = parseCsvFlag("assignments") || [];
   const practicalities = parseCsvFlag("practicalities") || [];
 
@@ -50,7 +51,8 @@ async function combinePDFs() {
 
   console.log("Combine: using the following lists:");
   console.log("  lectures:   ", lectureTopics.length ? lectureTopics.join(", ") : "(none)");
-  console.log("  studios:    ", studios.length ? studios.join(", ") : "(none)");
+  console.log("  activities: ", activities.length ? activities.join(", ") : "(none)");
+  console.log("  labs:       ", labs.length ? labs.join(", ") : "(none)");
   console.log("  assignments:", assignments.length ? assignments.join(", ") : "(none)");
   console.log("  practicalities:", practicalities.length ? practicalities.join(", ") : "(none)");
 
@@ -154,11 +156,19 @@ async function combinePDFs() {
     );
   }
 
-  // Add studio PDFs
-  for (const topic of studios) {
+  // Add activity PDFs
+  for (const topic of activities) {
     await addPDFSection(
-      path.join(TMP_DIR, `studio-${topic}.pdf`),
-      `Studio: ${topic.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}`
+      path.join(TMP_DIR, `activity-${topic}.pdf`),
+      `Activity: ${topic.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}`
+    );
+  }
+
+  // Add lab PDFs
+  for (const topic of labs) {
+    await addPDFSection(
+      path.join(TMP_DIR, `lab-${topic}.pdf`),
+      `Lab: ${topic.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}`
     );
   }
 

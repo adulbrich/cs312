@@ -20,26 +20,85 @@ BASE="https://cs312.alexulbrich.com"
 
 # Lecture topics
 lectures=(
-    "lecture1"
-    "lecture2"
+  "introduction"
+  "hardware-fundamentals"
+  "virtualization-basics"
+  "linux-server-planning-and-configuration"
+  "networking-fundamentals"
+  "containerization-with-docker"
+  "cloud-computing"
+  "infrastructure-as-code"
+  "shell-scripting-and-automation-basics"
+  "configuration-management"
+  "ci-cd"
+  "container-orchestration"
+  "network-services-and-application-delivery"
+  "monitoring-and-performance"
+  "log-management-and-analysis"
+  "incident-response-and-postmortems"
+  "reliability-engineering"
+  "on-premises-infrastructure"
+  "system-security-and-hardening"
+  "windows-server-administration"
 )
 
-# Studios
-studios=(
-    "studio1"
-    "studio2"
+# Activities
+activities=(
+  "introduction"
+  "hardware-build-spec"
+  "vm-setup"
+  "arch-linux-install"
+  "network-detective"
+  "docker-image-exploration"
+  "aws-console-tour"
+  "terraform-configuration"
+  "scripting"
+  "ansible-configuration"
+  "github-actions-workflow"
+  "minikube"
+  "network-services-exploration"
+  "prometheus-and-grafana"
+  "follow-the-logs"
+  "incident-response-case-study"
+  "sre-practice"
+  "rack-build-spec"
+  "security-audit"
+  "windows-server-active-directory"
+)
+
+# Labs
+labs=(
+  "introduction"
+  "the-bare-metal"
+  "cloud-environment-setup"
+  "manual-web-server-deployment"
+  "containerizing-a-web-application"
+  "image-registry-and-version-switching"
+  "first-infrastructure-stack"
+  "automated-configuration-and-deployment"
+  "first-container-orchestration-deployment"
+  "cluster-operations"
+  "observability-workshop"
 )
 
 # Assignments
 assignments=(
-  "assignment1"
-  "assignment2"
+  "introduction"
+  "minecraft-1-manual-server"
+  "minecraft-2-containerized-server"
+  "minecraft-3-infrastructure-automation"
+  "minecraft-4-container-orchestration"
+  "minecraft-5-observability"
 )
 
 # Practicalities
 practicalities=(
-    "practicality1"
-    "practicality2"
+  "aws-academy"
+  "gen-ai"
+  "terminal-and-shell"
+  "text-editors"
+  "windows-users"
+  "yaml"
 )
 
 echo "Generating individual PDFs with Node.js..."
@@ -49,9 +108,14 @@ for topic in "${lectures[@]}"; do
   node "$SCRIPT_DIR/print.js" "$BASE/lectures/$topic" "$PDF_DIR/lecture-notes-$topic.pdf"
 done
 
-for topic in "${studios[@]}"; do
-  node "$SCRIPT_DIR/print-clean.js" "$BASE/studios/$topic" "$TMP_DIR/studio-$topic.pdf"
-  node "$SCRIPT_DIR/print.js" "$BASE/studios/$topic" "$PDF_DIR/studio-$topic.pdf"
+for topic in "${activities[@]}"; do
+  node "$SCRIPT_DIR/print-clean.js" "$BASE/activities/$topic" "$TMP_DIR/activity-$topic.pdf"
+  node "$SCRIPT_DIR/print.js" "$BASE/activities/$topic" "$PDF_DIR/activity-$topic.pdf"
+done
+
+for topic in "${labs[@]}"; do
+  node "$SCRIPT_DIR/print-clean.js" "$BASE/labs/$topic" "$TMP_DIR/lab-$topic.pdf"
+  node "$SCRIPT_DIR/print.js" "$BASE/labs/$topic" "$PDF_DIR/lab-$topic.pdf"
 done
 
 for topic in "${assignments[@]}"; do
@@ -70,13 +134,15 @@ echo "Combining PDFs with Node.js..."
 join_by() { local IFS="$1"; shift; echo "$*"; }
 
 LECTURES_CSV=$(join_by , "${lectures[@]}")
-STUDIOS_CSV=$(join_by , "${studios[@]}")
+ACTIVITIES_CSV=$(join_by , "${activities[@]}")
+LABS_CSV=$(join_by , "${labs[@]}")
 ASSIGNMENTS_CSV=$(join_by , "${assignments[@]}")
 PRACTICALITIES_CSV=$(join_by , "${practicalities[@]}")
 
 node "$SCRIPT_DIR/combine.js" \
   --lectures="$LECTURES_CSV" \
-  --studios="$STUDIOS_CSV" \
+  --activities="$ACTIVITIES_CSV" \
+  --labs="$LABS_CSV" \
   --assignments="$ASSIGNMENTS_CSV" \
   --practicalities="$PRACTICALITIES_CSV"
 
