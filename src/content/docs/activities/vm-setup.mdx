@@ -140,13 +140,13 @@ The hypervisor can expose virtual hardware to the guest in two ways: fully emula
 <Steps>
 1. Check which storage devices the kernel sees:
 
-   ```bash
+   ```bash title="List Block Devices"
    lsblk -d -o NAME,TYPE,TRAN
    ```
 
    `lsblk` lists block devices. The `-d` flag shows disks only (no partitions), and `-o NAME,TYPE,TRAN` selects name, type, and transport. You will see something like:
 
-   ```
+   ```text title="Verify Paravirtualized Drivers Output"
    NAME TYPE TRAN
    sda  disk
    sr0  rom
@@ -156,7 +156,7 @@ The hypervisor can expose virtual hardware to the guest in two ways: fully emula
 
 2. Confirm the VirtIO controller is active by checking the PCI device list:
 
-   ```bash
+   ```bash title="Lspci | Grep -i Virtio"
    lspci | grep -i virtio
    ```
 
@@ -164,7 +164,7 @@ The hypervisor can expose virtual hardware to the guest in two ways: fully emula
 
 3. Install `ethtool` to query the network driver. On Debian, `sudo` is not installed by default, so switch to root first:
 
-   ```bash
+   ```bash title="Become Root to Install Tools"
    su -
    apt update
    apt install ethtool
@@ -177,7 +177,7 @@ The hypervisor can expose virtual hardware to the guest in two ways: fully emula
 
 4. Find your main network interface name:
 
-   ```bash
+   ```bash title="IP Link Show"
    ip link show
    ```
 
@@ -185,7 +185,7 @@ The hypervisor can expose virtual hardware to the guest in two ways: fully emula
 
 5. Check which driver is managing the network interface (substitute your interface name):
 
-   ```bash
+   ```bash title="Inspect Network Driver"
    ethtool -i enp0s3 | grep driver
    ```
 
@@ -203,7 +203,7 @@ Before making any changes to a system, record what "normal" looks like. This bas
 <Steps>
 1. Sample the CPU idle percentage:
 
-   ```bash
+   ```bash title="Sample CPU Idle Percentage"
    top -b -n 3 | grep "Cpu(s)" | tail -1
    ```
 
@@ -211,7 +211,7 @@ Before making any changes to a system, record what "normal" looks like. This bas
 
 2. Check memory usage:
 
-   ```bash
+   ```bash title="Check Memory Usage"
    free -h
    ```
 
@@ -219,7 +219,7 @@ Before making any changes to a system, record what "normal" looks like. This bas
 
 3. Check disk usage on the root filesystem:
 
-   ```bash
+   ```bash title="Df -h /"
    df -h /
    ```
 
@@ -227,7 +227,7 @@ Before making any changes to a system, record what "normal" looks like. This bas
 
 4. Check uptime and load average:
 
-   ```bash
+   ```bash title="Uptime"
    uptime
    ```
 
@@ -253,7 +253,7 @@ Log in to the VM and verify the SSH service and disk state are clean before crea
 <Steps>
 1. Verify SSH is running and the disk has free space:
 
-   ```bash
+   ```bash title="Check Service Status"
    systemctl status ssh
    df -h /
    ```
@@ -279,7 +279,7 @@ We will simulate a common real-world mistake: a typo in a configuration file tha
 <Steps>
 1. Append a bad config line and reload the service:
 
-   ```bash
+   ```bash title="Break SSH Configuration"
    su -
    sh -c 'echo "Port INVALID_VALUE" >> /etc/ssh/sshd_config'
    systemctl reload ssh
@@ -288,7 +288,7 @@ We will simulate a common real-world mistake: a typo in a configuration file tha
 
 2. Verify the damage:
 
-   ```bash
+   ```bash title="Check Service Status"
    systemctl status ssh
    sshd -T
    ```
@@ -301,7 +301,7 @@ We will simulate a common real-world mistake: a typo in a configuration file tha
 <Steps>
 1. Look at the end of the SSH config:
 
-   ```bash
+   ```bash title="Tail -10 /etc/ssh/sshdconfig"
    tail -10 /etc/ssh/sshd_config
    ```
 
@@ -325,7 +325,7 @@ Start the VM and verify recovery:
 <Steps>
 1. Confirm everything is clean:
 
-   ```bash
+   ```bash title="Check Service Status"
    systemctl status ssh
    sshd -T
    tail -5 /etc/ssh/sshd_config
@@ -366,7 +366,7 @@ Your VM currently uses NAT. In NAT mode, the hypervisor acts like a router: the 
 <Steps>
 1. Check the VM's IP address:
 
-   ```bash
+   ```bash title="Show IP Addresses"
    ip addr show
    ```
 
@@ -374,7 +374,7 @@ Your VM currently uses NAT. In NAT mode, the hypervisor acts like a router: the 
 
 2. From your **laptop's** terminal (not inside the VM), try to ping the VM:
 
-   ```bash
+   ```bash title="Ping -c 3"
    ping -c 3 <vm-ip-address>
    ```
 
@@ -382,7 +382,7 @@ Your VM currently uses NAT. In NAT mode, the hypervisor acts like a router: the 
 
 3. Confirm the VM still has outbound internet access; run this **inside the VM**:
 
-   ```bash
+   ```bash title="Ping -c 3 Debian.org"
    ping -c 3 debian.org
    ```
 
@@ -400,7 +400,7 @@ Host-only creates a private virtual network that exists only between the host an
 <Steps>
 1. Power off the VM:
 
-   ```bash
+   ```bash title="Shutdown Now"
    shutdown now
    ```
 
@@ -415,7 +415,7 @@ Host-only creates a private virtual network that exists only between the host an
 
 3. Check the new IP address inside the VM:
 
-   ```bash
+   ```bash title="Show IP Addresses"
    ip addr show
    ```
 
@@ -423,7 +423,7 @@ Host-only creates a private virtual network that exists only between the host an
 
 4. From your **laptop**, ping the VM:
 
-   ```bash
+   ```bash title="Ping -c 3"
    ping -c 3 <new-vm-ip>
    ```
 
@@ -431,13 +431,13 @@ Host-only creates a private virtual network that exists only between the host an
 
 5. From **inside the VM**, test internet access:
 
-   ```bash
+   ```bash title="Ping -c 3 Debian.org"
    ping -c 3 debian.org
    ```
 
    This will fail. The host-only network has no default gateway pointing to the internet; traffic has nowhere to go beyond the host. You can test the host's IP on the host-only network to confirm the VM can still reach the host:
 
-   ```bash
+   ```bash title="Ping -c 3"
    ping -c 3 <host-only-ip-of-host>
    ```
 
@@ -457,7 +457,7 @@ Before moving on, let's have a little fun:
 <Steps>
 1. Install cowsay and fortune:
 
-   ```bash
+   ```bash title="Install cowsay and fortune"
    su -
    apt install cowsay fortune
    exit
@@ -465,7 +465,7 @@ Before moving on, let's have a little fun:
 
 2. Run them together:
 
-   ```bash
+   ```bash title="Fortune | Cowsay"
    fortune | cowsay
    ```
 </Steps>

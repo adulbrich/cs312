@@ -166,7 +166,7 @@ On the **WindowsClient** machine:
 
 7. Verify DNS resolution by opening a **Command Prompt** and running:
 
-   ```
+   ```text title="Ping Domain Name"
    ping cs312lab.local
    ```
 
@@ -279,7 +279,7 @@ You linked the GPO to the `Lab Computers` OU. If you also linked a conflicting G
 
 3. Open a **Command Prompt** and verify your identity:
 
-   ```
+   ```text title="Check Domain Login Identity"
    whoami
    ```
 
@@ -287,13 +287,13 @@ You linked the GPO to the `Lab Computers` OU. If you also linked a conflicting G
 
 4. Force Group Policy to apply immediately (rather than waiting up to 90 minutes for the automatic refresh):
 
-   ```
+   ```text title="Force Group Policy Update"
    gpupdate /force
    ```
 
 5. Verify the GPO took effect by checking the PATH:
 
-   ```
+   ```text title="Check Updated PATH"
    echo %PATH%
    ```
 
@@ -301,7 +301,7 @@ You linked the GPO to the `Lab Computers` OU. If you also linked a conflicting G
 
 6. For a detailed report of which computer-side GPOs are applied to this machine, open **Command Prompt as administrator** and run:
 
-   ```
+   ```text title="Generate Group Policy Report"
    gpresult /scope computer /r
    ```
 

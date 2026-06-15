@@ -23,7 +23,7 @@ YAML uses spaces for indentation. Tabs used for indentation are a syntax error. 
 
 A mapping is a set of key-value pairs, usually written with a colon followed by a space:
 
-```yaml
+```yaml title="Tabs are not allowed for indentation"
 name: nginx
 port: 8080
 enabled: true
@@ -36,7 +36,7 @@ In this course, keys are almost always plain strings. Values can be strings, num
 
 A list uses a dash and a space before each item:
 
-```yaml
+```yaml title="A List Uses a Dash and a Space Before Each Item"
 ports:
   - "8080:80"
   - "8443:443"
@@ -52,7 +52,7 @@ Lists can also be written inline with square brackets: `ports: ["8080:80", "8443
 
 Indentation creates nesting. Consistent indentation within a block is required; two spaces per level is the convention:
 
-```yaml
+```yaml title="Service Container Configuration"
 services:
   web:
     image: nginx:alpine
@@ -69,13 +69,13 @@ Here `services` is a mapping with one key (`web`), which maps to another mapping
 
 Plain strings do not need quotes:
 
-```yaml
+```yaml title="Plain Strings Do Not Need Quotes"
 message: hello from the container
 ```
 
 Use quotes when the string contains characters that YAML would otherwise misinterpret: colons, hash signs, leading dashes, or values that look like other types:
 
-```yaml
+```yaml title="Quoted and Unquoted Strings"
 version: "3.8"          # without quotes, some parsers read this as a float
 greeting: "yes"         # without quotes, older parsers read this as boolean true
 label: "key: value"     # unquoted, the colon would break parsing
@@ -90,7 +90,7 @@ Two special characters control how multi-line strings are handled.
 
 The literal block scalar (`|`) preserves line breaks:
 
-```yaml
+```yaml title="The Literal Block Scalar (|) Preserves Line Breaks"
 script: |
   #!/bin/bash
   echo "starting..."
@@ -101,7 +101,7 @@ Each line in the block becomes a line in the string, including the newline at th
 
 The folded block scalar (`>`) folds line breaks into spaces, turning the block into a single paragraph:
 
-```yaml
+```yaml title="Literal and Folded Blocks"
 description: >
   This is a long description that
   spans multiple lines but will be
@@ -112,7 +112,7 @@ description: >
 
 A `#` starts a comment to the end of the line:
 
-```yaml
+```yaml title="YAML Comments"
 # This is a standalone comment
 image: nginx:alpine  # inline comment
 ```
@@ -123,7 +123,7 @@ Comments are one of the places YAML has a clear advantage over JSON, which does 
 
 YAML lets you define a value once and reuse it with anchors (`&name`) and aliases (`*name`). You may see this in GitHub Actions workflows or in example configurations online when the same block needs to appear more than once:
 
-```yaml
+```yaml title="YAML Anchor and Alias"
 common-env: &common_env
   APP_ENV: production
   LOG_LEVEL: info
@@ -143,7 +143,7 @@ A related feature called the **merge key** uses `<<:` to copy keys out of an anc
 
 **The Norway problem.** Older YAML 1.1-style resolvers treat values such as `yes`, `no`, `on`, `off`, `NO`, and `OFF` as booleans instead of strings. YAML 1.2 narrowed this behavior, but real tools do not all resolve plain scalars the same way, and older expectations are still common in the ecosystem. Ansible is a frequent source of these surprises, and Docker Compose documentation still recommends quoting ambiguous values. The safe habit is to quote any string value that could be mistaken for another type:
 
-```yaml
+```yaml title="The Norway Problem"
 # Risky: older tooling may read "no" as false
 restart: no
 
@@ -153,7 +153,7 @@ restart: "no"
 
 **Version numbers and numeric-looking strings.** Values such as `1.10` are numbers in YAML, not strings. If a tool expects a string, or if you want to preserve the formatting exactly, quote it:
 
-```yaml
+```yaml title="Version Numbers and Numeric-looking Strings"
 app_version: "1.10"
 release_label: "2026.04"
 ```

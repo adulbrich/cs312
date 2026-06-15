@@ -177,7 +177,7 @@ An error budget creates the right incentives only if the organization acts on it
 
 At a high level, Prometheus has a small number of moving parts. Targets and exporters expose metrics, service discovery tells Prometheus where those targets live, the Prometheus server scrapes and stores the results locally, Grafana and the built-in web UI query Prometheus for graphs, and Alertmanager handles notifications when alert rules fire. The diagram below deliberately simplifies the deployment so the main data flow stays visible.
 
-```mermaid
+```mermaid title="Prometheus: Architecture and the Pull Model"
 flowchart LR
   SD[Service discovery]
   Targets[Applications and exporters]
@@ -193,7 +193,7 @@ flowchart LR
 
 A typical endpoint response looks like this:
 
-```
+```text title="Prometheus: Architecture and the Pull Model Output"
 # HELP node_memory_MemAvailable_bytes Memory information field MemAvailable_bytes.
 # TYPE node_memory_MemAvailable_bytes gauge
 node_memory_MemAvailable_bytes 3.52122624e+09
@@ -291,7 +291,7 @@ When you write a PromQL query using `kube_pod_container_status_restarts_total`, 
 
 This query contains most of the core syntax worth learning first:
 
-```promql
+```promql title="HTTP Request Rate by Job"
 sum by (job) (rate(http_requests_total{job="api"}[5m]))
 ```
 
@@ -311,7 +311,7 @@ Not every function applies to every metric. PromQL is type-aware, and the metric
 
 Counter metrics are rarely useful raw because they only increase. `rate()` computes the per-second average rate of increase of a counter over a time window:
 
-```promql
+```promql title="Request Rate Query"
 rate(http_requests_total[5m])
 ```
 
@@ -319,7 +319,7 @@ This returns the average per-second request rate over the last 5 minutes, separa
 
 `increase()` returns the total increase in a counter over a time window. An expression for detecting crash-looping pods:
 
-```promql
+```promql title="Restart Increase Query"
 increase(kube_pod_container_status_restarts_total{namespace="default"}[10m]) > 3
 ```
 
@@ -329,7 +329,7 @@ A value above 3 means the container restarted more than 3 times in the last 10 m
 
 For histograms, `histogram_quantile()` computes percentiles at query time. For classic Prometheus histograms, you usually pair it with `rate()` over the `_bucket` series and an aggregation that preserves the `le` bucket label:
 
-```promql
+```promql title="Histogramquantile() Query"
 histogram_quantile(0.95,
   sum by (job, le) (
     rate(http_request_duration_seconds_bucket[5m])
@@ -343,13 +343,13 @@ This computes the 95th-percentile latency over a 5-minute window. Plotting p50, 
 
 PromQL aggregation operators summarize across label dimensions. The `by` clause controls which labels survive the aggregation:
 
-```promql
+```promql title="Aggregation Query"
 sum(rate(http_requests_total[5m])) by (job)
 ```
 
 This computes total request rate grouped by service name. To compute memory usage as a percentage of total node RAM:
 
-```promql
+```promql title="Aggregation Query"
 100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)
 ```
 
@@ -359,7 +359,7 @@ Once you can express a query in PromQL, the next question is whether you should 
 
 Recording rules precompute expensive PromQL expressions and store the result as a new metric, updated on a configurable interval. Dashboards and alert rules that need the result query the precomputed metric instead of rerunning the expensive expression on every load or evaluation:
 
-```yaml
+```yaml title="Recording Rule Example"
 groups:
   - name: latency.rules
     rules:
@@ -414,7 +414,7 @@ A Prometheus alert rule has three required parts: a PromQL expression that defin
 
 The `for` clause prevents a single bad scrape, a momentary CPU spike, or a brief network blip from triggering an alert. It requires the condition to be continuously true for the specified duration before the alert transitions from Pending to Firing:
 
-```yaml
+```yaml title="Prometheus Alert Rule"
 groups:
   - name: example.rules
     rules:
@@ -462,7 +462,7 @@ The most serious failure mode in a monitoring system is not a false positive but
 
 The dead man's switch pattern addresses this by inverting the normal alert logic. Instead of "alert when this condition becomes true," you create an alert that continuously fires under normal conditions. Alertmanager routes this watchdog alert to a secondary system that expects to receive it on a regular interval. If the watchdog stops arriving, the secondary system notifies on-call.
 
-```yaml
+```yaml title="Alert Fatigue Is a Safety Problem"
 groups:
   - name: watchdog
     rules:
@@ -490,7 +490,7 @@ Inhibition rules suppress downstream alerts when a root-cause alert is already f
 
 An inhibition rule collapses this noise:
 
-```yaml
+```yaml title="Alertmanager"
 inhibit_rules:
   - source_match:
       alertname: NodeDown
@@ -511,7 +511,7 @@ Traditional SLO alerting fires when the SLO is violated: if your availability SL
 
 **Burn-rate alerting** fires when your error budget is being consumed faster than it can be replenished, before you have exhausted it. The burn rate is the ratio of current error rate to the SLO's acceptable error rate. A burn rate of 1 means you are consuming the budget at exactly the sustainable pace. A burn rate of 14.4 means you are consuming a 30-day budget 14.4 times faster than sustainable, which would exhaust it in a little over two days.
 
-```promql
+```promql title="Burn Rate Against 99.9% SLO"
 (
   rate(http_requests_total{status=~"5.."}[1h])
   /

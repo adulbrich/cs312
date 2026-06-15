@@ -40,7 +40,7 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 
 2. Find the authoritative nameserver for `messwithdns.com`. This server holds the current zone data for your subdomain, and querying it directly bypasses any resolver caching:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig +short NS messwithdns.com
    ```
 
@@ -52,7 +52,7 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 
 4. Query a public recursive resolver for your new record:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
    ```
 
@@ -60,7 +60,7 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 
 5. Now query the authoritative server directly:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig YOUR-SUBDOMAIN.messwithdns.com @<NS>
    ```
 
@@ -68,7 +68,7 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 
 6. In the Mess with DNS interface, change the **TTL** on the A record from `300` to `30`, but keep the IP address at `203.0.113.1` for now. Then query both servers again:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig A YOUR-SUBDOMAIN.messwithdns.com @<NS>
    dig A YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
    ```
@@ -77,7 +77,7 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 
 7. Add an **AAAA record** for your subdomain pointing to `2001:db8::1` with TTL `300`. Confirm both records exist at the authoritative server:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig A YOUR-SUBDOMAIN.messwithdns.com @<NS>
    dig AAAA YOUR-SUBDOMAIN.messwithdns.com @<NS>
    ```
@@ -88,7 +88,7 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 
    Query both the authoritative server and the public resolver immediately after making the change:
 
-   ```bash
+   ```bash title="Demonstrate TTL Propagation"
    # Authoritative server: always current
    dig +short A YOUR-SUBDOMAIN.messwithdns.com @<NS>
 
@@ -102,7 +102,7 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 
 9. Observe **negative caching** with a name that does not exist yet. Query a fresh label under your subdomain, such as `missing`:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig missing.YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
    ```
 
@@ -112,7 +112,7 @@ Mess with DNS stores your personal subdomain in browser local storage. Closing t
 
 10. **Read the negative-cache timer from the SOA attached to the negative response.** Re-run the missing-name query and inspect the SOA record in the AUTHORITY SECTION:
 
-    ```bash
+    ```bash title="Inspect Negative DNS Cache TTL"
     dig missing.YOUR-SUBDOMAIN.messwithdns.com @1.1.1.1
     ```
 
@@ -132,7 +132,7 @@ SPF, DKIM, and DMARC rely on DNS records published at well-known locations, but 
 <Steps>
 1. Look up the SPF record for `google.com`. SPF lives as a TXT record at the domain root:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig TXT google.com +short
    ```
 
@@ -140,7 +140,7 @@ SPF, DKIM, and DMARC rely on DNS records published at well-known locations, but 
 
 2. Look up the DMARC record for `google.com`. DMARC always lives at the `_dmarc` subdomain:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig TXT _dmarc.google.com +short
    ```
 
@@ -148,7 +148,7 @@ SPF, DKIM, and DMARC rely on DNS records published at well-known locations, but 
 
 3. Look up a **DKIM public key**. Unlike SPF and DMARC, DKIM does not live at a well-known name. Each sending system publishes its public key under a **selector** of its own choosing, at `<selector>._domainkey.<domain>`. To find a selector yourself, inspect the headers of a real email from that domain and look for the `s=` field in the `DKIM-Signature` header. A header fragment such as `DKIM-Signature: ... d=google.com; s=20230601; ...` tells you to query `20230601._domainkey.google.com`. At the time this activity was tested, Google published a selector at `20230601`:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig TXT 20230601._domainkey.google.com +short
    ```
 
@@ -156,7 +156,7 @@ SPF, DKIM, and DMARC rely on DNS records published at well-known locations, but 
 
 4. Look up the DMARC policy for a second domain and compare:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig TXT _dmarc.mit.edu +short
    ```
 
@@ -164,7 +164,7 @@ SPF, DKIM, and DMARC rely on DNS records published at well-known locations, but 
 
 5. Check the MX records for `google.com` to see how Gmail routes incoming mail:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig MX google.com +short
    ```
 
@@ -172,7 +172,7 @@ SPF, DKIM, and DMARC rely on DNS records published at well-known locations, but 
 
 6. Check whether `example.com` publishes a NULL MX record:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig MX example.com +short
    ```
 
@@ -192,7 +192,7 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
 <Steps>
 1. Look up the IP addresses for `aws.amazon.com`:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig +short aws.amazon.com
    ```
 
@@ -200,7 +200,7 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
 
 2. Fetch the HTTP headers from the same site and look for CDN fingerprints:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -sI https://aws.amazon.com/ | grep -iE "server:|x-cache:|x-amz-cf"
    ```
 
@@ -212,7 +212,7 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
 
 3. Fetch headers from a Cloudflare-hosted static resource to compare naming conventions, and grab `cache-control:` along with the Cloudflare-specific headers:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -sI https://developers.cloudflare.com/robots.txt | grep -iE "cf-ray:|cf-cache-status:|server:|cache-control:"
    ```
 
@@ -220,7 +220,7 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
 
 4. Fetch headers from a dynamic Cloudflare page and compare the status value:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -sI https://blog.cloudflare.com/ | grep -iE "cf-ray:|cf-cache-status:|server:"
    ```
 
@@ -228,7 +228,7 @@ A CDN inserts edge servers between clients and the origin so that traffic reache
 
 5. Check what TLS certificate the CDN presents at the edge:
 
-   ```bash
+   ```bash title="Inspect TLS Certificate"
    openssl s_client -connect aws.amazon.com:443 -servername aws.amazon.com 2>/dev/null \
      | openssl x509 -noout -issuer -subject
    ```
@@ -249,7 +249,7 @@ A TLS certificate contains the hostnames it covers, the chain of trust back to a
 <Steps>
 1. Connect to Oregon State's web server and capture the key certificate fields:
 
-   ```bash
+   ```bash title="Inspect TLS Certificate"
    openssl s_client -connect oregonstate.edu:443 -servername oregonstate.edu 2>/dev/null \
      | openssl x509 -noout -issuer -dates -ext subjectAltName
    ```
@@ -260,7 +260,7 @@ A TLS certificate contains the hostnames it covers, the chain of trust back to a
 
 2. Verify that the certificate chain is complete and trusted:
 
-   ```bash
+   ```bash title="Inspect TLS Certificate"
    openssl s_client -connect oregonstate.edu:443 -servername oregonstate.edu 2>/dev/null \
      | grep "Verify return code"
    ```
@@ -269,7 +269,7 @@ A TLS certificate contains the hostnames it covers, the chain of trust back to a
 
 3. Inspect the certificate's embedded **Certificate Transparency** evidence:
 
-   ```bash
+   ```bash title="Inspect TLS Certificate"
    openssl s_client -connect oregonstate.edu:443 -servername oregonstate.edu 2>/dev/null \
      | openssl x509 -noout -text | grep -A6 "CT Precertificate SCTs"
    ```
@@ -280,7 +280,7 @@ A TLS certificate contains the hostnames it covers, the chain of trust back to a
 
 4. Check whether `oregonstate.edu` restricts which CAs are authorized to issue certificates for the domain:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig CAA oregonstate.edu +short
    ```
 
@@ -290,7 +290,7 @@ A TLS certificate contains the hostnames it covers, the chain of trust back to a
 
 5. **Read the HSTS header.** HSTS is published as an HTTP response header, not as part of the certificate. Fetch headers from a site that ships it:
 
-   ```bash
+   ```bash title="Read the HSTS Header"
    curl -sI https://www.cloudflare.com/ | grep -i strict-transport-security
    ```
 
@@ -298,7 +298,7 @@ A TLS certificate contains the hostnames it covers, the chain of trust back to a
 
 6. **Check OCSP stapling.** Stapling lets the server present a recent CA-signed proof of non-revocation alongside its certificate so the client does not have to query the CA itself. Use the lecture's diagnostic:
 
-   ```bash
+   ```bash title="Check OCSP Stapling"
    echo | openssl s_client -connect www.cloudflare.com:443 -servername www.cloudflare.com -status 2>/dev/null \
      | grep -A1 "OCSP Response Status"
    ```
@@ -318,7 +318,7 @@ A reverse proxy routes incoming requests to different backends based on the cont
 
 Create a working directory for this section:
 
-```bash
+```bash title="Create Directories"
 mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 ```
 
@@ -327,7 +327,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 <Steps>
 1. Create `web.html`. Replace `YOUR_ONID` with your actual ONID:
 
-   ```html
+   ```html title="web.html"
    <!doctype html>
    <html>
    <head><meta charset="utf-8"><title>Web</title></head>
@@ -340,7 +340,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 
 2. Create `api.html`:
 
-   ```html
+   ```html title="api.html"
    <!doctype html>
    <html>
    <head><meta charset="utf-8"><title>API</title></head>
@@ -353,7 +353,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 
 3. Create `proxy.conf`. This is the nginx configuration that makes the proxy a Layer 7 router:
 
-   ```nginx
+   ```nginx title="proxy.conf"
    server {
        listen 80;
 
@@ -373,7 +373,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 
 4. Create `docker-compose.yml`:
 
-   ```yaml
+   ```yaml title="Compose Services"
    services:
      proxy:
        image: nginx:1.27-alpine
@@ -404,7 +404,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 <Steps>
 1. Start all three containers:
 
-   ```bash
+   ```bash title="Start Compose Stack"
    docker compose up -d
    ```
 
@@ -412,7 +412,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 
 2. Verify all three containers are running:
 
-   ```bash
+   ```bash title="List Compose Services"
    docker compose ps
    ```
 
@@ -420,7 +420,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 
 3. Test the path routing. Both requests go to the same host and port; the proxy forwards each to a different backend based on the path:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    # Root path goes to the web backend
    curl -s http://localhost:8080/
 
@@ -432,7 +432,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 
 4. Confirm the routing with the response headers:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -sI http://localhost:8080/ | grep -i x-served-by
    curl -sI http://localhost:8080/api/ | grep -i x-served-by
    ```
@@ -441,7 +441,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 
 5. Follow the proxy access log live in one terminal:
 
-   ```bash
+   ```bash title="Docker Compose Logs -f Proxy"
    docker compose logs -f proxy
    ```
 
@@ -449,7 +449,7 @@ mkdir -p ~/cs312-delivery && cd ~/cs312-delivery
 
 6. In a second terminal, send the two requests again:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -s http://localhost:8080/ >/dev/null
    curl -s http://localhost:8080/api/ >/dev/null
    ```
@@ -464,7 +464,7 @@ So far the proxy forwards every `/` request to exactly one backend. Production d
 <Steps>
 1. Replace the contents of `proxy.conf` with a version that defines an explicit upstream pool and exposes the chosen replica in a response header:
 
-   ```nginx
+   ```nginx title="proxy.conf"
    upstream web_backends {
        server web1:80;
        server web2:80;
@@ -491,7 +491,7 @@ So far the proxy forwards every `/` request to exactly one backend. Production d
 
 2. Replace `docker-compose.yml` with a version that defines three identical web replicas:
 
-   ```yaml
+   ```yaml title="Compose Services"
    services:
      proxy:
        image: nginx:1.27-alpine
@@ -530,7 +530,7 @@ So far the proxy forwards every `/` request to exactly one backend. Production d
 
 3. Apply the refactor. Compose will remove the old `web` container and start the three new replicas plus a fresh proxy with the new config:
 
-   ```bash
+   ```bash title="Start Compose Stack"
    docker compose up -d
    docker compose ps
    ```
@@ -539,7 +539,7 @@ So far the proxy forwards every `/` request to exactly one backend. Production d
 
 4. Send several requests to `/` and watch which replica answers each one:
 
-   ```bash
+   ```bash title="For I in 1 2 3 4 5 6; Do"
    for i in 1 2 3 4 5 6; do
      curl -sI http://localhost:8080/ | grep -i x-upstream-addr
    done
@@ -549,7 +549,7 @@ So far the proxy forwards every `/` request to exactly one backend. Production d
 
 5. Confirm path routing still works alongside load balancing. The api backend is not behind the upstream pool; it remains a single backend reached via path-based routing:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -sI http://localhost:8080/api/ | grep -iE "x-served-by|x-upstream-addr"
    ```
 
@@ -562,7 +562,7 @@ The lecture's load-balancer table lists round-robin, least-connections, and IP-h
 
 Run this command to produce a clean visible result with your identifier:
 
-```bash
+```bash title="Test HTTP Response"
 curl -s http://localhost:8080/ | grep -i owner
 ```
 
@@ -570,7 +570,7 @@ Your ONID should appear in the output, confirming your personalized web backend 
 
 When you are done, stop and remove the containers:
 
-```bash
+```bash title="Stop Compose Stack"
 docker compose down
 ```
 

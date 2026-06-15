@@ -37,7 +37,7 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
 <Steps>
 1. SSH into your instance. Replace `<YOUR-EC2-PUBLIC-IP>` with the value from the EC2 console:
 
-   ```bash
+   ```bash title="Connect with SSH"
    ssh -i ~/.ssh/cs312-key.pem ubuntu@<YOUR-EC2-PUBLIC-IP>
    ```
 
@@ -45,13 +45,13 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
 
 2. Print your interactive shell's PATH:
 
-   ```bash
+   ```bash title="Print Text"
    echo $PATH
    ```
 
    You will see something like:
 
-   ```
+   ```text title="Connect and Explore the Environment Output"
    /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
    ```
 
@@ -59,13 +59,13 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
 
 3. Simulate a minimal cron-like environment:
 
-   ```bash
+   ```bash title="Show Environment Variables"
    env -i PATH=/usr/bin:/bin bash -c 'echo $PATH'
    ```
 
    The output is:
 
-   ```
+   ```text title="Connect and Explore the Environment Output"
    /usr/bin:/bin
    ```
 
@@ -73,7 +73,7 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
 
 4. Check where `curl` lives on this system:
 
-   ```bash
+   ```bash title="Which Curl"
    which curl
    ```
 
@@ -81,7 +81,7 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
 
 5. Observe the difference between exported and unexported variables:
 
-   ```bash
+   ```bash title="Set Environment Variable"
    export GREETING="hello"
    INTERNAL="world"
    bash -c 'echo "exported: $GREETING"'
@@ -92,7 +92,7 @@ Your script will run on the EC2 instance, so start by connecting to it. Before w
 
 6. Create your working directory:
 
-   ```bash
+   ```bash title="Create Directories"
    mkdir -p ~/cs312-scripts
    cd ~/cs312-scripts
    ```
@@ -111,7 +111,7 @@ You will build `setup.sh` piece by piece, running the script after each change s
 <Steps>
 1. Create the file and make it executable:
 
-   ```bash
+   ```bash title="Create setup.sh"
    touch setup.sh
    chmod +x setup.sh
    ```
@@ -120,18 +120,18 @@ You will build `setup.sh` piece by piece, running the script after each change s
 
 2. Open `setup.sh` in any editor and add a shebang and a single print statement:
 
-   ```bash
+   ```bash title="setup.sh"
    #!/usr/bin/env bash
    printf "Hello from %s\n" "$(hostname)"
    ```
 
    Run it:
 
-   ```bash
+   ```bash title="Run setup.sh"
    ./setup.sh
    ```
 
-   ```
+   ```text title="Your First Script Output"
    Hello from ip-10-0-1-42
    ```
 
@@ -139,7 +139,7 @@ You will build `setup.sh` piece by piece, running the script after each change s
 
 3. Add variables for the paths the script will manage. Update `setup.sh` to:
 
-   ```bash
+   ```bash title="setup.sh"
    #!/usr/bin/env bash
    ONID="ulbrical"
    WEBROOT="/var/www/html"
@@ -150,11 +150,11 @@ You will build `setup.sh` piece by piece, running the script after each change s
 
    Run it:
 
-   ```bash
+   ```bash title="Run setup.sh"
    ./setup.sh
    ```
 
-   ```
+   ```text title="Your First Script Output"
    === Setup: ulbrical on ip-10-0-1-42 ===
    Log will be written to: /tmp/setup-ulbrical.log
    ```
@@ -163,7 +163,7 @@ You will build `setup.sh` piece by piece, running the script after each change s
 
 4. Add `set -euo pipefail` immediately after the shebang line. The file now starts:
 
-   ```bash
+   ```bash title="Enable Strict Mode"
    #!/usr/bin/env bash
    set -euo pipefail
    ONID="ulbrical"
@@ -172,12 +172,12 @@ You will build `setup.sh` piece by piece, running the script after each change s
 
    Run the script again: the output is the same. Now see what `set -u` catches. Run these two commands directly in your shell session:
 
-   ```bash
+   ```bash title="Compare unset Variable Behavior"
    bash -c 'echo "no set -u:   [$TYPO_VAR]"'
    bash -c 'set -u; echo "with set -u: [$TYPO_VAR]"'
    ```
 
-   ```
+   ```text title="Your First Script Output"
    no set -u:   []
    bash: TYPO_VAR: unbound variable
    ```
@@ -186,7 +186,7 @@ You will build `setup.sh` piece by piece, running the script after each change s
 
 5. Replace the hardcoded `ONID` with argument validation. The script will need to run as root to install packages, so add that check too. Update `setup.sh` to:
 
-   ```bash
+   ```bash title="setup.sh"
    #!/usr/bin/env bash
    set -euo pipefail
 
@@ -210,21 +210,21 @@ You will build `setup.sh` piece by piece, running the script after each change s
 
    Run without arguments to see the usage message:
 
-   ```bash
+   ```bash title="Run setup.sh"
    sudo ./setup.sh
    ```
 
-   ```
+   ```text title="Your First Script Output"
    Usage: sudo setup.sh <your-onid>
    ```
 
    Run without `sudo` to trigger the root check:
 
-   ```bash
+   ```bash title="Run setup.sh"
    ./setup.sh myonid
    ```
 
-   ```
+   ```text title="Your First Script Output"
    Run as root: sudo setup.sh <your-onid>
    ```
 
@@ -232,27 +232,27 @@ You will build `setup.sh` piece by piece, running the script after each change s
 
 6. Run the script correctly with your actual ONID:
 
-   ```bash
+   ```bash title="Run Script with Valid Input"
    sudo ./setup.sh ulbrical
    ```
 
-   ```
+   ```text title="Your First Script Output"
    === Server Setup: ulbrical on ip-10-0-1-42 ===
    ```
 
    Now add a `trap` to the script, right after the variable block:
 
-   ```bash
+   ```bash title="Add Exit Trap"
    trap 'printf "[trap] Exiting. Log: %s\n" "$LOG_FILE"' EXIT
    ```
 
    Run it again:
 
-   ```bash
+   ```bash title="Run setup.sh"
    sudo ./setup.sh your-onid
    ```
 
-   ```
+   ```text title="Your First Script Output"
    === Server Setup: your-onid on ip-10-0-1-42 ===
    [trap] Exiting. Log: /tmp/setup-your-onid.log
    ```
@@ -273,7 +273,7 @@ Before installing anything, the script should examine the system. Add a logging 
 <Steps>
 1. Add a `log` function to `setup.sh`, right after the `trap` line:
 
-   ```bash
+   ```bash title="setup.sh"
    log() {
        printf "[%s] %s\n" "$(date '+%H:%M:%S')" "$1" | tee -a "$LOG_FILE"
    }
@@ -283,7 +283,7 @@ Before installing anything, the script should examine the system. Add a logging 
 
 2. Add a disk check below the `log` function:
 
-   ```bash
+   ```bash title="Calculate Root Disk Usage"
    DISK_PCT=$(df -h / | awk 'NR==2 { gsub(/%/, "", $5); print $5 }')
    if [[ "$DISK_PCT" -gt 80 ]]; then
        log "WARNING: root filesystem at ${DISK_PCT}% capacity"
@@ -296,13 +296,13 @@ Before installing anything, the script should examine the system. Add a logging 
 
 3. Run the script to test the disk check:
 
-   ```bash
+   ```bash title="Run setup.sh"
    sudo ./setup.sh your-onid
    ```
 
    You should see:
 
-   ```
+   ```text title="Check Preconditions Output"
    === Server Setup: your-onid on ip-10-0-1-42 ===
    [10:15:03] Disk check passed: 22% used
    [trap] Exiting. Log: /tmp/setup-your-onid.log
@@ -310,7 +310,7 @@ Before installing anything, the script should examine the system. Add a logging 
 
 4. Add an `is_installed` helper function below `log`:
 
-   ```bash
+   ```bash title="Isinstalled() {"
    is_installed() {
        dpkg -l "$1" 2>/dev/null | grep -q "^ii"
    }
@@ -320,7 +320,7 @@ Before installing anything, the script should examine the system. Add a logging 
 
 5. Test `is_installed` directly in the shell before relying on it in the script:
 
-   ```bash
+   ```bash title="Package Installed Helper"
    is_installed() { dpkg -l "$1" 2>/dev/null | grep -q "^ii"; }
    is_installed bash && echo "bash: installed" || echo "bash: not installed"
    is_installed doesnotexist && echo "doesnotexist: installed" || echo "doesnotexist: not installed"
@@ -330,7 +330,7 @@ Before installing anything, the script should examine the system. Add a logging 
 
 6. Run `grep -E` directly against a package that is already installed so you can see the status codes the pattern is matching:
 
-   ```bash
+   ```bash title="Inspect dpkg Status Codes"
    dpkg -l bash | grep -E "^ii|^rc"
    ```
 
@@ -350,7 +350,7 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 <Steps>
 1. Add `ensure_installed` to `setup.sh`, right below `is_installed`:
 
-   ```bash
+   ```bash title="setup.sh"
    ensure_installed() {
        local pkg="$1"
        if is_installed "$pkg"; then
@@ -367,7 +367,7 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 
 2. Add a package list and loop below the disk check block:
 
-   ```bash
+   ```bash title="Add Package Installation Logging"
    log "Refreshing apt package metadata..."
    apt-get update >> "$LOG_FILE" 2>&1
 
@@ -383,13 +383,13 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 
 3. Run the script:
 
-   ```bash
+   ```bash title="Run setup.sh"
    sudo ./setup.sh your-onid
    ```
 
    On the first run, nginx will be downloaded and installed. You should see:
 
-   ```
+   ```text title="Install Packages Output"
    [10:17:01] Refreshing apt package metadata...
    [10:17:03] Checking required packages...
    [10:17:03] Installing: nginx
@@ -399,7 +399,7 @@ Add an `ensure_installed` function that checks before acting, then loop over a l
 
 4. Run the script a second time:
 
-   ```bash
+   ```bash title="Run setup.sh"
    sudo ./setup.sh your-onid
    ```
 
@@ -419,18 +419,18 @@ With nginx installed, configure it and deploy a page that identifies the server.
 <Steps>
 1. Confirm that the default nginx configuration is valid before modifying it:
 
-   ```bash
+   ```bash title="Nginx -t"
    sudo nginx -t
    ```
 
-   ```
+   ```text title="Configure Nginx and Deploy Your Page Output"
    nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
    nginx: configuration file /etc/nginx/nginx.conf test is successful
    ```
 
 2. Add the configuration block to `setup.sh`, below the package loop:
 
-   ```bash
+   ```bash title="setup.sh"
    log "Configuring nginx..."
    CURRENT_HOST="$(hostname)"
    sed -i "s|server_name [^;]*;|server_name ${CURRENT_HOST};|" "$NGINX_DEFAULT"
@@ -444,7 +444,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
 
 3. Add the index page right after the `sed` line:
 
-   ```bash
+   ```bash title="Write nginx Index Page"
    log "Deploying index.html..."
    cat > "$WEBROOT/index.html" << EOF
    <!DOCTYPE html>
@@ -463,7 +463,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
 
 4. Add the config test, restart, and verification right after the heredoc:
 
-   ```bash
+   ```bash title="Validate nginx Configuration in Script"
    nginx -t 2>>"$LOG_FILE"
    systemctl restart nginx
    log "nginx restarted"
@@ -480,13 +480,13 @@ With nginx installed, configure it and deploy a page that identifies the server.
 
 5. Run the script:
 
-   ```bash
+   ```bash title="Run setup.sh"
    sudo ./setup.sh your-onid
    ```
 
    You should see the nginx restart and verification lines:
 
-   ```
+   ```text title="Configure Nginx and Deploy Your Page Output"
    [10:20:01] Configuring nginx...
    [10:20:01] Deploying index.html...
    [10:20:02] nginx restarted
@@ -495,7 +495,7 @@ With nginx installed, configure it and deploy a page that identifies the server.
 
 6. Confirm the page from inside the server:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl http://localhost/
    ```
 
@@ -515,13 +515,13 @@ The last piece is a health-check script that cron runs every minute, recording t
 <Steps>
 1. Confirm that cron is present and active:
 
-   ```bash
+   ```bash title="Check Service Status"
    systemctl status cron --no-pager
    ```
 
    On Ubuntu Server images, cron is usually already present. You should see `Active: active (running)`. If the unit is missing or inactive, install and start it now:
 
-   ```bash
+   ```bash title="Apt-get Install -y Cron"
    sudo apt-get install -y cron
    sudo systemctl enable --now cron
    ```
@@ -530,7 +530,7 @@ The last piece is a health-check script that cron runs every minute, recording t
 
 2. Add the health-check installation block to `setup.sh`, below the nginx verification:
 
-   ```bash
+   ```bash title="Create Health Check Script"
    log "Installing health check..."
    cat > /usr/local/bin/nginx-health.sh << 'HEALTHEOF'
    #!/usr/bin/env bash
@@ -547,7 +547,7 @@ The last piece is a health-check script that cron runs every minute, recording t
 
 3. Add the cron job registration right after:
 
-   ```bash
+   ```bash title="Schedule Health Check Cron Job"
    log "Scheduling health check..."
    cat > /etc/cron.d/nginx-health << 'CRONEOF'
    * * * * * root /usr/local/bin/nginx-health.sh
@@ -560,7 +560,7 @@ The last piece is a health-check script that cron runs every minute, recording t
 
 4. Add a final completion line at the very end of `setup.sh`:
 
-   ```bash
+   ```bash title="setup.sh"
    trap - EXIT
    log "Setup complete"
    ```
@@ -569,7 +569,7 @@ The last piece is a health-check script that cron runs every minute, recording t
 
 5. Run the complete setup script:
 
-   ```bash
+   ```bash title="Run Script After Health Check Changes"
    sudo ./setup.sh your-onid
    ```
 
@@ -577,19 +577,19 @@ The last piece is a health-check script that cron runs every minute, recording t
 
 6. Confirm the cron job is registered:
 
-   ```bash
+   ```bash title="Display File Contents"
    cat /etc/cron.d/nginx-health
    ```
 
 7. Wait about 60 seconds, then check the health log:
 
-   ```bash
+   ```bash title="Display File Contents"
    cat /tmp/nginx-health.log
    ```
 
    You should see one or more lines like:
 
-   ```
+   ```text title="Schedule a Health Check Output"
    [2026-04-17 10:25:01] nginx: 200
    ```
 
@@ -609,7 +609,7 @@ Run the complete script one final time and notice which parts detect state versu
 <Steps>
 1. Run the script again without changing anything:
 
-   ```bash
+   ```bash title="Run setup.sh"
    sudo ./setup.sh your-onid
    ```
 
@@ -617,19 +617,19 @@ Run the complete script one final time and notice which parts detect state versu
 
 2. Exit the SSH session:
 
-   ```bash
+   ```bash title="Exit SSH Session"
    exit
    ```
 
 3. From your own machine, verify the page over the public internet:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl http://<YOUR-EC2-PUBLIC-IP>/
    ```
 
    You should see:
 
-   ```html
+   ```html title="Your Configured Server HTML"
    <h1>Configured by your-onid</h1>
    <p>Host: ip-10-0-1-42</p>
    <p>Deployed: ...</p>

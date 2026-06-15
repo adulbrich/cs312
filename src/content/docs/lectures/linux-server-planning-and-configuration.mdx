@@ -117,7 +117,7 @@ At this point it helps to define **PID (Process ID)** explicitly. Every running 
 <HistoricalNote title="MBR, GPT, and Why Old Booting Was So Constrained">
 Before UEFI and GPT (GUID Partition Table) became normal, PCs commonly booted using legacy BIOS and the **MBR (Master Boot Record)**. The MBR is the first 512-byte sector of a disk. It contained both a tiny piece of boot code and the partition table. That design was historically important but severely constrained: 512 bytes is barely enough for a stub loader, and the classic MBR partition table supports only four primary partitions and has a 2 TB addressing limit.
 
-```text
+```text title="Init System Output"
 Legacy BIOS disk layout:
 
 +----------------------+  sector 0
@@ -294,7 +294,7 @@ The `chmod` command changes permissions (`chmod 640 /etc/app.conf` grants owner 
 
 The `useradd` command creates a new user account. On Debian-based distributions, the friendlier `adduser` wrapper is also available, but understanding the lower-level command matters:
 
-```bash
+```bash title="Create User"
 # Create a user with a home directory and bash as the default shell
 sudo useradd -m -s /bin/bash deploy
 
@@ -313,7 +313,7 @@ User account information is stored in two files:
 
 You can inspect a user's entry with:
 
-```bash
+```bash title="Inspect User Account"
 getent passwd deploy # deploy:x:1001:1001::/home/deploy:/bin/bash
 ```
 
@@ -321,7 +321,7 @@ getent passwd deploy # deploy:x:1001:1001::/home/deploy:/bin/bash
 
 The `usermod` command changes an existing account. One of its most common uses is adding a user to supplementary groups:
 
-```bash
+```bash title="Modify User"
 # Add the deploy user to the www-data group
 sudo usermod -aG www-data deploy
 ```
@@ -330,7 +330,7 @@ The `-aG` flags mean "append to the supplementary group list." Forgetting the `-
 
 To create a group explicitly:
 
-```bash
+```bash title="Create Group"
 sudo groupadd <group_name>
 ```
 
@@ -344,14 +344,14 @@ One caveat matters in practice: not every distribution enables `sudo` by default
 
 The `/etc/sudoers` file is the policy database that tells `sudo` who may do what. A rule like `deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx` means the user `deploy` may run exactly that command as any target user, from any host, without being prompted for a password. For a deploy user, you might grant more targeted access like this:
 
-```bash
+```bash title="Open the Sudoers File Safely"
 # Open the sudoers file safely
 sudo visudo
 ```
 
 Add a line that lets the deploy user restart nginx without a password prompt:
 
-```
+```text title="Sudoers Rule Example"
 deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart nginx
 ```
 
@@ -381,7 +381,7 @@ A server that cannot reach package repositories or accept remote administration 
 
 The `ip` command is the modern tool for inspecting network interfaces:
 
-```bash
+```bash title="Show IP Addresses"
 # Show all interfaces and their IP addresses
 ip addr show
 
@@ -403,13 +403,13 @@ We already set the hostname with `hostnamectl`. That command writes a short labe
 
 Each non-comment line has the format:
 
-```text
+```text title="hosts File Format"
 IP_address  canonical_hostname  [alias ...]
 ```
 
 Fields are separated by any amount of whitespace (spaces or tabs). Lines starting with `#` are comments. A minimal server entry looks like this:
 
-```text
+```text title="Example /etc/hosts"
 # /etc/hosts
 127.0.0.1       localhost
 127.0.1.1       web-prod-01.example.com web-prod-01
@@ -436,7 +436,7 @@ Debian and Ubuntu use `apt`, which downloads `.deb` packages from repositories d
 
 On Red Hat-family distributions, the equivalent commands use `dnf`:
 
-```bash
+```bash title="dnf Package Workflow"
 sudo dnf check-update        # similar to apt update
 sudo dnf install nginx       # install a package
 sudo dnf upgrade             # upgrade all packages
@@ -476,7 +476,7 @@ This matters because a server is not just "a machine with software installed." I
 
 `systemctl` is the command-line interface to systemd's service manager. The operations you will reach for constantly are checking a service's current state, starting or stopping it, restarting it after a configuration change, and controlling whether it comes up automatically at boot.
 
-```bash
+```bash title="Check Service Status"
 # Check the status of nginx
 sudo systemctl status nginx
 
@@ -491,19 +491,19 @@ sudo systemctl reload nginx
 
 To make a service start automatically at boot:
 
-```bash
+```bash title="Enable Service"
 sudo systemctl enable nginx
 ```
 
 To prevent it from starting at boot:
 
-```bash
+```bash title="Systemctl Disable Nginx"
 sudo systemctl disable nginx
 ```
 
 Combining `enable` and `start` in one command:
 
-```bash
+```bash title="Enable Service"
 sudo systemctl enable --now nginx
 ```
 
@@ -515,7 +515,7 @@ Some application ecosystems ship their own process managers that complement or w
 
 Systemd services are defined by unit files, typically stored in `/usr/lib/systemd/system/` (distribution-provided) or `/etc/systemd/system/` (administrator overrides). A systemd unit file typically has three sections: `[Unit]` declares what this service is and what it depends on; `[Service]` defines how to run it (which user, which binary, restart policy); and `[Install]` tells systemd which target (boot state) should pull this service in when enabled. Only `[Unit]` and the type-specific section (`[Service]` here) are required; `[Install]` is optional and only needed when you want to enable or disable the unit with `systemctl`. A unit file for a Node.js application might look like this:
 
-```ini
+```ini title="systemd Service Unit"
 # /etc/systemd/system/webapp.service
 [Unit]
 Description=Node.js Web Application
@@ -556,7 +556,7 @@ A `.timer` unit schedules a `.service` unit to run at defined times or intervals
 
 The service unit is written as a `oneshot` type (runs once and exits, rather than staying alive):
 
-```ini
+```ini title="systemd Service Unit"
 # /etc/systemd/system/webapp-health.service
 [Unit]
 Description=Webapp health check
@@ -568,7 +568,7 @@ ExecStart=/usr/local/bin/webapp-health.sh
 
 The timer unit controls when it fires:
 
-```ini
+```ini title="systemd Timer Unit"
 # /etc/systemd/system/webapp-health.timer
 [Unit]
 Description=Run webapp health check every minute

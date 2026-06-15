@@ -10,7 +10,7 @@ If you deploy a service and only you know how to recover it, the service is not 
 
 This page explains what a runbook is, what belongs in one, and how to write one that is actually usable.
 
-<Aside type="tip">
+<Aside type="tip" title="Write While You Build">
 Write the runbook while you build the service, not after you are finished. If you wait until the end, you will forget commands, skip assumptions, and accidentally document a recovery path you never tested.
 </Aside>
 
@@ -92,7 +92,7 @@ Avoid vague instructions such as:
 
 Replace them with specific instructions such as:
 
-```bash
+```bash title="Connect with SSH"
 ssh -i ~/.ssh/prod-key.pem ubuntu@203.0.113.10
 sudo systemctl status nginx --no-pager
 docker compose ps
@@ -114,7 +114,7 @@ A good runbook is:
 - **maintained**: it is updated when deployment details change
 - **portable**: it does not depend on one person's laptop paths or unstated shell aliases
 
-<Aside type="caution">
+<Aside type="caution" title="Untested Runbooks Are Liabilities">
 An untested runbook is a liability. During an outage, a wrong recovery step wastes time and may make the incident worse.
 </Aside>
 
@@ -171,7 +171,7 @@ List what the operator needs before starting:
 
 Avoid machine-specific assumptions. For example:
 
-```text
+```text title="Prerequisites and Access Example"
 Use ~/Downloads/key.pem to connect.
 ```
 
@@ -213,7 +213,7 @@ A service can be "running" and still unusable, so include more than one check:
 
 For non-HTTP services, use a protocol-appropriate check rather than forcing everything into `curl`. For example:
 
-```bash
+```bash title="Check Service Health"
 nmap -sV -Pn -p T:25565 PUBLIC_ENDPOINT
 ```
 
@@ -221,21 +221,21 @@ Explain what successful output looks like.
 
 Examples by environment:
 
-```bash
+```bash title="Check nginx Service Status"
 # systemd-managed service
 sudo systemctl status nginx --no-pager
 sudo ss -tulpn | grep ':80'
 curl -I http://127.0.0.1
 ```
 
-```bash
+```bash title="List Compose Services"
 # Docker Compose stack
 docker compose ps
 docker compose logs --tail=50 wordpress
 curl -I http://PUBLIC_IP
 ```
 
-```bash
+```bash title="List Pods"
 # Kubernetes deployment
 kubectl get pods -n wordpress
 kubectl get svc -n wordpress
@@ -264,20 +264,20 @@ Include:
 
 Examples:
 
-```bash
+```bash title="Restart Service"
 sudo systemctl restart nginx
 sudo systemctl status nginx --no-pager
 curl -I http://127.0.0.1
 ```
 
-```bash
+```bash title="Docker Compose Restart Db"
 docker compose restart db
 docker compose restart wordpress
 docker compose ps
 curl -I http://PUBLIC_IP
 ```
 
-```bash
+```bash title="Check Rollout Status"
 kubectl rollout restart deployment/wordpress -n wordpress
 kubectl rollout status deployment/wordpress -n wordpress
 kubectl get pods -n wordpress
@@ -333,19 +333,19 @@ A strong runbook tells the operator where to look next if the first restart does
 
 Useful examples:
 
-```bash
+```bash title="Verification"
 # systemd / OS logs
 sudo journalctl -u nginx -n 100 --no-pager
 sudo tail -n 100 /var/log/syslog
 ```
 
-```bash
+```bash title="Review Recent WordPress Logs"
 # Docker Compose logs
 docker compose logs --tail=100 wordpress
 docker compose logs --tail=100 db
 ```
 
-```bash
+```bash title="View Pod Logs"
 # Kubernetes logs and events
 kubectl logs deployment/wordpress -n wordpress --tail=100
 kubectl describe pod POD_NAME -n wordpress
@@ -398,7 +398,7 @@ An operator should be able to copy a command from the runbook and run it with mi
 
 Good:
 
-```bash
+```bash title="CD ~/services/app"
 cd ~/services/app
 docker compose up -d
 docker compose ps
@@ -406,7 +406,7 @@ docker compose ps
 
 Less good:
 
-```text
+```text title="Unclear Runbook Step"
 Go to the project directory and start the containers.
 ```
 
@@ -414,7 +414,7 @@ Go to the project directory and start the containers.
 
 If a value varies by operator or environment, use a clearly named placeholder:
 
-```bash
+```bash title="Connect with SSH"
 ssh -i PATH_TO_SSH_KEY ubuntu@PUBLIC_IP
 curl -I http://SERVICE_URL
 kubectl get pods -n NAMESPACE
@@ -428,13 +428,13 @@ Show the operator what "normal" looks like.
 
 Example:
 
-```bash
+```bash title="List Compose Services"
 docker compose ps
 ```
 
 Expected healthy state:
 
-```text
+```text title="Expected Container Status"
 NAME                IMAGE              STATE    PORTS
 wordpress-app       wordpress:latest   Up       0.0.0.0:80->80/tcp
 wordpress-db        mariadb:11         Up       3306/tcp
@@ -490,7 +490,7 @@ Use them as building blocks, not a substitute for service-specific instructions.
 
 Use this when another operator may need to go from a fresh EC2 instance to a working service.
 
-```md
+```md title="Bootstrap Template Markdown"
 # Runbook: SERVICE_NAME
 
 - Owner: YOUR_NAME
@@ -556,7 +556,7 @@ Use this when another operator may need to go from a fresh EC2 instance to a wor
 
 Use this when you need a clean starting point for a single deployed service.
 
-```md
+```md title="Operations Template Markdown"
 # Runbook: SERVICE_NAME
 
 - Owner: YOUR_NAME
@@ -717,7 +717,7 @@ Good habits:
 
 One useful habit is to add a short footer note such as:
 
-```text
+```text title="Testing and Maintenance Example"
 Last tested restart: 2026-04-30
 Last tested rollback: 2026-04-30
 Validated by: Your Name
@@ -725,6 +725,6 @@ Validated by: Your Name
 
 That makes freshness visible.
 
-<Aside type="note">
+<Aside type="note" title="Runbooks Reduce Improvisation">
 The best indicator that a runbook is working is that it reduces improvisation. During recovery, the operator should spend less time remembering and more time verifying.
 </Aside>

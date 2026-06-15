@@ -207,7 +207,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
      - Security group: select existing `db-sg`
    - Expand **Advanced details** and paste this into **User data**:
 
-   ```bash
+   ```bash title="User Data TCP Listener"
    #!/bin/bash
    cat >/usr/local/bin/listen-5432.py <<'PY'
    import socket
@@ -236,7 +236,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
 6. On your local machine, load your key into the SSH agent so agent forwarding works later, then connect to `cs312-web`:
 
-   ```bash
+   ```bash title="Ssh-add /path/to/your-key.pem"
    ssh-add /path/to/your-key.pem
    ssh -A -i /path/to/your-key.pem ubuntu@<WEB_PUBLIC_IP>
    ```
@@ -245,7 +245,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
 7. From inside `cs312-web`, request an IMDSv2 token:
 
-   ```bash
+   ```bash title="Set Environment Variable"
    TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" \
      -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
    echo "$TOKEN"
@@ -255,7 +255,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
 8. Query the metadata service root to see what categories are available:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -H "X-aws-ec2-metadata-token: $TOKEN" \
      http://169.254.169.254/latest/meta-data/
    ```
@@ -264,7 +264,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
 9. Query the IAM path to find the name of the attached role:
 
-   ```bash
+   ```bash title="Read Instance Role Name"
    ROLE_NAME=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
      http://169.254.169.254/latest/meta-data/iam/security-credentials/)
    echo "$ROLE_NAME"
@@ -274,7 +274,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
 10. Retrieve the actual credentials:
 
-    ```bash
+    ```bash title="Test HTTP Response"
     curl -H "X-aws-ec2-metadata-token: $TOKEN" \
       "http://169.254.169.254/latest/meta-data/iam/security-credentials/$ROLE_NAME"
     ```
@@ -283,7 +283,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
 11. Install the AWS CLI v2 and a TCP probe tool, then confirm the CLI uses the role without any configuration:
 
-    ```bash
+    ```bash title="Update Package Lists"
     sudo apt update -q && sudo apt install -y unzip netcat-openbsd
     curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
     unzip -q awscliv2.zip
@@ -295,7 +295,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
 12. Validate the security-group relationship you built earlier by probing the private instance on port 5432:
 
-    ```bash
+    ```bash title="Probe Private Database Port"
     nc -zv <DB_PRIVATE_IP> 5432
     ```
 
@@ -309,7 +309,7 @@ AWS Academy's LabRole is already configured as an IAM role that EC2 instances ca
 
 14. From inside `cs312-web`, SSH to the private instance using only its private IP:
 
-    ```bash
+    ```bash title="SSH to Private Instance"
     ssh ubuntu@<DB_PRIVATE_IP>
     ```
 
@@ -333,7 +333,7 @@ Your instance already has credentials from the metadata service. This section us
 <Steps>
 1. From your EC2 SSH session, create an S3 bucket. Bucket names must be globally unique, so include your ONID:
 
-   ```bash
+   ```bash title="Set Environment Variable"
    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
    BUCKET="cs312-YOUR_ONID-$ACCOUNT_ID"
 
@@ -344,14 +344,14 @@ Your instance already has credentials from the metadata service. This section us
 
 2. Write a small file and upload it:
 
-   ```bash
+   ```bash title="Print Text"
    echo "uploaded from cs312-web via instance role" > testfile.txt
    aws s3 cp testfile.txt "s3://$BUCKET/testfile.txt"
    ```
 
 3. List the bucket contents to confirm the upload:
 
-   ```bash
+   ```bash title="List S3 Bucket Contents"
    aws s3 ls "s3://$BUCKET/"
    ```
 
@@ -359,7 +359,7 @@ Your instance already has credentials from the metadata service. This section us
 
 4. Download the file back under a different name to confirm retrieval:
 
-   ```bash
+   ```bash title="Download S3 Object"
    aws s3 cp "s3://$BUCKET/testfile.txt" retrieved.txt
    cat retrieved.txt
    ```
@@ -378,7 +378,7 @@ Your instance already has credentials from the metadata service. This section us
 
 7. In the AWS Console, open your bucket's **Permissions** tab and click **Edit** under **Bucket policy**. Paste the policy below, replacing `YOUR_BUCKET_NAME` with the value of `$BUCKET`:
 
-   ```json
+   ```json title="JSON Document"
    {
      "Version": "2012-10-17",
      "Statement": [
@@ -402,7 +402,7 @@ Your instance already has credentials from the metadata service. This section us
 
 8. Back in your SSH session, retry the upload without any encryption flag:
 
-   ```bash
+   ```bash title="Copy Backup to S3"
    aws s3 cp testfile.txt "s3://$BUCKET/denied-upload.txt"
    ```
 
@@ -410,7 +410,7 @@ Your instance already has credentials from the metadata service. This section us
 
 9. Retry the upload with server-side encryption specified:
 
-   ```bash
+   ```bash title="Copy Backup to S3"
    aws s3 cp testfile.txt "s3://$BUCKET/encrypted-upload.txt" \
      --sse AES256
    ```
@@ -439,7 +439,7 @@ You will create a private container registry, install Docker on the EC2 instance
 
 2. Back in your EC2 SSH session, install Docker:
 
-   ```bash
+   ```bash title="Repository Name"
    sudo apt install -y docker.io
    sudo usermod -aG docker ubuntu
    newgrp docker
@@ -447,7 +447,7 @@ You will create a private container registry, install Docker on the EC2 instance
 
 3. Verify Docker is running:
 
-   ```bash
+   ```bash title="Docker Version"
    docker version
    ```
 
@@ -455,7 +455,7 @@ You will create a private container registry, install Docker on the EC2 instance
 
 4. Retrieve your AWS account ID, which you need to construct the ECR login command:
 
-   ```bash
+   ```bash title="Verify AWS Credentials"
    aws sts get-caller-identity --query Account --output text
    ```
 
@@ -463,7 +463,7 @@ You will create a private container registry, install Docker on the EC2 instance
 
 5. Authenticate Docker to ECR. The AWS CLI uses the instance role to obtain a temporary registry token:
 
-   ```bash
+   ```bash title="Log in to ECR"
    aws ecr get-login-password --region us-east-1 | \
      docker login --username AWS --password-stdin \
      <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
@@ -473,7 +473,7 @@ You will create a private container registry, install Docker on the EC2 instance
 
 6. Create a small image that carries your ONID:
 
-   ```bash
+   ```bash title="Create Directories"
    mkdir myapp && cd myapp
 
    echo '<h1>CS 312 - YOUR_ONID</h1>' > index.html
@@ -486,13 +486,13 @@ You will create a private container registry, install Docker on the EC2 instance
 
    Build it:
 
-   ```bash
+   ```bash title="Build Docker Image"
    docker build -t cs312-YOUR_ONID:v1 .
    ```
 
 7. Tag the image with both a version tag and `latest`, then push both:
 
-   ```bash
+   ```bash title="Docker Tag Cs312-youronid:v1"
    docker tag cs312-YOUR_ONID:v1 \
      <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID:v1
    docker tag cs312-YOUR_ONID:v1 \
@@ -508,7 +508,7 @@ You will create a private container registry, install Docker on the EC2 instance
 
    If the registry has basic scanning enabled, findings will appear here within a minute or two of the push. Note any findings and their severity levels. If the tab shows no results, retrieve them from the CLI instead:
 
-   ```bash
+   ```bash title="Inspect ECR Repository"
    aws ecr describe-image-scan-findings \
      --repository-name cs312-YOUR_ONID \
      --image-id imageTag=v1 \
@@ -519,14 +519,14 @@ You will create a private container registry, install Docker on the EC2 instance
 
 9. Pull the image back from ECR to confirm the full round-trip:
 
-   ```bash
+   ```bash title="Docker Pull"
    docker pull \
      <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID:v1
    ```
 
 10. Run the image and verify it serves your content:
 
-    ```bash
+    ```bash title="Run Container"
     docker run -d -p 9090:80 --name myapp \
       <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/cs312-YOUR_ONID:v1
 

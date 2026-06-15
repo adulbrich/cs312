@@ -29,7 +29,7 @@ Every operations team has a "bus factor," the number of people who could be sudd
 
 Three scenarios make the case clearly. First, on-call handoffs: when one engineer ends a rotation and another begins, the incoming person inherits every alert, every half-finished migration, and every known fragility. Without written context, the handoff becomes a game of telephone. Second, onboarding: a new team member should be able to set up a development environment, understand the production architecture, and handle common alerts within their first week. If that process lives entirely in someone's head, onboarding stretches into months. Third, incident response: during an outage at 3 AM, you do not rise to the level of your expertise; you fall to the level of your documentation. A clear runbook is the difference between a five-minute fix and a two-hour escalation.
 
-<Aside type="tip">
+<Aside type="tip" title="Write It Down After the Second Time">
 A useful rule of thumb: if you have done something twice and expect to do it again, write it down. The third time, you will be glad you did, and so will the person who does it after you.
 </Aside>
 
@@ -80,7 +80,7 @@ Each step should include the exact command to run (copy-pasteable, with no place
 
 The weak version assumes familiarity and leaves the reader guessing about which host to connect to, which service manager to use, and what "check that it's running" actually means. The strong version eliminates ambiguity.
 
-<Aside type="caution">
+<Aside type="caution" title="Make Decisions Explicit">
 Avoid writing runbooks that require the reader to "use judgment" at critical junctures. If a step requires a decision, make it a decision tree with explicit branches: "If the error log contains X, proceed to step 4a. If the error log contains Y, proceed to step 4b." Save judgment for situations that genuinely cannot be anticipated.
 </Aside>
 
@@ -94,7 +94,7 @@ A good architecture document typically includes three layers. The first is a hig
 
 Architecture docs go stale quickly, so attach a "last verified" date and assign an owner responsible for reviewing them quarterly. A diagram from two years ago that no longer matches reality is worse than no diagram at all, because it builds false confidence.
 
-<Aside type="note">
+<Aside type="note" title="Prefer Version-Controlled Diagrams">
 You do not need expensive diagramming tools. Mermaid diagrams render directly in Markdown and can be version-controlled alongside your code. A simple box-and-arrow diagram that is accurate and up to date beats a polished Visio file that nobody updates.
 </Aside>
 
@@ -134,7 +134,7 @@ The benefits are significant. Version control gives you a history of every chang
 
 Organize documentation predictably. A common structure places runbooks in `docs/runbooks/`, architecture docs in `docs/architecture/`, and decision records in `docs/decisions/`. Use descriptive filenames (`restart-celery-worker.md`, not `runbook3.md`) so that readers can find what they need without opening every file.
 
-<Aside type="tip">
+<Aside type="tip" title="Review Documentation Like Code">
 Treat documentation pull requests with the same seriousness as code pull requests. A runbook with a wrong command is as dangerous as a bug in production code, perhaps more so, because it will be executed during an incident when stress is high and attention is divided.
 </Aside>
 

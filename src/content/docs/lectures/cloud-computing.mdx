@@ -97,7 +97,7 @@ An ASG maintains a desired number of instances from the same AMI and instance ty
 
 The mechanics of configuring ASGs fit naturally into an Infrastructure as Code context, where the desired state of the fleet is declared rather than clicked through a console. The important concept here is that EC2 capacity is fungible and disposable by design; individual instances are meant to be replaced, not maintained in place.
 
-```mermaid
+```mermaid title="Horizontal Scaling with Auto Scaling Groups Diagram"
 flowchart TB
   Metrics[CloudWatch metrics\nCPU utilization, request rate]
   ASG[Auto Scaling Group\nmin: 2 · desired: 3 · max: 6]
@@ -151,7 +151,7 @@ The more subtle design question is where your application servers belong. For a 
 
 The diagram below shows one version of this topology, a standard multi-tier setup with a load balancer fronting private application instances, each tier able to initiate outbound connections through a NAT gateway.
 
-```mermaid
+```mermaid title="Vpcs and Subnets Diagram"
 flowchart TB
   Internet((Internet))
   IGW[Internet Gateway]
@@ -273,7 +273,7 @@ When a single server holds everything, access control is simple in the worst way
 
 Historically, an **IAM user** represented a human identity inside a single AWS account, with a console password and optional access keys. You will still see IAM users in older accounts and in small one-account environments. Current AWS best practice is different: human users usually sign in through an external identity provider or [AWS IAM Identity Center](https://docs.aws.amazon.com/singlesignon/latest/userguide/what-is.html) and then assume roles with temporary credentials. For workloads and automation, the guidance is stronger still: use **IAM roles** rather than long-term access keys. If you are using the classic IAM-user model, avoid attaching permissions directly to individual users; instead, organize them into **groups** such as "developers" or "operations" and attach **policies** to the groups. In IAM Identity Center, **permission sets** serve a related but different purpose: they define the role-based access that Identity Center provisions across one or more AWS accounts, rather than acting as simple per-account groups. A policy is a JSON document specifying allowed or denied actions on specific resources.
 
-```json
+```json title="JSON Document"
 {
   "Version": "2012-10-17",
   "Statement": [
@@ -315,7 +315,7 @@ IMDS is one source in the AWS credential provider chain, not the only one. The e
 
 The sequence matters because there are several moving parts. Once you see them in order, the design becomes much less mysterious.
 
-```mermaid
+```mermaid title="Roles and Instance Profiles Diagram"
 flowchart TB
   Role[IAM role\npermissions policy]
   Profile[Instance profile]
@@ -331,7 +331,7 @@ flowchart TB
   App --> AWS
 ```
 
-```bash
+```bash title="Set Environment Variable"
 # IMDSv2 example from inside an EC2 instance with an attached role:
 TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
   -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
@@ -355,7 +355,7 @@ S3 bucket policies are the most common example. A bucket policy can require that
 
 The simplified decision flow below is the mental model most engineers need first:
 
-```mermaid
+```mermaid title="Resource-based Policies Diagram"
 flowchart TD
   Request([API request])
   Deny{Explicit deny in any\napplicable policy?}
@@ -390,7 +390,7 @@ As covered in the Containerization with Docker lecture, an image becomes operati
 
 The workflow has three parts. You authenticate Docker to ECR using the AWS CLI, which obtains a temporary token valid for twelve hours. You tag your locally built image with the full ECR repository URI. Then you push the tagged image. On the deployment target, the same authenticate-then-pull process retrieves the image. The EC2 instance pulling the image at deployment time uses its attached instance profile for authentication, which means no stored credentials are needed anywhere in the pipeline.
 
-```bash
+```bash title="Authenticate, Tag, and Push to ECR"
 # Authenticate Docker to ECR (uses the AWS CLI to obtain a temporary token)
 aws ecr get-login-password --region us-east-1 | \
   docker login --username AWS --password-stdin \

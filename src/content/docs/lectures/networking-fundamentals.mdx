@@ -76,7 +76,7 @@ The four topologies you will encounter most often are worth visualizing. **Bus**
 
 All devices attach to a single shared cable. Only one device can transmit at a time; if two transmit simultaneously, a collision occurs and both must retransmit. Early Ethernet standards used exactly this design: 10BASE5 ("thicknet") in the late 1970s and 10BASE2 ("thinnet") in the 1980s ran coaxial cable through offices with a T-connector at each workstation. Bus topology still appears in embedded and industrial contexts: the [CAN bus](https://en.wikipedia.org/wiki/CAN_bus) in every modern car is a shared two-wire bus where engine control units, ABS, and infotainment all compete for the same medium.
 
-```mermaid
+```mermaid title="Bus Diagram"
 flowchart LR
   T1[Terminator]---A[Host A]---B[Host B]---C[Host C]---D[Host D]---T2[Terminator]
 ```
@@ -85,7 +85,7 @@ flowchart LR
 
 Each device connects to exactly two neighbors, forming a closed loop. A frame travels around the ring until it reaches its destination. A single break can disrupt the entire ring unless dual-ring redundancy is implemented. IBM's [Token Ring](https://en.wikipedia.org/wiki/Token_Ring) (IEEE 802.5) used ring topology for corporate LANs through the 1980s and 1990s, passing a special "token" frame around the loop to prevent collisions. [FDDI (Fiber Distributed Data Interface)](https://en.wikipedia.org/wiki/FDDI) extended the same idea to fiber at 100 Mbps and added a counter-rotating backup ring for resilience. Rings did not disappear at the WAN level: [SONET/SDH](https://en.wikipedia.org/wiki/Synchronous_optical_networking) optical rings still form the backbone of many telephone and cable networks, and metro Ethernet rings give ISPs a way to route around a fiber cut without manual intervention.
 
-```mermaid
+```mermaid title="Ring Diagram"
 flowchart LR
   A[Host A]-->B[Host B]-->C[Host C]-->D[Host D]-->E[Host E]-->A
 ```
@@ -94,7 +94,7 @@ flowchart LR
 
 Every device has a dedicated cable to a central switch. The switch forwards frames only to the intended port, so each link is logically point-to-point. This is the physical topology of every modern wired LAN.
 
-```mermaid
+```mermaid title="Star Diagram"
 flowchart TB
   SW[Switch]
   A[Host A]---SW
@@ -108,7 +108,7 @@ flowchart TB
 
 Star networks are joined at multiple levels. Enterprise networks typically use a three-tier hierarchy: access switches connect end devices, distribution switches aggregate access switches, and a core layer connects distribution switches together and to the internet.
 
-```mermaid
+```mermaid title="Tree (Hierarchical) Diagram"
 flowchart TB
   CR[Core Switch / Router]
   DS1[Distribution 1]---CR
@@ -168,7 +168,7 @@ This separation lets you apply different firewall rules to each subnet. Workstat
 
 On a Linux machine, you can inspect your current address and subnet with:
 
-```bash
+```bash title="Show IP Addresses"
 ip addr show
 ```
 
@@ -186,7 +186,7 @@ Four services make a network usable in practice. Without them, every user would 
 
 When a device plugs into a network or connects to Wi-Fi, **DHCP** automatically assigns an IP address, subnet mask, default gateway, and DNS server addresses. The process works in four steps called DORA: the client broadcasts a Discover to find any available DHCP server, the server responds with an Offer proposing a specific address, the client broadcasts a Request to accept the offer (broadcast rather than unicast, so other DHCP servers know the offer was accepted), and the server sends an Acknowledgment confirming the lease. Each address comes with a lease time; when the lease expires, the client must renew it.
 
-```mermaid
+```mermaid title="DHCP (Dynamic Host Configuration Protocol) Diagram"
 sequenceDiagram
     participant C as Client
     participant S as DHCP Server
@@ -201,7 +201,7 @@ For example, a DHCP server on a network using `10.0.1.0/24` might hand out addre
 
 You can inspect your current DHCP lease on a Linux system. Note that the interface name varies: you may see `eth0`, `enp3s0`, `ens3`, or something else depending on your hardware and distribution. Use `ip addr show` with no arguments to list all interfaces first, then query the specific one:
 
-```bash
+```bash title="Show IP Addresses"
 # List all interfaces to find the correct name
 ip addr show
 
@@ -223,7 +223,7 @@ The most common record types are **A records** (mapping a name to an IPv4 addres
 
 You can query DNS from the command line:
 
-```bash
+```bash title="DNS Operates over Two Different Protocols"
 # Look up the A record for a hostname
 dig example.com
 
@@ -277,7 +277,7 @@ When a client connects to `https://example.com`, the TLS handshake runs before a
 
 Certificates are organized in a **chain of trust**. A server's leaf certificate is signed by an intermediate CA, which is signed by a root CA. Browsers and operating systems only trust root CAs directly; intermediate CAs derive their authority from the root. A common failure mode is a server that presents its own certificate but omits the intermediate CA certificate from the chain. The client cannot verify the chain and rejects the connection, even though the leaf certificate is perfectly valid.
 
-```bash
+```bash title="ICE (Interactive Connectivity Establishment)"
 # Inspect a TLS handshake and the full certificate chain
 openssl s_client -connect example.com:443
 
@@ -296,14 +296,14 @@ A **router** connects two or more networks and forwards packets between them. Ev
 
 The router makes forwarding decisions based on its **routing table**, a list of destination networks and the next-hop address or interface to use for each. You can inspect the routing table on a Linux machine:
 
-```bash
+```bash title="Show Routes"
 # Show the routing table
 ip route show
 ```
 
 Typical output on a workstation might look like:
 
-```
+```text title="Show the Routing Table Output"
 default via 10.0.1.1 dev eth0
 10.0.1.0/25 dev eth0 proto kernel scope link src 10.0.1.10
 ```
@@ -312,7 +312,7 @@ The first line says "for any destination not otherwise listed, send the packet t
 
 On a router connecting two subnets to the internet, the routing table is more complex. It has entries for both internal subnets plus a default route pointing to the ISP's gateway:
 
-```bash
+```bash title="Show Routes"
 # On the router
 ip route show
 # default via 203.0.113.1 dev wan0
@@ -322,7 +322,7 @@ ip route show
 
 You can also add static routes manually when needed:
 
-```bash
+```bash title="Show Routes"
 # Add a route to a remote network via a specific gateway
 sudo ip route add 10.0.2.0/24 via 10.0.1.1 dev eth0
 ```
@@ -356,7 +356,7 @@ IP addresses are layer-3 identifiers used for routing between networks. But with
 
 Each host caches these mappings in an **ARP table** to avoid repeating the broadcast for every packet. On Linux you can inspect it directly:
 
-```bash
+```bash title="Managed Switches"
 # Show the ARP / neighbor cache
 ip neighbor show
 
@@ -377,7 +377,7 @@ The transport layer (layer 4 in the OSI model, and the transport layer in the TC
 
 **TCP (Transmission Control Protocol)** provides reliable, ordered delivery. It establishes a connection with a three-way handshake (SYN, SYN-ACK, ACK), retransmits lost packets, and guarantees that data arrives in order. HTTP, SSH, and database protocols typically use TCP because they need reliability. After the handshake, the connection is bidirectional: both sides send and receive, and every segment is acknowledged. Closing a connection is typically shown as a four-message exchange (FIN, ACK, FIN, ACK), though some stacks may combine or optimize packets.
 
-```mermaid
+```mermaid title="Ports and Protocols Diagram"
 sequenceDiagram
     participant C as Client
     participant S as Server
@@ -402,7 +402,7 @@ sequenceDiagram
 
 **UDP (User Datagram Protocol)** is simpler and faster but provides no delivery guarantees. DNS queries, DHCP, video streaming, and VoIP use UDP because speed matters more than perfect delivery, or because the application handles retransmission itself. There is no handshake and no acknowledgment: the sender fires a datagram and moves on. If the datagram is lost, UDP does not know and does not care.
 
-```mermaid
+```mermaid title="Ports and Protocols Diagram"
 sequenceDiagram
     participant C as Client
     participant S as Server
@@ -429,7 +429,7 @@ Common service ports are standardized or conventionally assigned. Well-known por
 
 You can inspect which ports are open and listening on a Linux system using the `ss` command:
 
-```bash
+```bash title="List Listening Sockets"
 # Show all listening TCP sockets with process names
 sudo ss -tlnp
 
@@ -442,7 +442,7 @@ ss -tn
 
 The flags break down as follows: `-t` for TCP, `-u` for UDP, `-l` for listening sockets only, `-n` for numeric output (no DNS resolution), and `-p` to show the process using each socket. Typical output looks like:
 
-```
+```text title="Show All Established Connections Output"
 State   Recv-Q  Send-Q  Local Address:Port  Peer Address:Port  Process
 LISTEN  0       128     0.0.0.0:22          0.0.0.0:*          users:(("sshd",pid=1234,fd=3))
 LISTEN  0       511     0.0.0.0:80          0.0.0.0:*          users:(("nginx",pid=5678,fd=6))
@@ -465,7 +465,7 @@ Linux provides several different tools and frameworks for network configuration,
 
 The `ip` command (part of iproute2) is the current standard for viewing and modifying network state:
 
-```bash
+```bash title="Systemd-networkd"
 # Show all interfaces and their addresses
 ip addr show
 
@@ -482,7 +482,7 @@ sudo ip route add default via 10.0.1.1
 <Aside type="caution" title="Temporary vs. Persistent Configuration">
 Changes made with `ip addr` and `ip route` commands are not persistent. They disappear on reboot. Always apply permanent configuration through your distribution's network management tool. On Ubuntu, that is Netplan: edit or create a file in `/etc/netplan/` and apply with `sudo netplan apply`. A static address configuration looks like:
 
-```yaml
+```yaml title="Netplan Static Address Example"
 network:
   version: 2
   ethernets:
@@ -513,7 +513,7 @@ Before using `ping`, it helps to know what it is actually sending. **ICMP (Inter
 
 `ping` sends ICMP echo requests to a target and reports whether replies come back and how long they take. It is your first tool for testing layer 3 connectivity. The `-c 4` flag sends exactly four packets and then stops; without it, `ping` runs until you interrupt it with `Ctrl+C`.
 
-```bash
+```bash title="Ping -c 4 10.0.1.1"
 # Can I reach the default gateway?
 ping -c 4 10.0.1.1
 
@@ -532,7 +532,7 @@ One important caveat: many networks and cloud providers block ICMP at their fire
 
 `traceroute` reveals the path packets take to a destination by exploiting the IP TTL (Time To Live) field. It works by sending a series of probes with progressively increasing TTLs: the first probe is sent with TTL=1, causing the first router to decrement it to zero, drop the packet, and send back an ICMP "time exceeded" message (revealing the first hop). The second probe is sent with TTL=2, so the first router forwards it and the second router drops it and sends an ICMP reply (revealing the second hop). This pattern continues until the probe reaches the destination. The round-trip times from each ICMP response let you see both the path and the latency at each hop.
 
-```bash
+```bash title="Traceroute 8.8.8.8"
 # Trace the route to a public server (sends UDP probes by default on Linux)
 traceroute 8.8.8.8
 
@@ -545,7 +545,7 @@ sudo traceroute -T -p 443 example.com
 
 Typical output looks like:
 
-```
+```text title="Use Tcp-based Traceroute on a Specific Port (Useful When"
  1  10.0.1.1 (10.0.1.1)       1.2 ms  1.1 ms  1.3 ms
  2  * * *
  3  203.0.113.1 (203.0.113.1) 8.4 ms  8.2 ms  8.5 ms
@@ -560,7 +560,7 @@ The protocol `traceroute` uses matters operationally. The default on Linux (`tra
 
 These tools query DNS servers directly and show you exactly what the resolver returns:
 
-```bash
+```bash title="Query DNS with dig and nslookup"
 # Full DNS query with all sections
 dig example.com
 
@@ -580,7 +580,7 @@ The `dig` output includes the answer section (the actual records), the authority
 
 `curl` makes HTTP (and many other protocol) requests from the command line. It is invaluable for testing whether a web service is actually responding:
 
-```bash
+```bash title="Test HTTP Response"
 # Test if the web server responds (fetch headers only)
 curl -I https://example.com
 
@@ -596,7 +596,7 @@ curl -o /dev/null -s -w "HTTP %{http_code} in %{time_total}s\n" https://example.
 
 The `-I` flag fetches only headers, which is useful for a quick check without downloading the entire page. The `-v` flag shows the TLS handshake and request/response headers, which helps diagnose certificate problems and redirect loops. When you need to go deeper than `curl -v`, `openssl s_client` connects to a host and performs the TLS handshake while printing every detail: the certificate chain, the negotiated cipher suite, the protocol version, and whether the certificate validates correctly.
 
-```bash
+```bash title="Inspect TLS Certificate"
 # Connect to a host and inspect the TLS handshake and certificate
 # Note: this command opens an interactive session; exit with Ctrl+C or by typing 'quit'
 openssl s_client -connect example.com:443
@@ -611,7 +611,7 @@ openssl s_client -connect example.com:443 2>/dev/null | openssl x509 -noout -tex
 
 `nmap` (Network Mapper) probes a host from the network to discover which ports are accepting connections and what software is answering them. Unlike `ss`, which requires shell access to the target, `nmap` runs from any machine and shows you exactly what an outside client would see. This makes it the right tool for verifying that a service is reachable through any firewalls between you and the server.
 
-```bash
+```bash title="Nmap -sv -pn -p T:22 10.0.1.10"
 # Check whether a specific port is open and identify the service version
 nmap -sV -Pn -p T:22 10.0.1.10
 
@@ -626,7 +626,7 @@ Flags: `-sV` probes open ports to determine service version; `-Pn` skips host-di
 
 Typical output:
 
-```
+```text title="Check a Non-standard Application Port (E.g., a Minecraft"
 PORT      STATE     SERVICE   VERSION
 25565/tcp open      minecraft Minecraft 1.21 (Protocol: 764)
 22/tcp    open      ssh       OpenSSH 9.6 (Ubuntu)
@@ -643,7 +643,7 @@ Three possible states, and the distinction between them matters operationally. `
 
 When higher-level tools do not reveal the problem, packet capture lets you see exactly what is happening on the wire. The `tcpdump` utility is available on virtually every Linux system and reads frames directly from a network interface, optionally filtered by host, port, or protocol.
 
-```bash
+```bash title="Tcpdump -i Eth0 Host 10.0.1.50"
 # Capture traffic to or from a specific host
 sudo tcpdump -i eth0 host 10.0.1.50
 

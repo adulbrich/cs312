@@ -61,7 +61,7 @@ Before booting the ISO, you need a virtual machine configured with the right res
 
 2. Verify you have an internet connection (the VM's NAT adapter piggybacks on your host's network):
 
-   ```bash
+   ```bash title="Ping -c 3 Archlinux.org"
    ping -c 3 archlinux.org
    ```
 
@@ -69,7 +69,7 @@ Before booting the ISO, you need a virtual machine configured with the right res
 
 3. Identify the name of your virtual disk:
 
-   ```bash
+   ```bash title="Partition Disk"
    fdisk -l
    ```
 
@@ -91,7 +91,7 @@ A raw disk has no structure. Before Linux can use it, you must divide it into pa
 <Steps>
 1. Launch the partitioning tool:
 
-   ```bash
+   ```bash title="Root Partition"
    # replace <disk> with your disk name, such as sda or vda
    fdisk /dev/<disk>
    ```
@@ -102,7 +102,7 @@ A raw disk has no structure. Before Linux can use it, you must divide it into pa
 
 2. **Create the EFI System Partition.** Type `n` for a new partition, then `p` for primary partition. Accept the default partition number (1) and default first sector. For the last sector, type `+300M`. After that type `t`, select partition 1, and set the hex code to `uefi` or `ef` (EFI System Partition).
 
-   ```
+   ```text title="Create the EFI System Partition Output"
    Command (m for help): n
    Partition type
       p   primary (0 primary, 0 extended, 4 free)
@@ -115,7 +115,7 @@ A raw disk has no structure. Before Linux can use it, you must divide it into pa
 
    The `+300M` notation means "300 megabytes from the current position": fidsk calculates the exact sector number for you.
 
-   ```
+   ```text title="Partition the Disk Output"
    Command (m for help): t
    Partition number (1-4): 1
    Hex code (type L to list all codes): uefi
@@ -131,7 +131,7 @@ A raw disk has no structure. Before Linux can use it, you must divide it into pa
 
 5. **Verify your work.** Type `p` to print the partition table. You should see something like:
 
-   ```
+   ```text title="Verify Your Work Output"
    Device   Boot Start       End   Sectors  Size Id Type
    /dev/sda1      2048    616447    614400  300M ef EFI (FAT-12/16/32)
    /dev/sda2    616448   1437695    821248  400M 82 Linux swap / Solaris
@@ -148,7 +148,7 @@ Partitioning only defines boundaries on the disk. Formatting writes the actual f
 <Steps>
 1. Format the EFI partition as FAT32:
 
-   ```bash
+   ```bash title="Write the Partition Table"
    mkfs.fat -F32 /dev/<disk>1
    ```
 
@@ -156,7 +156,7 @@ Partitioning only defines boundaries on the disk. Formatting writes the actual f
 
 2. Format the root partition as ext4:
 
-   ```bash
+   ```bash title="Create Filesystem"
    mkfs.ext4 -F /dev/<disk>3
    ```
 
@@ -164,7 +164,7 @@ Partitioning only defines boundaries on the disk. Formatting writes the actual f
 
 3. Initialize and activate swap:
 
-   ```bash
+   ```bash title="Enable Swap and Mount Partitions"
    mkswap /dev/<disk>2
    swapon /dev/<disk>2
    ```
@@ -179,13 +179,13 @@ Before `pacstrap` can install packages to the new system, the partitions need to
 <Steps>
 1. Mount the root partition:
 
-   ```bash
+   ```bash title="Mount Filesystem"
    mount /dev/<disk>3 /mnt
    ```
 
 2. Create the EFI mount point and mount the EFI partition:
 
-   ```bash
+   ```bash title="Create Directories"
    mkdir -p /mnt/boot/efi
    mount /dev/<disk>1 /mnt/boot/efi
    ```
@@ -193,7 +193,7 @@ Before `pacstrap` can install packages to the new system, the partitions need to
    When GRUB is installed later, it will write its EFI files into whatever is mounted at `/boot/efi`, so the mount point and the EFI partition need to match.
 </Steps>
 
-<Aside type="note" title="Checkpoint">
+<Aside type="note" title="Verify Mounted Filesystems">
 Run `lsblk -f` and verify the filesystems of each partition and that your root partition is mounted at `/mnt` and your EFI partition at `/mnt/boot/efi`. If you made a mistake, you can unmount with `umount /mnt/boot/efi` and `umount /mnt`, then fix the partitioning or formatting and start this step again.
 </Aside>
 
@@ -208,7 +208,7 @@ With the partitions mounted, `pacstrap` can download and install the core Arch L
 <Steps>
 1. Install the base packages:
 
-   ```bash
+   ```bash title="Install Arch Base System"
    pacstrap /mnt base linux vim
    ```
 
@@ -221,7 +221,7 @@ With the partitions mounted, `pacstrap` can download and install the core Arch L
 
 2. Generate the filesystem table:
 
-   ```bash
+   ```bash title="Genfstab -U /mnt /mnt/etc/fstab"
    genfstab -U /mnt > /mnt/etc/fstab
    ```
 
@@ -239,7 +239,7 @@ To configure the installed system, you need to "pivot" into it using `chroot` (c
 <Steps>
 1. Enter the chroot:
 
-   ```bash
+   ```bash title="Enter Arch Chroot"
    arch-chroot /mnt
    ```
 
@@ -247,7 +247,7 @@ To configure the installed system, you need to "pivot" into it using `chroot` (c
 
 2. Verify you are inside the chroot:
 
-   ```bash
+   ```bash title="Print Working Directory"
    pwd
    ```
 
@@ -261,30 +261,30 @@ Inside the chroot, every change you make writes to the installed system on disk.
 <Steps>
 1. Set the timezone (adjust if you are not on the US West Coast):
 
-   ```bash
+   ```bash title="Set Timezone"
    cp /usr/share/zoneinfo/America/Los_Angeles /etc/localtime
    date
    ```
 
    `/usr/share/zoneinfo/` contains a database of timezone definitions for every region. Copying one to `/etc/localtime` tells the system which timezone to use for displaying times and for calculating DST transitions. Run `date` to confirm the timezone took effect. You can browse the directory (e.g., `ls /usr/share/zoneinfo/America/`) to find your region.
 
-   <Aside type="tip" title="Optional but recommended">
+   <Aside type="tip" title="Sync the Hardware Clock">
    Sync the hardware clock so the RTC and system clock match:
 
-   ```bash
+   ```bash title="Hwclock --systohc"
    hwclock --systohc
    ```
    </Aside>
 
 2. Configure the locale. Open the locale configuration file:
 
-   ```bash
+   ```bash title="Edit /etc/locale.gen"
    vim /etc/locale.gen
    ```
 
    Find and uncomment these two lines (remove the leading `#`):
 
-   ```
+   ```text title="locale.gen Entry"
    en_US.UTF-8 UTF-8
    en_US ISO-8859-1
    ```
@@ -293,7 +293,7 @@ Inside the chroot, every change you make writes to the installed system on disk.
 
 3. Generate the locale and set it as default:
 
-   ```bash
+   ```bash title="Locale-gen"
    locale-gen
    echo LANG=en_US.UTF-8 > /etc/locale.conf
    export LANG=en_US.UTF-8
@@ -309,7 +309,7 @@ GRUB bridges the UEFI firmware and the Linux kernel. The firmware finds GRUB on 
 <Steps>
 1. Install GRUB and supporting EFI tools:
 
-   ```bash
+   ```bash title="Install GRUB and Supporting EFI Tools"
    pacman -S grub efibootmgr dosfstools mtools
    ```
 
@@ -323,12 +323,12 @@ GRUB bridges the UEFI firmware and the Linux kernel. The firmware finds GRUB on 
 
    <Tabs syncKey="arch">
    <TabItem label="x86_64 (Intel/AMD)">
-   ```bash
+   ```bash title="X8664 (Intel/amd)"
    grub-install --target=x86_64-efi --bootloader-id=arch --recheck
    ```
    </TabItem>
    <TabItem label="aarch64 (Apple Silicon / ARM)">
-   ```bash
+   ```bash title="Aarch64 (Apple Silicon / ARM)"
    grub-install --target=arm64-efi --bootloader-id=arch --removable --recheck
    ```
 
@@ -340,7 +340,7 @@ GRUB bridges the UEFI firmware and the Linux kernel. The firmware finds GRUB on 
 
 3. Generate the GRUB configuration:
 
-   ```bash
+   ```bash title="Grub-mkconfig -o /boot/grub/grub.cfg"
    grub-mkconfig -o /boot/grub/grub.cfg
    ```
 
@@ -351,7 +351,7 @@ GRUB bridges the UEFI firmware and the Linux kernel. The firmware finds GRUB on 
 
    On some Apple Silicon installs, the kernel file is named `/boot/Image` instead, which does not match that pattern, so GRUB may not detect it automatically. If `grub-mkconfig` does not find Arch, create a compatibility symlink and regenerate the config:
 
-   ```bash
+   ```bash title="UTM aarch64 kernel detection tip"
    ln -sf /boot/Image /boot/vmlinuz-linux
    grub-mkconfig -o /boot/grub/grub.cfg
    ```
@@ -371,13 +371,13 @@ Logging in as root directly is unsafe for everyday use. You need a regular user 
 <Steps>
 1. Install sudo:
 
-   ```bash
+   ```bash title="Pacman -S Sudo"
    pacman -S sudo
    ```
 
 2. Open the sudoers file (never edit it directly, always use `visudo`):
 
-   ```bash
+   ```bash title="Set Environment Variable"
    EDITOR=/usr/bin/vim VISUAL=/usr/bin/vim visudo
    ```
 
@@ -385,7 +385,7 @@ Logging in as root directly is unsafe for everyday use. You need a regular user 
 
    Find and uncomment this line:
 
-   ```
+   ```text title="Wheel sudoers Rule"
    %wheel ALL=(ALL) ALL
    ```
 
@@ -393,7 +393,7 @@ Logging in as root directly is unsafe for everyday use. You need a regular user 
 
 3. Create a regular user with a home directory, bash shell, and wheel group membership:
 
-   ```bash
+   ```bash title="Create User"
    useradd -m -G wheel -s /bin/bash archuser
    ```
 
@@ -401,7 +401,7 @@ Logging in as root directly is unsafe for everyday use. You need a regular user 
 
 4. Set the password:
 
-   ```bash
+   ```bash title="Set Password"
    passwd archuser
    ```
 </Steps>
@@ -417,7 +417,7 @@ The chroot session has given you a complete installed system. Exit it, remove th
 <Steps>
 1. Exit the chroot:
 
-   ```bash
+   ```bash title="Exit the Chroot"
    exit
    ```
 
@@ -427,7 +427,7 @@ The chroot session has given you a complete installed system. Exit it, remove th
 
 3. Reboot:
 
-   ```bash
+   ```bash title="Reboot"
    reboot
    ```
 </Steps>
@@ -445,25 +445,25 @@ Your Arch system boots but has no hostname and no network service configured. Th
 <Steps>
 1. Set a hostname:
 
-   ```bash
+   ```bash title="Set Hostname"
    sudo hostnamectl set-hostname archbox
    ```
 
    Replace `archbox` with whatever single-word name you want for this machine. Verify it took effect:
 
-   ```bash
+   ```bash title="Hostnamectl"
    hostnamectl
    ```
 
 2. Configure `/etc/hosts`:
 
-   ```bash
+   ```bash title="Open File for Editing"
    sudo vim /etc/hosts
    ```
 
    Add these lines:
 
-   ```
+   ```text title="hosts File Entries"
    127.0.0.1   localhost
    127.0.1.1   archbox.localdomain archbox
    ```
@@ -472,7 +472,7 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 3. Find your network interface name:
 
-   ```bash
+   ```bash title="IP Link"
    ip link
    ```
 
@@ -480,13 +480,13 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 4. Create a systemd-networkd configuration file:
 
-   ```bash
+   ```bash title="Open File for Editing"
    sudo vim /etc/systemd/network/20-wired.network
    ```
 
    Add the following (substitute your interface name if it differs):
 
-   ```ini
+   ```ini title="systemd-networkd DHCP Profile"
    [Match]
    Name=enp0s3
 
@@ -498,7 +498,7 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 5. Enable and start the network service:
 
-   ```bash
+   ```bash title="Enable Service"
    sudo systemctl enable --now systemd-networkd
    ```
 
@@ -506,7 +506,7 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 6. Verify you received an IP address:
 
-   ```bash
+   ```bash title="Show IP Addresses"
    ip addr show
    ```
 
@@ -514,13 +514,13 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 7. Configure DNS so you can resolve domain names:
 
-   ```bash
+   ```bash title="Open File for Editing"
    sudo vim /etc/resolv.conf
    ```
 
    Add:
 
-   ```
+   ```text title="resolv.conf DNS Servers"
    nameserver 1.1.1.1
    nameserver 1.0.0.1
    ```
@@ -532,14 +532,14 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
       - If using systemd-networkd, also enable systemd-resolved and let it manage DNS:
 
-         ```bash
+         ```bash title="Enable Service"
          sudo systemctl enable --now systemd-resolved
          sudo ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
          ```
 
       - If using NetworkManager, let it manage interface addressing and DNS together:
 
-         ```bash
+         ```bash title="Pacman -S Networkmanager"
          sudo pacman -S networkmanager
          sudo systemctl enable --now NetworkManager
          ```
@@ -547,7 +547,7 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 8. Test your connection:
 
-   ```bash
+   ```bash title="Ping -c 3 Archlinux.org"
    ping -c 3 archlinux.org
    ```
 </Steps>
@@ -557,13 +557,13 @@ Your Arch system boots but has no hostname and no network service configured. Th
 <Steps>
 1. Install the OpenSSH server:
 
-   ```bash
+   ```bash title="Pacman -S Openssh"
    sudo pacman -S openssh
    ```
 
 2. Enable and start the SSH daemon:
 
-   ```bash
+   ```bash title="Enable Service"
    sudo systemctl enable --now sshd
    ```
 
@@ -579,7 +579,7 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 4. From your **host machine** terminal, generate a key pair on your laptop (if you do not already have one):
 
-   ```bash
+   ```bash title="Add a NAT Port-forwarding Rule in Your Hypervisor"
    ssh-keygen -t ed25519 -C "cs312-arch-host-key"
    ```
 
@@ -587,21 +587,21 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 5. Copy your host public key into the VM using the forwarded SSH port:
 
-   ```bash
+   ```bash title="Copy SSH Key Over Forwarded Port"
    ssh-copy-id -p 2222 archuser@127.0.0.1
    # If you used a non-default key name, add: -i /path/to/your/key
    ```
 
    If `ssh-copy-id` is unavailable, use this fallback from your host terminal:
 
-   ```bash
+   ```bash title="Fallback SSH Key Copy"
    cat ~/.ssh/id_ed25519.pub | ssh -p 2222 archuser@127.0.0.1 "mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
    # Replace id_ed25519.pub with your key name if you chose a different one
    ```
 
 6. Test key authentication from your host:
 
-   ```bash
+   ```bash title="Connect with SSH"
    ssh -p 2222 archuser@127.0.0.1 
    # If you used a non-default key name, add: -i /path/to/your/k
    ```
@@ -610,7 +610,7 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 7. (Optional) Verify that the SSH service is working from inside the VM using password authentication:
 
-   ```bash
+   ```bash title="Connect with SSH"
    ssh archuser@localhost
    ```
 
@@ -618,7 +618,7 @@ Your Arch system boots but has no hostname and no network service configured. Th
 
 8. Locate the password authentication setting:
 
-   ```bash
+   ```bash title="Search Text"
    grep PasswordAuthentication /etc/ssh/sshd_config
    ```
 
@@ -636,7 +636,7 @@ Now that your system boots and services are running, inspect live process IDs so
 <Steps>
 1. Confirm which process is PID 1:
 
-   ```bash
+   ```bash title="Ps -p 1 -o Pid,ppid,comm,args"
    ps -p 1 -o pid,ppid,comm,args
    ```
 
@@ -644,7 +644,7 @@ Now that your system boots and services are running, inspect live process IDs so
 
 2. Find PID 2 and identify what it does:
 
-   ```bash
+   ```bash title="Inspect Process IDs"
    ps -p 2 -o pid,ppid,comm,args
    ```
 
@@ -652,7 +652,7 @@ Now that your system boots and services are running, inspect live process IDs so
 
 3. Inspect the process tree from the top:
 
-   ```bash
+   ```bash title="Inspect the Process Tree from the Top"
    ps -e -o pid,ppid,comm --forest | head -40
    ```
 
@@ -660,7 +660,7 @@ Now that your system boots and services are running, inspect live process IDs so
 
 4. Pick a service you enabled, then inspect its PID and parent:
 
-   ```bash
+   ```bash title="Check Service Status"
    systemctl status sshd
    ps -C sshd -o pid,ppid,comm,args
    ```
@@ -669,7 +669,7 @@ Now that your system boots and services are running, inspect live process IDs so
 
 5. Inspect `/proc` for one running process:
 
-   ```bash
+   ```bash title="Display File Contents"
    cat /proc/1/status | head -20
    ```
 
@@ -687,7 +687,7 @@ Your Arch Linux system is installed, networked, and running. Run these commands 
 <Steps>
 1. Show system identity and kernel version:
 
-   ```bash
+   ```bash title="Hostnamectl"
    hostnamectl
    ```
 
@@ -695,7 +695,7 @@ Your Arch Linux system is installed, networked, and running. Run these commands 
 
 2. Confirm your user and group memberships:
 
-   ```bash
+   ```bash title="Check Installed User and Services"
    id
    ```
 
@@ -703,7 +703,7 @@ Your Arch Linux system is installed, networked, and running. Run these commands 
 
 3. Show active services:
 
-   ```bash
+   ```bash title="Show Active Services"
    systemctl list-units --type=service --state=active
    ```
 
@@ -711,7 +711,7 @@ Your Arch Linux system is installed, networked, and running. Run these commands 
 
 4. Confirm network reachability:
 
-   ```bash
+   ```bash title="Ping Arch Linux Mirror"
    ping -c 3 archlinux.org
    ```
 
@@ -719,7 +719,7 @@ Your Arch Linux system is installed, networked, and running. Run these commands 
 
 5. You can now safely shut down the VM:
 
-   ```bash
+   ```bash title="Shutdown -h Now"
    sudo shutdown -h now
    ```
 

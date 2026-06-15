@@ -91,7 +91,7 @@ An error budget becomes organizationally useful when it is treated as a **spendi
 
 The policy becomes easier to reason about when you draw it as a control loop instead of leaving it as a set of thresholds in prose.
 
-```mermaid
+```mermaid title="Error Budgets as Organizational Policy Diagram"
 flowchart TB
   Review["Review SLO window<br/>and recent burn rate"] --> Budget{"How much error budget<br/>has been consumed?"}
   Budget -->|Healthy / low burn| Normal["Ship normally<br/>Accept routine change"]
@@ -171,7 +171,7 @@ Once you know which dependencies are critical, you can make deliberate choices a
 
 Once those choices are on paper, the important difference is not whether a dependency ever fails. It is how much of the user promise survives when it does.
 
-```mermaid
+```mermaid title="Fail-open, Fail-closed, and Graceful Degradation Diagram"
 flowchart TB
   Failure["A dependency becomes unavailable"] --> Kind{"Which dependency is failing?"}
   Kind -->|Critical path| Critical["Primary database,<br/>payment check, or core auth"]

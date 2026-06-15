@@ -37,7 +37,7 @@ A resolver configuration has two parts that matter operationally. The **nameserv
 
 The first DNS troubleshooting step is confirming which resolver the machine is actually asking, then querying that resolver directly instead of treating "DNS" as a single black box.
 
-```bash
+```bash title="/etc/resolv.conf"
 # Query a specific resolver directly, bypassing the local cache
 dig @10.0.1.2 app.example.com
 
@@ -62,7 +62,7 @@ nslookup -type=TXT example.com 1.1.1.1   # query a specific resolver
 
 The `dig +trace` flag performs a full iterative resolution starting from the root servers, showing each delegation in the chain. Each tier delegates authority downward until the authoritative nameserver for the zone answers with the actual record.
 
-```mermaid
+```mermaid title="Nslookup Is Older but Ubiquitous, Including on Windows and"
 sequenceDiagram
   participant C as Client
   participant R as Resolver
@@ -122,7 +122,7 @@ Most organizations run an internal DNS server that answers queries for private h
 
 **Split-horizon DNS** (also called split-brain DNS) takes this further: the same hostname resolves to different addresses depending on where the query originates. `app.company.com` might resolve to `10.0.1.100` for internal clients (going directly to the backend) and to `203.0.113.5` (the public load balancer) for external clients. The internal answer avoids the round-trip through the internet and eliminates a dependency on the load balancer for internal traffic. The tradeoff is behavioral drift: internal users may bypass the public content delivery network (CDN), web application firewall (WAF), or load balancer path entirely, so they may not see the same authentication redirects, rate limits, access logs, or certificate behavior that external users do.
 
-```mermaid
+```mermaid title="Internal DNS and Split-horizon Diagram"
 flowchart LR
   Internal["Internal client\n10.0.0.5"]
   External["External client"]
@@ -183,7 +183,7 @@ Different firewall positions protect different perimeters. A **perimeter firewal
 
 In the diagram below, hexagons mark **firewall components** (policy-enforcement points) and rectangles mark **network resources** (the things firewalls protect or expose). Endpoint firewalls are shown attached to each server in the internal network rather than as a separate node in the traffic path: they enforce policy locally on the host, regardless of which network firewalls a packet has already traversed.
 
-```mermaid
+```mermaid title="Placement and Zone Design Diagram"
 flowchart TB
   Internet(["Internet"])
   PF{{"Perimeter firewall\nstateful inspection, NAT"}}
@@ -241,7 +241,7 @@ Firewall interfaces and vendor documentation reuse a small vocabulary constantly
 
 On Linux, the kernel's netfilter framework handles packet filtering. The traditional interface is `iptables`; the modern replacement is `nftables`. Both organize rules into chains: `INPUT` for incoming traffic, `OUTPUT` for outgoing, and `FORWARD` for traffic being routed through the host.
 
-```bash
+```bash title="List iptables Rules"
 # List current iptables rules with line numbers
 sudo iptables -L -n --line-numbers
 
@@ -275,7 +275,7 @@ A VPN is not the same thing as a proxy, even though some commercial privacy serv
 
 **Site-to-site VPN** connects two or more geographically separate offices, allowing their internal networks to communicate securely as if they were on the same LAN. The VPN is configured on the routers or firewalls at each site.
 
-```mermaid
+```mermaid title="Deployment Patterns Diagram"
 flowchart LR
   subgraph Portland ["Portland (10.1.0.0/24)"]
     PA["Hosts"]
@@ -329,7 +329,7 @@ A **reverse proxy** is a server that sits in front of one or more backend server
 
 Reverse proxies solve several operational problems at once. They centralize TLS termination for HTTPS, the secure form of the Hypertext Transfer Protocol (HTTP), so certificates are managed in one place. They provide a single entry point for access logging, rate limiting, and header injection. They route requests to different backends based on hostname or path. And they hide the backend topology from clients. That combination is why reverse proxies appear in almost every serious web deployment even before traffic volume is high enough to demand load balancing.
 
-```mermaid
+```mermaid title="Why Use a Reverse Proxy Diagram"
 flowchart LR
   Client["Client"]
   RP["Reverse proxy\nTLS termination\nPath routing\nLoad balancing"]
@@ -359,7 +359,7 @@ Session stickiness is sometimes necessary for legacy applications that keep sess
 
 Load balancers operate at different Open Systems Interconnection (OSI) layers, and that determines what information they can use when making routing decisions.
 
-```mermaid
+```mermaid title="Layer 4 vs. Layer 7 Diagram"
 flowchart LR
   subgraph L7 ["Layer 7 — Application Load Balancer"]
     l7in["Incoming: HTTP request\nmethod, path, Host header, cookies"]
@@ -397,7 +397,7 @@ The patterns above describe load balancers as components in isolation. In a typi
 
 One tier deeper, an **internal-scheme load balancer** (an ALB or NLB with `scheme=internal`) is common wherever one private service calls another. An order service in the application tier might talk to a payments service through an internal ALB rather than every order replica needing to know the addresses of every payments replica. Internal load balancers have private IPs only and are reachable only through private connectivity into the VPC, whether from resources in the VPC itself or from attached private networks such as peered VPCs, Transit Gateway paths, or VPN-connected sites. They are typically only TLS-terminated when the internal traffic is sensitive enough to warrant it. The database tier is usually fronted not by another load balancer but by a managed service endpoint: [Amazon Relational Database Service (RDS)](https://aws.amazon.com/rds/) publishes a DNS hostname that resolves to the active primary, with read replicas reachable through their own endpoints. In the private-subnet pattern shown here, those endpoints stay on the private side of the architecture rather than creating another public entry point.
 
-```mermaid
+```mermaid title="Public and Internal Load Balancers in a VPC Diagram"
 flowchart TB
   Internet(["Internet"])
 
@@ -441,7 +441,7 @@ A **[content delivery network (CDN)](https://www.cloudflare.com/learning/cdn/wha
 
 CDNs do more than caching. They terminate TLS at the edge PoP, so the TLS handshake latency is between the user and the nearest edge server rather than between the user and the origin. They also help absorb very large distributed denial-of-service (DDoS) floods at a scale that no single origin server can usually match. Most major CDNs also offer integrated WAF and bot mitigation, making the CDN the first layer of HTTP-aware security in the request path.
 
-```mermaid
+```mermaid title="Content Delivery Networks Diagram"
 flowchart LR
   User["User (Berlin)"]
   Edge["CDN edge PoP (Frankfurt)\nTLS termination, cache, WAF"]
@@ -489,13 +489,13 @@ Two mechanisms improve the security posture of a TLS-enabled site after the cert
 
 Preloading is an explicit opt-in, not a default recommendation. The Chromium preload list requires at least `max-age=31536000`, `includeSubDomains`, and `preload`, plus working HTTPS on every subdomain, including internal ones. Removal is slow, and modern browsers already auto-upgrade many HTTP navigations on their own, so most teams should deploy ordinary HSTS first, ramp `max-age` upward carefully, and add `preload` only when they are certain the domain can remain HTTPS-only long-term. Concretely, an HSTS-enabled response can include a header like the following:
 
-```
+```text title="HSTS (HTTP Strict Transport Security) Output"
 Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
 ```
 
 The `max-age=63072000` tells the browser to remember this for two years. That is a common strong value, not the minimum preload requirement. `includeSubDomains` extends the policy to every subdomain. `preload` is the operator's signal that the domain is asking to be included in the preload list. In Nginx the configuration is one line inside the relevant `server` block:
 
-```nginx
+```nginx title="Nginx Configuration"
 add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
 ```
 
@@ -503,7 +503,7 @@ The `always` flag ensures the header is sent on error responses too, which matte
 
 **Online Certificate Status Protocol (OCSP) stapling** improves certificate revocation checking. The traditional OCSP mechanism requires the browser to query the CA's OCSP responder during every TLS handshake, adding latency and leaking browsing behavior to the CA. With OCSP stapling, the server periodically fetches a signed OCSP response from the CA and includes ("staples") it in the TLS handshake. The client gets revocation status without an extra network round trip and without the CA learning which sites the user visits. In Nginx, stapling also needs a working DNS resolver because the server has to look up the CA's OCSP responder hostname. A minimal configuration looks like this:
 
-```nginx
+```nginx title="Nginx Configuration"
 resolver 1.1.1.1 1.0.0.1 valid=300s;
 ssl_stapling on;
 ssl_stapling_verify on;
@@ -512,7 +512,7 @@ ssl_trusted_certificate /etc/letsencrypt/live/example.com/chain.pem;
 
 `ssl_stapling_verify on` makes Nginx validate the OCSP response signature against the chain file before serving it, which prevents the server from stapling a malformed or stale response to clients. `ssl_trusted_certificate` must include the issuer chain Nginx needs for that verification. Caddy generally handles stapling automatically when the certificate issuer supports it. You can confirm stapling is working with `openssl`:
 
-```bash
+```bash title="Print Text"
 echo | openssl s_client -connect example.com:443 -servername example.com -status 2>/dev/null | grep -A1 "OCSP Response Status"
 ```
 
@@ -538,7 +538,7 @@ A **hostname mismatch** means the certificate's `subjectAltName` fields do not i
 
 A related failure is a **Server Name Indication (SNI) mismatch** on a shared reverse proxy or load balancer. The TLS terminator may present the wrong certificate because the client did not send the expected server name or because the default virtual host is configured with the wrong certificate. This is common when many hostnames share one edge proxy.
 
-```bash
+```bash title="Inspect Certificate SANs"
 # Check what names a certificate covers
 openssl s_client -connect example.com:443 -servername example.com 2>/dev/null | openssl x509 -noout -text | grep -A1 "Subject Alternative Name"
 ```
@@ -565,7 +565,7 @@ The reverse-proxy idea can be pushed one level deeper. An Ingress controller is 
 
 The services in this lecture form the plumbing that application traffic flows through, composed in a specific order.
 
-```mermaid
+```mermaid title="Takeaways Diagram"
 flowchart TB
   User["User"]
   DNS["DNS resolver"]

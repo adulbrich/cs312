@@ -41,14 +41,14 @@ Run the following commands on your **Linux machine**.
 
 1. **Create the working directory:**
 
-    ```bash
+    ```bash title="Create the Working Directory"
     mkdir -p ~/cs312-log-activity/bundle
     cd ~/cs312-log-activity
     ```
 
 2. **Create the nginx access log:**
 
-    ```bash
+    ```bash title="Write ~/cs312-log-activity/bundle/nginx-access.log"
     cat > ~/cs312-log-activity/bundle/nginx-access.log << 'EOF'
     203.0.113.10 - - [15/Mar/2026:03:02:05 +0000] "GET /api/orders HTTP/1.1" 200 912 "-" "curl/8.5.0"
     198.51.100.24 - - [15/Mar/2026:03:02:18 +0000] "GET /healthz HTTP/1.1" 200 31 "-" "kube-probe/1.32"
@@ -71,7 +71,7 @@ Run the following commands on your **Linux machine**.
 
 3. **Create the application JSON log:**
 
-    ```bash
+    ```bash title="Write ~/cs312-log-activity/bundle/order-api.jsonl"
     cat > ~/cs312-log-activity/bundle/order-api.jsonl << 'EOF'
     {"timestamp":"2026-03-15T03:00:52.011Z","level":"info","service":"order-api","message":"worker pool healthy","request_id":"req-1001","duration_ms":19}
     {"timestamp":"2026-03-15T03:01:17.125Z","level":"error","service":"order-api","message":"database connection timeout, served stale cache","upstream_host":"postgres-prod","upstream_port":5432,"request_id":"req-1002","duration_ms":30012,"fallback":"stale-cache","http_status":200}
@@ -84,7 +84,7 @@ Run the following commands on your **Linux machine**.
 
 4. **Create the PostgreSQL log:**
 
-    ```bash
+    ```bash title="Write ~/cs312-log-activity/bundle/postgres.log"
     cat > ~/cs312-log-activity/bundle/postgres.log << 'EOF'
     2026-03-15 03:00:59 UTC [4122] LOG: checkpoint starting: time
     2026-03-15 03:01:04 UTC [4122] FATAL: remaining connection slots are reserved for non-replication superuser connections
@@ -97,7 +97,7 @@ Run the following commands on your **Linux machine**.
 
 5. **Create the database host journal excerpt:**
 
-    ```bash
+    ```bash title="Write ~/cs312-log-activity/bundle/db-host-journal.log"
     cat > ~/cs312-log-activity/bundle/db-host-journal.log << 'EOF'
     Mar 15 02:58:23 db-prod-01 systemd[1]: Started nightly-export.service - Finance CSV export.
     Mar 15 02:58:24 db-prod-01 nightly-export[5111]: opened 90 database sessions for region sweep
@@ -110,7 +110,7 @@ Run the following commands on your **Linux machine**.
 
 6. **Confirm all four files exist:**
 
-    ```bash
+    ```bash title="Confirm All Four Files Exist"
     ls -1 ~/cs312-log-activity/bundle
     ```
 
@@ -118,7 +118,7 @@ Run the following commands on your **Linux machine**.
 
 7. **Write real journal entries on your server:**
 
-    ```bash
+    ```bash title="Write Journal Test Entries"
     logger -t cs312-log-activity "incident bundle ready for $(whoami) on $(hostname)"
     logger -p user.warning -t cs312-log-activity "practice warning: the 5xx spike begins at 03:04 UTC"
     ```
@@ -127,7 +127,7 @@ Run the following commands on your **Linux machine**.
 
 8. **Query the entries you just wrote:**
 
-    ```bash
+    ```bash title="Query the Entries You Just Wrote"
     journalctl -t cs312-log-activity --since "5 minutes ago" --no-pager
     ```
 
@@ -135,7 +135,7 @@ Run the following commands on your **Linux machine**.
 
 9. **Filter on priority:**
 
-    ```bash
+    ```bash title="Filter on Priority"
     journalctl -t cs312-log-activity -p warning --since "5 minutes ago"  --no-pager
     ```
 
@@ -143,7 +143,7 @@ Run the following commands on your **Linux machine**.
 
 10. **Check the boot history:**
 
-    ```bash
+    ```bash title="Check the Boot History"
     journalctl --list-boots | head -5
     ```
 
@@ -161,7 +161,7 @@ Run the following commands on your **Linux machine**.
 
 An investigation starts at the edge: the log source closest to the customer. First find when users began failing, then move inward and backward until you can explain what set the failure in motion.
 
-```mermaid
+```mermaid title="Scope the Symptom Diagram"
 flowchart LR
   A[Web Server<br/>nginx-access.log] --> B[Application API<br/>order-api.jsonl]
   B --> C[Database <br/>postgres.log]
@@ -174,7 +174,7 @@ Read top to bottom during triage: start where users are failing, then move inwar
 
 1. **Count 5xx responses by minute to find the onset:**
 
-    ```bash
+    ```bash title="Count 5xx Responses by Minute to Find the Onset"
     # Keep only HTTP status >=500, extract the timestamp field (cutting seconds), then group and count by minute.
     awk '$9 >= 500 {print $4}' ~/cs312-log-activity/bundle/nginx-access.log \
      | cut -d: -f1-3 | sort | uniq -c
@@ -184,7 +184,7 @@ Read top to bottom during triage: start where users are failing, then move inwar
 
 2. **Show the first customer-visible failure:**
 
-    ```bash
+    ```bash title="Find First Customer-Visible Failure"
     awk '$9 >= 500 {print; exit}' ~/cs312-log-activity/bundle/nginx-access.log
     ```
 
@@ -192,7 +192,7 @@ Read top to bottom during triage: start where users are failing, then move inwar
 
 3. **Find the earliest application-side error:**
 
-    ```bash
+    ```bash title="Find Earliest Application Error"
     # Find the first matching result in the application log
     grep '"level":"error"' ~/cs312-log-activity/bundle/order-api.jsonl | head -1
     ```
@@ -201,7 +201,7 @@ Read top to bottom during triage: start where users are failing, then move inwar
 
 4. **Correlate the degradation window across application, database, and host logs:**
 
-    ```bash
+    ```bash title="Correlate the Degradation Window Across Application,"
     grep '"level":"error"' ~/cs312-log-activity/bundle/order-api.jsonl 
     awk '$2 >= "03:01:00" && $2 < "03:05:00"' ~/cs312-log-activity/bundle/postgres.log
     awk '$3 >= "03:01:00" && $3 < "03:05:00"' ~/cs312-log-activity/bundle/db-host-journal.log
@@ -211,7 +211,7 @@ Read top to bottom during triage: start where users are failing, then move inwar
 
 5. **Use the service name you just surfaced to search earlier entries in the same host log:**
 
-    ```bash
+    ```bash title="Use the Service Name You Just Surfaced to Search Earlier"
     grep 'nightly-export' ~/cs312-log-activity/bundle/db-host-journal.log
     ```
 
@@ -235,13 +235,13 @@ You now have enough evidence to write the incident timeline without introducing 
 
 1. **Set your name in a shell variable. Replace `YOUR NAME` with your actual name:**
 
-    ```bash
+    ```bash title="Set Your Name in a Shell Variable. Replace YOUR NAME with"
     export CS312_NAME="YOUR NAME"
     ```
 
 2. **Create the timeline file from the evidence you just surfaced:**
 
-    ```bash
+    ```bash title="Write ~/cs312-log-activity/timeline.txt"
     cat <<EOF > ~/cs312-log-activity/timeline.txt
     Investigator: ${CS312_NAME}
     Host: $(hostname)
@@ -264,7 +264,7 @@ You now have enough evidence to write the incident timeline without introducing 
 
 3. **Print the timeline:**
 
-    ```bash
+    ```bash title="Print the Timeline"
     cat ~/cs312-log-activity/timeline.txt
     ```
 
@@ -282,7 +282,7 @@ Before leaving the Linux machine, inspect one more log source: the kernel audit 
 
 1. **Confirm auditd is running:**
 
-    ```bash
+    ```bash title="Confirm Auditd Is Running"
     sudo systemctl status auditd --no-pager
     ```
 
@@ -290,7 +290,7 @@ Before leaving the Linux machine, inspect one more log source: the kernel audit 
 
 2. **See a summary of recent audit activity:**
 
-    ```bash
+    ```bash title="Summarize Audit Activity"
     sudo aureport --summary
     ```
 
@@ -298,7 +298,7 @@ Before leaving the Linux machine, inspect one more log source: the kernel audit 
 
 3. **Add a temporary watch rule on one of the bundle files:**
 
-    ```bash
+    ```bash title="Add a Temporary Watch Rule on One of the Bundle Files"
     AUDIT_FILE="$HOME/cs312-log-activity/bundle/order-api.jsonl"
     sudo auditctl -w "$AUDIT_FILE" -p r -k cs312-audit
     ```
@@ -307,7 +307,7 @@ Before leaving the Linux machine, inspect one more log source: the kernel audit 
 
 4. **Trigger the rule by reading the file:**
 
-    ```bash
+    ```bash title="Trigger the Rule by Reading the File"
     grep '"level":"fatal"' "$AUDIT_FILE" > /dev/null
     sleep 1
     ```
@@ -316,7 +316,7 @@ Before leaving the Linux machine, inspect one more log source: the kernel audit 
 
 5. **Search for the audit event:**
 
-    ```bash
+    ```bash title="Search for the Audit Event"
     sudo ausearch -k cs312-audit --start recent
     ```
 
@@ -324,7 +324,7 @@ Before leaving the Linux machine, inspect one more log source: the kernel audit 
 
 6. **Remove the watch rule:**
 
-    ```bash
+    ```bash title="Remove the Watch Rule"
     sudo auditctl -W "$AUDIT_FILE" -p r -k cs312-audit
     ```
 
@@ -348,19 +348,19 @@ In containerized environments, the current container log is often not the one th
 
 1. **Make sure minikube is running:**
 
-   ```bash
+   ```bash title="Make Sure Minikube Is Running"
    minikube status
    ```
 
    If the cluster is stopped:
 
-   ```bash
+   ```bash title="If the Cluster Is Stopped"
    minikube start --driver=docker --memory=4096 --cpus=2
    ```
 
 2. **Deploy a pod that prints errors and then exits:**
 
-   ```bash
+   ```bash title="Deploy a Pod That Prints Errors and Then Exits"
    kubectl apply -f - <<'EOF'
    apiVersion: v1
    kind: Pod
@@ -389,7 +389,7 @@ In containerized environments, the current container log is often not the one th
 
 3. **Watch the pod move through its lifecycle:**
 
-   ```bash
+   ```bash title="Watch the Pod Move Through Its Lifecycle"
    kubectl get pod crash-demo -w
    ```
 
@@ -397,7 +397,7 @@ In containerized environments, the current container log is often not the one th
 
 4. **Read the current container's log:**
 
-   ```bash
+   ```bash title="Read the Current Container's Log"
    kubectl logs crash-demo
    ```
 
@@ -405,7 +405,7 @@ In containerized environments, the current container log is often not the one th
 
 5. **Read the previous container's log:**
 
-   ```bash
+   ```bash title="Read the Previous Container's Log"
    kubectl logs crash-demo --previous
    ```
 
@@ -413,7 +413,7 @@ In containerized environments, the current container log is often not the one th
 
 6. **Inspect the cluster's view of what happened:**
 
-   ```bash
+   ```bash title="Inspect the Cluster's View of What Happened"
    kubectl describe pod crash-demo
    ```
 
@@ -421,7 +421,7 @@ In containerized environments, the current container log is often not the one th
 
 7. **Clean up:**
 
-   ```bash
+   ```bash title="Clean Up"
    kubectl delete pod crash-demo
    ```
 
@@ -443,7 +443,7 @@ Stay on your **local machine terminal**.
 
 1. **Deploy a pod that writes continuous structured output:**
 
-   ```bash
+   ```bash title="Deploy Structured Log Generator"
    kubectl apply -f - <<'EOF'
    apiVersion: v1
    kind: Pod
@@ -470,7 +470,7 @@ Stay on your **local machine terminal**.
 
 2. **Deploy Fluent Bit as a DaemonSet:**
 
-   ```bash
+   ```bash title="Deploy Fluent Bit as a DaemonSet"
    kubectl apply -f - <<'EOF'
    apiVersion: v1
    kind: Namespace
@@ -593,7 +593,7 @@ Stay on your **local machine terminal**.
 
 3. **Wait for the Fluent Bit pod to be ready:**
 
-   ```bash
+   ```bash title="Wait for the Fluent Bit Pod to Be Ready"
    kubectl rollout status daemonset/fluent-bit -n logging
    ```
 
@@ -601,7 +601,7 @@ Stay on your **local machine terminal**.
 
 4. **Stream Fluent Bit's output:**
 
-   ```bash
+   ```bash title="Stream Fluent Bit Logs"
    kubectl logs -n logging -l app=fluent-bit --tail=10 -f
    ```
 
@@ -609,14 +609,14 @@ Stay on your **local machine terminal**.
 
 5. **Examine one log-generator entry:**
 
-   ```bash
+   ```bash title="Examine One Log-generator Entry"
    kubectl logs -n logging -l app=fluent-bit --tail=200 \
      | grep '"pod_name":"log-generator"' | tail -1
    ```
 
    In the output, look for the `kubernetes` object. It will contain fields that the log-generator pod never wrote:
 
-   ```
+   ```text title="Watch Fluent Bit Collect Logs Output"
    "kubernetes":{"pod_name":"log-generator","namespace_name":"default","container_name":"log-generator",...}
    ```
 
@@ -624,7 +624,7 @@ Stay on your **local machine terminal**.
 
 6. **Clean up:**
 
-   ```bash
+   ```bash title="Clean Up"
    kubectl delete pod log-generator
    kubectl delete namespace logging
    kubectl delete clusterrole fluent-bit

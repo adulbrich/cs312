@@ -37,7 +37,7 @@ Before hardening anything, document what the server looks like right now. The go
 
 1. **Connect to your instance:**
 
-   ```bash
+   ```bash title="Connect to Your Instance"
    ssh ubuntu@YOUR_INSTANCE_IP
    ```
 
@@ -45,7 +45,7 @@ Before hardening anything, document what the server looks like right now. The go
 
 2. **Check what services are listening on the network:**
 
-   ```bash
+   ```bash title="Check What Services Are Listening on the Network"
    sudo ss -tlnp
    ```
 
@@ -53,7 +53,7 @@ Before hardening anything, document what the server looks like right now. The go
 
 3. **Check the current SSH configuration:**
 
-   ```bash
+   ```bash title="Inspect SSH Configuration"
    sudo sshd -T | grep -E "passwordauthentication|permitrootlogin|allowusers|pubkeyauthentication"
    ```
 
@@ -61,7 +61,7 @@ Before hardening anything, document what the server looks like right now. The go
 
 4. **List human login accounts:**
 
-   ```bash
+   ```bash title="List Human Login Accounts"
    grep -v nologin /etc/passwd | grep -v false | grep -v sync
    ```
 
@@ -69,7 +69,7 @@ Before hardening anything, document what the server looks like right now. The go
 
 5. **Check recent login history and failures:**
 
-   ```bash
+   ```bash title="Check Recent Login History and Failures"
    journalctl -u ssh -n 20 --no-pager
    ```
 
@@ -77,7 +77,7 @@ Before hardening anything, document what the server looks like right now. The go
 
 6. **Check the AppArmor profiles already in place:**
 
-   ```bash
+   ```bash title="Check the AppArmor Profiles Already in Place"
    sudo aa-status
    ```
 
@@ -99,7 +99,7 @@ AWS EC2 instances use key pairs for the initial login, which means you already h
 
 1. **Verify your key-based login is working.** Before making any changes, open a second terminal and confirm you can SSH in again with your current key:
 
-   ```bash
+   ```bash title="Verify Your Key-based Login Is Working"
    ssh -i ~/.ssh/your-key.pem ubuntu@YOUR_INSTANCE_IP
    ```
 
@@ -107,7 +107,7 @@ AWS EC2 instances use key pairs for the initial login, which means you already h
 
 2. **Create a dedicated deploy user and grant it full passwordless sudo:**
 
-   ```bash
+   ```bash title="Create a Dedicated Deploy User and Grant It Full"
    sudo adduser --disabled-password --gecos "" deploy
    echo "deploy ALL=(ALL) NOPASSWD: ALL" | sudo tee /etc/sudoers.d/deploy
    ```
@@ -116,7 +116,7 @@ AWS EC2 instances use key pairs for the initial login, which means you already h
 
 3. **Add your public key to the deploy user's authorized keys:**
 
-   ```bash
+   ```bash title="Add Your Public Key to the Deploy User's Authorized Keys"
    sudo mkdir -p /home/deploy/.ssh
    sudo cp /home/ubuntu/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
    sudo chown -R deploy:deploy /home/deploy/.ssh
@@ -128,7 +128,7 @@ AWS EC2 instances use key pairs for the initial login, which means you already h
 
 4. **Test the deploy login from your second terminal:**
 
-   ```bash
+   ```bash title="Test the Deploy Login from Your Second Terminal"
    ssh -i ~/.ssh/your-key.pem deploy@YOUR_INSTANCE_IP
    ```
 
@@ -136,13 +136,13 @@ AWS EC2 instances use key pairs for the initial login, which means you already h
 
 5. **Harden `sshd_config`:**
 
-   ```bash
+   ```bash title="Harden Sshdconfig"
    sudo vim /etc/ssh/sshd_config
    ```
 
    Find or add these four directives. If a line exists with a different value, change it. If it is commented out with `#`, uncomment and set it:
 
-   ```text
+   ```text title="Password Authentication Setting"
    PasswordAuthentication no
    PermitRootLogin no
    PubkeyAuthentication yes
@@ -153,20 +153,20 @@ AWS EC2 instances use key pairs for the initial login, which means you already h
 
 6. **Restart the SSH service and observe the lockout:**
 
-   ```bash
+   ```bash title="Restart the SSH Service and Observe the Lockout"
    sudo systemctl restart ssh
    sudo sshd -T | grep -E "passwordauthentication|permitrootlogin|allowusers|pubkeyauthentication"
    ```
 
    The output should now show `allowusers deploy`. On Ubuntu, the systemd unit is named `ssh` even though the daemon binary is `sshd` and the configuration file is `sshd_config`. From your second terminal, try connecting as ubuntu:
 
-   ```bash
+   ```bash title="Connect with SSH"
    ssh -i ~/.ssh/your-key.pem ubuntu@YOUR_INSTANCE_IP
    ```
 
    The connection will be rejected. Check the journal from your deploy session to see the rejection logged:
 
-   ```bash
+   ```bash title="View System Logs"
    sudo journalctl -u ssh -n 5 --no-pager
    ```
 
@@ -192,7 +192,7 @@ With SSH secured, you will configure UFW (Uncomplicated Firewall) to default-den
 
 1. **Set the default policies:**
 
-   ```bash
+   ```bash title="Set the Default Policies"
    sudo ufw default deny incoming
    sudo ufw default allow outgoing
    ```
@@ -201,7 +201,7 @@ With SSH secured, you will configure UFW (Uncomplicated Firewall) to default-den
 
 2. **Allow SSH with rate limiting:**
 
-   ```bash
+   ```bash title="Allow SSH with Rate Limiting"
    sudo ufw limit 22/tcp
    ```
 
@@ -209,7 +209,7 @@ With SSH secured, you will configure UFW (Uncomplicated Firewall) to default-den
 
 3. **Allow web traffic (add only the ports your server actually uses):**
 
-   ```bash
+   ```bash title="Allow HTTP and HTTPS"
    sudo ufw allow 80/tcp
    sudo ufw allow 443/tcp
    ```
@@ -218,14 +218,14 @@ With SSH secured, you will configure UFW (Uncomplicated Firewall) to default-den
 
 4. **Enable the firewall and verify:**
 
-   ```bash
+   ```bash title="Enable the Firewall and Verify"
    sudo ufw enable
    sudo ufw status verbose
    ```
 
    The output should show:
 
-   ```
+   ```text title="Part 3: Configure the Firewall Output"
    Status: active
    Logging: on (low)
    Default: deny (incoming), allow (outgoing), disabled (routed)
@@ -245,7 +245,7 @@ With SSH secured, you will configure UFW (Uncomplicated Firewall) to default-den
 
 5. **Confirm the port state from inside the server:**
 
-   ```bash
+   ```bash title="Confirm the Port State from Inside the Server"
    sudo ss -tlnp
    ```
 
@@ -267,20 +267,20 @@ UFW's rate-limiting rule blocks raw connection attempts. Fail2Ban goes a step fu
 
 1. **Install Fail2Ban:**
 
-   ```bash
+   ```bash title="Install Fail2ban"
    sudo apt update
    sudo apt install -y fail2ban
    ```
 
 2. **Create a local configuration file:**
 
-   ```bash
+   ```bash title="Create a Local Configuration File"
    sudo vim /etc/fail2ban/jail.local
    ```
 
    Add the following:
 
-   ```ini
+   ```ini title="Fail2Ban SSH Jail"
    [sshd]
    enabled  = true
    port     = ssh
@@ -296,7 +296,7 @@ UFW's rate-limiting rule blocks raw connection attempts. Fail2Ban goes a step fu
 
 3. **Enable and start Fail2Ban:**
 
-   ```bash
+   ```bash title="/var/log/auth.log"
    sudo systemctl enable --now fail2ban
    ```
 
@@ -304,13 +304,13 @@ UFW's rate-limiting rule blocks raw connection attempts. Fail2Ban goes a step fu
 
 4. **Verify the jail is active:**
 
-   ```bash
+   ```bash title="Verify the Jail Is Active"
    sudo fail2ban-client status sshd
    ```
 
    You should see output like:
 
-   ```
+   ```text title="Part 4: Install and Configure Fail2ban Output"
    Status for the jail: sshd
    |- Filter
    |  |- Currently failed: 0
@@ -326,19 +326,19 @@ UFW's rate-limiting rule blocks raw connection attempts. Fail2Ban goes a step fu
 
 5. **Restore ubuntu SSH access now that Fail2Ban is active:**
 
-   ```bash
+   ```bash title="Restore Ubuntu SSH Access Now That Fail2ban Is Active"
    sudo vim /etc/ssh/sshd_config
    ```
 
    Change `AllowUsers deploy` to:
 
-   ```text
+   ```text title="AllowUsers Setting"
    AllowUsers deploy ubuntu
    ```
 
    Save, exit, and restart the SSH service:
 
-   ```bash
+   ```bash title="Restart Service"
    sudo systemctl restart ssh
    ```
 
@@ -360,13 +360,13 @@ The `deploy` user currently has full passwordless sudo access via the broad rule
 
 1. **Replace the broad sudoers rule with a scoped one:**
 
-   ```bash
+   ```bash title="Replace the Broad Sudoers Rule with a Scoped One"
    sudo visudo -f /etc/sudoers.d/deploy
    ```
 
    `visudo` validates the syntax before saving, preventing a broken sudoers file that locks you out of sudo. The `-f` flag edits the file in `/etc/sudoers.d/` directly rather than the main sudoers file. Replace the existing `NOPASSWD: ALL` line with this single line:
 
-   ```text
+   ```text title="Scoped sudoers Rule"
    deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart fail2ban, /usr/bin/fail2ban-client status sshd
    ```
 
@@ -376,13 +376,13 @@ The `deploy` user currently has full passwordless sudo access via the broad rule
 
    From your `deploy` session, test that the allowed command succeeds:
 
-   ```bash
+   ```bash title="Verify the Restriction Works"
    sudo fail2ban-client status sshd
    ```
 
    You should see the `sshd` jail status. Then test that a disallowed command fails:
 
-   ```bash
+   ```bash title="Update Package Lists"
    sudo apt update
    ```
 
@@ -404,7 +404,7 @@ You have made five distinct changes to this server. Run these verification steps
 
 1. **Confirm the SSH configuration:**
 
-   ```bash
+   ```bash title="Verify Hardened SSH Settings"
    sudo sshd -T | grep -E "passwordauthentication|permitrootlogin|allowusers|pubkeyauthentication"
    ```
 
@@ -412,19 +412,19 @@ You have made five distinct changes to this server. Run these verification steps
 
 2. **Confirm the firewall rules:**
 
-   ```bash
+   ```bash title="Confirm the Firewall Rules"
    sudo ufw status verbose
    ```
 
 3. **Confirm Fail2Ban is running:**
 
-   ```bash
+   ```bash title="Confirm Fail2ban Is Running"
    sudo fail2ban-client status sshd
    ```
 
 4. **Check open ports one final time:**
 
-   ```bash
+   ```bash title="Check Open Ports One Final Time"
    sudo ss -tlnp
    ```
 
@@ -432,7 +432,7 @@ You have made five distinct changes to this server. Run these verification steps
 
 5. **Create a timestamped verification entry:**
 
-   ```bash
+   ```bash title="Create a Timestamped Verification Entry"
    echo "Hardened by $(whoami) on $(hostname) at $(date)" | sudo tee /var/log/cs312-hardened.log
    cat /var/log/cs312-hardened.log
    ```

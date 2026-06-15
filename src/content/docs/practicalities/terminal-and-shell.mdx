@@ -9,7 +9,7 @@ If you have never used a terminal before, this page will get you oriented. If yo
 
 Unless noted otherwise, path and log file examples below assume a Linux server rather than macOS.
 
-<Aside type="tip">
+<Aside type="tip" title="Further Shell Practice">
 For a deeper treatment of these topics, see MIT's [The Missing Semester of Your CS Education](https://missing.csail.mit.edu/).
 </Aside>
 
@@ -52,7 +52,7 @@ In Unix-like systems, most things you interact with are represented as files or 
 | `mkdir` | Create a directory | `mkdir -p logs/2026` |
 | `touch` | Create an empty file or update a timestamp | `touch notes.txt` |
 
-<Aside type="caution">
+<Aside type="caution" title="rm Is Permanent">
 `rm` deletes permanently. There is no recycle bin on the command line. Double-check before pressing Enter.
 </Aside>
 
@@ -73,13 +73,13 @@ In Unix-like systems, most things you interact with are represented as files or 
 
 For alternation with extended regular expressions, use `|`:
 
-```bash
+```bash title="Search Text"
 grep -E "error|warn" syslog
 ```
 
 `find` locates files by name, type, or other attributes:
 
-```bash
+```bash title="Find Files"
 find /etc -name "*.conf"           # all .conf files under /etc
 find /var/log -name "*.log" -mtime -1   # log files modified in the last day
 find /tmp -type f -size +10M       # files larger than 10 MB in /tmp
@@ -87,7 +87,7 @@ find /tmp -type f -size +10M       # files larger than 10 MB in /tmp
 
 `which` tells you where the shell would find a command:
 
-```bash
+```bash title="Locate a Command"
 which python3       # /usr/bin/python3
 ```
 
@@ -105,7 +105,7 @@ The distinction between stdout and stderr matters when you redirect output to a 
 
 The pipe operator `|` connects one command's stdout directly to the next command's stdin. Each program does one thing; the shell arranges the plumbing:
 
-```bash
+```bash title="Stderr"
 grep "error" /var/log/syslog | wc -l       # count lines containing "error"
 du -ah /var | sort -rh | head -10          # 10 largest items in /var
 ps aux | grep nginx | grep -v grep         # find nginx processes
@@ -115,7 +115,7 @@ ps aux | grep nginx | grep -v grep         # find nginx processes
 
 Redirection sends a stream to a file instead of the terminal, or takes file content as input instead of the keyboard:
 
-```bash
+```bash title="Print Text"
 echo "hello" > file.txt          # write stdout to file (overwrites)
 echo "world" >> file.txt         # append stdout to file
 command 2> errors.log            # redirect stderr only to a file
@@ -129,14 +129,14 @@ command >> out.log 2>&1          # append both (the standard pattern for cron jo
 
 `echo` prints a string followed by a newline. It is sufficient for simple messages:
 
-```bash
+```bash title="Print Text"
 echo "Backup complete"
 echo "Error: file not found" >&2    # send to stderr instead of stdout
 ```
 
 `printf` gives precise control over formatting. It does not append a newline automatically, so you add `\n` explicitly:
 
-```bash
+```bash title="Print Formatted Output"
 printf "%-20s %s\n" "Directory" "Status"
 printf "%-20s %s\n" "/var/www/html" "OK"
 printf "%d files processed\n" 42
@@ -146,7 +146,7 @@ printf "%d files processed\n" 42
 
 The `read` builtin captures a line from stdin and stores it in a variable. Use `-r` to disable backslash interpretation (almost always what you want). Prompt flags differ between shells, so the most portable pattern is to print the prompt separately:
 
-```bash
+```bash title="Prompt for User Input"
 printf "Enter the destination path: "
 read -r DEST
 echo "You entered: $DEST"
@@ -160,7 +160,7 @@ Inside a script, `read` is commonly used in a `while` loop to process a file or 
 
 Process substitution (`<(command)`) makes the output of a command appear as a file path. It is useful when a command expects file arguments rather than piped input:
 
-```bash
+```bash title="Compare Directories with Process Substitution"
 diff <(ls /etc/nginx/conf.d) <(ls /etc/nginx/sites-enabled)
 ```
 
@@ -170,7 +170,7 @@ Both `ls` commands run concurrently and `diff` compares their outputs as if they
 
 Every file has an owner, a group, and permissions for read (`r`), write (`w`), and execute (`x`). In `ls -l` output, the first character shows the file type.
 
-```bash
+```bash title="Ls -l Script.sh"
 ls -l script.sh
 # -rwxr-xr-- 1 ubuntu www-data 512 Mar 15 script.sh
 # ^            file type (- = regular file, d = directory, l = symbolic link)
@@ -191,7 +191,7 @@ The numeric form (like `755`) encodes permissions as three digits: owner, group,
 
 `sudo` runs a single command as the superuser (root). Most system administration tasks require it.
 
-```bash
+```bash title="Update Package Lists"
 sudo apt update              # Update package lists
 sudo systemctl restart nginx # Restart a service
 sudo vim /etc/hosts          # Edit a system file
@@ -201,7 +201,7 @@ Use `sudo` only when necessary. Running everything as root is a security risk be
 
 `su` (substitute user) switches your entire session to another user rather than running a single command. `su -` (with a hyphen) switches to root and loads a full login environment, including root's PATH and profile:
 
-```bash
+```bash title="Switch Users with su"
 su -              # become root (requires root's password)
 su - deploy       # become the "deploy" user
 exit              # return to your original user
@@ -228,7 +228,7 @@ On Debian and Ubuntu, run `sudo apt update` before installing packages to refres
 
 Environment variables store configuration that programs and scripts can read. They are written in `ALL_CAPS` by convention. Every process has its own set of environment variables, inherited from the process that started it. When you open a terminal, your shell inherits variables set by the system and by your shell configuration files. When you run a command, that command inherits your shell's environment.
 
-```bash
+```bash title="Print Text"
 echo $HOME         # your home directory
 echo $USER         # your username
 echo $SHELL        # your current shell
@@ -239,7 +239,7 @@ printenv           # print all environment variables
 
 A plain assignment creates a shell variable, local to the current shell session:
 
-```bash
+```bash title="Set Environment Variable"
 MY_VAR="hello"
 echo $MY_VAR       # hello
 bash -c 'echo $MY_VAR'   # (empty — child process does not see it)
@@ -247,7 +247,7 @@ bash -c 'echo $MY_VAR'   # (empty — child process does not see it)
 
 Adding `export` promotes it to an environment variable, which child processes inherit:
 
-```bash
+```bash title="Set Environment Variable"
 export MY_VAR="hello"
 bash -c 'echo $MY_VAR'   # hello
 ```
@@ -263,7 +263,7 @@ Variables set in a terminal session disappear when you close the terminal. To ma
 
 After editing the file, reload it in your current session:
 
-```bash
+```bash title="Reload Shell Configuration"
 source ~/.bashrc   # bash
 source ~/.zshrc    # zsh
 ```
@@ -272,7 +272,7 @@ source ~/.zshrc    # zsh
 
 `PATH` is a colon-separated list of directories the shell searches when you type a command. The shell tries each directory in order and runs the first match:
 
-```bash
+```bash title="Print Text"
 echo $PATH
 # /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
 
@@ -281,7 +281,7 @@ which python3      # shows which python3 the shell would run
 
 To add a directory to PATH for the current session:
 
-```bash
+```bash title="Set Environment Variable"
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
@@ -291,7 +291,7 @@ Place the new directory before `$PATH` (at the start) to make it take priority o
 
 SSH (Secure Shell) connects you to a remote machine over an encrypted channel. You will use it constantly in this course.
 
-```bash
+```bash title="Connect with SSH"
 # Connect to a remote server
 ssh -i ~/Downloads/cs312-key.pem ubuntu@54.123.45.67
 
@@ -304,7 +304,7 @@ scp ubuntu@54.123.45.67:/var/log/syslog ./syslog-copy.txt
 
 If SSH says your private key permissions are too open and refuses to use it, fix the permissions:
 
-```bash
+```bash title="Set File Permissions"
 chmod 400 ~/Downloads/cs312-key.pem
 ```
 
@@ -312,7 +312,7 @@ chmod 400 ~/Downloads/cs312-key.pem
 
 When you encounter an unfamiliar command, these are the fastest ways to learn what it does:
 
-```bash
+```bash title="Open Help and Manual Pages"
 man ls              # Open the manual page for "ls" (press q to quit)
 type cd             # Ask the shell what "cd" is (builtin, alias, function, or executable)
 tldr tar            # Community-maintained cheat sheets

@@ -37,7 +37,7 @@ Before you inject any failures, give yourself a small backend service and a tiny
 
 1. In every terminal that will run `kubectl` or `k6`, set your ONID, local forward port, and target URL:
 
-   ```bash
+   ```bash title="Set Environment Variable"
    export ONID=your-onid
    export FORWARD_PORT=8080 # or 8081, 8082, ... if 8080 is in use
    export TARGET_URL=http://127.0.0.1:${FORWARD_PORT}/
@@ -47,7 +47,7 @@ Before you inject any failures, give yourself a small backend service and a tiny
 
 2. Create a working directory for this activity and an idempotent namespace:
 
-   ```bash
+   ```bash title="Create Directories"
    mkdir -p ~/cs312-reliability
    cd ~/cs312-reliability
    kubectl create namespace reliability-lab --dry-run=client -o yaml | kubectl apply -f -
@@ -57,7 +57,7 @@ Before you inject any failures, give yourself a small backend service and a tiny
 
 3. Write the manifest for the backend service, the front-end edge layer, and the two Services:
 
-   ```bash
+   ```bash title="Write web.yaml"
    cat <<EOF > web.yaml
    apiVersion: v1
    kind: ConfigMap
@@ -198,7 +198,7 @@ Before you inject any failures, give yourself a small backend service and a tiny
 
    The shape of our deployment is:
 
-   ```mermaid
+   ```mermaid title="Deploy the Test Service Diagram"
    flowchart TB
      Client["client"] --> EdgeService
 
@@ -225,7 +225,7 @@ Before you inject any failures, give yourself a small backend service and a tiny
 
 4. Apply the manifest and wait for both deployments to become ready:
 
-   ```bash
+   ```bash title="Apply Kubernetes Manifest"
    kubectl apply -n reliability-lab -f web.yaml
    kubectl rollout status deployment/${ONID}-web -n reliability-lab
    kubectl rollout status deployment/${ONID}-edge -n reliability-lab
@@ -233,14 +233,14 @@ Before you inject any failures, give yourself a small backend service and a tiny
 
    You should see:
 
-   ```text
+   ```text title="Deploy the Test Service Output"
    deployment "${ONID}-web" successfully rolled out
    deployment "${ONID}-edge" successfully rolled out
    ```
 
 5. In a dedicated terminal, forward the edge Service to your laptop:
 
-   ```bash
+   ```bash title="Port-forward Edge Service"
    kubectl port-forward service/${ONID}-edge ${FORWARD_PORT}:80 -n reliability-lab
    ```
 
@@ -248,7 +248,7 @@ Before you inject any failures, give yourself a small backend service and a tiny
 
 6. In another terminal, point `curl` at the local URL and verify the steady state:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl "$TARGET_URL"
    ```
 
@@ -272,7 +272,7 @@ For this activity, use this SLI: a request is good only if it returns HTTP 200 a
 
 1. Write the k6 script:
 
-   ```bash
+   ```bash title="Write ~/cs312-reliability/probe.js"
    cat <<'EOF' > ~/cs312-reliability/probe.js
    import http from 'k6/http';
    import { check } from 'k6';
@@ -329,7 +329,7 @@ For this activity, use this SLI: a request is good only if it returns HTTP 200 a
 
 2. Run the baseline measurement:
 
-   ```bash
+   ```bash title="Run the Baseline Measurement"
    k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
@@ -362,7 +362,7 @@ The baseline tells you the service is healthy at 10 requests per second. It does
 
 1. Write a second k6 script that runs five back-to-back scenarios at increasing rates, with per-stage thresholds:
 
-   ```bash
+   ```bash title="Write ~/cs312-reliability/stress.js"
    cat <<'EOF' > ~/cs312-reliability/stress.js
    import http from 'k6/http';
    import { Rate } from 'k6/metrics';
@@ -433,7 +433,7 @@ The baseline tells you the service is healthy at 10 requests per second. It does
 
 2. Run the stress test:
 
-   ```bash
+   ```bash title="Run the Stress Test"
    k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/stress.js
    ```
 
@@ -441,7 +441,7 @@ The baseline tells you the service is healthy at 10 requests per second. It does
 
 3. Read the summary's threshold block. You will see ten lines, two per stage, each marked with a green check or red cross:
 
-   ```text
+   ```text title="Find the Saturation Knee Output"
    ✓ sli_ok{scenario:rate_50}
    ✓ http_req_duration{scenario:rate_50}........: p(95)=...
    ✗ sli_ok{scenario:rate_200}
@@ -480,13 +480,13 @@ Write your hypothesis before running: will one deleted Pod spend any meaningful 
 
 1. In the k6 terminal, rerun the same one-minute test:
 
-   ```bash
+   ```bash title="In the K6 Terminal, Rerun the Same One-minute Test"
    k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
 2. In the Kubernetes terminal, list the Pods and delete one of the three serving replicas:
 
-   ```bash
+   ```bash title="List Pods"
    kubectl get pods -n reliability-lab
    kubectl delete pod <one-pod-name> -n reliability-lab
    ```
@@ -495,7 +495,7 @@ Write your hypothesis before running: will one deleted Pod spend any meaningful 
 
 3. Wait until the deployment reports three ready replicas again:
 
-   ```bash
+   ```bash title="Wait Until the Deployment Reports Three Ready Replicas Again"
    kubectl wait --for=jsonpath='{.status.readyReplicas}'=3 deployment/${ONID}-web -n reliability-lab --timeout=60s
    ```
 
@@ -525,13 +525,13 @@ Write your hypothesis before running: once the deployment reaches zero ready rep
 
 1. Start the same k6 run again:
 
-   ```bash
+   ```bash title="Start the Same K6 Run Again"
    k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
 2. In the Kubernetes terminal, run the same four-command outage and recovery sequence you will reuse in the next experiment:
 
-   ```bash
+   ```bash title="Scale Backend to Zero"
    kubectl scale deployment/${ONID}-web --replicas=0 -n reliability-lab
    kubectl wait --for=delete pod -l app=${ONID}-web -n reliability-lab --timeout=60s
    kubectl scale deployment/${ONID}-web --replicas=3 -n reliability-lab
@@ -564,7 +564,7 @@ Write your hypothesis before running: if the edge serves a fallback page when th
 
 1. Write a new edge ConfigMap that intercepts upstream errors and serves a personalized fallback page:
 
-   ```bash
+   ```bash title="Write ~/cs312-reliability/edge-degraded.yaml"
    cat <<EOF > ~/cs312-reliability/edge-degraded.yaml
    apiVersion: v1
    kind: ConfigMap
@@ -601,7 +601,7 @@ Write your hypothesis before running: if the edge serves a fallback page when th
 
 2. Restart the edge Deployment so the new ConfigMap is picked up:
 
-   ```bash
+   ```bash title="Check Rollout Status"
    kubectl rollout restart deployment/${ONID}-edge -n reliability-lab
    kubectl rollout status deployment/${ONID}-edge -n reliability-lab
    ```
@@ -610,7 +610,7 @@ Write your hypothesis before running: if the edge serves a fallback page when th
 
 3. With the backend still healthy, verify nothing visible changed in steady state:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl "$TARGET_URL"
    ```
 
@@ -618,13 +618,13 @@ Write your hypothesis before running: if the edge serves a fallback page when th
 
 4. Start the same one-minute k6 run as before:
 
-   ```bash
+   ```bash title="Start the Same One-minute K6 Run as Before"
    k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
 5. In a third terminal, start a short sampling loop before you cut the backend:
 
-   ```bash
+   ```bash title="Sample Edge Fallback"
    for i in $(seq 1 20); do curl -s "$TARGET_URL" | grep -E 'h1|Reduced'; sleep 1; done
    ```
 
@@ -632,7 +632,7 @@ Write your hypothesis before running: if the edge serves a fallback page when th
 
 6. In the Kubernetes terminal, repeat the exact same outage and recovery sequence from Experiment 2:
 
-   ```bash
+   ```bash title="Repeat Zero-Replica Outage"
    kubectl scale deployment/${ONID}-web --replicas=0 -n reliability-lab
    kubectl wait --for=delete pod -l app=${ONID}-web -n reliability-lab --timeout=60s
    kubectl scale deployment/${ONID}-web --replicas=3 -n reliability-lab
@@ -669,13 +669,13 @@ Write your hypothesis before running: can a rollout be broken and still stay wit
 
 1. Start the same k6 run again:
 
-   ```bash
+   ```bash title="Start the Same K6 Run Again"
    k6 run -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js
    ```
 
 2. In the Kubernetes terminal, intentionally set a bad image tag on the deployment:
 
-   ```bash
+   ```bash title="Set Broken Deployment Image"
    kubectl set image deployment/${ONID}-web web=nginx:this-tag-does-not-exist -n reliability-lab
    ```
 
@@ -683,7 +683,7 @@ Write your hypothesis before running: can a rollout be broken and still stay wit
 
 3. Inspect the Pods while the bad rollout is in progress:
 
-   ```bash
+   ```bash title="List Pods"
    kubectl get pods -n reliability-lab
    ```
 
@@ -691,7 +691,7 @@ Write your hypothesis before running: can a rollout be broken and still stay wit
 
 4. Undo the rollout and wait for the deployment to settle:
 
-   ```bash
+   ```bash title="Check Rollout Status"
    kubectl rollout undo deployment/${ONID}-web -n reliability-lab
    kubectl rollout status deployment/${ONID}-web -n reliability-lab
    ```
@@ -718,7 +718,7 @@ The last step of a reliability exercise is confirming that the system is healthy
 
 1. Run one final clean baseline and save the summary to a file:
 
-   ```bash
+   ```bash title="Run One Final Clean Baseline and Save the Summary to a File"
    k6 run --quiet -e TARGET_URL="$TARGET_URL" ~/cs312-reliability/probe.js | tee final-check.txt
    ```
 
@@ -726,7 +726,7 @@ The last step of a reliability exercise is confirming that the system is healthy
 
 2. Append one user-visible check and the Kubernetes state:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -s "$TARGET_URL" | grep h1 | tee -a final-check.txt
    kubectl get deployment,replicaset,pods,service -n reliability-lab | tee -a final-check.txt
    ```
@@ -735,7 +735,7 @@ The last step of a reliability exercise is confirming that the system is healthy
 
 3. Print the record you just created:
 
-   ```bash
+   ```bash title="Display File Contents"
    cat final-check.txt
    ```
 

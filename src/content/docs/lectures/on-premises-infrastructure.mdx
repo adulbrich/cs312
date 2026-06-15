@@ -54,7 +54,7 @@ import ServerChipset from '/src/content/docs/lectures/hardware-components/server
 
 The single biggest conceptual difference for a sysadmin is [**Non-Uniform Memory Access (NUMA)**](https://en.wikipedia.org/wiki/Non-uniform_memory_access). In a two-socket server, each CPU has local memory banks it can access at full speed and remote memory banks on the other socket that it reaches over an inter-socket interconnect ([AMD Infinity Fabric](https://en.wikipedia.org/wiki/HyperTransport#Infinity_Fabric) or [Intel UPI](https://en.wikipedia.org/wiki/Intel_Ultra_Path_Interconnect)). The latency difference between local and remote memory is typically two to three times. A workload whose threads and buffers are pinned to one socket runs at one speed; a workload whose memory ends up split across sockets runs measurably slower.
 
-```mermaid
+```mermaid title="Server Cpus and NUMA Diagram"
 flowchart TB
   CPU0 <-->|"Infinity Fabric / UPI\n2-3x latency"| CPU1
   subgraph N0["NUMA Node 0"]
@@ -118,7 +118,7 @@ Operationally, the BMC is the answer to questions that have no software-side ans
 
 The network design implication is the part most relevant here. The BMC presents its own management interface, with its own MAC and IP identity even when it shares cabling with a host NIC, and it should be on its own **management VLAN** that is reachable only from operator workstations and a small set of automation hosts. The specific VLAN number is just a local convention; what matters is that the management network is separate and tightly controlled. Putting BMCs on the same VLAN as production traffic exposes a powerful control surface to anyone who reaches that broadcast domain. A separate, firewalled, MFA-gated management VLAN is the standard pattern, and it is one of the reasons VLAN segmentation matters operationally rather than as a theoretical layer-2 nicety.
 
-```mermaid
+```mermaid title="Out-of-band Management Diagram"
 flowchart LR
   subgraph Server["Production Server"]
     OS["Host OS\napps, hypervisor"]
@@ -176,7 +176,7 @@ The three storage attachment models differ in where the network boundary falls r
 
 **Storage Area Networks (SANs)** present raw block devices to servers over a dedicated storage path instead of exposing files over an ordinary share. In many enterprise environments that path is **[Fibre Channel](https://en.wikipedia.org/wiki/Fibre_Channel)**, a purpose-built storage network with its own switches and host bus adapters. In Ethernet-centric environments it is often **[iSCSI](https://en.wikipedia.org/wiki/ISCSI)**, which carries older SCSI block commands over IP networks. Newer flash-heavy designs increasingly use NVMe-oF, which applies the same idea to NVMe devices. A server with a SAN-attached **[LUN](https://en.wikipedia.org/wiki/Logical_Unit_Number)** (Logical Unit Number) sees it as a locally attached block device and formats its own filesystem on top. SANs are used in enterprise environments for databases and virtual machine datastores because they deliver low latency, high throughput, and the multipath failover behavior that NAS protocols cannot match at the same scale.
 
-```mermaid
+```mermaid title="Direct-attached, Network-attached, and Storage Area Networks"
 flowchart LR
   subgraph DAS["DAS: drives attached to one host"]
     DH["Host"]
@@ -270,7 +270,7 @@ We already covered the protocols (TCP/IP, ARP, DHCP DORA, NAT, routing tables) a
 
 The Cisco hierarchical model organizes a network into three functional layers. The **Access Layer** is where end devices connect; it handles layer-2 switching, port security, VLAN assignment, and Power over Ethernet for things like phones and access points. The **Distribution Layer** aggregates access switches and acts as the boundary between layer-2 switching and layer-3 routing; it enforces ACL-based policy, performs inter-VLAN routing, and summarizes routes upward. The **Core Layer** is the high-speed backbone that interconnects distribution devices; it does as little policy work as possible and prioritizes fast forwarding and redundancy. In small-to-medium networks, the distribution and core layers are often collapsed into a single layer-3 switch.
 
-```mermaid
+```mermaid title="From Three-tier to Spine-leaf Diagram"
 flowchart TD
   Core["Core Layer\nHigh-speed backbone\nFast forwarding only"]
   D1["Distribution Layer A\nInter-VLAN routing\nACLs, route summarization"]
@@ -288,7 +288,7 @@ flowchart TD
 
 This design is the right answer for a campus: users connect at the access layer, traffic flows up to a central core, and a small number of expensive policy points see everything. It is the wrong answer for a modern data center. Data center workloads are dominated by east-west traffic between servers: replicas in a distributed database, Kubernetes pods on different nodes, synchronization traffic between GPUs in a training cluster, or block storage traffic to a remote flash array. In a three-tier topology those flows climb to the core and back down, doubling hop count and creating oversubscription bottlenecks. Modern data centers therefore use **spine-leaf** (also called fat-tree or Clos) topologies instead. Every leaf switch connects to every spine switch, and no two leaf switches connect directly. Traffic that stays within one rack stays on a single leaf; traffic that leaves the rack follows a fixed, small path of leaf, spine, leaf. That gives you predictable latency between racks, and bandwidth scales by adding spines rather than upgrading a central core.
 
-```mermaid
+```mermaid title="From Three-tier to Spine-leaf Diagram"
 flowchart TD
   S1["Spine Switch 1"]
   S2["Spine Switch 2"]
@@ -318,7 +318,7 @@ VLANs, which we already introduced as a way to segment a switch into multiple lo
 
 **Access ports** connect to end devices: servers, workstations, printers, IP phones. The switch assigns all traffic on an access port to a single VLAN and strips the 802.1Q tag before delivering frames to the device. The device never sees the tag. **Trunk ports** connect switches to each other, or switches to routers. A trunk preserves the 802.1Q tag so the receiving switch knows which VLAN each frame belongs to, which is the only way to carry multiple VLANs across a single physical cable.
 
-```mermaid
+```mermaid title="VLAN Operations in Practice Diagram"
 flowchart LR
   Server["Server\nuntagged VLAN 10"]
   PC["Workstation\nuntagged VLAN 20"]
@@ -393,7 +393,7 @@ Power in a data center is delivered in multiple layers. Utility power enters the
 
 Inside the building, power is distributed to racks through **PDUs (Power Distribution Units)**. A rack-level PDU is usually a vertical strip, and higher-end metered or switched models can report per-outlet current over the management network. Production racks almost always have **two PDUs**, one on each side, fed by independent branch circuits (often labeled the **A feed** and **B feed**), so a single circuit breaker trip or PDU failure does not take down the rack. Servers with dual power supplies plug one cord into each, and the supplies share load when both are healthy and carry the full load alone when one feed disappears. Sizing follows the **80 percent derating rule** for continuous load, but the arithmetic depends on whether you are talking about single-phase branch power or a three-phase rack PDU. For quick mental math, single-phase nameplate capacity is roughly <Latex formula="V \times A"/>, while three-phase nameplate capacity is roughly <Latex formula="V \times A \times \sqrt{3}"/>. A single-phase 208 V 30 A branch circuit is about 6.2 kVA nameplate, so you plan for about 5 kW continuous load after derating. A 208 V 30 A three-phase rack PDU is a different class of feed: about 10.8 kVA nameplate, or about 8.6 kW usable continuous load after derating. At the denser end, a 415 V 60 A three-phase PDU lands around 43 kVA nameplate and about 34.5 kW usable continuous load after derating.
 
-```mermaid
+```mermaid title="Power: from Utility to Server Diagram"
 flowchart LR
   Utility["Utility\ngrid"]
   Gen["Diesel /\ngas generator"]

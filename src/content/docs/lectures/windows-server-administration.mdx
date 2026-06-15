@@ -33,7 +33,7 @@ Before drilling into editions, forests, policies, and replication, it helps to s
 
 The diagram below shows the path a normal sign-in and file-share request usually follow.
 
-```mermaid
+```mermaid title="The Whole System at a Glance Diagram"
 flowchart TB
   User["User at a domain-joined workstation"] --> Client["Windows client"]
   Client --> DnsLookup["DNS lookup for domain services"]
@@ -102,7 +102,7 @@ Above the domain sits the **forest**. The forest is the broadest trust and schem
 
 The hierarchy is only part of the story, because sites are not just another child object under a domain. Domains and forests describe logical identity boundaries. Sites describe where clients and domain controllers are near one another on the network. The diagram below separates those two ideas so the terms do not blur together.
 
-```mermaid
+```mermaid title="Domains, Forests, Sites, and Trusts Diagram"
 flowchart TB
   subgraph Logical["Logical identity boundaries"]
     Forest["Forest\nShared schema and top-level trust boundary"]
@@ -162,7 +162,7 @@ LDAP is less glamorous but equally important. It is how administrative tools sea
 
 The sequence below captures the usual split. Kerberos proves identity to a service. LDAP asks the directory questions about objects and policy. NTLM appears only when the cleaner Kerberos path cannot be used.
 
-```mermaid
+```mermaid title="Kerberos, LDAP, and the Shadow of NTLM Diagram"
 sequenceDiagram
   participant C as Client
   participant DNS as DNS
@@ -259,7 +259,7 @@ The beginner mnemonic for Group Policy processing is **LSDOU**: Local, Site, Dom
 
 The order is easier to reason about when you picture it as a narrowing funnel. Broad defaults apply first, and more specific containers can narrow or replace them later.
 
-```mermaid
+```mermaid title="Processing Order, Inheritance, and Precedence Diagram"
 flowchart LR
   Local["Local policy"] --> Site["Site-linked GPOs"]
   Site --> Domain["Domain-linked GPOs"]
@@ -293,7 +293,7 @@ A common Windows administration experience goes like this: you changed one GPO, 
 
 Useful tooling exists, but only if you think to use it early. The first command below is the fast text summary on a client. The second produces a fuller HTML Resultant Set of Policy report when you need something you can inspect in detail or hand to someone else.
 
-```powershell
+```powershell title="PowerShell Command"
 gpresult /r
 
 Get-GPResultantSetOfPolicy -ReportType Html -Path C:\Temp\rsop.html

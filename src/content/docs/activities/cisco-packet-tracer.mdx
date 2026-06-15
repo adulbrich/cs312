@@ -97,7 +97,7 @@ Click any device to open its panel. The tabs you will use most:
 
    On each PC: click the PC, go to **Desktop > IP Configuration**, and enter the IPv4 address and subnet mask (255.255.255.0).
 
-   <Aside type="tip">
+   <Aside type="tip" title="Label PCs With IP Addresses">
    Rename each PC to include its IP address (for example, `SALES-10.100`) so you can see subnet membership at a glance on the canvas without opening each device.
    </Aside>
 
@@ -105,7 +105,7 @@ Click any device to open its panel. The tabs you will use most:
 
 6. Configure VLANs on all three switches. On each switch, open the **CLI** tab and run:
 
-   ```
+   ```text title="Enter Switch Configuration Mode"
    en
    conf t
    vlan 10
@@ -119,7 +119,7 @@ Click any device to open its panel. The tabs you will use most:
 
 7. Assign each access port to the correct VLAN. On each access switch, open the **Config** tab, select the interface connected to each PC, and set the VLAN. You can also do this from the CLI:
 
-   ```
+   ```text title="Assign VLAN Access Ports"
    interface FastEthernet0/1
     switchport access vlan 10
    ```
@@ -148,14 +148,14 @@ Why do the uplinks between switches carry all VLANs instead of just one? What wo
 
 3. Configure a **Switch Virtual Interface (SVI)** for each VLAN on the MLS. In the CLI:
 
-   ```
+   ```text title="Configure VLAN Interfaces"
    interface vlan 10
     ip address 192.168.10.1 255.255.255.0
    ```
 
    Repeat for VLANs 20, 99, and 200 with the correct subnet. Then enable IP routing:
 
-   ```
+   ```text title="Enable Inter-VLAN Routing"
    ip routing
    ```
 
@@ -182,7 +182,7 @@ You used a multilayer switch for inter-VLAN routing instead of connecting each V
 
 3. On the MLS, disable switching on the port connected to the router (converting it from a Layer 2 switch port to a Layer 3 routed port):
 
-   ```
+   ```text title="Configure Routed Link Interface"
    interface GigabitEthernet0/2
     no switchport
     ip address 172.16.1.2 255.255.255.252
@@ -190,7 +190,7 @@ You used a multilayer switch for inter-VLAN routing instead of connecting each V
 
 4. Add static routes on both devices:
 
-   ```
+   ```text title="Add Static Routes"
    ip route 0.0.0.0 0.0.0.0 GigabitEthernet0/2   (on the MLS)
    ip route 192.168.0.0 255.255.0.0 GigabitEthernet0/0/0   (on the router)
    ```
@@ -223,7 +223,7 @@ You configured static routes between the MLS and the border router. Under what c
 
 4. Add a DHCP relay helper on the MLS so VLAN clients can reach the server across subnet boundaries:
 
-   ```
+   ```text title="Configure DHCP Pool Limits"
    interface vlan 10
     ip helper-address 192.168.99.100
    ```
@@ -267,7 +267,7 @@ Every real company network needs DNS. IP addresses work, but nobody types `192.1
 
 5. On a PC in **VLAN 20**, open **Desktop > Command Prompt** and run:
 
-   ```
+   ```text title="Ping Internal Web Name"
    ping web.company.local
    ```
 
@@ -275,7 +275,7 @@ Every real company network needs DNS. IP addresses work, but nobody types `192.1
 
 6. Switch to **Simulation mode** and add **DNS** and **HTTP** to the event filter. On the VLAN 20 PC, open **Desktop > Web Browser** and navigate to:
 
-   ```
+   ```text title="Browse Internal Web Name"
    http://web.company.local
    ```
 

@@ -98,7 +98,7 @@ Syslog was invented by Eric Allman in 1980 as part of the sendmail project: a si
 
 **JSON structured logging** has become the standard in cloud-native environments, particularly for applications running in containers. Instead of a flat string, each log entry is a JSON object with named fields:
 
-```json
+```json title="JSON Document"
 {
   "timestamp": "2026-03-15T03:04:12.841Z",
   "level": "error",
@@ -177,7 +177,7 @@ The systemd journal and `/var/log` capture events that processes choose to emit.
 
 You configure the audit subsystem using `auditctl` rules. Common rules include watching specific files for access or modification, recording all executions of privileged commands, and logging privilege escalation events:
 
-```bash
+```bash title="Logging on macOS and Windows"
 # Log all writes to the sudoers file
 auditctl -w /etc/sudoers -p wa -k sudoers-change
 
@@ -200,7 +200,7 @@ Some failures appear in logs that exist below the operating system level. Hardwa
 
 The **Baseboard Management Controller (BMC)** is a small embedded processor on server motherboards that operates independently of the main CPU and OS. It maintains a **System Event Log (SEL)**: a persistent record of hardware events including power supply failures, fan speed anomalies, temperature threshold crossings, CPU errors, and memory errors. On Dell hardware this interface is called iDRAC; on HPE it is iLO; on most other hardware it is accessible via the IPMI protocol.
 
-```bash
+```bash title="List Hardware Event Logs"
 # Read the System Event Log via IPMI
 ipmitool sel list
 ```
@@ -217,7 +217,7 @@ Log data does not only inform human decisions; it can drive automated operationa
 
 The default use case is SSH brute-force protection. fail2ban watches `/var/log/auth.log` (or the systemd journal unit for sshd), counts failed authentication attempts per source IP address within a rolling time window, and when an IP exceeds the configured threshold (typically 5 to 10 failures), executes a firewall action, often by adding iptables or nftables rules that block traffic from that IP for a configured duration (typically 10 minutes to 1 hour).
 
-```ini
+```ini title="Sshd Configuration"
 [sshd]
 enabled  = true
 port     = ssh
@@ -246,7 +246,7 @@ The **kubelet** manages these log files and exposes them through the Kubernetes 
 
 When a container crashes and Kubernetes restarts it, the restarted container is a new process writing to a new log file. The log from the crashed container is not in the current container's log stream. The kubelet saves a copy of the terminated container's log for a brief period, and `--previous` retrieves that saved log:
 
-```bash
+```bash title="View Pod Logs"
 kubectl logs <pod-name> --previous
 ```
 
@@ -277,19 +277,19 @@ The commands in this section rely on regular expressions for pattern matching. T
 
 `grep` searches for lines matching a pattern. For case-insensitive search:
 
-```bash
+```bash title="Search Text"
 grep -i "error" /var/log/nginx/error.log
 ```
 
 To show context around each match, `-B` adds lines before and `-A` adds lines after:
 
-```bash
+```bash title="Search Text"
 grep -B2 -A2 "Connection refused" /var/log/nginx/error.log
 ```
 
 To exclude matching lines, useful for filtering out health check requests:
 
-```bash
+```bash title="Search Text"
 grep -v "GET /healthz" /var/log/nginx/access.log
 ```
 
@@ -297,13 +297,13 @@ grep -v "GET /healthz" /var/log/nginx/access.log
 
 [`journalctl`](https://www.freedesktop.org/software/systemd/man/latest/journalctl.html) queries the systemd journal with rich filtering. Filtering simultaneously by service unit, severity level, and time window:
 
-```bash
+```bash title="View System Logs"
 journalctl -u nginx.service -p err --since "2026-03-15 02:50:00" --until "2026-03-15 03:10:00"
 ```
 
 To follow new entries in real time:
 
-```bash
+```bash title="View System Logs"
 journalctl -u myapp.service -f
 ```
 
@@ -311,13 +311,13 @@ journalctl -u myapp.service -f
 
 For plain-text log files, `tail -f` streams new lines as they are written. Piping to `grep` watches for a specific pattern in the real-time stream:
 
-```bash
+```bash title="Stream nginx 500 Errors"
 tail -f /var/log/nginx/access.log | grep " 500 "
 ```
 
 `awk` excels at extracting and summarizing fields from structured text. To count how many times each status code appeared in an Nginx access log (the status code is the ninth field in the default log format):
 
-```bash
+```bash title="Count Status Codes with awk"
 awk '{print $9}' /var/log/nginx/access.log | \
   sort | \
   uniq -c | \
@@ -332,7 +332,7 @@ awk '{print $9}' /var/log/nginx/access.log | \
 
 To find the top client IPs generating 500 errors:
 
-```bash
+```bash title="Top 500 Sources"
 awk '$9 == 500 {print $1}' /var/log/nginx/access.log | \
   sort | uniq -c | sort -rn | head
 # awk '$9 == 500 {print $1}': filter rows with status 500, then print client IP field
@@ -345,13 +345,13 @@ This tells you immediately whether 500 errors are coming from all clients (sugge
 
 Regular expressions extend `grep`'s ability to match patterns. To match any HTTP 5xx response:
 
-```bash
+```bash title="Search Text"
 grep -E '" [5][0-9]{2} ' /var/log/nginx/access.log
 ```
 
 To extract and count usernames from failed SSH authentication attempts:
 
-```bash
+```bash title="Search Text"
 grep "Failed password for" /var/log/auth.log | \
   sed -E 's/.*Failed password for (invalid user )?([^ ]+).*/\2/' | \
   sort | uniq -c | sort -rn
@@ -375,7 +375,7 @@ Effective log investigation is less about memorizing commands and more about hav
 
 Before reading individual lines, start with a count. A per-minute frequency histogram reveals when errors began and whether the pattern is continuous or bursty:
 
-```bash
+```bash title="Count Requests by Minute"
 awk '{print $4}' /var/log/nginx/access.log | \
   cut -d: -f1-3 | \
   sort | uniq -c
@@ -399,7 +399,7 @@ A concrete walkthrough illustrates how the three phases work together. At 03:07,
 
 **Narrow:** Start with a per-minute count of errors rather than reading raw log output:
 
-```bash
+```bash title="Count 5xx Errors by Minute"
 awk '$9 >= 500 {print $4}' /var/log/nginx/access.log | cut -d: -f1-3 | sort | uniq -c | tail -20
 # awk '$9 >= 500 {print $4}': keep only 5xx rows and print the timestamp field
 # cut -d: -f1-3: keep date + hour + minute so entries bucket per minute
@@ -410,7 +410,7 @@ awk '$9 >= 500 {print $4}' /var/log/nginx/access.log | cut -d: -f1-3 | sort | un
 
 The output shows 0 errors at 03:03, then 847 errors at 03:04. The symptom started abruptly, suggesting a discrete event rather than gradual degradation. Look at the 5 minutes before 03:04:
 
-```bash
+```bash title="View System Logs"
 journalctl -u order-api.service --since "03:00:00" --until "03:04:00" -p err
 # -u order-api.service: query only the order-api service unit
 # --since / --until: narrow output to the pre-symptom time window
@@ -421,7 +421,7 @@ Three entries between 03:01:17 and 03:03:58: all `database connection timeout` e
 
 **Broaden:** Check the PostgreSQL log for the same window:
 
-```bash
+```bash title="Broaden"
 grep "03:01\|03:02\|03:03" /var/log/postgresql/postgresql.log | grep -i "error\|fatal\|deadlock\|lock"
 # first grep: keep only lines from the target minutes (03:01 through 03:03)
 # second grep -i: case-insensitive filter for failure and locking keywords
@@ -431,7 +431,7 @@ A stream of `FATAL: remaining connection slots are reserved for non-replication 
 
 Now check why: look at the system journal on the database host for the 30 minutes before:
 
-```bash
+```bash title="View System Logs"
 journalctl -p warning --since "02:30:00" --until "03:01:00" | grep -i "connection\|memory\|postgres"
 # journalctl -p warning: include warning-level and higher system entries
 # --since / --until: scan the 30 minutes before the first database failures
@@ -480,7 +480,7 @@ Rotation then prevents unbounded growth by periodically compressing, archiving, 
 
 On Linux, [`logrotate`](https://www.man7.org/linux/man-pages/man8/logrotate.8.html) is the standard tool. It runs daily via a systemd timer or cron job and reads configuration from `/etc/logrotate.conf` (global defaults) and `/etc/logrotate.d/` (per-application overrides). A typical configuration for Nginx:
 
-```
+```text title="logrotate Sampling Configuration"
 /var/log/nginx/*.log {
     daily
     missingok
@@ -555,13 +555,13 @@ The LGTM stack (Loki, Grafana, Tempo, Mimir) is a cloud-native alternative built
 
 [LogQL](https://grafana.com/docs/loki/latest/query/) is Loki's query language. A basic query has two parts: a log stream selector (label filters in curly braces) and optional filter expressions:
 
-```text
+```text title="Loki Connection Refused Query"
 {namespace="default", container="wordpress"} |= "connection refused"
 ```
 
 To filter to errors and extract fields from structured JSON log lines:
 
-```text
+```text title="Loki Error Duration Query"
 {namespace="default", container="order-api"} | json | level="error" | line_format "{{.message}} ({{.duration_ms}}ms)"
 ```
 
@@ -579,7 +579,7 @@ Both Loki and Elasticsearch support log-based alerting rules: rules that fire wh
 
 A log-based alert that fires when the word "FATAL" appears in a service's log stream:
 
-```text
+```text title="Fatal Log Alert Query"
 count_over_time({namespace="production", container="order-api"} |= "FATAL" [5m]) > 0
 ```
 

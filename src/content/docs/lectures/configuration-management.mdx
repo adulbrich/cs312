@@ -72,7 +72,7 @@ Ansible is not magic. It is a coordination layer around YAML, SSH, Python module
 
 The diagram below shows that execution model at a high level. The playbook, inventory, and variables live on the control side. The actual system state lives on the managed side. Much of the craft of configuration management lies in keeping those two views aligned without confusing the description of the system for the system itself.
 
-```mermaid
+```mermaid title="Why This Course Uses Ansible Diagram"
 flowchart TB
   operator["Operator or automation runner"]
   repo["Automation source\nplaybook · inventory · variables"]
@@ -91,7 +91,7 @@ An inventory is more than a host list. It is the first abstraction layer over yo
 
 Here is a simple static inventory written in an [INI file](https://en.wikipedia.org/wiki/INI_file):
 
-```ini
+```ini title="Webservers Configuration"
 [webservers]
 web1 ansible_host=192.0.2.10
 web2 ansible_host=192.0.2.11
@@ -152,7 +152,7 @@ Inventories answer "which machines?" Playbooks answer "what should be true about
 
 This playbook shows the structure clearly:
 
-```yaml
+```yaml title="Configure Web Servers Playbook"
 ---
 - name: Configure web servers
   hosts: webservers
@@ -208,7 +208,7 @@ The same boundary explains where kernel and VM-level changes belong. Configurati
 
 Idempotency is easy to describe but worth seeing in terms of what Ansible actually reports. When a play runs, common task outcomes include `ok` (task succeeded), `changed` (task succeeded and modified state), `skipped` (a `when` condition or other gate kept it from running), and `failed` (something went wrong and execution stopped). At the end of every run, Ansible also prints recap counters per host. These numbers are per-host counters, not one global total:
 
-```
+```text title="Reading a Playbook Run Output"
 PLAY RECAP *********************************************************************
 web1  : ok=6   changed=2   unreachable=0   failed=0   skipped=1   rescued=0   ignored=0
 web2  : ok=6   changed=2   unreachable=0   failed=0   skipped=1   rescued=0   ignored=0
@@ -235,7 +235,7 @@ On a well-maintained fleet, the second run of any playbook should produce almost
 
 The `--check` flag is a command-line option on `ansible-playbook` that runs the play in dry-run mode, predicting what would change without applying anything. Combined with `--diff`, modules that support diff mode can show before-and-after differences, especially for file-oriented changes. Running both together before a maintenance window is one of the cheapest risk-reduction habits available:
 
-```bash
+```bash title="Run the Playbook"
 ansible-playbook site.yml -i hosts.ini --check --diff
 ```
 
@@ -247,7 +247,7 @@ The Shell Scripting lecture introduced conditionals, exit codes, and one-time se
 
 Several task-flow tools show up constantly in real playbooks. `register` captures a task result so later tasks can inspect it. `when` turns that result into a gate. `changed_when` and `failed_when` let you correct Ansible's default interpretation when a raw command does not map neatly onto the framework's idea of success or change. For multi-step work, `block`, `rescue`, and `always` group tasks into a success path, a recovery path, and a cleanup path. The first example is short, but it captures the pattern.
 
-```yaml
+```yaml title="Bootstrap Marker Task Flow"
 - name: Check whether the bootstrap marker exists
   ansible.builtin.stat:
     path: /srv/myapp/.bootstrapped
@@ -278,7 +278,7 @@ This is the point where configuration management stops feeling like a prettier p
 
 Sometimes the unit of failure is larger than one task. You might need to render a configuration file, validate it, and roll back if validation fails. Ansible's `block`, `rescue`, and `always` keywords exist for exactly that situation.
 
-```yaml
+```yaml title="Read That Snippet from Top to Bottom"
 - name: Apply and validate web configuration
   block:
     - name: Render configuration
@@ -343,7 +343,7 @@ Roles also force you to think about **variable precedence**, which is one of the
 
 [Templates](https://docs.ansible.com/projects/ansible/latest/collections/ansible/builtin/template_module.html) solve the corresponding file problem. Static file copies are fine when every target should receive exactly the same bytes. Real fleets rarely stay that uniform. Ports differ, hostnames differ, upstream backends differ, and security settings differ by environment. Ansible uses the [Jinja2 templating engine](https://jinja.palletsprojects.com/en/stable/templates/) so one configuration file can be rendered differently for each host:
 
-```jinja2
+```jinja2 title="Reuse, Templates, and Shared Automation Jinja2"
 worker_processes {{ nginx_worker_processes }};
 
 server {
@@ -359,7 +359,7 @@ Ansible also separates **roles** from **collections**. A role is a reusable comp
 
 [Collections](https://docs.ansible.com/projects/ansible/latest/collections_guide/index.html) deserve the same dependency discipline as application libraries. A small `requirements.yml` file records which collections the project expects and what version range the team has actually tested.
 
-```yaml
+```yaml title="Ansible Collection Requirements"
 collections:
   - name: community.docker
     version: ">=4.0.0,<5.0.0"
@@ -373,7 +373,7 @@ A role that works correctly on Ubuntu will fail silently against Rocky Linux if 
 
 Two tools handle most of this verification work in the Ansible ecosystem. [ansible-lint](https://ansible-lint.readthedocs.io/) is a static analysis tool that inspects playbooks and roles for style violations, deprecated module usage, and logical mistakes that a plain syntax check would miss. It catches problems like tasks that always report `changed` regardless of whether anything actually changed, `become` directives placed in scopes where they should not be inherited, variable names that shadow Ansible built-ins, and module parameters that were renamed or removed in a recent collection release. Running ansible-lint as part of a CI pipeline turns your automation repository into something with a clear pass or fail signal on every push, rather than something that only reveals problems when it runs on a production server:
 
-```bash
+```bash title="Ansible-lint Site.yml"
 ansible-lint site.yml
 ansible-lint roles/nginx/
 ```
@@ -382,7 +382,7 @@ Most violations reported by ansible-lint are inexpensive to fix: consistent inde
 
 [Molecule](https://ansible.readthedocs.io/projects/molecule/) goes further by actually running roles inside ephemeral containers or virtual machines. A Molecule scenario provisions a test instance, applies the role under test, reruns it to check idempotence, runs a verifier to assert the expected system state, and destroys the instance when finished. In current Molecule workflows that verification step is commonly Ansible-native, often through a `verify.yml` playbook. Some teams also use [Testinfra](https://testinfra.readthedocs.io/), which lets you write Python assertions about files, services, packages, and sockets on the guest system:
 
-```python
+```python title="Testinfra nginx Assertions"
 def test_nginx_running(host):
     nginx = host.service("nginx")
     assert nginx.is_running
@@ -402,7 +402,7 @@ One of the most important conceptual mistakes in automation is treating configur
 
 The diagram below shows the basic shape of a stateful rebuild. The runtime and configuration can be reapplied from code. The data path must be mounted or restored before the service is allowed to treat the machine as healthy.
 
-```mermaid
+```mermaid title="Configuration Is Not Data Diagram"
 flowchart TB
   host["Fresh host"]
   runtime["Runtime and configuration\npackages · files · services"]
@@ -454,7 +454,7 @@ The next important boundary is between producing software artifacts and deployin
 
 The diagram below shows the cleaner separation. Provisioning creates the host and its surrounding infrastructure. CI/CD produces a versioned artifact. Configuration management takes an already-reviewed artifact and makes a particular environment run it with the right runtime, files, credentials, and policies.
 
-```mermaid
+```mermaid title="Artifacts, Versions, and Deployment Boundaries Diagram"
 flowchart TB
   source["Source code"]
   ci["CI/CD pipeline\nbuild · test · publish"]
@@ -481,7 +481,7 @@ The word **secret** is often overloaded in automation conversations. A database 
 
 Ansible Vault still matters because some values really do need to be materialized inside the playbook or on the target. Secrets cannot live as plain text in a repository and still be called automation done responsibly. [Ansible Vault](https://docs.ansible.com/ansible/latest/user_guide/vault.html) exists because teams need encrypted variables and files that can still travel through version control and review workflows. Behind the scenes, Vault encrypts the file contents locally before you commit them, so Git stores ciphertext beginning with an `$ANSIBLE_VAULT` header rather than plaintext. A teammate who has the vault password, or access to the vault password file or secret-manager entry used by automation, can decrypt, edit, or run against that file. A teammate without that credential sees only encrypted text. During playbook execution the control node decrypts the data so tasks can use it, but that does not mean plaintext can never touch disk anywhere: `ansible-vault edit` uses a temporary decrypted file under the hood, and tasks may intentionally render secrets into target configuration files.
 
-```bash
+```bash title="Create Ansible Vault Secrets"
 # Create a new encrypted variables file from the start
 ansible-vault create group_vars/production/secrets.yml
 

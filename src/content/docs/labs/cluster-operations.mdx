@@ -28,7 +28,7 @@ You need:
 
 If you ended your AWS Academy session, restart it. The EC2 instance and cluster will still be there. If you deleted the resources from Lab 7, re-apply all the manifests from that lab before starting.
 
-<Aside type="caution">
+<Aside type="caution" title="Lab 7 Data May Be Gone">
 If you stopped and restarted your EC2 instance between sessions, k3s restarted all Pods on boot. Because Lab 7 used ephemeral (in-container) storage for MariaDB, any WordPress data you entered (posts, settings, the admin account) is gone. The first tutorial section below adds a PersistentVolumeClaim to fix this. After completing it, you will need to run through the WordPress setup wizard once more; after that, your data will survive pod restarts and EC2 stops.
 </Aside>
 
@@ -75,12 +75,12 @@ k3s ships with a `local-path` StorageClass that automatically provisions PVs bac
 
    SSH into your EC2 instance and navigate to your lab directory then write the PVC manifest:
 
-   ```bash
+   ```bash title="Write the PVC Manifest"
    cd ~/k8s-lab
    vim mariadb-pvc.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: PersistentVolumeClaim
    metadata:
@@ -98,7 +98,7 @@ k3s ships with a `local-path` StorageClass that automatically provisions PVs bac
 
 2. **Apply the PVC**
 
-   ```bash
+   ```bash title="Apply the PVC"
    kubectl apply -f mariadb-pvc.yaml
    kubectl get pvc
    ```
@@ -109,7 +109,7 @@ k3s ships with a `local-path` StorageClass that automatically provisions PVs bac
 
    Edit `mariadb-deployment.yaml` and add a `volumeMounts` entry to the container and a `volumes` entry to the Pod spec:
 
-   ```yaml
+   ```yaml title="Pod Volume Mount"
    apiVersion: apps/v1
    kind: Deployment
    metadata:
@@ -159,20 +159,20 @@ k3s ships with a `local-path` StorageClass that automatically provisions PVs bac
 
 4. **Apply the updated Deployment**
 
-   ```bash
+   ```bash title="Apply the Updated Deployment"
    kubectl apply -f mariadb-deployment.yaml
    kubectl rollout status deployment/mariadb
    ```
 
    `kubectl rollout status` works for any Deployment, including a single-replica one like MariaDB. Here it means "wait until the new MariaDB Pod is available." This is not the same behavior we observed in the previous lab with 2 wordpress replicas, where old and new Pods overlap to keep traffic flowing during the update.
 
-   <Aside type="note">
+   <Aside type="note" title="PVC Starts Empty">
    Because the PVC starts empty, MariaDB initializes a fresh database. Any WordPress data from Lab 7 is gone. After this step, open `http://<your-ec2-public-ip>` and run through the WordPress setup wizard again to create the site and admin account. This is the last time you will need to do this: from here on, your data persists across pod restarts and EC2 instance stops.
    </Aside>
 
 5. **Verify the PVC is bound**
 
-   ```bash
+   ```bash title="Verify the PVC Is Bound"
    kubectl get pvc
    ```
 
@@ -182,13 +182,13 @@ k3s ships with a `local-path` StorageClass that automatically provisions PVs bac
 
    Log in to the WordPress admin and set a distinctive site title (e.g., "Gerald's Persistent Restaurant"). Then delete the MariaDB Pod:
 
-   ```bash
+   ```bash title="Verify Data Persists Across Pod Restarts"
    kubectl delete pod -l app=mariadb
    ```
 
    Watch Kubernetes replace it:
 
-   ```bash
+   ```bash title="List Pods"
    kubectl get pods -w
    ```
 
@@ -206,7 +206,7 @@ At this point your stack is running, but Kubernetes still needs explicit rules f
 
    Edit `nginx-configmap.yaml` to add a `/health` location that nginx handles directly (not proxied to WordPress). This lets the liveness probe check whether nginx itself is alive, independently of whether WordPress is reachable:
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: ConfigMap
    metadata:
@@ -234,7 +234,7 @@ At this point your stack is running, but Kubernetes still needs explicit rules f
 
    Apply the updated ConfigMap:
 
-   ```bash
+   ```bash title="Apply Kubernetes Manifest"
    kubectl apply -f nginx-configmap.yaml
    ```
 
@@ -242,7 +242,7 @@ At this point your stack is running, but Kubernetes still needs explicit rules f
 
    Edit `nginx-deployment.yaml`:
 
-   ```yaml
+   ```yaml title="Rolling Update Strategy"
    apiVersion: apps/v1
    kind: Deployment
    metadata:
@@ -310,13 +310,13 @@ At this point your stack is running, but Kubernetes still needs explicit rules f
 
 3. **Apply the updated Deployment**
 
-   ```bash
+   ```bash title="Apply the Updated Deployment"
    kubectl apply -f nginx-deployment.yaml
    ```
 
 4. **Verify Pods are Running and Ready**
 
-   ```bash
+   ```bash title="Verify Pods Are Running and Ready"
    kubectl get pods
    ```
 
@@ -332,7 +332,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 1. **Record the current revision**
 
-   ```bash
+   ```bash title="Record the Current Revision"
    kubectl rollout history deployment/nginx
    ```
 
@@ -340,7 +340,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 2. **Pause the Deployment before making changes**
 
-   ```bash
+   ```bash title="Pause the Deployment Before Making Changes"
     kubectl rollout pause deployment/nginx
    ```
 
@@ -350,7 +350,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
    Update directly from the command line:
 
-   ```bash
+   ```bash title="Update the Image While Paused"
    kubectl set image deployment/nginx nginx=nginx:1.27-alpine
    ```
 
@@ -358,7 +358,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 4. **Add a change-cause annotation (common operator practice)**
 
-   ```bash
+   ```bash title="Add a Change-cause Annotation (Common Operator Practice)"
    kubectl annotate deployment nginx kubernetes.io/change-cause="Upgrade  nginx image to 1.27-alpine" --overwrite
    ```
  
@@ -366,7 +366,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 5. **Verify the Deployment is paused**
 
-   ```bash
+   ```bash title="Verify the Deployment Is Paused"
    kubectl get deployment nginx -o jsonpath='{.spec.paused}{"\n"}'
    kubectl get pods
    ```
@@ -375,7 +375,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 6. **Resume and watch the rollout begin**
 
-   ```bash
+   ```bash title="Resume and Watch the Rollout Begin"
    kubectl rollout resume deployment/nginx
    kubectl get pods -w
    ```
@@ -384,7 +384,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 7. **Wait for rollout completion**
 
-   ```bash
+   ```bash title="Wait for Rollout Completion"
    kubectl rollout status deployment/nginx
    ```
 
@@ -392,7 +392,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 8. **Verify the new image**
 
-   ```bash
+   ```bash title="Verify the New Image"
    kubectl describe deployment nginx | grep Image
    ```
 
@@ -400,7 +400,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 9. **Check the revision history**
 
-   ```bash
+   ```bash title="Check the Revision History"
    kubectl rollout history deployment/nginx
    ```
 
@@ -414,7 +414,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 1. **Roll back to the previous revision**
 
-   ```bash
+   ```bash title="Roll Back to the Previous Revision"
    kubectl rollout undo deployment/nginx
    ```
 
@@ -422,7 +422,7 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
 2. **Verify the rollback**
 
-   ```bash
+   ```bash title="Verify the Rollback"
    kubectl describe deployment nginx | grep Image
    ```
 
@@ -432,13 +432,13 @@ A rolling update replaces Pods gradually; it creates new Pods with the updated i
 
    First inspect revision numbers:
  
-   ```bash
+   ```bash title="Roll Back to a Specific Revision"
    kubectl rollout history deployment/nginx
    ```
  
    Then roll back explicitly to a chosen revision number from the history  output:
  
-   ```bash
+   ```bash title="Check Rollout Status"
    kubectl rollout undo deployment/nginx --to-revision=<revision-number>
    kubectl rollout status deployment/nginx
    kubectl describe deployment nginx | grep Image
@@ -456,24 +456,24 @@ This drill simulates a deployment that references an image that does not exist, 
 
 1. **Deploy a nonexistent image**
 
-   ```bash
+   ```bash title="Deploy a Nonexistent Image"
    kubectl set image deployment/nginx nginx=nginx:doesnotexist
    ```
 
 2. **Observe the failure**
 
-   ```bash
+   ```bash title="Observe the Failure"
    kubectl get pods
    ```
 
    After a few seconds, you will see new Pods stuck in `ErrImagePull` or `ImagePullBackOff` status. The old Pods remain running because Kubernetes' rolling update strategy will not terminate old Pods until new Pods are ready.
 
-   <Aside type="note">
+   <Aside type="note" title="ImagePullBackOff Retries">
    `ImagePullBackOff` means Kubernetes tried to pull the image, failed, and is now waiting before retrying with exponentially increasing delays. This prevents hammering the registry with requests for an image that does not exist.
    </Aside>
 3. **Diagnose the failure**
 
-   ```bash
+   ```bash title="Diagnose the Failure"
    kubectl describe pod <failing-pod-name>
    ```
 
@@ -481,13 +481,13 @@ This drill simulates a deployment that references an image that does not exist, 
 
 4. **Recover via rollback**
 
-   ```bash
+   ```bash title="Recover Via Rollback"
    kubectl rollout undo deployment/nginx
    ```
 
    The failing Pods are replaced with Pods running the known-good image. Verify:
 
-   ```bash
+   ```bash title="List Pods"
    kubectl get pods
    ```
 
@@ -510,7 +510,7 @@ Both outcomes represent the same root cause: the memory limit is too low.
 
    Edit `nginx-deployment.yaml` and change the memory limit to `1Mi` (1 Megabyte, far too little for nginx to start):
 
-   ```yaml
+   ```yaml title="nginx-deployment.yaml"
    resources:
      requests:
        memory: "1Mi"
@@ -522,13 +522,13 @@ Both outcomes represent the same root cause: the memory limit is too low.
 
 2. **Apply the change**
 
-   ```bash
+   ```bash title="Apply the Change"
    kubectl apply -f nginx-deployment.yaml
    ```
 
 3. **Observe the failure pattern**
 
-   ```bash
+   ```bash title="Observe the Failure Pattern"
    kubectl get pods -w
    ```
 
@@ -536,7 +536,7 @@ Both outcomes represent the same root cause: the memory limit is too low.
 
 4. **Diagnose the failure (authoritative step)**
 
-   ```bash
+   ```bash title="Diagnose the Failure (Authoritative Step)"
    kubectl describe pod <oomkilled-pod-name>
    ```
 
@@ -548,7 +548,7 @@ Both outcomes represent the same root cause: the memory limit is too low.
 
 5. **Check logs when available**
 
-   ```bash
+   ```bash title="Check Logs When Available"
    kubectl logs <oomkilled-pod-name> --previous
    ```
 
@@ -558,7 +558,7 @@ Both outcomes represent the same root cause: the memory limit is too low.
 
    Edit `nginx-deployment.yaml` and restore the memory limit to `128Mi`:
 
-   ```yaml
+   ```yaml title="nginx-deployment.yaml"
    resources:
      requests:
        memory: "64Mi"
@@ -570,19 +570,19 @@ Both outcomes represent the same root cause: the memory limit is too low.
 
    Apply:
 
-   ```bash
+   ```bash title="Apply Kubernetes Manifest"
    kubectl apply -f nginx-deployment.yaml
    ```
 
 7. **Verify recovery**
 
-   ```bash
+   ```bash title="Verify Recovery"
    kubectl get pods
    ```
 
    All Pods should be `Running` and `Ready` again. Record the current image tag from:
 
-   ```bash
+   ```bash title="Describe Kubernetes Resource"
    kubectl describe deployment nginx | grep Image
    ```
 
@@ -596,7 +596,7 @@ To pause your work, end your AWS Academy Learner Lab session. Your EC2 instance,
 
 If you have completed both labs and are permanently done, tear everything down:
 
-```bash
+```bash title="Kubectl Delete"
 kubectl delete \
   -f wordpress-ingress.yaml \
   -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \

@@ -92,7 +92,7 @@ The control plane is the cluster's brain. In a production cluster, it runs on de
 
 A diagram helps keep the control plane's most important relationship straight: most components do not coordinate with each other directly. They coordinate by reading and writing cluster state through the API server, with etcd acting as the system of record.
 
-```mermaid
+```mermaid title="The Control Plane Diagram"
 flowchart LR
   Client[kubectl / CI / controllers] --> APIServer[kube-apiserver]
 
@@ -126,7 +126,7 @@ Worker nodes are the machines that actually run your containers. A cluster can h
 
 The worker-node side is different: the kubelet, kube-proxy, and container runtime are host-level agents, while Pods and their containers are the workloads those agents manage. Seeing that boundary makes it much easier to reason about where a failure is happening.
 
-```mermaid
+```mermaid title="Worker Nodes Diagram"
 flowchart LR
 
   subgraph Node1[control plane]
@@ -168,13 +168,13 @@ These interfaces explain why the Kubernetes ecosystem feels tool-dense: every pl
 <Aside type="tip" title="kubectl: The Primary Interface">
 [`kubectl`](https://kubernetes.io/docs/reference/kubectl/) is the command-line client for the Kubernetes API. It reads cluster credentials from `~/.kube/config` (or a path set by the `KUBECONFIG` environment variable) and sends API requests on your behalf. Most operations follow the pattern:
 
-```bash
+```bash title="The Container Runtime"
 kubectl <verb> <resource> [name]
 ```
 
 For example:
 
-```bash
+```bash title="List Pods"
 kubectl get pods
 kubectl describe pod my-pod
 kubectl apply -f deployment.yaml
@@ -205,7 +205,7 @@ Every Pod moves through a small set of [**lifecycle phases**](https://kubernetes
 
 A [**Deployment**](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) is a declaration that a certain number of identical Pods should exist at all times. You specify an image, a replica count, resource requests and limits, environment variables, and volume mounts. The Deployment controller creates a **ReplicaSet** (a lower-level object that tracks a specific set of pod replicas), monitors it continuously, and takes action if the actual count diverges from the desired count.
 
-```yaml
+```yaml title="nginx Deployment"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -251,7 +251,7 @@ A StatefulSet gives each pod a stable, ordinal name (`mysql-0`, `mysql-1`, `mysq
 
 What a StatefulSet does *not* do is keep application data in sync for you. Kubernetes is only providing the stable identities, ordering, and storage that a stateful workload needs; the actual replication is still the job of the application, an operator, or bootstrap logic. A PersistentVolumeClaim is not exclusive to StatefulSets; a Deployment can mount a PVC too. The difference is that a StatefulSet is the standard choice when each replica needs its own stable identity and its own persistent volume. In other words, the example below shows the identity-and-storage pattern, not a working PostgreSQL replication topology. If you applied it as written, you would get three independent PostgreSQL Pods with separate volumes, not an automatically replicated three-node database cluster.
 
-```yaml
+```yaml title="postgres StatefulSet"
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -305,7 +305,7 @@ A [**Service**](https://kubernetes.io/docs/concepts/services-networking/service/
 
 That is the core abstraction to remember: pods come and go, but the Service stays put. Most day-to-day application manifests use the default `ClusterIP` type for internal traffic. External exposure options such as `NodePort`, `LoadBalancer`, and Ingress build on the same idea, but they make more sense in the broader networking story that follows.
 
-```yaml
+```yaml title="nginx-service Service"
 apiVersion: v1
 kind: Service
 metadata:
@@ -327,7 +327,7 @@ A [**ConfigMap**](https://kubernetes.io/docs/concepts/configuration/configmap/) 
 
 Both can be projected into a container as environment variables or mounted as files in the container's filesystem. Mounted files are often preferred for secrets because they avoid baking secret values into process environments, make rotation easier for many applications, and reduce accidental exposure through debugging output or child processes.
 
-```yaml
+```yaml title="db-secret Secret"
 apiVersion: v1
 kind: Secret
 metadata:
@@ -353,7 +353,7 @@ In practice, a Namespace matters operationally in three ways:
 
 This is easiest to see as a shared-cluster layout:
 
-```mermaid
+```mermaid title="Namespaces Diagram"
 flowchart TB
   subgraph Cluster[Kubernetes cluster]
     subgraph Prod[Namespace: production]
@@ -383,7 +383,7 @@ The same object names can appear in multiple Namespaces without colliding. Quota
 
 Kubernetes starts with four standard Namespaces: `default` (where objects land if you do not specify a Namespace), `kube-system` (where Kubernetes' own components run), `kube-public` (readable by all users and reserved for cluster-wide public resources), and `kube-node-lease` (which stores node heartbeat lease objects). In shared clusters, a common pattern is a dedicated Namespace per application, team, or environment such as `staging`, `production`, and `monitoring`. Companies do use Namespaces for environment boundaries when those environments share one cluster, but that is a convention rather than a hard rule: many organizations still place production in a separate cluster when they want a stronger isolation boundary.
 
-```bash
+```bash title="Kubectl Create Namespace Production"
 kubectl create namespace production
 kubectl create namespace staging
 kubectl apply -f web.yaml -n production
@@ -436,7 +436,7 @@ The component that makes this possible is the cluster's [**CNI (Container Networ
 
 The diagram below shows that mental model. Pods on different nodes still talk directly across one logical cluster network, while containers inside the same Pod continue to share one local network stack.
 
-```mermaid
+```mermaid title="Pod-to-pod Reachability Diagram"
 flowchart LR
   subgraph NodeA[Node A]
     PodA[Pod web-7d8f\n10.244.1.7]
@@ -463,7 +463,7 @@ This is the closest Kubernetes analogue to the Docker Compose behavior you alrea
 
 The next diagram shows why Services matter operationally. The client keeps talking to one name and one virtual IP, while the backend Pods can be replaced underneath it.
 
-```mermaid
+```mermaid title="Services and DNS Diagram"
 flowchart LR
   Client[Client Pod] -->|HTTP to api| DNS[CoreDNS]
   DNS -->|api.default.svc.cluster.local| Service[Service api\nClusterIP 10.96.42.13]
@@ -490,7 +490,7 @@ A Service of type [**LoadBalancer**](https://kubernetes.io/docs/concepts/service
 
 An [**Ingress**](https://kubernetes.io/docs/concepts/services-networking/ingress/) solves a different problem. It is an HTTP and HTTPS routing layer that lets one external entry point distribute requests to multiple Services based on hostnames and URL paths. That is how one cluster can serve `api.example.com` and `shop.example.com` without creating a separate public load balancer for each application. An Ingress object is only a declaration of rules, though. It is not the public entry point by itself. In practice, you run an [**Ingress controller**](https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/) inside the cluster, and that controller is what reads the rules and configures a reverse proxy or cloud load balancer to enforce them.
 
-```yaml
+```yaml title="site-ingress Ingress"
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -511,7 +511,7 @@ spec:
 
 The diagram below separates the three cases. Internal clients use the ClusterIP. Clients that already have network reachability to a node can use NodePort. Public-internet clients usually need a load balancer or an exposed Ingress controller in front.
 
-```mermaid
+```mermaid title="Reaching Services Beyond Cluster Internals Diagram"
 flowchart TB
   Public[Public internet client]
   Reachable[Developer laptop, VPC VM, or VPN client]
@@ -558,7 +558,7 @@ A [**PersistentVolume (PV)**](https://kubernetes.io/docs/concepts/storage/persis
 
 A [**PersistentVolumeClaim (PVC)**](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#persistentvolumeclaims) is a request from a pod for storage. A PVC says "I need 10 GB of storage with read-write-once access." Kubernetes matches the PVC to a suitable PV, binds them, and mounts the PV into the requesting pod.
 
-```yaml
+```yaml title="mysql-pvc PersistentVolumeClaim"
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -573,7 +573,7 @@ spec:
 
 In a Pod spec, you reference the PVC by name:
 
-```yaml
+```yaml title="Pod Volume Mount"
 volumes:
   - name: mysql-storage
     persistentVolumeClaim:
@@ -598,7 +598,7 @@ The strategy is controlled by two parameters in the Deployment spec:
 - **`maxUnavailable`**: the maximum number of pods that can be unavailable during the update. Setting this to `0` ensures the old version keeps serving traffic while the new version starts.
 - **`maxSurge`**: the maximum number of pods that can be created above the desired replica count. A surge of `1` on a Deployment with 3 replicas means Kubernetes starts one new pod (now 4 total), waits for it to pass its readiness probe, then terminates one old pod (back to 3), and so on.
 
-```yaml
+```yaml title="Rolling Update Strategy"
 spec:
   strategy:
     type: RollingUpdate
@@ -609,13 +609,13 @@ spec:
 
 You can watch the progress with:
 
-```bash
+```bash title="Check Rollout Status"
 kubectl rollout status deployment/nginx
 ```
 
 If something goes wrong (the new version crashes on startup, readiness probes fail), Kubernetes stops making progress on the rollout and keeps the older ReplicaSet available while you investigate. You can roll back to the previous revision with:
 
-```bash
+```bash title="Check Rollout Status"
 kubectl rollout undo deployment/nginx
 ```
 
@@ -633,7 +633,7 @@ A static replica count is fine when load is stable. When it is not, Kubernetes c
 
 The **Horizontal Pod Autoscaler (HPA)** watches a metric (CPU utilization is the default, but custom and external metrics work too) and changes the replica count of a Deployment or StatefulSet to keep the metric within a target range. Doubling the replicas under load and shrinking back when load drops is a one-line declaration:
 
-```yaml
+```yaml title="api HorizontalPodAutoscaler"
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:

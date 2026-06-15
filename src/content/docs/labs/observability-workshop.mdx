@@ -79,7 +79,7 @@ Before installing the monitoring stack, resize your EC2 instance. `kube-promethe
 
    If your instance uses an auto-assigned public IP, it may have changed after stop/start. Reconnect using the current public IP, then verify Kubernetes is responding:
 
-   ```bash
+   ```bash title="Reconnect over SSH and Verify the Cluster"
    kubectl get nodes -o wide
    kubectl get pods -A
    ```
@@ -96,13 +96,13 @@ Before installing the monitoring stack, resize your EC2 instance. `kube-promethe
 
    Helm runs as a client on your machine and communicates with the Kubernetes API (Application Programming Interface) server:
 
-   ```bash
+   ```bash title="Install Helm on the EC2 Instance"
    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
    ```
 
 2. **Verify the installation**
 
-   ```bash
+   ```bash title="Verify the Installation"
    helm version
    ```
 
@@ -116,14 +116,14 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
 
 1. **Add the Helm repository**
 
-   ```bash
+   ```bash title="Add the Helm Repository"
    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
    helm repo update
    ```
 
 2. **Install the monitoring stack**
 
-   ```bash
+   ```bash title="Install the Monitoring Stack"
    helm install monitoring prometheus-community/kube-prometheus-stack \
      --namespace monitoring --create-namespace \
      --set grafana.service.type=NodePort \
@@ -139,12 +139,12 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
    - Configures Prometheus to pick up ServiceMonitors and PrometheusRules from all namespaces (not just the monitoring namespace)
    - Pins the Grafana sidecar image to `1.28.0` to avoid a known broken image tag in the latest chart release
 
-   <Aside type="note">
+   <Aside type="note" title="Helm Install Takes a Few Minutes">
    The installation takes 2-3 minutes. Helm downloads container images for Prometheus, Grafana, kube-state-metrics, and Node Exporter.
    </Aside>
 3. **Wait for all Pods to be ready**
 
-   ```bash
+   ```bash title="Wait for All Pods to Be Ready"
    kubectl get pods -n monitoring -w
    ```
 
@@ -154,13 +154,13 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
 
    On the EC2 instance, run:
 
-   ```bash
+   ```bash title="Access Grafana"
    kubectl -n monitoring port-forward svc/monitoring-grafana 3000:80 --address 127.0.0.1
    ```
 
    Keep that terminal open. On your laptop, create an SSH tunnel to that forwarded port:
 
-   ```bash
+   ```bash title="Connect with SSH"
    ssh -i ~/Downloads/cs312-key.pem -N -L 3000:127.0.0.1:3000 ec2-user@<your-public-ip>
    ```
 
@@ -168,7 +168,7 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
 
    Optional direct access (requires Security Group inbound rule for TCP 31000):
 
-   ```
+   ```text title="Deploying the Monitoring Stack Output"
    http://<your-ec2-public-ip>:31000
    ```
 
@@ -179,7 +179,7 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
 
    The username is `admin`. Retrieve the generated password with:
 
-   ```bash
+   ```bash title="Retrieve Grafana Admin Password"
    kubectl get secret -n monitoring monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d
    ```
 </Steps>
@@ -220,7 +220,7 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
 
    In the query editor, enter this PromQL query:
 
-   ```promql
+   ```promql title="Pod Restart Count Query"
    kube_pod_container_status_restarts_total{namespace="default"}
    ```
 
@@ -232,7 +232,7 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
 
    Add another panel with this query:
 
-   ```promql
+   ```promql title="Node Memory Usage Query"
    100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)
    ```
 
@@ -242,7 +242,7 @@ The `kube-prometheus-stack` Helm chart bundles Prometheus, Grafana, Node Exporte
 
    Add a third panel:
 
-   ```promql
+   ```promql title="Pod Ready Status Query"
    kube_pod_status_ready{namespace="default", condition="true"}
    ```
 
@@ -264,11 +264,11 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
    PrometheusRule is a Kubernetes Custom Resource Definition (CRD) that Prometheus watches for alert definitions.
 
-   ```bash
+   ```bash title="Edit alerting-rules.yaml"
    vim alerting-rules.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: monitoring.coreos.com/v1
    kind: PrometheusRule
    metadata:
@@ -328,7 +328,7 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
 2. **Apply the alert rules**
 
-   ```bash
+   ```bash title="Apply the Alert Rules"
    kubectl apply -f alerting-rules.yaml
    ```
 
@@ -336,13 +336,13 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
    You can check that Prometheus loaded the rules by port-forwarding to the Prometheus UI. Open a second SSH session to the EC2 instance and run:
 
-   ```bash
+   ```bash title="Verify in Prometheus"
    kubectl port-forward svc/monitoring-kube-prometheus-prometheus -n monitoring 9091:9090 --address 127.0.0.1
    ```
 
    Keep that session open (Ctrl+C stops the tunnel). On your laptop, create an SSH tunnel:
 
-   ```bash
+   ```bash title="Connect with SSH"
    ssh -i ~/Downloads/cs312-key.pem -N -L 9091:127.0.0.1:9091 ec2-user@<your-public-ip>
    ```
 
@@ -358,7 +358,7 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
    You will force nginx containers to restart repeatedly by killing the main process inside them. The main nginx process runs as PID 1:
 
-   ```bash
+   ```bash title="Trigger the Crash Loop Alert"
    for i in $(seq 1 5); do
      kubectl exec $(kubectl get pods -l app=nginx -o jsonpath='{.items[0].metadata.name}') -- nginx -s stop
      sleep 10
@@ -381,13 +381,13 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
    Find the Pod that was restarted:
 
-   ```bash
+   ```bash title="Investigate with Logs"
    kubectl get pods
    ```
 
    View the logs from the previous (terminated) container instance:
 
-   ```bash
+   ```bash title="View Pod Logs"
    kubectl logs <restarted-pod-name> --previous
    ```
 
@@ -399,7 +399,7 @@ Alerts notify you when something goes wrong; but poorly designed alerts create *
 
 When you are done with all three labs (Labs 7-9), uninstall the monitoring stack and remove all workloads:
 
-```bash
+```bash title="Remove Monitoring Resources"
 helm uninstall monitoring -n monitoring
 kubectl delete namespace monitoring
 kubectl delete \

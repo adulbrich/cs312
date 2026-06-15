@@ -75,7 +75,7 @@ These five phases are not equal in duration. Detection might take milliseconds (
 
 Read as a set of posture changes rather than a rigid checklist, the lifecycle looks like this:
 
-```mermaid
+```mermaid title="The Incident Lifecycle as Posture Shifts"
 flowchart TB
   Signals["Alerts, dashboards,<br/>or user reports"] --> Detect["Detect<br/>Notice the signal"]
   Detect --> Triage["Triage<br/>Confirm scope and impact"]
@@ -136,7 +136,7 @@ Preparedness artifacts and mitigation options matter, but they do not coordinate
 
 Taken together, the role structure is a small coordination system with one shared source of truth:
 
-```mermaid
+```mermaid title="Incident Roles Diagram"
 flowchart TD
   IC["Incident Commander<br/>Sets priorities and makes response decisions"]
   Ops["Operations Lead<br/>Investigates and executes mitigations"]
@@ -259,7 +259,7 @@ Once the service is stable and the responders have stood down, the operational q
 
 At a high level, the postmortem process is a decision gate followed by a learning pipeline:
 
-```mermaid
+```mermaid title="Blameless Postmortems Diagram"
 flowchart TD
   Close["Incident is stable and closed"] --> Trigger{"Meets postmortem trigger?"}
   Trigger -->|No| Review["Short incident review<br/>Capture the lesson and small fixes"]

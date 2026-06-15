@@ -54,7 +54,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    In the AWS Console, launch an Ubuntu Server 26.04 LTS instance (t3.micro). Reuse your existing key pair (`cs312-key`) and Security Group (`cs312-wordpress-sg`, which already allows SSH on port 22 and HTTP on port 80). Under **Configure storage**, increase the root volume to **20 GiB** (the default 8 GiB fills up quickly when pulling multiple Docker images). Connect via SSH:
 
-   ```bash
+   ```bash title="Launch a Fresh EC2 Instance"
    ssh -i ~/Downloads/cs312-key.pem ubuntu@<your-public-ip>
    ```
 
@@ -62,7 +62,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    Docker Engine is the runtime that builds and runs containers. Install it using Docker's official convenience script:
 
-   ```bash
+   ```bash title="Install Docker Engine"
    curl -fsSL https://get.docker.com | sudo sh
    ```
 
@@ -72,25 +72,25 @@ Watch for the answers to these questions as you follow the tutorial.
 
    By default, Docker commands require `sudo`. Adding your user to the `docker` group lets you run Docker commands without it:
 
-   ```bash
+   ```bash title="Add Your User to the Docker Group"
    sudo usermod -aG docker ubuntu
    ```
 
    Log out and back in for the group change to take effect:
 
-   ```bash
+   ```bash title="Exit SSH Session"
    exit
    ```
 
    Then reconnect via SSH.
 
-   <Aside type="caution" title="Security implication">
+   <Aside type="caution" title="Docker Group Grants Root">
    Membership in the `docker` group is effectively root access. A user in this group can mount the host filesystem into a container and modify it without a password; there is no meaningful difference from running `sudo` freely. On a shared or production server, you would not do this; you would require explicit `sudo docker` invocations so that privilege escalation is intentional and auditable. This is acceptable here only because your EC2 instance is single-user and disposable.
    </Aside>
 
 4. **Verify Docker is working**
 
-   ```bash
+   ```bash title="Verify Docker Is Working"
    docker --version
    docker run --rm hello-world
    ```
@@ -107,7 +107,7 @@ Docker Compose is a tool for defining and running multi-container applications. 
 
 1. **Create a project directory**
 
-   ```bash
+   ```bash title="Create a Project Directory"
    mkdir ~/wordpress-lab && cd ~/wordpress-lab
    ```
 
@@ -115,31 +115,31 @@ Docker Compose is a tool for defining and running multi-container applications. 
 
    Hardcoding passwords in your Compose file is bad practice. Instead, store them in a `.env` file that Compose reads automatically:
 
-   ```bash
+   ```bash title="Create an Environment File for Credentials"
    vim .env
    ```
 
    Add the following (choose your own passwords):
 
-   ```
+   ```text title="WordPress .env Values"
    MYSQL_ROOT_PASSWORD=rootpass123
    MYSQL_DATABASE=wordpress
    MYSQL_USER=wp_user
    MYSQL_PASSWORD=wppass456
    ```
 
-   <Aside type="caution">
+   <Aside type="caution" title=".env Files Are Secrets">
    In a real deployment, you would never commit a `.env` file to version control. Add it to your `.gitignore`. For this lab, keeping credentials in `.env` is sufficient.
    </Aside>
 3. **Write the Compose file**
 
-   ```bash
+   ```bash title="Edit docker-compose.yml"
    vim docker-compose.yml
    ```
 
    Add the following:
 
-   ```yaml
+   ```yaml title="Compose Services"
    services:
      db:
        image: mariadb:11
@@ -185,7 +185,7 @@ Docker Compose is a tool for defining and running multi-container applications. 
 
 1. **Start the containers**
 
-   ```bash
+   ```bash title="Start the Containers"
    docker compose up -d
    ```
 
@@ -193,7 +193,7 @@ Docker Compose is a tool for defining and running multi-container applications. 
 
 2. **Check the containers are running**
 
-   ```bash
+   ```bash title="Check the Containers Are Running"
    docker compose ps
    ```
 
@@ -213,7 +213,7 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
 1. **Stop and restart without removing volumes**
 
-   ```bash
+   ```bash title="Stop and Restart without Removing Volumes"
    docker compose down
    docker compose up -d
    ```
@@ -222,7 +222,7 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
    List the volumes:
 
-   ```bash
+   ```bash title="Docker Volume Ls"
    docker volume ls
    ```
 
@@ -232,7 +232,7 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
    Now run `down` with the `-v` flag, which removes named volumes:
 
-   ```bash
+   ```bash title="Stop and Restart WITH Volume Removal"
    docker compose down -v
    docker compose up -d
    ```
@@ -241,24 +241,24 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
    List the volumes again:
 
-   ```bash
+   ```bash title="Docker Volume Ls"
    docker volume ls
    ```
 
    The volume names are the same, but these are new, empty volumes. Compare this output to the previous step.
 
-   <Aside type="danger">
+   <Aside type="danger" title="down -v Deletes Volumes">
    This is one of the most common mistakes in container operations: running `docker compose down -v` when you meant `docker compose down`. The `-v` flag permanently deletes all named volumes and the data they contain. There is no undo. In production, always have backups.
    </Aside>
 
    <Aside type="note" title="External volumes (optional)">
    Named volumes defined inside a Compose file are owned by that Compose project and removed by `down -v`. If you need data to survive even that, you can use an **external volume**: one you create manually and declare as external in the Compose file so Compose never manages its lifecycle.
 
-   ```bash
+   ```bash title="External volumes (optional)"
    docker volume create wordpress_db_data
    ```
 
-   ```yaml
+   ```yaml title="External Compose Volume"
    volumes:
      db_data:
        external: true
@@ -283,7 +283,7 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
 2. **Reboot the instance**
 
-   ```bash
+   ```bash title="Reboot the Instance"
    sudo reboot
    ```
 
@@ -291,7 +291,7 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
 3. **Check that containers restarted**
 
-   ```bash
+   ```bash title="Check That Containers Restarted"
    docker ps --format "table {{.Names}}\t{{.Status}}"
    ```
 
@@ -311,14 +311,14 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
    The `docker exec` command runs a command inside a running container. The `-it` flags give you an interactive terminal:
 
-   ```bash
+   ```bash title="Open a Shell Inside the WordPress Container"
    docker exec -it $(docker compose ps -q wordpress) bash
    ```
 
-   <Aside type="note">
+   <Aside type="note" title="Resolving the WordPress Container">
    The `$(docker compose ps -q wordpress)` subshell resolves to the container ID. This only works when run from the `~/wordpress-lab` directory where your `docker-compose.yml` lives. Alternatively, use `docker ps` to find the container name and pass it directly:
 
-   ```bash
+   ```bash title="Exec into Container by Name"
    docker exec -it <container-name> bash
    ```
    </Aside>
@@ -327,7 +327,7 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
 2. **Find the WordPress version**
 
-   ```bash
+   ```bash title="Find the WordPress Version"
    cat /var/www/html/wp-includes/version.php | grep wp_version
    ```
 
@@ -335,7 +335,7 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
 3. **Exit the container**
 
-   ```bash
+   ```bash title="Exit the Container"
    exit
    ```
 
@@ -345,7 +345,7 @@ Volumes are the mechanism Docker uses to persist data beyond the life of a conta
 
 When you are done with this lab, stop the containers and remove unused images to free disk space for the next lab:
 
-```bash
+```bash title="Stop Compose Stack"
 docker compose down -v
 docker system prune -a
 ```

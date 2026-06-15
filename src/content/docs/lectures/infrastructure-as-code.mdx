@@ -117,7 +117,7 @@ By default, Terraform writes state to a file called `terraform.tfstate` in the p
 
 For any shared project you should store state in a **remote backend**. On AWS, a current common pattern is an S3 backend with encryption enabled, S3 bucket versioning turned on for recovery, and native lockfiles enabled with `use_lockfile = true`. Older Terraform setups often paired S3 with DynamoDB for locking, but DynamoDB-based locking is now deprecated.
 
-```hcl
+```hcl title="Terraform Backend Configuration"
 terraform {
   backend "s3" {
     bucket       = "my-terraform-state"
@@ -163,7 +163,7 @@ Resources differ in how risky they are to modify or destroy. A security group ca
 
 The most important rule is `prevent_destroy`. A resource marked `prevent_destroy = true` causes Terraform to error at plan time rather than produce a plan that would destroy it, even when the destruction would logically follow from a configuration change. It is the right safeguard for any resource that other infrastructure depends on: the VPC that every subnet lives in, the RDS instance that holds production data, the shared IAM role that a fleet of services assumes.
 
-```hcl
+```hcl title="aws_db_instance.primary"
 resource "aws_db_instance" "primary" {
   # ... configuration ...
   lifecycle {
@@ -174,7 +174,7 @@ resource "aws_db_instance" "primary" {
 
 The second common rule is `ignore_changes`. It tells Terraform to stop tracking drift on specific attributes. A common example is an Auto Scaling Group whose desired capacity is adjusted dynamically by scaling policies or temporarily by an operator during an incident. If you do not want Terraform to force that value back on the next apply, you add that attribute to the `ignore_changes` list. This is a pragmatic escape hatch for resources that are partially managed outside Terraform without abandoning Terraform management entirely.
 
-```hcl
+```hcl title="aws_autoscaling_group.web"
 resource "aws_autoscaling_group" "web" {
   # ... configuration ...
   lifecycle {
@@ -195,7 +195,7 @@ The implicit dependency mechanism is also how multi-tier architectures are expre
 
 Occasionally you need a dependency that is not visible in the attribute references. The most common case is when a resource uses a literal string that coincidentally refers to another managed resource. If an EC2 instance specifies `iam_instance_profile = "my-role-name"` as a plain string rather than `iam_instance_profile = aws_iam_role.web_role.name` as an attribute reference, Terraform sees a string with no connection to any other resource in the configuration and cannot infer the dependency. You declare it explicitly with `depends_on`:
 
-```hcl
+```hcl title="aws_instance.web"
 resource "aws_instance" "web" {
   # ... other arguments ...
   iam_instance_profile = "my-role-name"  # plain string: no implicit dependency inferred
@@ -215,7 +215,7 @@ As configurations grow, repeating the same blocks across projects becomes tediou
 
 A module is simply a directory containing `.tf` files. The directory you are working in is the **root module**. You can create a child module by placing files in a subdirectory and calling it from the root:
 
-```
+```text title="Modules Output"
 project/
   main.tf          # root module
   modules/
@@ -227,7 +227,7 @@ project/
 
 The child module declares its accepted inputs in `variables.tf` and exposes its results through `outputs.tf`, establishing the contract that any caller must satisfy:
 
-```hcl
+```hcl title="variable.instance_type"
 # modules/web_server/variables.tf
 variable "instance_type" {
   description = "EC2 instance size"
@@ -240,7 +240,7 @@ variable "ssh_cidr" {
 }
 ```
 
-```hcl
+```hcl title="output.public_ip"
 # modules/web_server/outputs.tf
 output "public_ip" {
   description = "Public IP of the provisioned instance"
@@ -250,7 +250,7 @@ output "public_ip" {
 
 The root module calls the child module by passing values for those variables and reading back the outputs:
 
-```hcl
+```hcl title="output.web_ip"
 module "web" {
   source        = "./modules/web_server"
   instance_type = "t3.micro"

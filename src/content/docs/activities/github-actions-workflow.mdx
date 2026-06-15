@@ -39,7 +39,7 @@ Before writing any workflow YAML, you need something to build and test. You will
 
 2. **Clone the repository:**
 
-   ```bash
+   ```bash title="Clone the Repository"
    git clone https://github.com/YOUR_GITHUB_USERNAME/cs312-ci-activity.git
    cd cs312-ci-activity
    ```
@@ -48,7 +48,7 @@ Before writing any workflow YAML, you need something to build and test. You will
 
 3. **Create `app.py`:**
 
-   ```python
+   ```python title="app.py"
    from flask import Flask, jsonify
 
    app = Flask(__name__)
@@ -67,7 +67,7 @@ Before writing any workflow YAML, you need something to build and test. You will
 
 4. **Create `test_app.py`:**
 
-   ```python
+   ```python title="test_app.py"
    from app import app
 
 
@@ -82,7 +82,7 @@ Before writing any workflow YAML, you need something to build and test. You will
 
 5. **Create `requirements.txt`:**
 
-   ```
+   ```text title="requirements.txt"
    flask==3.1.0
    pytest==8.3.4
    flake8==7.1.0
@@ -92,7 +92,7 @@ Before writing any workflow YAML, you need something to build and test. You will
 
 6. **Create the `Dockerfile`:**
 
-   ```dockerfile
+   ```dockerfile title="Dockerfile"
    FROM python:3.12-slim
 
    WORKDIR /app
@@ -111,7 +111,7 @@ Before writing any workflow YAML, you need something to build and test. You will
 
 7. **Commit and push everything:**
 
-   ```bash
+   ```bash title="Commit and Push Everything"
    git add app.py test_app.py requirements.txt Dockerfile
    git commit -m "Add application source and Dockerfile"
    git push origin main
@@ -131,7 +131,7 @@ Notice the `permissions` block near the top of the file. GitHub generates an aut
 
 1. **Create `.github/workflows/ci.yml`**, creating the `.github/workflows/` directories if your editor asks:
 
-   ```yaml
+   ```yaml title="Set Up Python Step"
    name: CI
 
    on:
@@ -174,7 +174,7 @@ Notice the `permissions` block near the top of the file. GitHub generates an aut
 
 3. **Commit and push:**
 
-   ```bash
+   ```bash title="Commit and Push"
    git add .github/workflows/ci.yml
    git commit -m "Add CI workflow with lint and test"
    git push
@@ -184,7 +184,7 @@ Notice the `permissions` block near the top of the file. GitHub generates an aut
 
 5. **Expand the Lint and Test steps.** The Lint step should complete silently: no output means `flake8` found no issues. The Test step should print something like:
 
-   ```
+   ```text title="Expand the Lint and Test Steps Output"
    test_app.py::test_index PASSED [100%]
    1 passed in 0.11s
    ```
@@ -211,7 +211,7 @@ The `build` job authenticates using `GITHUB_TOKEN`, the same short-lived secret 
 
 1. **Add the `build` job** to `.github/workflows/ci.yml`. Append these lines after the last line of the `quality` job block, at the same indentation level as `quality:` under `jobs:`:
 
-   ```yaml
+   ```yaml title="Set Up Docker Buildx Step"
      build:
        needs: quality
        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -273,7 +273,7 @@ The `build` job authenticates using `GITHUB_TOKEN`, the same short-lived secret 
 
 2. **Commit and push:**
 
-   ```bash
+   ```bash title="Commit and Push"
    git commit -am "Add Docker build, smoke test, and push job"
    git push
    ```
@@ -282,7 +282,7 @@ The `build` job authenticates using `GITHUB_TOKEN`, the same short-lived secret 
 
 4. **Expand the Smoke-test step** inside the `build` job. You will see `docker run` start the container, followed by `curl` output showing the JSON response from your application:
 
-   ```
+   ```text title="Expand the Smoke-test Step Output"
    {"status":"ok","version":"1.0.0"}
    ```
 
@@ -292,7 +292,7 @@ The `build` job authenticates using `GITHUB_TOKEN`, the same short-lived secret 
 
 6. **Push a small change** and watch the layer cache in action:
 
-   ```bash
+   ```bash title="Push a Small Change"
    # Edit app.py to change "1.0.0" to "1.0.1", then:
    git commit -am "Bump version"
    git push
@@ -324,7 +324,7 @@ A single Python version tells you the code works on 3.12. It does not tell you w
 
 1. **Update the `quality` job** in `.github/workflows/ci.yml` to replace the hardcoded Python version with a matrix. Replace the entire `quality:` block with this version:
 
-   ```yaml
+   ```yaml title="Set Up Python Step"
      quality:
        runs-on: ubuntu-latest
        strategy:
@@ -356,7 +356,7 @@ A single Python version tells you the code works on 3.12. It does not tell you w
 
 2. **Commit and push:**
 
-   ```bash
+   ```bash title="Commit and Push"
    git commit -am "Add matrix builds across Python 3.11 and 3.12"
    git push
    ```
@@ -383,14 +383,14 @@ You will add two things to the `quality` job: a JUnit XML report from pytest, an
 
 1. **Update the `Test` step** inside the `quality` job to emit an XML report alongside the normal output:
 
-   ```yaml
+   ```yaml title="Test Step"
          - name: Test
            run: pytest -v --junitxml=pytest-report.xml
    ```
 
 2. **Add an upload step** at the end of the `quality` job's `steps:` list, after the Test step:
 
-   ```yaml
+   ```yaml title="Upload Test Report Step"
          - name: Upload test report
            if: always()
            uses: actions/upload-artifact@v7
@@ -405,7 +405,7 @@ You will add two things to the `quality` job: a JUnit XML report from pytest, an
 
 3. **Commit and push:**
 
-   ```bash
+   ```bash title="Commit and Push"
    git commit -am "Emit JUnit report and upload as artifact"
    git push
    ```
@@ -428,21 +428,21 @@ The pipeline's real value appears when something goes wrong. You will introduce 
 
 1. **Introduce a lint error.** Open `app.py` and add an unused import at the top:
 
-   ```python
+   ```python title="app.py"
    import os
    from flask import Flask, jsonify
    ```
 
 2. **Commit and push:**
 
-   ```bash
+   ```bash title="Commit and Push"
    git commit -am "Oops: add unused import"
    git push
    ```
 
 3. **Open the Actions tab.** Both `quality (3.11)` and `quality (3.12)` jobs will fail. Click into either run and expand the **Lint** step. You will see output like:
 
-   ```
+   ```text title="Open the Actions Tab Output"
    ./app.py:1:1: F401 'os' imported but unused
    ```
 
@@ -450,13 +450,13 @@ The pipeline's real value appears when something goes wrong. You will introduce 
 
 4. **Fix the file.** Remove `import os`, leaving only the original two lines:
 
-   ```python
+   ```python title="Fix the File"
    from flask import Flask, jsonify
    ```
 
 5. **Commit and push the fix:**
 
-   ```bash
+   ```bash title="Commit and Push the Fix"
    git commit -am "Remove unused import"
    git push
    ```
@@ -477,7 +477,7 @@ You have built the full feedback loop from the lecture: lint, test across Python
 
 **Add concurrency control to the `build` job.** Right now, if you push two commits to `main` within thirty seconds, two `build` jobs can race each other. Add a `concurrency` block to the `build` job to prevent this:
 
-```yaml
+```yaml title="Add Concurrency Control to the Build Job"
   build:
     needs: quality
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -494,7 +494,7 @@ With `cancel-in-progress: false`, GitHub allows the currently running build to f
 
 {/* There is nothing to rotate and nothing to leak. To switch this `build` job from GHCR to ECR, first replace its permissions block with this one:
 
-```yaml
+```yaml title="Push to Amazon ECR Using OIDC Instead of GHCR"
     permissions:
       contents: read
       id-token: write
@@ -502,7 +502,7 @@ With `cancel-in-progress: false`, GitHub allows the currently running build to f
 
 Then replace the login, build, and push steps with these:
 
-```yaml
+```yaml title="Configure AWS Credentials Step"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:

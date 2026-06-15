@@ -27,7 +27,7 @@ You need:
 - An SSH client on your laptop
 - Docker installed on an EC2 instance (from Lab 3, or install fresh with a **20 GiB** root volume)
 
-<Aside type="note">
+<Aside type="note" title="Free Disk Space Before Starting">
 If you skipped the Lab 3 cleanup step, run `docker system prune -a` before continuing to ensure you have enough disk space. Named volumes are unaffected.
 </Aside>
 
@@ -55,7 +55,7 @@ Amazon ECR is a fully managed container image registry. It integrates with AWS I
 
    SSH into your EC2 instance and install the AWS CLI v2 using the official installer:
 
-   ```bash
+   ```bash title="Install the AWS CLI"
    sudo apt install -y unzip
    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
    unzip awscliv2.zip
@@ -64,7 +64,7 @@ Amazon ECR is a fully managed container image registry. It integrates with AWS I
 
    Verify it works:
 
-   ```bash
+   ```bash title="AWS --version"
    aws --version
    ```
 
@@ -77,14 +77,14 @@ Amazon ECR is a fully managed container image registry. It integrates with AWS I
    3. Copy the credentials block (it contains `aws_access_key_id`, `aws_secret_access_key`, and `aws_session_token`)
    4. On your EC2 instance, paste them into the credentials file:
 
-   ```bash
+   ```bash title="Configure AWS Credentials"
    mkdir -p ~/.aws
    vim ~/.aws/credentials
    ```
 
    The file should look like this (with your actual values from the portal):
 
-   ```ini
+   ```ini title="The File Should Look Like This (with Your Actual Values from"
    [default]
    aws_access_key_id=ASIA...
    aws_secret_access_key=...
@@ -93,17 +93,17 @@ Amazon ECR is a fully managed container image registry. It integrates with AWS I
 
    Also set the default region:
 
-   ```bash
+   ```bash title="AWS Configure Set Region Us-east-1"
    aws configure set region us-east-1
    ```
 
-   <Aside type="caution">
+   <Aside type="caution" title="Refresh AWS Academy Credentials">
    AWS Academy credentials expire when your Learner Lab session ends. Each time you start a new lab session, you must repeat this step with the fresh credentials shown in the portal.
    </Aside>
 
 3. **Create a repository via the CLI**
 
-   ```bash
+   ```bash title="Create a Repository Via the CLI"
    aws ecr create-repository --repository-name cs312-wordpress-lab --region us-east-1
    ```
 
@@ -116,7 +116,7 @@ Amazon ECR is a fully managed container image registry. It integrates with AWS I
 
    Docker needs credentials to push images to your private registry. The AWS CLI can generate a temporary token:
 
-   ```bash
+   ```bash title="Authenticate Docker to ECR"
    aws ecr get-login-password --region us-east-1 | \
      docker login --username AWS --password-stdin \
      <your-account-id>.dkr.ecr.us-east-1.amazonaws.com
@@ -124,7 +124,7 @@ Amazon ECR is a fully managed container image registry. It integrates with AWS I
 
    Replace `<your-account-id>` with the number from your repository URI. You should see "Login Succeeded."
 
-   <Aside type="tip">
+   <Aside type="tip" title="ECR Login Tokens Expire">
    ECR login tokens expire after 12 hours. If you get "authorization token has expired" errors later, re-run this command.
    </Aside>
 </Steps>
@@ -139,7 +139,7 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
    Pull a specific WordPress version from Docker Hub, verify it, tag it for your ECR repository, and push it:
 
-   ```bash
+   ```bash title="Pull and Tag Version 1"
    docker pull wordpress:6.4.3
    docker run --rm wordpress:6.4.3 grep wp_version /usr/src/wordpress/wp-includes/version.php
    docker tag wordpress:6.4.3 <your-repo-uri>:wp-6.4-v1
@@ -152,7 +152,7 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
    Repeat with a different WordPress version:
 
-   ```bash
+   ```bash title="Pull and Tag Version 2"
    docker pull wordpress:6.5.5
    docker run --rm wordpress:6.5.5 grep wp_version /usr/src/wordpress/wp-includes/version.php
    docker tag wordpress:6.5.5 <your-repo-uri>:wp-6.5-v2
@@ -161,7 +161,7 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
 3. **Verify both images are in ECR**
 
-   ```bash
+   ```bash title="Verify Both Images Are in ECR"
    aws ecr describe-images --repository-name cs312-wordpress-lab \
      --query 'imageDetails[*].[imageTags,imagePushedAt,imageDigest]' \
      --output table
@@ -179,13 +179,13 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
    If you still have a `docker-compose.yml` from Lab 3, update the `wordpress` service image. Otherwise, create a new one:
 
-   ```bash
+   ```bash title="Create a Compose File Using ECR Images"
    mkdir ~/ecr-lab && cd ~/ecr-lab
    ```
 
    Create a `.env` file with your database credentials (same as Lab 3), then create `docker-compose.yml`:
 
-   ```yaml
+   ```yaml title="Compose Services"
    services:
      db:
        image: mariadb:11
@@ -220,7 +220,7 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
 2. **Start the stack and create content**
 
-   ```bash
+   ```bash title="Start the Stack and Create Content"
    docker compose up -d
    ```
 
@@ -232,13 +232,13 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
    Edit `docker-compose.yml` and change the WordPress image tag from `wp-6.4-v1` to `wp-6.5-v2`:
 
-   ```bash
+   ```bash title="Edit docker-compose.yml"
    vim docker-compose.yml
    ```
 
    Then pull the new image from ECR and apply the change:
 
-   ```bash
+   ```bash title="Docker Compose Pull"
    docker compose pull
    docker compose up -d -V
    ```
@@ -247,7 +247,7 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
    Verify the WordPress version inside the container:
 
-   ```bash
+   ```bash title="Verify the WordPress Version Inside the Container"
    docker exec $(docker compose ps -q wordpress) \
      cat /var/www/html/wp-includes/version.php | grep wp_version
    ```
@@ -256,7 +256,7 @@ Image tagging is how you manage versions in a container registry. A tag is a hum
 
    Change the image tag back to `wp-6.4-v1` in your Compose file and run:
 
-   ```bash
+   ```bash title="Roll Back to Version 1"
    docker compose pull
    docker compose up -d -V
    ```
@@ -275,7 +275,7 @@ Amazon S3 is an object storage service designed for durability (99.999999999%, o
 
    Bucket names must be globally unique across all AWS accounts. Choose a name that includes your username or student ID:
 
-   ```bash
+   ```bash title="Create an S3 Bucket"
    aws s3 mb s3://cs312-<your-username>-backups --region us-east-1
    ```
 
@@ -283,25 +283,25 @@ Amazon S3 is an object storage service designed for durability (99.999999999%, o
 
    Use `mysqldump` to export the WordPress database from inside the MariaDB container:
 
-   ```bash
+   ```bash title="Dump the Database"
    docker exec $(docker compose ps -q db) \
      mariadb-dump -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" wordpress > backup.sql
    ```
 
    This creates a SQL file on your EC2 instance containing every table, row, and setting in the WordPress database.
 
-   <Aside type="tip">
+   <Aside type="tip" title="Verify the Database Backup">
    Check the backup is not empty: `wc -l backup.sql` should show hundreds or thousands of lines. If it shows fewer than 10, your dump command had an error (check the password) or WordPress has not been set up yet (complete the installation wizard first).
    </Aside>
 3. **Upload to S3**
 
-   ```bash
+   ```bash title="Upload to S3"
    aws s3 cp backup.sql s3://cs312-<your-username>-backups/backups/
    ```
 
    Verify it arrived:
 
-   ```bash
+   ```bash title="Verify It Arrived"
    aws s3 ls s3://cs312-<your-username>-backups/backups/
    ```
 
@@ -309,7 +309,7 @@ Amazon S3 is an object storage service designed for durability (99.999999999%, o
 
    Lifecycle rules automate data management. You will create a rule that automatically deletes backups older than 7 days to prevent storage costs from growing indefinitely:
 
-   ```bash
+   ```bash title="Configure a Lifecycle Rule"
    aws s3api put-bucket-lifecycle-configuration \
      --bucket cs312-<your-username>-backups \
      --lifecycle-configuration '{
@@ -334,7 +334,7 @@ A backup you have never tested is not a backup; it is a hope. This section prove
 
 1. **Destroy the database volume**
 
-   ```bash
+   ```bash title="Destroy the Database Volume"
    docker compose down -v
    ```
 
@@ -342,7 +342,7 @@ A backup you have never tested is not a backup; it is a hope. This section prove
 
 2. **Start fresh containers**
 
-   ```bash
+   ```bash title="Start Fresh Containers"
    docker compose up -d
    ```
 
@@ -350,13 +350,13 @@ A backup you have never tested is not a backup; it is a hope. This section prove
 
 3. **Download the backup from S3**
 
-   ```bash
+   ```bash title="Download the Backup from S3"
    aws s3 cp s3://cs312-<your-username>-backups/backups/backup.sql ./restore.sql
    ```
 
 4. **Import the backup**
 
-   ```bash
+   ```bash title="Import the Backup"
    docker exec -i $(docker compose ps -q db) \
      mariadb -u root -p"$(grep MYSQL_ROOT_PASSWORD .env | cut -d= -f2)" wordpress < restore.sql
    ```
@@ -371,13 +371,13 @@ A backup you have never tested is not a backup; it is a hope. This section prove
 
 When you are done:
 
-```bash
+```bash title="Verify the Restore"
 docker compose down
 ```
 
 Delete the ECR repository and S3 bucket as well to avoid charges:
 
-```bash
+```bash title="Delete Registry and Backup Resources"
 aws ecr delete-repository --repository-name cs312-wordpress-lab --force --region us-east-1
 aws s3 rb s3://cs312-<your-username>-backups --force
 ```

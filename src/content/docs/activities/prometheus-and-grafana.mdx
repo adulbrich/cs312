@@ -42,7 +42,7 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
 
 1. **Verify the tools you will use throughout the activity:**
 
-   ```bash
+   ```bash title="Verify the Tools You Will Use Throughout the Activity"
    docker version
    minikube version
    kubectl version --client
@@ -53,13 +53,13 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
 
 2. **Make sure minikube is running:**
 
-   ```bash
+   ```bash title="Make Sure Minikube Is Running"
    minikube status
    ```
 
    If the cluster is stopped, start it now:
 
-   ```bash
+   ```bash title="If the Cluster Is Stopped, Start It Now"
    minikube start --driver=docker --memory=4096 --cpus=2
    ```
 
@@ -67,7 +67,7 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
 
 3. **Create a working directory for this activity:**
 
-   ```bash
+   ```bash title="Create a Working Directory for This Activity"
    mkdir -p ~/cs312-monitoring
    cd ~/cs312-monitoring
    ```
@@ -76,7 +76,7 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
 
 4. **Write the Prometheus values file:**
 
-   ```bash
+   ```bash title="Write prometheus-values.yaml"
    cat <<'EOF' > prometheus-values.yaml
    alertmanager:
      enabled: false
@@ -116,7 +116,7 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
 
 5. **Write the Grafana values file:**
 
-   ```bash
+   ```bash title="Write grafana-values.yaml"
    cat <<'EOF' > grafana-values.yaml
    adminPassword: cs312grafana
 
@@ -142,7 +142,7 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
 
 6. **Add the Helm repositories and install the two releases:**
 
-   ```bash
+   ```bash title="Add the Helm Repositories and Install the Two Releases"
    helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
    helm repo add grafana-community https://grafana-community.github.io/helm-charts
    helm repo update
@@ -161,7 +161,7 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
 
 7. **Verify the releases and wait for the Pods to be ready:**
 
-   ```bash
+   ```bash title="Verify the Releases and Wait for the Pods to Be Ready"
    helm list -n monitoring
    kubectl get pods -n monitoring -w
    ```
@@ -172,13 +172,13 @@ Before you look at any metrics, bring up a clean local monitoring environment. I
 
    In one terminal:
 
-   ```bash
+   ```bash title="Start Two Port-forwards So You Can Use the Web Interfaces"
    kubectl -n monitoring port-forward svc/grafana 3000:80
    ```
 
    In a second terminal:
 
-   ```bash
+   ```bash title="In a Second Terminal"
    kubectl -n monitoring port-forward svc/metrics-prometheus-server 9090:80
    ```
 
@@ -202,7 +202,7 @@ Prometheus is already running in the `monitoring` namespace from the previous se
 
 1. **Write the workload manifest:**
 
-   ```bash
+   ```bash title="Write podinfo.yaml"
    cat <<'EOF' > podinfo.yaml
    apiVersion: v1
    kind: Namespace
@@ -276,7 +276,7 @@ Prometheus is already running in the `monitoring` namespace from the previous se
 
 2. **Apply the manifest and wait for the Deployment to become ready:**
 
-   ```bash
+   ```bash title="Deploy podinfo"
    kubectl apply -f podinfo.yaml
    kubectl rollout status deployment/podinfo -n observability
    kubectl get pods,svc -n observability
@@ -288,7 +288,7 @@ Prometheus is already running in the `monitoring` namespace from the previous se
 
    In a third terminal:
 
-   ```bash
+   ```bash title="Open Port-forwards to Both the Application and Its Metrics"
    kubectl -n observability port-forward svc/podinfo 9898:9898 9797:9797
    ```
 
@@ -304,7 +304,7 @@ Prometheus is already running in the `monitoring` namespace from the previous se
 
    In the Prometheus expression browser, run:
 
-   ```promql
+   ```promql title="Check podinfo Scrape Target"
    up{service="podinfo", namespace="observability"}
    ```
 
@@ -312,7 +312,7 @@ Prometheus is already running in the `monitoring` namespace from the previous se
 
 6. **Look at the raw data Prometheus is collecting:**
 
-   ```bash
+   ```bash title="Look at the Raw Data Prometheus Is Collecting"
    curl -s http://127.0.0.1:9797/metrics | head -50
    ```
 
@@ -340,7 +340,7 @@ Once the target is being scraped, make it do something interesting. In this sect
 
 A normal PromQL query usually has one of these shapes:
 
-```promql
+```promql title="PromQL Selector Pattern"
 # Instant selector ("what is true right now")
 # this selects time series by metric name and exact label match
 # we an use regex match with =~ instead of = 
@@ -361,7 +361,7 @@ You can find all available [query functions in the Prometheus documentation](htt
 
 1. **Send a burst of mixed traffic to the service:**
 
-   ```bash
+   ```bash title="Send a Burst of Mixed Traffic to the Service"
    for i in {1..20}; do curl -s http://127.0.0.1:9898/ >/dev/null; done
    for i in {1..5}; do curl -s http://127.0.0.1:9898/status/500 >/dev/null; done
    for i in {1..5}; do curl -s http://127.0.0.1:9898/delay/1 >/dev/null; done
@@ -373,11 +373,11 @@ You can find all available [query functions in the Prometheus documentation](htt
 
    Before building dashboard panels, run two small validation queries: one to confirm target identity labels, and one to confirm request labels (`path`, `status`) and spot probe traffic.
 
-   ```promql
+   ```promql title="Target Identity Query"
    sum by (job, instance, service, namespace) (up{service="podinfo", namespace="observability"})
    ```
 
-   ```promql
+   ```promql title="Request Labels Query"
    sum by (path, status) (rate(http_request_duration_seconds_count{service="podinfo", namespace="observability"}[5m]))
    ```
 
@@ -396,7 +396,7 @@ You can find all available [query functions in the Prometheus documentation](htt
 
    **Panel 1: `Request rate`**
 
-   ```promql
+   ```promql title="Request Rate Query"
    sum(rate(http_request_duration_seconds_count{service="podinfo", namespace="observability", path=~"root|status|delay"}[5m]))
    ```
 
@@ -404,7 +404,7 @@ You can find all available [query functions in the Prometheus documentation](htt
 
    **Panel 2: `5xx rate`**
 
-   ```promql
+   ```promql title="5xx Rate Query"
    sum(rate(http_request_duration_seconds_count{service="podinfo", namespace="observability", path=~"root|status|delay", status=~"5.."}[5m]))
    ```
 
@@ -412,7 +412,7 @@ You can find all available [query functions in the Prometheus documentation](htt
 
    **Panel 3: `p95 latency`**
 
-   ```promql
+   ```promql title="p95 Latency Query"
    histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{service="podinfo", namespace="observability", path=~"root|status|delay"}[5m])))
    ```
 
@@ -424,7 +424,7 @@ You can find all available [query functions in the Prometheus documentation](htt
 
    **Panel 4: `Podinfo target up`**
  
-   ```promql
+   ```promql title="Target Up Query"
    max(up{service="podinfo", namespace="observability"}) or on() vector(0)
    ```
 
@@ -434,7 +434,7 @@ You can find all available [query functions in the Prometheus documentation](htt
 
    **Panel 5: `Node CPU utilization (%)`**
 
-   ```promql
+   ```promql title="Node CPU Utilization Query"
    100 * (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])))
    ```
 
@@ -442,7 +442,7 @@ You can find all available [query functions in the Prometheus documentation](htt
 
     **Panel 6: `Node memory used (%)`**
 
-   ```promql
+   ```promql title="Node Memory Used Query"
    100 * (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes))
    ```
 
@@ -454,7 +454,7 @@ You can find all available [query functions in the Prometheus documentation](htt
 
 7. **Generate a second burst of traffic while watching the dashboard refresh:**
 
-   ```bash
+   ```bash title="Generate Dashboard Traffic"
    for i in {1..10}; do curl -s http://127.0.0.1:9898/ >/dev/null; done
    for i in {1..3}; do curl -s http://127.0.0.1:9898/status/500 >/dev/null; done
    ```
@@ -483,7 +483,7 @@ Dashboards are useful only when someone is looking at them. In this stripped-dow
 
 2. **Confirm where that rule came from:**
 
-   ```bash
+   ```bash title="Confirm Where That Rule Came from"
    helm get values metrics -n monitoring
    ```
 
@@ -491,7 +491,7 @@ Dashboards are useful only when someone is looking at them. In this stripped-dow
 
 3. **Scale the Deployment to zero replicas:**
 
-   ```bash
+   ```bash title="Scale the Deployment to Zero Replicas"
    kubectl scale deployment/podinfo --replicas=0 -n observability
    kubectl get pods -n observability -w
    ```
@@ -506,7 +506,7 @@ Dashboards are useful only when someone is looking at them. In this stripped-dow
 
 5. **Restore the service:**
 
-   ```bash
+   ```bash title="Restore the Service"
    kubectl scale deployment/podinfo --replicas=1 -n observability
    kubectl rollout status deployment/podinfo -n observability
    ```
@@ -517,13 +517,13 @@ Dashboards are useful only when someone is looking at them. In this stripped-dow
 
    Delete the demo application namespace:
 
-   ```bash
+   ```bash title="Clean Up When You Are Finished"
    kubectl delete namespace observability --wait=true
    ```
 
    To remove the monitoring stack as well:
 
-   ```bash
+   ```bash title="Helm Uninstall Grafana -n Monitoring"
    helm uninstall grafana -n monitoring
    helm uninstall metrics -n monitoring
    kubectl delete namespace monitoring --wait=true

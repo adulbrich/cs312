@@ -56,20 +56,20 @@ Watch for the answers to these questions as you follow the tutorial.
    Terraform runs on your local machine (or a bastion host) and talks to the AWS Application Programming Interface (API) remotely. Install it based on your operating system:
 
    **macOS (with Homebrew):**
-   ```bash
+   ```bash title="Macos (with Homebrew)"
    brew tap hashicorp/tap
    brew install hashicorp/tap/terraform
    ```
 
    **Ubuntu/Debian:**
-   ```bash
+   ```bash title="Ubuntu/Debian"
    wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
    sudo apt update && sudo apt install terraform
    ```
 
    **Windows (with Chocolatey):**
-   ```bash
+   ```bash title="Windows (with Chocolatey)"
    choco install terraform
    ```
 
@@ -77,7 +77,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
 2. **Verify the installation**
 
-   ```bash
+   ```bash title="Verify the Installation"
    terraform --version
    ```
 
@@ -85,14 +85,14 @@ Watch for the answers to these questions as you follow the tutorial.
 
    Terraform needs AWS credentials to create resources. In AWS Academy, download your credentials from the Learner Lab page (click **AWS Details**, then **Show** next to AWS CLI). Copy the credentials block and paste it into `~/.aws/credentials`:
 
-   ```bash
+   ```bash title="Configure AWS Credentials"
    mkdir -p ~/.aws
    vim ~/.aws/credentials
    ```
 
    If you only use AWS for this course, paste the credentials under the `[default]` profile:
 
-   ```ini
+   ```ini title="Terraform HashiCorp Repository"
    [default]
    aws_access_key_id=ASIA...
    aws_secret_access_key=...
@@ -101,7 +101,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    If you already use the AWS CLI for another account (personal projects, a job, etc.), use a named profile instead to avoid overwriting your existing credentials:
 
-   ```ini
+   ```ini title="Install Terraform Package"
    [cs312]
    aws_access_key_id=ASIA...
    aws_secret_access_key=...
@@ -110,7 +110,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    With a named profile, you must tell Terraform which profile to use. Add a `profile` argument to the provider block in `main.tf`:
 
-   ```hcl
+   ```hcl title="main.tf"
    provider "aws" {
      region  = "us-east-1"
      profile = "cs312"
@@ -119,7 +119,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    You can also set the `AWS_PROFILE=cs312` environment variable instead of hardcoding it in the provider block.
 
-   <Aside type="caution">
+   <Aside type="caution" title="Refresh AWS Academy Credentials">
    AWS Academy credentials are temporary and rotate each time you start a new Learner Lab session. Each time you restart the lab, paste the fresh credentials block into `~/.aws/credentials` under whichever profile you chose (`default` or `cs312`). If Terraform commands fail with "ExpiredToken," this is why.
    </Aside>
 </Steps>
@@ -134,19 +134,19 @@ The stack you are about to define provisions two EC2 instances and two security 
 
 1. **Create a project directory**
 
-   ```bash
+   ```bash title="main.tf"
    mkdir ~/terraform-lab && cd ~/terraform-lab
    ```
 
 2. **Write `main.tf`**
 
-   ```bash
+   ```bash title="Edit main.tf"
    vim main.tf
    ```
 
    Add the following:
 
-   ```hcl
+   ```hcl title="Terraform AWS Provider"
    terraform {
      required_providers {
        aws = {
@@ -275,11 +275,11 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    Variables make your configuration reusable. Instead of hardcoding values, you parameterize them:
 
-   ```bash
+   ```bash title="Edit variables.tf"
    vim variables.tf
    ```
 
-   ```hcl
+   ```hcl title="variables.tf"
    variable "ami_id" {
      description = "AMI ID for the EC2 instance (Ubuntu 26.04 in us-east-1)"
      type        = string
@@ -298,11 +298,11 @@ The stack you are about to define provisions two EC2 instances and two security 
    }
    ```
 
-   <Aside type="tip">
+   <Aside type="tip" title="AMI IDs Change">
    The `ami_id` default may need updating; AMI IDs change over time and vary by region. To find the current Ubuntu 26.04 LTS AMI in us-east-1, open the EC2 Console, click **Launch instance**, search for "Ubuntu 26.04", and copy the AMI ID from the results without actually launching anything. It will look like `ami-0d13e2317a7e75c95`. Paste it as the default in `variables.tf`.
 
    If you have the AWS CLI configured, you can also retrieve it programmatically (add `--profile profile-name` if you are using a named profile):
-   ```bash
+   ```bash title="variables.tf"
    aws ec2 describe-images \
      --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*" \
                "Name=architecture,Values=x86_64" \
@@ -315,11 +315,11 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    Outputs display useful information after `terraform apply`:
 
-   ```bash
+   ```bash title="Edit outputs.tf"
    vim outputs.tf
    ```
 
-   ```hcl
+   ```hcl title="outputs.tf"
    output "control_node_public_ip" {
      description = "Public IP of the control node: SSH here from your laptop"
      value       = aws_instance.control.public_ip
@@ -349,7 +349,7 @@ The stack you are about to define provisions two EC2 instances and two security 
 
 1. **Initialize the project**
 
-   ```bash
+   ```bash title="Initialize the Project"
    terraform init
    ```
 
@@ -357,7 +357,7 @@ The stack you are about to define provisions two EC2 instances and two security 
 
 2. **Preview the changes**
 
-   ```bash
+   ```bash title="Preview the Changes"
    terraform plan -var="key_name=cs312-key"
    ```
 
@@ -367,7 +367,7 @@ The stack you are about to define provisions two EC2 instances and two security 
 
 3. **Apply the configuration**
 
-   ```bash
+   ```bash title="Apply the Configuration"
    terraform apply -var="key_name=cs312-key"
    ```
 
@@ -377,7 +377,7 @@ The stack you are about to define provisions two EC2 instances and two security 
 
 4. **Verify by SSHing in**
 
-   ```bash
+   ```bash title="Verify by Sshing in"
    ssh -i ~/Downloads/cs312-key.pem ubuntu@<public-ip-from-output>
    ```
 
@@ -393,19 +393,19 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    Edit `variables.tf` and change the default instance type from `t3.micro` to `t3.small`:
 
-   ```hcl
+   ```hcl title="variables.tf"
    default = "t3.small"
    ```
 
 2. **Preview the change**
 
-   ```bash
+   ```bash title="Preview the Change"
    terraform plan -var="key_name=cs312-key"
    ```
 
    Terraform will show whether this change requires an "update in-place" (the instance is modified without being destroyed) or "destroy and recreate" (the old instance is terminated and a new one launched). Record which it shows; the answer reveals how AWS handles instance type changes.
 
-   <Aside type="note">
+   <Aside type="note" title="Plan Is Enough Here">
    You do not need to apply this change. The `plan` output is sufficient for the lab question. If you do apply it, remember that a destroy/recreate will give you a new public IP.
    </Aside>
 
@@ -415,7 +415,7 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    Remove the `data "aws_vpc" "default"` block from `main.tf` and replace it with these five resources:
 
-   ```hcl
+   ```hcl title="main.tf"
    resource "aws_vpc" "cs312" {
      cidr_block           = "10.0.0.0/16"
      enable_dns_hostnames = true
@@ -472,7 +472,7 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    Next, update the `vpc_id` in both security groups to reference the new VPC:
 
-   ```hcl
+   ```hcl title="Next, Update the Vpcid in Both Security Groups to Reference"
    # In aws_security_group.control and aws_security_group.managed, replace:
    vpc_id = data.aws_vpc.default.id
    # with:
@@ -481,14 +481,14 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    Then add `subnet_id` to both instance resources so Terraform places them in the new subnet:
 
-   ```hcl
+   ```hcl title="Dedicated VPC Resources"
    # Add this argument to aws_instance.control and aws_instance.managed:
    subnet_id = aws_subnet.cs312_public.id
    ```
 
    Finally, add a VPC output to `outputs.tf`:
 
-   ```hcl
+   ```hcl title="outputs.tf"
    output "vpc_id" {
      description = "ID of the provisioned VPC"
      value       = aws_vpc.cs312.id
@@ -497,13 +497,13 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    Run the plan:
 
-   ```bash
+   ```bash title="Preview Terraform Changes"
    terraform plan -var="key_name=cs312-key"
    ```
 
    You will see a large diff: the instances and security groups attached to the default VPC must be destroyed and recreated in the new one. This is expected: network interfaces are attached at instance launch time and cannot be moved between VPCs in place.
 
-   <Aside type="note">
+   <Aside type="note" title="VPC Changes Cascade">
    You do not need to apply this change for the lab submission. The `plan` output illustrates how infrastructure changes cascade through dependent resources: modifying a VPC forces recreation of everything that references it.
    </Aside>
 
@@ -517,13 +517,13 @@ The stack you are about to define provisions two EC2 instances and two security 
 
    After `terraform apply`, Terraform writes a `terraform.tfstate` file containing the current state of all managed resources. This is how Terraform knows what exists in AWS:
 
-   ```bash
+   ```bash title="Inspect the State File"
    cat terraform.tfstate | python3 -m json.tool | head -80
    ```
 
    Find the `"arn"` field for the managed node (`cs312-tf-managed`). An ARN (Amazon Resource Name) is a globally unique identifier for any AWS resource. It contains your account ID, the region, and the resource ID.
 
-   <Aside type="danger">
+   <Aside type="danger" title="State Files Are Sensitive">
    The state file contains sensitive data (resource IDs, IP addresses, and potentially secrets). Never commit it to a public Git repository. In production, teams store state remotely using an S3 backend with encryption.
    </Aside>
 </Steps>
@@ -534,7 +534,7 @@ The stack you are about to define provisions two EC2 instances and two security 
 
 1. **Tear everything down**
 
-   ```bash
+   ```bash title="Tear Everything Down"
    terraform destroy -var="key_name=cs312-key"
    ```
 
@@ -542,13 +542,13 @@ The stack you are about to define provisions two EC2 instances and two security 
 
 2. **Verify nothing remains**
 
-   ```bash
+   ```bash title="Verify Nothing Remains"
    terraform show
    ```
 
    This should display an empty state. You can also check the EC2 console to confirm the instance is terminated.
 
-   <Aside type="note">
+   <Aside type="note" title="Recreate Instances for Lab 6">
    You will need both instances running for the Ansible lab. After completing this destroy exercise, re-run `terraform apply -var="key_name=cs312-key"` to bring them back up before starting Lab 6.
    </Aside>
 

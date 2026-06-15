@@ -34,7 +34,7 @@ Ansible uses an **agentless** architecture: you run Ansible on a **control node*
 Ansible's control node **must be Linux or macOS**: it cannot run natively on Windows. Rather than wrestling with WSL2 or Homebrew on every student's laptop, we will use an EC2 instance as the control node. This gives everyone an identical environment and mirrors a real-world pattern where a dedicated management server (sometimes called a *bastion host* or *jump box*) is used to administer infrastructure.
 
 {/* TODO: convert this to a mermaid diagram */}
-```
+```text title="Control Node to Managed Node Topology"
 ┌──────────────┐         SSH          ┌──────────────┐
 │              │ ──────────────────▶  │              │
 │ Control Node │    (Ansible runs     │ Managed Node │
@@ -60,14 +60,14 @@ If using your laptop, skip the "Setting Up the Control Node" section and use the
 
 Your two EC2 instances were provisioned by the Terraform configuration in the previous lab. From your laptop, re-apply if the instances are not already running:
 
-```bash
+```bash title="Windows (Native)"
 cd ~/terraform-lab
 terraform apply -var="key_name=cs312-key"
 ```
 
 The outputs will show four values you will need throughout this lab:
 
-```
+```text title="Using Your Terraform Infrastructure Output"
 control_node_public_ip  = "54.x.x.x"
 managed_node_public_ip  = "54.x.x.x"
 managed_node_private_ip = "172.x.x.x"
@@ -103,19 +103,19 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    From your laptop, connect to the control node instance:
 
-   ```bash
+   ```bash title="SSH into Your Control Node"
    ssh -i ~/Downloads/cs312-key.pem ubuntu@<control-node-public-ip>
    ```
 
 2. **Install Ansible**
 
-   ```bash
+   ```bash title="Install Ansible"
    sudo apt update && sudo apt install -y ansible
    ```
 
    Verify the installation:
 
-   ```bash
+   ```bash title="Run Ansible Command"
    ansible --version
    ```
 
@@ -125,13 +125,13 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    Ansible needs the `.pem` key file to SSH into the managed node. From a **new terminal on your laptop** (not the control node SSH session), copy the key using `scp`:
 
-   ```bash
+   ```bash title="Copy Your SSH Key to the Control Node"
    scp -i ~/Downloads/cs312-key.pem ~/Downloads/cs312-key.pem ubuntu@<control-node-public-ip>:~/cs312-key.pem
    ```
 
    Then, back on the **control node**, set the correct permissions (SSH refuses to use key files that are too permissive):
 
-   ```bash
+   ```bash title="Set File Permissions"
    chmod 400 ~/cs312-key.pem
    ```
 
@@ -139,11 +139,11 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    Before involving Ansible at all, confirm you can SSH from the control node to the managed node:
 
-   ```bash
+   ```bash title="Verify SSH Connectivity to the Managed Node"
    ssh -i ~/cs312-key.pem ubuntu@<managed-node-private-ip>
    ```
 
-   <Aside type="tip">
+   <Aside type="tip" title="Use the Managed Node Private IP">
    Use the managed node's **private IP** (e.g., `10.0.1.42`), not its public IP. Both instances are in the same VPC, so private IPs work and are faster and more secure. You can find the private IP in the EC2 console under "Private IPv4 address."
    </Aside>
 
@@ -159,7 +159,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    On the control node:
 
-   ```bash
+   ```bash title="Create a Project Directory"
    mkdir ~/ansible-lab && cd ~/ansible-lab
    ```
 
@@ -167,17 +167,17 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    Create a file named `ansible.cfg` in your project directory. This tells Ansible to skip host key verification (since these are ephemeral lab instances) and where to find the inventory:
 
-   ```bash
+   ```bash title="Edit ansible.cfg"
    vim ansible.cfg
    ```
 
-   ```ini
+   ```ini title="ansible.cfg"
    [defaults]
    host_key_checking = False
    inventory = inventory
    ```
 
-   <Aside type="note">
+   <Aside type="note" title="Host Key Checking Is Lab-Only">
    In production, you would **not** disable host key checking; it protects against man-in-the-middle attacks. We disable it here because lab instances are short-lived and their host keys change every time they are recreated.
    </Aside>
 
@@ -185,11 +185,11 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    The inventory tells Ansible which servers to manage and how to connect. Create a file named `inventory`:
 
-   ```bash
+   ```bash title="Edit inventory"
    vim inventory
    ```
 
-   ```ini
+   ```ini title="Ansible Inventory"
    [webservers]
    wordpress ansible_host=<managed-node-private-ip> ansible_user=ubuntu ansible_ssh_private_key_file=~/cs312-key.pem
    ```
@@ -205,13 +205,13 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
 4. **Test connectivity with Ansible**
 
-   ```bash
+   ```bash title="Test Connectivity with Ansible"
    ansible webservers -m ping
    ```
 
    You should see output like:
 
-   ```
+   ```text title="Writing the Inventory and Playbook Output"
    wordpress | SUCCESS => {
        "changed": false,
        "ping": "pong"
@@ -220,7 +220,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    This is not an ICMP ping, Ansible's `ping` module connects over SSH, runs a small Python script, and confirms it can execute code on the managed node. A green `SUCCESS` with `"pong"` means Ansible is fully working.
 
-   <Aside type="caution">
+   <Aside type="caution" title="Troubleshooting UNREACHABLE">
    If you see "UNREACHABLE," double-check: (1) the private IP in your inventory, (2) the key file path, (3) that the managed node's security group allows SSH from the control node's security group.
    </Aside>
 
@@ -228,11 +228,11 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    Now for the main event. Create a file named `configure.yml`:
 
-   ```bash
+   ```bash title="Edit configure.yml"
    vim configure.yml
    ```
 
-   ```yaml
+   ```yaml title="Compose Services"
    ---
    - name: Configure WordPress on EC2
      hosts: webservers
@@ -338,7 +338,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
    - **`become: true`**: runs tasks with `sudo` (installing packages and managing Docker requires root).
    - **`vars:`**: defines variables used throughout the playbook. Changing a password here changes it everywhere it is referenced.
 
-   <Aside type="caution">
+   <Aside type="caution" title="Plaintext Playbook Secrets Are Lab-Only">
    Hardcoding passwords directly in a playbook is acceptable for a lab but is a serious security risk in production. Anyone with read access to the file can see the credentials, and they end up in Git history if the file is committed. The proper solution is **Ansible Vault**, which encrypts sensitive values so you can safely commit them. A simpler alternative is to pass variables at runtime with `-e "mysql_root_password=..."` so they never touch disk. For this lab, plaintext vars are fine.
    </Aside>
    - **Tasks 1-5** install Docker Engine from the official Docker repository. The `creates:` argument on shell tasks makes them idempotent, Ansible skips the task if the file already exists.
@@ -350,13 +350,13 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    The playbook uses the `community.docker` collection for the last task. Install it on the control node:
 
-   ```bash
+   ```bash title="Install the Docker Collection"
    ansible-galaxy collection install community.docker
    ```
 
 7. **Run the playbook**
 
-   ```bash
+   ```bash title="Run the Playbook"
    ansible-playbook configure.yml
    ```
 
@@ -368,7 +368,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
    At the end, the **PLAY RECAP** summarizes results:
 
-   ```
+   ```text title="Failed Output"
    PLAY RECAP *************************************************************
    wordpress   : ok=8    changed=8    unreachable=0    failed=0    skipped=0
    ```
@@ -381,7 +381,7 @@ The key concept is **idempotency**: each task checks whether the desired state a
 
 9. **Run the playbook again to prove idempotency**
 
-   ```bash
+   ```bash title="Run the Playbook Again to Prove Idempotency"
    ansible-playbook configure.yml
    ```
 
@@ -405,7 +405,7 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
 
    On github.com, create a new repository called `cs312-wordpress-pipeline` (public or private). Clone it to your laptop (or the control node):
 
-   ```bash
+   ```bash title="Create a New GitHub Repository"
    git clone https://github.com/<your-username>/cs312-wordpress-pipeline.git
    cd cs312-wordpress-pipeline
    ```
@@ -414,11 +414,11 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
 
    This Dockerfile extends the official WordPress image with a custom health check page:
 
-   ```bash
+   ```bash title="Edit Dockerfile"
    vim Dockerfile
    ```
 
-   ```dockerfile
+   ```dockerfile title="Dockerfile"
    FROM wordpress:6.4
 
    # Add a simple health check page
@@ -429,12 +429,12 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
 
    GitHub Actions looks for workflow files in the `.github/workflows/` directory. Each YAML file in that directory defines a separate workflow.
 
-   ```bash
+   ```bash title="Write the GitHub Actions Workflow"
    mkdir -p .github/workflows
    vim .github/workflows/build-push.yml
    ```
 
-   ```yaml
+   ```yaml title="Checkout Code Step"
    name: Build and Push to ECR
 
    on:
@@ -519,12 +519,12 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
    - `AWS_SECRET_ACCESS_KEY`: from your AWS Academy credentials
    - `AWS_SESSION_TOKEN`: from your AWS Academy credentials
 
-   <Aside type="caution">
+   <Aside type="caution" title="Refresh GitHub AWS Secrets">
    AWS Academy credentials expire when your lab session ends. You will need to update these secrets each time you start a new session.
    </Aside>
 5. **Commit and push**
 
-   ```bash
+   ```bash title="Commit and Push"
    git add .
    git commit -m "Add Dockerfile and CI/CD pipeline"
    git push origin main
@@ -534,7 +534,7 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
 
 6. **Create and push a tag**
 
-   ```bash
+   ```bash title="Create and Push a Tag"
    git tag v1.0.0
    git push --tags
    ```
@@ -545,7 +545,7 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
 
    After the pipeline succeeds, check ECR for the new image. You can do this from the AWS Console (ECR > Repositories > `cs312-wordpress-lab`) or from a terminal with AWS CLI access:
 
-   ```bash
+   ```bash title="Verify the Image in ECR"
    aws ecr describe-images --repository-name cs312-wordpress-lab \
      --query 'imageDetails[*].[imageTags,imagePushedAt]' --output table
    ```
@@ -562,14 +562,14 @@ This part runs entirely in the cloud (GitHub's servers and AWS), so you can do i
 
    From your laptop, in the Terraform project directory:
 
-   ```bash
+   ```bash title="Destroy the AWS Infrastructure"
    cd ~/terraform-lab
    terraform destroy -var="key_name=cs312-key"
    ```
 
    Type `yes` to confirm. This removes the two EC2 instances, both security groups, and the ECR repository. The ECR destroy will fail if the repository still contains images; delete them first via the AWS Console (ECR > Repositories > `cs312-wordpress-lab` > select all images > Delete) or with the CLI:
 
-   ```bash
+   ```bash title="AWS ECR Batch-delete-image"
    aws ecr batch-delete-image \
      --repository-name cs312-wordpress-lab \
      --image-ids "$(aws ecr list-images \

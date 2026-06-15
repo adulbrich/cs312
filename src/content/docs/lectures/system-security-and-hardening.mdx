@@ -35,7 +35,7 @@ Security failures have real consequences: data breaches expose private user info
 
 **Availability** means that authorized users can access data and services when they need to. Systems must handle expected load, hardware must be maintained, infrastructure must be monitored, and a Disaster Recovery (DR) plan must be in place. A Denial-of-Service (DoS) attack (or its distributed variant, DDoS, which floods a target with traffic from many sources) is a direct attack on availability.
 
-<Aside type="note">
+<Aside type="note" title="CIA Triad at an ATM">
 A useful illustration: an ATM covers all three CIA properties. It enforces confidentiality through two-factor authentication (card + PIN); it enforces integrity by ensuring that withdrawals are accurately reflected in your account balance; and it provides availability by being accessible in a public place even when the bank is closed.
 </Aside>
 
@@ -108,7 +108,7 @@ Several protocols define how the assertion actually travels between IdP and rely
 
 A worked trace of a typical OIDC sign-in clarifies the moving parts. A user clicks "Sign in with Google" on a SaaS application. The application redirects the browser to Google's authorization endpoint, including parameters identifying the application and the scopes it is requesting. The user authenticates to Google (entering a password, completing MFA, or relying on an existing Google session). Google redirects the browser back to the application with a one-time authorization code. The application's backend exchanges that code, over a direct server-to-server call to Google's token endpoint, for an ID token and an access token. The application validates the ID token's signature against Google's published public keys, decodes the JWT to learn the user's identifier and verified claims (email, name, organization), and creates a local session. At no point did the application see or store the user's Google password.
 
-```mermaid
+```mermaid title="Identity Providers and Federation Protocols Diagram"
 sequenceDiagram
     participant U as User / Browser
     participant A as App (Relying Party)
@@ -261,7 +261,7 @@ SSH was written by Tatu Ylönen, a researcher at Helsinki University of Technolo
 
 With key-based authentication working, `/etc/ssh/sshd_config` controls which authentication methods and users the daemon accepts. The most important directives for a public server:
 
-```text
+```text title="sshd_config Hardening"
 PasswordAuthentication no
 PermitRootLogin no
 PubkeyAuthentication yes
@@ -280,7 +280,7 @@ A firewall controls which network traffic is allowed to reach your server and wh
 
 The most important firewall principle is "default deny": block all incoming traffic, allow all outgoing, then explicitly open only the ports the server needs. UFW translates that principle into a simple command sequence:
 
-```bash
+```bash title="Ufw Default Deny Incoming"
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
 sudo ufw allow 22/tcp
@@ -303,21 +303,21 @@ Unpatched software is one of the easiest targets for attackers. The time between
 
 The basic approach is straightforward:
 
-```bash
+```bash title="Update Package Lists"
 sudo apt update
 sudo apt upgrade -y
 ```
 
 For security patches specifically, Ubuntu supports automatic installation through the `unattended-upgrades` package:
 
-```bash
+```bash title="Install Packages"
 sudo apt install -y unattended-upgrades
 sudo dpkg-reconfigure -plow unattended-upgrades
 ```
 
 The configuration file at `/etc/apt/apt.conf.d/50unattended-upgrades` controls which updates are applied automatically. By default, it enables only security updates, which is a sensible starting point. You can also configure email notifications and automatic reboots for kernel updates:
 
-```text
+```text title="Unattended Upgrades Policy"
 Unattended-Upgrade::Allowed-Origins {
     "${distro_id}:${distro_codename}-security";
 };
@@ -326,7 +326,7 @@ Unattended-Upgrade::Automatic-Reboot "true";
 Unattended-Upgrade::Automatic-Reboot-Time "04:00";
 ```
 
-<Aside type="note">
+<Aside type="note" title="Schedule Reboots Deliberately">
 Automatic reboots should be used carefully on production servers. Consider whether your application can tolerate brief downtime at 4:00 AM, or whether you need a more controlled maintenance window.
 </Aside>
 
@@ -338,7 +338,7 @@ The configuration model uses three concepts: a **filter** defines the log patter
 
 Fail2Ban is an effective response to automated scanners and brute-force bots. It is not a defense against a determined attacker with access to many IP addresses: a distributed brute-force campaign simply rotates source IPs faster than the ban list can grow. The right mental model is that Fail2Ban reduces log noise and eliminates low-effort automated threats; it complements key-based auth rather than substituting for it. It ships with filters for Nginx, Apache, Postfix, and many other services, so the same jail-and-action model extends beyond SSH to any service that produces structured failure logs.
 
-<Aside type="tip">
+<Aside type="tip" title="Fail2Ban Beyond SSH">
 Fail2Ban is not limited to SSH. It ships with filters for Apache, Nginx, Postfix, and many other services. Once you are comfortable with the SSH jail, consider enabling jails for other public-facing services.
 </Aside>
 
@@ -350,7 +350,7 @@ A default Kubernetes cluster is not a secure cluster. The API server is reachabl
 
 The container orchestration lecture introduced RBAC at the level of "roles control what a service account can do." The full model uses four object types that are easy to confuse. A **Role** defines permitted operations (API groups, resources, and verbs: get, list, watch, create, update, delete) within a single namespace. A **ClusterRole** defines the same set of permissions but applies cluster-wide, covering cluster-scoped resources such as nodes, PersistentVolumes, and namespaces themselves. A **RoleBinding** attaches a Role or ClusterRole to a subject (a user, group, or ServiceAccount) within one namespace. A **ClusterRoleBinding** attaches a ClusterRole to a subject across the entire cluster.
 
-```mermaid
+```mermaid title="The RBAC Model in Detail"
 flowchart LR
     subgraph NS["Namespace-scoped"]
         Role["Role\nverbs on resources within one namespace"]
@@ -371,7 +371,7 @@ flowchart LR
 
 The distinction has a practical consequence: a ClusterRoleBinding granting the built-in `cluster-admin` ClusterRole gives the bound subject root-equivalent access across every namespace. That level of access is necessary for almost no production workload. Most application service accounts need only namespace-scoped permissions, so a RoleBinding referencing a narrowly defined Role is both sufficient and safer. To audit what a service account can actually do at runtime:
 
-```bash
+```bash title="Kubectl Auth Can-i List Secrets"
 kubectl auth can-i list secrets \
   --namespace production \
   --as system:serviceaccount:production:my-app
@@ -389,7 +389,7 @@ Admission controllers are the gatekeeping layer between "a resource was submitte
 
 The built-in [Pod Security admission controller](https://kubernetes.io/docs/concepts/security/pod-security-admission/), which enforces the [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/), has been stable since Kubernetes 1.25, the same release that removed the older PodSecurityPolicy mechanism. The `privileged` profile imposes no restrictions. The `baseline` profile blocks the most dangerous configurations: host namespace sharing, privileged containers, and dangerous host path mounts. The `restricted` profile requires non-root execution, disallows privilege escalation, and requires tighter seccomp and capability settings:
 
-```bash
+```bash title="Mutating Admission Webhooks"
 kubectl label namespace production \
   pod-security.kubernetes.io/enforce=restricted
 ```
@@ -402,7 +402,7 @@ Kubernetes accepts [NetworkPolicy](https://kubernetes.io/docs/concepts/services-
 
 Without any NetworkPolicy, the default behavior is to allow all pod-to-pod and pod-to-internet traffic in both directions. A default-deny policy for a namespace blocks everything and requires explicit allow rules per service:
 
-```yaml
+```yaml title="default-deny-all NetworkPolicy"
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -423,7 +423,7 @@ Kubernetes Secrets are base64-encoded by default, not encrypted. Base64 is an en
 
 Encrypting Secrets at rest requires configuring the API server with an `EncryptionConfiguration` manifest. The recommended approach uses the [KMS v2 provider](https://kubernetes.io/docs/tasks/administer-cluster/kms-provider/) (stable since Kubernetes 1.29), which implements envelope encryption: a fresh DEK (data encryption key) encrypts each write, and that DEK is itself encrypted by a KEK (key encryption key) stored in an external KMS such as AWS KMS, GCP Cloud KMS, or HashiCorp Vault's Transit engine. The plaintext DEK is never written to disk. A stolen etcd backup is unreadable without access to the external key store.
 
-```mermaid
+```mermaid title="Secrets Encryption at Rest Diagram"
 flowchart TD
     subgraph KMS["External KMS (AWS KMS / GCP Cloud KMS / Vault Transit)"]
         KEK["KEK - key encryption key\nnever leaves the KMS"]
@@ -456,7 +456,7 @@ Zero Trust is built on three principles:
 2. **Use least-privilege access.** Grant just-in-time, just-enough access (JIT/JEA: credentials that are issued on demand and expire automatically) rather than broad standing permissions. Apply risk-based adaptive policies that can tighten access when anomalies are detected.
 3. **Assume breach.** Segment networks and workloads to minimize the blast radius of any compromise. Enforce end-to-end encryption and use analytics to detect lateral movement early.
 
-<Aside type="note">
+<Aside type="note" title="Zero Trust Is an Architecture">
 Zero Trust is not a single product; it is an architectural philosophy. It is now required for US federal executive agencies under [White House memorandum M-22-09](https://www.whitehouse.gov/wp-content/uploads/2022/01/M-22-09.pdf), and it underpins modern identity platforms like Microsoft Entra ID, [Google BeyondCorp](https://research.google/pubs/beyondcorp-a-new-approach-to-enterprise-security/), or [Twingate](https://www.twingate.com/).
 </Aside>
 
@@ -490,7 +490,7 @@ Authoritative sources for tracking security vulnerabilities:
 - **Vendor security advisories**: [Ubuntu Security Notices (USN)](https://ubuntu.com/security/notices), Red Hat Security Advisories (RHSA), and similar feeds from your OS and software vendors.
 - **Security blogs** such as Krebs on Security and the SANS Internet Storm Center for news and analysis.
 
-<Aside type="tip">
+<Aside type="tip" title="Subscribe to Security Notices">
 Subscribe to the Ubuntu Security Notices RSS feed or mailing list for your distribution. When a critical vulnerability is disclosed in a package you run, you want to know the same day, not next week.
 </Aside>
 
@@ -522,13 +522,13 @@ No technology, policy, or security control is more important than having a worki
 - **Verifiable.** A backup that was never tested is an assumption, not a guarantee. Backups should report success or failure, and restoration should be tested periodically.
 - **Secured.** An infected or encrypted backup cannot save you. Backups must be stored separately from the live system, ideally off-site, and access-controlled so that ransomware spreading across the network cannot reach them.
 
-<Aside type="caution">
+<Aside type="caution" title="Sync Is Not Backup">
 Cloud sync services (Dropbox, Google Drive) and version control (Git) are not backups. They are useful tools, but a ransomware infection that encrypts your files can propagate through a sync client and overwrite cloud copies within minutes. Proper off-site backups are a separate, purpose-built system.
 </Aside>
 
 On Linux, [`rsync`](https://rsync.samba.org/) remains a widely-used tool for scripted backups:
 
-```bash
+```bash title="Secured"
 # Incremental backup with compression to a remote server
 rsync -avzh /var/data/ backup-server:/backups/$(date +%F)/
 ```
@@ -561,7 +561,7 @@ A simplified hardening checklist for a new Ubuntu server covers the eight areas 
 
 The full CIS benchmarks go much further, covering kernel parameters, filesystem mount options, network stack tuning, and audit daemon configuration. Working through the CIS benchmark for your distribution is an excellent way to deepen your understanding of Linux security.
 
-<Aside type="note">
+<Aside type="note" title="Hardening Is Ongoing">
 No checklist can make a server perfectly secure. Security is an ongoing process of monitoring, patching, and adapting. The goal of hardening is to raise the cost of attack high enough that automated threats are neutralized and targeted attackers face significant obstacles at every step.
 </Aside>
 

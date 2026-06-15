@@ -43,7 +43,7 @@ Before you deploy anything, make the cluster itself visible. You will start mini
 
 1. **Verify the three tools this activity assumes are already installed:**
 
-   ```bash
+   ```bash title="Verify the Three Tools This Activity Assumes Are Already"
    docker version
    minikube version
    kubectl version --client
@@ -53,7 +53,7 @@ Before you deploy anything, make the cluster itself visible. You will start mini
 
 2. **Create a clean working directory for the manifests you are about to write:**
 
-   ```bash
+   ```bash title="Create a Clean Working Directory for the Manifests You Are"
    mkdir -p ~/cs312-minikube
    cd ~/cs312-minikube
    ```
@@ -62,7 +62,7 @@ Before you deploy anything, make the cluster itself visible. You will start mini
 
 3. **Start a single-node Kubernetes cluster with the Docker driver:**
 
-   ```bash
+   ```bash title="Start Minikube Cluster"
    minikube start --driver=docker
    ```
 
@@ -70,7 +70,7 @@ Before you deploy anything, make the cluster itself visible. You will start mini
 
 4. **Enable the ingress and metrics-server addons:**
 
-   ```bash
+   ```bash title="Enable Ingress and Metrics Addons"
    minikube addons enable ingress
    minikube addons enable metrics-server
    ```
@@ -79,7 +79,7 @@ Before you deploy anything, make the cluster itself visible. You will start mini
 
 5. **Inspect the cluster at a high level:**
 
-   ```bash
+   ```bash title="Inspect the Cluster at a High Level"
    kubectl cluster-info
    kubectl get nodes -o wide
    kubectl get pods -A
@@ -94,7 +94,7 @@ Before you deploy anything, make the cluster itself visible. You will start mini
 
 6. **Look specifically at the system namespace:**
 
-   ```bash
+   ```bash title="Look Specifically at the System Namespace"
    kubectl get pods -n kube-system
    ```
 
@@ -102,7 +102,7 @@ Before you deploy anything, make the cluster itself visible. You will start mini
 
 7. **Identify which pods are DaemonSet-managed:**
 
-   ```bash
+   ```bash title="Identify Which Pods Are DaemonSet-managed"
    kubectl get daemonset -A
    ```
 
@@ -126,7 +126,7 @@ Now create the first pieces of desired state. A namespace scopes all the objects
 
 1. **Create `namespace.yaml`:**
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: Namespace
    metadata:
@@ -137,7 +137,7 @@ Now create the first pieces of desired state. A namespace scopes all the objects
 
 2. **Apply the namespace and make it your current default:**
 
-   ```bash
+   ```bash title="Apply the Namespace and Make It Your Current Default"
    kubectl apply -f namespace.yaml
    kubectl config set-context --current --namespace=cs312-minikube
    kubectl config view --minify -o 'jsonpath={..namespace}'; echo
@@ -151,7 +151,7 @@ Now create the first pieces of desired state. A namespace scopes all the objects
 
 3. **Create `web-config.yaml`:**
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: ConfigMap
    metadata:
@@ -175,7 +175,7 @@ Now create the first pieces of desired state. A namespace scopes all the objects
 
 4. **Apply the ConfigMap and Secret:**
 
-   ```bash
+   ```bash title="Apply the ConfigMap and Secret"
    kubectl apply -f web-config.yaml
    ```
 
@@ -183,7 +183,7 @@ Now create the first pieces of desired state. A namespace scopes all the objects
 
 5. **Inspect what was stored:**
 
-   ```bash
+   ```bash title="Inspect What Was Stored"
    kubectl get configmap,secret
    kubectl get secret orchestra-web-owner -o jsonpath='{.data.owner}'; echo
    kubectl get secret orchestra-web-owner -o jsonpath='{.data.owner}' | base64 --decode; echo
@@ -208,7 +208,7 @@ With namespace and configuration in place, you can now create the web workload i
 
 1. **Create `web-deployment.yaml`:**
 
-   ```yaml
+   ```yaml title="Rolling Update Strategy"
    apiVersion: apps/v1
    kind: Deployment
    metadata:
@@ -321,7 +321,7 @@ With namespace and configuration in place, you can now create the web workload i
 
 2. **Apply the Deployment and wait for it to become ready:**
 
-   ```bash
+   ```bash title="Apply the Deployment and Wait for It to Become Ready"
    kubectl apply -f web-deployment.yaml
    kubectl rollout status deployment/orchestra-web
    ```
@@ -330,7 +330,7 @@ With namespace and configuration in place, you can now create the web workload i
 
 3. **Inspect the workload hierarchy:**
 
-   ```bash
+   ```bash title="Inspect the Workload Hierarchy"
    kubectl get deployment,replicaset,pods,service -o wide
    ```
 
@@ -338,7 +338,7 @@ With namespace and configuration in place, you can now create the web workload i
 
 4. **Capture one Pod name and confirm its owner:**
 
-   ```bash
+   ```bash title="Capture Web Pod Name"
    WEB_POD=$(kubectl get pods -l app=orchestra-web -o jsonpath='{.items[0].metadata.name}')
    echo "$WEB_POD"
    kubectl get pod "$WEB_POD" -o jsonpath='{.metadata.ownerReferences[0].kind}{"/"}{.metadata.ownerReferences[0].name}{"\n"}'
@@ -348,7 +348,7 @@ With namespace and configuration in place, you can now create the web workload i
 
 5. **Describe the Pod and look for the init container, probes, and volumes:**
 
-   ```bash
+   ```bash title="Describe Web Pod"
    kubectl describe pod "$WEB_POD"
    ```
 
@@ -356,7 +356,7 @@ With namespace and configuration in place, you can now create the web workload i
 
 6. **Prove the Service works from inside the cluster by DNS name:**
 
-   ```bash
+   ```bash title="Prove the Service Works from Inside the Cluster by DNS Name"
    kubectl run curl-test --rm -i --restart=Never --image=busybox:1.36 -- wget -qO- http://orchestra-web
    ```
 
@@ -389,7 +389,7 @@ Stateless workloads can be replaced freely because they carry no persistent data
 
 1. **Create `stateful-note.yaml`:**
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: Service
    metadata:
@@ -451,7 +451,7 @@ Stateless workloads can be replaced freely because they carry no persistent data
 
 2. **Apply the StatefulSet and wait for it to be ready:**
 
-   ```bash
+   ```bash title="Apply the StatefulSet and Wait for It to Be Ready"
    kubectl apply -f stateful-note.yaml
    kubectl rollout status statefulset/note-pad
    ```
@@ -460,7 +460,7 @@ Stateless workloads can be replaced freely because they carry no persistent data
 
 3. **Inspect the objects Kubernetes created for you:**
 
-   ```bash
+   ```bash title="Inspect the Objects Kubernetes Created for You"
    kubectl get statefulset,pod,pvc
    ```
 
@@ -468,7 +468,7 @@ Stateless workloads can be replaced freely because they carry no persistent data
 
 4. **Write your own content into the mounted volume:**
 
-   ```bash
+   ```bash title="Write Your Own Content into the Mounted Volume"
    kubectl exec note-pad-0 -- sh -c 'printf "<h1>Persisted from YOUR_ONID</h1>\n<p>This file lives on a PVC.</p>\n" > /data/index.html && cat /data/index.html'
    ```
 
@@ -476,7 +476,7 @@ Stateless workloads can be replaced freely because they carry no persistent data
 
 5. **Read that same file back through the Pod's stable DNS name:**
 
-   ```bash
+   ```bash title="Read That Same File Back Through the Pod's Stable DNS Name"
    kubectl exec note-pad-0 -- wget -qO- http://note-pad-0.note-pad:8080/
    ```
 
@@ -484,7 +484,7 @@ Stateless workloads can be replaced freely because they carry no persistent data
 
 6. **Delete the Pod and watch the StatefulSet replace it:**
 
-   ```bash
+   ```bash title="Delete the Pod and Watch the StatefulSet Replace It"
    kubectl delete pod note-pad-0
    kubectl get pod note-pad-0 -w
    ```
@@ -493,7 +493,7 @@ Stateless workloads can be replaced freely because they carry no persistent data
 
 7. **Confirm that the file survived the Pod replacement:**
 
-   ```bash
+   ```bash title="Confirm That the File Survived the Pod Replacement"
    kubectl exec note-pad-0 -- cat /data/index.html
    ```
 
@@ -525,7 +525,7 @@ Deployments and StatefulSets manage workloads that should always be running. Som
 
 1. **Create `batch-job.yaml`:**
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: batch/v1
    kind: Job
    metadata:
@@ -549,7 +549,7 @@ Deployments and StatefulSets manage workloads that should always be running. Som
 
 2. **Apply the Job and watch the Pod move through its lifecycle:**
 
-   ```bash
+   ```bash title="Apply the Job and Watch the Pod Move Through Its Lifecycle"
    kubectl apply -f batch-job.yaml
    kubectl get pods -w
    ```
@@ -558,7 +558,7 @@ Deployments and StatefulSets manage workloads that should always be running. Som
 
 3. **Read the output and inspect the Job's final state:**
 
-   ```bash
+   ```bash title="Inspect Job Logs and Status"
    kubectl logs job/hello-job
    kubectl get job hello-job
    kubectl get pod -l job-name=hello-job
@@ -568,7 +568,7 @@ Deployments and StatefulSets manage workloads that should always be running. Som
 
 4. **Delete the Job:**
 
-   ```bash
+   ```bash title="Delete the Job"
    kubectl delete job hello-job
    ```
 
@@ -594,7 +594,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 1. **Delete one web Pod and watch the Deployment heal the gap:**
 
-   ```bash
+   ```bash title="Delete One Web Pod and Watch the Deployment Heal the Gap"
    kubectl get pods -l app=orchestra-web
    WEB_POD=$(kubectl get pods -l app=orchestra-web -o jsonpath='{.items[0].metadata.name}')
    kubectl delete pod "$WEB_POD"
@@ -605,7 +605,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 2. **Scale the Deployment manually to three replicas:**
 
-   ```bash
+   ```bash title="Scale the Deployment Manually to Three Replicas"
    kubectl scale deployment orchestra-web --replicas=3
    kubectl get pods -l app=orchestra-web
    ```
@@ -614,7 +614,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 3. **Check that metrics-server is feeding live resource data:**
 
-   ```bash
+   ```bash title="Check That Metrics-server Is Feeding Live Resource Data"
    kubectl top pods
    ```
 
@@ -622,7 +622,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 4. **Create `web-edge.yaml` with an HPA and an Ingress:**
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: autoscaling/v2
    kind: HorizontalPodAutoscaler
    metadata:
@@ -666,7 +666,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 5. **Apply the HPA and Ingress, then inspect the autoscaler object:**
 
-   ```bash
+   ```bash title="Apply HPA and Ingress"
    kubectl apply -f web-edge.yaml
    kubectl get hpa
    ```
@@ -677,13 +677,13 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
    Open `web-config.yaml` and replace the `message` value with:
 
-   ```text
+   ```text title="Updated Web Message"
    Rolling updates keep this page online while the desired state changes.
    ```
 
    Then apply:
 
-   ```bash
+   ```bash title="Apply Kubernetes Manifest"
    kubectl apply -f web-config.yaml
    ```
 
@@ -691,7 +691,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 7. **Roll the Deployment so new Pods pick up the new desired content:**
 
-   ```bash
+   ```bash title="Restart Web Deployment"
    kubectl rollout restart deployment/orchestra-web
    kubectl rollout status deployment/orchestra-web
    ```
@@ -702,7 +702,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
    Edit `web-deployment.yaml` and change the nginx image from `nginx:1.27-alpine` to `nginx:1.28-alpine`, then apply it again:
 
-   ```bash
+   ```bash title="web-deployment.yaml"
    kubectl apply -f web-deployment.yaml
    kubectl rollout status deployment/orchestra-web
    ```
@@ -711,7 +711,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 9. **Roll back to the previous revision:**
 
-   ```bash
+   ```bash title="Roll Back to the Previous Revision"
    kubectl rollout undo deployment/orchestra-web
    kubectl rollout status deployment/orchestra-web
    ```
@@ -720,7 +720,7 @@ This section puts the control loop directly in front of you. Delete one Pod, cha
 
 10. **Confirm the image rolled back and the page still shows the updated message:**
 
-    ```bash
+    ```bash title="Verify Rollback Result"
     kubectl get deployment orchestra-web -o jsonpath='{.spec.template.spec.containers[0].image}{"\n"}'
     kubectl run curl-test --rm -i --restart=Never --image=busybox:1.36 -- wget -qO- http://orchestra-web
     ```
@@ -746,14 +746,14 @@ The Service is still internal to the cluster. This section first shows you NodeP
 
 1. **Temporarily expose the Service as a NodePort:**
 
-   ```bash
+   ```bash title="Temporarily Expose the Service as a NodePort"
    kubectl patch service orchestra-web -p '{"spec":{"type":"NodePort"}}'
    minikube service orchestra-web -n cs312-minikube --url
    ```
 
    Copy the URL printed and curl it (on macOS/WSL with the Docker driver, `minikube service --url` may keep a tunnel open, so run the curl in a second terminal):
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl <the-url-from-above>/
    ```
 
@@ -761,7 +761,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
 
 2. **Switch back to ClusterIP and use Ingress instead:**
 
-   ```bash
+   ```bash title="Switch Back to ClusterIP and Use Ingress Instead"
    kubectl patch service orchestra-web -p '{"spec":{"type":"ClusterIP"}}'
    ```
 
@@ -769,7 +769,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
 
 3. **Start the minikube tunnel in a second terminal and leave it running:**
 
-   ```bash
+   ```bash title="Start Minikube Tunnel"
    minikube tunnel
    ```
 
@@ -777,7 +777,7 @@ The Service is still internal to the cluster. This section first shows you NodeP
 
 4. **In your original terminal, wait for the Ingress to report an address:**
 
-   ```bash
+   ```bash title="Wait for Ingress Address"
    kubectl get ingress
    ```
 
@@ -788,14 +788,14 @@ The Service is still internal to the cluster. This section first shows you NodeP
    <Tabs syncKey="os">
    <TabItem label="macOS / Windows">
 
-   ```bash
+   ```bash title="Macos / Windows"
    curl http://127.0.0.1/
    ```
 
    </TabItem>
    <TabItem label="Linux">
 
-   ```bash
+   ```bash title="Linux"
    curl "http://$(kubectl get ingress orchestra-web -o jsonpath='{.status.loadBalancer.ingress[0].ip}')/"
    ```
 
@@ -826,7 +826,7 @@ Once you have verified the Ingress page, remove the activity resources so your n
 
 2. **Delete the activity namespace and everything in it:**
 
-   ```bash
+   ```bash title="Delete the Activity Namespace and Everything in It"
    kubectl delete namespace cs312-minikube --wait=true
    ```
 
@@ -834,7 +834,7 @@ Once you have verified the Ingress page, remove the activity resources so your n
 
 3. **Reset your current `kubectl` namespace to `default`:**
 
-   ```bash
+   ```bash title="Reset Your Current Kubectl Namespace to Default"
    kubectl config set-context --current --namespace=default
    kubectl config view --minify -o 'jsonpath={..namespace}'; echo
    ```

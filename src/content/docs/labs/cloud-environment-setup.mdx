@@ -91,7 +91,7 @@ Elastic Compute Cloud (EC2) is the AWS service that lets you rent virtual server
    - Private key file format: Choose **.pem** (for macOS/Linux) or **.ppk** (if you plan to use PuTTY on Windows).
    - Click **Create key pair**. Your browser will download the private key file. **Save this file somewhere safe**; you cannot download it again.
 
-   <Aside type="caution">
+   <Aside type="caution" title="Protect Your Private Key">
    Never share your private key file with anyone. Anyone who has this file can log into your server. If you lose it, you will need to create a new key pair and launch a new instance.
    </Aside>
 7. **Network settings**
@@ -129,20 +129,20 @@ SSH (Secure Shell) is a protocol for securely connecting to a remote computer ov
 
    Open a terminal on your laptop. Navigate to where you saved your `.pem` file and restrict its permissions. SSH refuses to use key files that are too open.
 
-   ```bash
+   ```bash title="Set Permissions on Your Key File"
    chmod 400 ~/Downloads/cs312-key.pem
    ```
 
    On Windows PowerShell, the permissions work differently. You may need to right-click the file, go to Properties, Security, and remove access for all users except yourself. Alternatively, use the AWS Connect button method in the next tip.
 
-   <Aside type="tip">
+   <Aside type="tip" title="Fallback: EC2 Instance Connect">
    If SSH key setup is giving you trouble, you can click the **Connect** button at the top of your instance details page in the AWS Console, then choose **EC2 Instance Connect** to get a browser-based terminal. However, learning to use SSH from your own terminal is an essential skill.
    </Aside>
 2. **Connect to your instance**
 
    Use the `ssh` command with your key file and the default username for Amazon Linux (`ec2-user`):
 
-   ```bash
+   ```bash title="Connect to Your Instance"
    ssh -i ~/Downloads/cs312-key.pem ec2-user@<your-public-ip>
    ```
 
@@ -154,11 +154,11 @@ SSH (Secure Shell) is a protocol for securely connecting to a remote computer ov
 
    You should now see a prompt like `[ec2-user@ip-172-31-xx-xx ~]$`. You are now on your cloud server. Run the following commands for your lab questions:
 
-   ```bash
+   ```bash title="Verify Your Connection"
    ssh -V
    ```
 
-   ```bash
+   ```bash title="Display File Contents"
    cat /etc/os-release | head -3
    ```
 
@@ -176,7 +176,7 @@ A **Security Group (SG)** acts as a virtual firewall for your EC2 instance. It c
 
    While still connected via SSH, install Apache HTTP Server (called `httpd` on Amazon Linux):
 
-   ```bash
+   ```bash title="Install a Web Server on Your Instance"
    sudo dnf install -y httpd && sudo systemctl start httpd
    ```
 
@@ -184,7 +184,7 @@ A **Security Group (SG)** acts as a virtual firewall for your EC2 instance. It c
 
 2. **Verify Apache is running locally**
 
-   ```bash
+   ```bash title="Verify Apache Is Running Locally"
    curl -s http://localhost | head -5
    ```
 
@@ -231,7 +231,7 @@ Now you will see firsthand how Security Groups protect your instance.
 
    Refresh `http://<your-public-ip>` in your browser. The page should fail to load. Note the exact error message and approximately how long it took before the error appeared. Security Group changes take effect almost immediately, but your browser may wait for a TCP timeout before showing an error.
 
-   <Aside type="note">
+   <Aside type="note" title="Dropped Traffic Times Out">
    You should see something like "connection timed out" or "unable to connect." The exact wording depends on your browser. The timeout is typically 15-30 seconds because the Security Group silently drops the packets rather than actively rejecting them.
    </Aside>
 3. **Re-add the HTTP rule**

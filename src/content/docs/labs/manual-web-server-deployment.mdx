@@ -62,7 +62,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    The default username on Ubuntu AMIs is `ubuntu` (not `ec2-user` as on Amazon Linux):
 
-   ```bash
+   ```bash title="Connect Via SSH"
    ssh -i ~/Downloads/cs312-key.pem ubuntu@<your-public-ip>
    ```
 
@@ -78,7 +78,7 @@ A WordPress site requires three software components working together, often call
 
    Before installing anything, update the list of available packages so you get the latest versions:
 
-   ```bash
+   ```bash title="Update the Package Index"
    sudo apt update && sudo apt upgrade -y
    ```
 
@@ -86,13 +86,13 @@ A WordPress site requires three software components working together, often call
 
    Apache HTTP Server (often just called Apache) is the software that listens for incoming web requests on port 80 and serves web pages in response. It has been the most widely used web server on the internet for decades.
 
-   ```bash
+   ```bash title="Install Apache"
    sudo apt install -y apache2
    ```
 
    Apache starts automatically after installation on Ubuntu. Verify it:
 
-   ```bash
+   ```bash title="Check Service Status"
    sudo systemctl status apache2
    ```
 
@@ -102,7 +102,7 @@ A WordPress site requires three software components working together, often call
 
    PHP (PHP: Hypertext Preprocessor, a recursive acronym) is the programming language WordPress is written in. Apache needs PHP installed to execute WordPress code. We also install the MySQL extension so PHP can communicate with the database:
 
-   ```bash
+   ```bash title="Install PHP"
    sudo apt install -y php php-mysql libapache2-mod-php php-curl php-xml php-mbstring
    ```
 
@@ -123,7 +123,7 @@ You have two options for setting up your database. **Read both before choosing.*
 | **Difficulty** | Easier: fewer steps | Harder: more configuration |
 | **Cost** | db.t3.micro RDS instance | Another t3.micro EC2 |
 
-<Aside type="tip" title="Recommendation">
+<Aside type="tip" title="Choose RDS for This Lab">
 **Option A (RDS) is recommended.** It is the industry-standard approach for production databases and will take less time, leaving you more time to explore WordPress itself. Option B is for students who want deeper hands-on experience with database administration.
 </Aside>
 ---
@@ -166,7 +166,7 @@ You have two options for setting up your database. **Read both before choosing.*
 
    Once the instance shows "Available," click on it and find the **Endpoint** under Connectivity and security. It will look something like:
 
-   ```
+   ```text title="Note the RDS Endpoint Output"
    cs312-wordpress-db.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com
    ```
 
@@ -176,14 +176,14 @@ You have two options for setting up your database. **Read both before choosing.*
 
    From your WordPress EC2 instance, connect to the RDS instance using the MySQL client:
 
-   ```bash
+   ```bash title="Create the WordPress Database"
    sudo apt install -y mariadb-client
    mysql -h <rds-endpoint> -u admin -p
    ```
 
    Enter the master password you set during RDS creation. At the MariaDB prompt, create a dedicated database and user. The principle of **least privilege** says you should never give an application the admin password. Instead, create a user that can only access the specific database it needs:
 
-   ```sql
+   ```sql title="Option 1: Setting Up an RDS MariaDB Instance SQL"
    CREATE DATABASE wordpress;
    CREATE USER 'wp_user'@'%' IDENTIFIED BY 'your-wp-password-here';
    GRANT ALL PRIVILEGES ON wordpress.* TO 'wp_user'@'%';
@@ -195,11 +195,11 @@ You have two options for setting up your database. **Read both before choosing.*
 
 </Steps>
 
-<Aside type="caution" title="Cost Warning">
+<Aside type="caution" title="Delete RDS After the Lab">
 RDS instances accrue charges even when idle. **Delete your RDS instance at the end of the lab.** Go to RDS → Databases → select your instance → Actions → Delete. Uncheck "Create final snapshot" (this is a lab, not production) and confirm. Forgetting this step will cost real money.
 </Aside>
 Your database endpoint for `wp-config.php` will be:
-```
+```text title="RDS Endpoint Format"
 <rds-endpoint>   (e.g., cs312-wordpress-db.xxxxxxxxxxxx.us-east-1.rds.amazonaws.com)
 ```
 
@@ -221,7 +221,7 @@ Your database endpoint for `wp-config.php` will be:
 
    By referencing the WordPress security group as the source (instead of an IP address), any instance in that security group can reach the database. This is more maintainable than hardcoding IPs.
 
-   <Aside type="note">
+   <Aside type="note" title="Keep the Database Private">
    Notice there is **no** HTTP rule on the database security group. The database should never be reachable from the public internet; only the WordPress server and your SSH session can reach it.
    </Aside>
 2. **Launch the database EC2 instance**
@@ -242,13 +242,13 @@ Your database endpoint for `wp-config.php` will be:
 
 4. **Connect via SSH and install MariaDB**
 
-   ```bash
+   ```bash title="Connect Via SSH and Install MariaDB"
    ssh -i ~/Downloads/cs312-key.pem ubuntu@<db-public-ip>
    ```
 
    Update packages and install MariaDB (the LAMP stack traditionally uses MySQL; MariaDB is a drop-in fork that ships with Ubuntu and is fully compatible with WordPress):
 
-   ```bash
+   ```bash title="Update Package Lists"
    sudo apt update && sudo apt upgrade -y
    sudo apt install -y mariadb-server
    ```
@@ -257,7 +257,7 @@ Your database endpoint for `wp-config.php` will be:
 
    MariaDB ships with permissive defaults meant for development, not production. The `mysql_secure_installation` script tightens things up:
 
-   ```bash
+   ```bash title="Secure MariaDB"
    sudo mysql_secure_installation
    ```
 
@@ -275,19 +275,19 @@ Your database endpoint for `wp-config.php` will be:
 
    Edit the MariaDB configuration:
 
-   ```bash
+   ```bash title="Configure MariaDB to Accept Remote Connections"
    sudo vim /etc/mysql/mariadb.conf.d/50-server.cnf
    ```
 
    Find the line:
 
-   ```ini
+   ```ini title="Find the Line"
    bind-address            = 127.0.0.1
    ```
 
    Change it to:
 
-   ```ini
+   ```ini title="Change It to"
    bind-address            = 0.0.0.0
    ```
 
@@ -295,19 +295,19 @@ Your database endpoint for `wp-config.php` will be:
 
    Restart MariaDB:
 
-   ```bash
+   ```bash title="Restart Service"
    sudo systemctl restart mariadb
    ```
 
 7. **Create the WordPress database and user**
 
-   ```bash
+   ```bash title="Create the WordPress Database and User"
    sudo mysql -u root -p
    ```
 
    At the MariaDB prompt, create a dedicated database and user. The principle of **least privilege** says you should never give an application the root password. The `@'%'` wildcard allows connections from any host; this is safe because the security group already restricts network access:
 
-   ```sql
+   ```sql title="Create WordPress Database and User"
    CREATE DATABASE wordpress;
    CREATE USER 'wp_user'@'%' IDENTIFIED BY 'your-wp-password-here';
    GRANT ALL PRIVILEGES ON wordpress.* TO 'wp_user'@'%';
@@ -321,7 +321,7 @@ Your database endpoint for `wp-config.php` will be:
 
    Back on your WordPress EC2 instance, install the MariaDB client and test:
 
-   ```bash
+   ```bash title="Test the Connection from the WordPress Instance"
    sudo apt install -y mariadb-client
    mysql -h <db-private-ip> -u wp_user -p
    ```
@@ -331,7 +331,7 @@ Your database endpoint for `wp-config.php` will be:
 </Steps>
 
 Your database host for `wp-config.php` will be:
-```
+```text title="Database Host Format"
 <db-private-ip>   (e.g., 172.31.42.10)
 ```
 
@@ -345,7 +345,7 @@ Your database host for `wp-config.php` will be:
 
    It is best practice to run web applications as a non-root user. Create a `wordpress` system user:
 
-   ```bash
+   ```bash title="Create a Dedicated OS User"
    sudo useradd -r -s /usr/sbin/nologin wordpress
    ```
 
@@ -355,7 +355,7 @@ Your database host for `wp-config.php` will be:
 
    Download the latest WordPress release and extract it:
 
-   ```bash
+   ```bash title="Download WordPress"
    cd /tmp
    curl -O https://wordpress.org/latest.tar.gz
    sudo tar -xzf latest.tar.gz -C /var/www/
@@ -367,7 +367,7 @@ Your database host for `wp-config.php` will be:
 
    Apache's worker processes run as the `www-data` user on Ubuntu. WordPress needs to read (and sometimes write) its own files, so we give ownership to `www-data`:
 
-   ```bash
+   ```bash title="Set File Ownership"
    sudo chown -R www-data:www-data /var/www/wordpress
    ```
 
@@ -375,14 +375,14 @@ Your database host for `wp-config.php` will be:
 
    WordPress ships with a sample configuration file. Copy it and edit it:
 
-   ```bash
+   ```bash title="Configure WordPress"
    sudo cp /var/www/wordpress/wp-config-sample.php /var/www/wordpress/wp-config.php
    sudo vim /var/www/wordpress/wp-config.php
    ```
 
    Find these lines and update them with your database details:
 
-   ```php
+   ```php title="Find These Lines and Update Them with Your Database Details"
    define( 'DB_NAME', 'wordpress' );
    define( 'DB_USER', 'wp_user' );
    define( 'DB_PASSWORD', 'your-wp-password-here' );
@@ -395,12 +395,12 @@ Your database host for `wp-config.php` will be:
 
    **Option A only:** RDS requires SSL for all connections. Add this line immediately after `DB_HOST`:
 
-   ```php
+   ```php title="Option a Only"
    define('MYSQL_CLIENT_FLAGS', MYSQLI_CLIENT_SSL);
    ```
 
 
-   <Aside type="caution">
+   <Aside type="caution" title="Do Not Store Plaintext Credentials in Production">
    In a production environment, you would never store database credentials in a plain-text config file on disk. You would use environment variables or a secrets manager. For this lab, editing the file directly is fine.
    </Aside>
 
@@ -408,7 +408,7 @@ Your database host for `wp-config.php` will be:
 
    Below the database settings in `wp-config.php` is a block of eight lines that look like this:
 
-   ```php
+   ```php title="wp-config.php"
    define('AUTH_KEY',         'put your unique phrase here');
    define('SECURE_AUTH_KEY',  'put your unique phrase here');
    // ...and so on
@@ -418,7 +418,7 @@ Your database host for `wp-config.php` will be:
 
    Generate a fresh set in one command:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -s https://api.wordpress.org/secret-key/1.1/salt/
    ```
 
@@ -434,13 +434,13 @@ A **VirtualHost** is Apache's way of serving different websites from the same se
 
 1. **Create the VirtualHost configuration**
 
-   ```bash
+   ```bash title="Edit Apache VirtualHost"
    sudo vim /etc/apache2/sites-available/wordpress.conf
    ```
 
    Add the following content:
 
-   ```apache
+   ```apache title="Apache VirtualHost"
    <VirtualHost *:80>
        ServerAdmin admin@localhost
        DocumentRoot /var/www/wordpress
@@ -459,7 +459,7 @@ A **VirtualHost** is Apache's way of serving different websites from the same se
 
 2. **Enable the site and disable the default**
 
-   ```bash
+   ```bash title="Enable the Site and Disable the Default"
    sudo a2ensite wordpress.conf
    sudo a2dissite 000-default.conf
    sudo a2enmod rewrite
@@ -474,7 +474,7 @@ A **VirtualHost** is Apache's way of serving different websites from the same se
 
    From your SSH session, verify with `curl`:
 
-   ```bash
+   ```bash title="Verify WordPress Loads"
    curl -s -o /dev/null -w "%{http_code}" http://localhost
    ```
 
@@ -490,13 +490,13 @@ A health check is a simple automated test that runs periodically to confirm your
 
 1. **Create a health check script**
 
-   ```bash
+   ```bash title="Edit Health Check Script"
    sudo vim /usr/local/bin/wordpress-health.sh
    ```
 
    Add the following:
 
-   ```bash
+   ```bash title="wordpress-health.sh"
    #!/bin/bash
    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -L http://localhost)
    echo "$(date '+%Y-%m-%d %H:%M:%S') - HTTP status: $STATUS" >> /var/log/wordpress-health.log
@@ -504,17 +504,17 @@ A health check is a simple automated test that runs periodically to confirm your
 
    Make it executable:
 
-   ```bash
+   ```bash title="Set File Permissions"
    sudo chmod +x /usr/local/bin/wordpress-health.sh
    ```
 
 2. **Create a systemd service unit**
 
-   ```bash
+   ```bash title="Create a Systemd Service Unit"
    sudo vim /etc/systemd/system/wordpress-health.service
    ```
 
-   ```ini
+   ```ini title="wordpress-health.service"
    [Unit]
    Description=WordPress health check
 
@@ -525,11 +525,11 @@ A health check is a simple automated test that runs periodically to confirm your
 
 3. **Create a systemd timer unit**
 
-   ```bash
+   ```bash title="Create a Systemd Timer Unit"
    sudo vim /etc/systemd/system/wordpress-health.timer
    ```
 
-   ```ini
+   ```ini title="wordpress-health.timer"
    [Unit]
    Description=Run WordPress health check every minute
 
@@ -545,7 +545,7 @@ A health check is a simple automated test that runs periodically to confirm your
 
 4. **Enable and start the timer**
 
-   ```bash
+   ```bash title="Enable and Start the Timer"
    sudo systemctl daemon-reload
    sudo systemctl enable wordpress-health.timer
    sudo systemctl start wordpress-health.timer
@@ -553,7 +553,7 @@ A health check is a simple automated test that runs periodically to confirm your
 
    Wait two minutes, then check the log:
 
-   ```bash
+   ```bash title="Display File Contents"
    cat /var/log/wordpress-health.log
    ```
 
@@ -569,19 +569,19 @@ A health check is a simple automated test that runs periodically to confirm your
 
    On Ubuntu, Apache is typically enabled by default after installation, but verify:
 
-   ```bash
+   ```bash title="Enable Apache to Start on Boot"
    sudo systemctl is-enabled apache2
    ```
 
    If it says `disabled`, enable it:
 
-   ```bash
+   ```bash title="Enable Service"
    sudo systemctl enable apache2
    ```
 
 2. **Reboot the instance**
 
-   ```bash
+   ```bash title="Reboot the Instance"
    sudo reboot
    ```
 
@@ -591,13 +591,13 @@ A health check is a simple automated test that runs periodically to confirm your
 
    Check that Apache is running and note the Process ID (PID) and uptime:
 
-   ```bash
+   ```bash title="Verify Everything Survived"
    systemctl status apache2
    ```
 
    Check the health log for any gap during the reboot:
 
-   ```bash
+   ```bash title="Tail -5 /var/log/wordpress-health.log"
    tail -5 /var/log/wordpress-health.log
    ```
 
@@ -613,7 +613,7 @@ A health check is a simple automated test that runs periodically to confirm your
 
    `nmap` (Network Mapper) is a tool for scanning a host to discover what ports are open and what services are running. The `-sV` flag tells nmap to probe open ports to determine the service version:
 
-   ```bash
+   ```bash title="Run Nmap from Your Laptop"
    nmap -sV -Pn -p T:80 <your-public-ip>
    ```
 
@@ -623,7 +623,7 @@ A health check is a simple automated test that runs periodically to confirm your
 
 ### Cleanup
 
-<Aside type="danger" title="Do not skip this step">
+<Aside type="danger" title="Terminate Lab Resources">
 Terminate all resources you created in this lab to avoid charges:
 - **Option A students:** Go to RDS → Databases → select your instance → Actions → Delete. Uncheck "Create final snapshot" and uncheck "Retain automated backups", then confirm.
 - **Option B students:** Go to EC2 → Instances → select `cs312-wordpress-db` → Instance state → Terminate.

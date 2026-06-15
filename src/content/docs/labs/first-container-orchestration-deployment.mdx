@@ -61,11 +61,11 @@ Watch for the answers to these questions as you follow the tutorial.
 
    Connect via SSH. SLES uses `ec2-user` as the default username:
 
-   ```bash
+   ```bash title="Launch an EC2 Instance"
    ssh -i ~/Downloads/cs312-key.pem ec2-user@<your-public-ip>
    ```
 
-   <Aside type="caution">
+   <Aside type="caution" title="Use a Plain SSH Session">
    Some terminals and developer tools (Warp, VS Code Remote SSH, and others) open multiple SSH channels simultaneously for features like AI assistance, port forwarding, or remote file access. SLES ships with a stricter default sshd configuration than Ubuntu or Amazon Linux and rejects these extra channel requests, causing an immediate disconnect with a stream of `channel X: open failed` errors. This did not occur in earlier labs because Ubuntu and Amazon Linux accept those extra channels silently by default. If you see this error, switch to a standard terminal that opens a single plain SSH session: Terminal.app, iTerm2, Ghostty, or Windows Terminal.
    </Aside>
 
@@ -75,7 +75,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    k3s installs with a single command:
 
-   ```bash
+   ```bash title="Install K3s"
    curl -sfL https://get.k3s.io | sh -
    ```
 
@@ -85,7 +85,7 @@ Watch for the answers to these questions as you follow the tutorial.
 
    By default, k3s writes its configuration to `/etc/rancher/k3s/k3s.yaml`, which is only readable by root. To use `kubectl` without `sudo`:
 
-   ```bash
+   ```bash title="/etc/rancher/k3s/k3s.yaml"
    mkdir -p ~/.kube
    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
    sudo chown $(id -u):$(id -g) ~/.kube/config
@@ -93,13 +93,13 @@ Watch for the answers to these questions as you follow the tutorial.
    echo 'export KUBECONFIG=~/.kube/config' >> ~/.bashrc
    ```
 
-   <Aside type="caution">
+   <Aside type="caution" title="Protect Cluster-Admin Kubeconfig">
    This approach copies the cluster-admin kubeconfig to your home directory for convenience. The file contains a certificate with full control over the cluster, equivalent to root access. In production, `/etc/rancher/k3s/k3s.yaml` stays root-owned, and administrators run `sudo kubectl` for cluster-admin operations. Individual operators receive scoped kubeconfig files backed by Role-Based Access Control (RBAC) service accounts with only the permissions their role requires, not a personal copy of the cluster-admin certificate.
    </Aside>
 
 4. **Verify the cluster**
 
-   ```bash
+   ```bash title="Verify the Cluster"
    kubectl get nodes -o wide
    ```
 
@@ -125,12 +125,12 @@ MariaDB needs a password. Hardcoding it in a manifest is bad practice; it ends u
 
 1. **Create a project directory and write the Secret**
 
-   ```bash
+   ```bash title="Create a Project Directory and Write the Secret"
    mkdir ~/k8s-lab && cd ~/k8s-lab
    vim db-secret.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: Secret
    metadata:
@@ -145,19 +145,19 @@ MariaDB needs a password. Hardcoding it in a manifest is bad practice; it ends u
 
 2. **Apply the Secret**
 
-   ```bash
+   ```bash title="Apply the Secret"
    kubectl apply -f db-secret.yaml
    ```
 
 3. **Inspect the stored value**
 
-   ```bash
+   ```bash title="Inspect the Stored Value"
    kubectl get secret db-secret -o jsonpath='{.data.db-password}' | base64 --decode
    ```
 
    The value is stored encoded, but you can decode it with standard base64 tooling. Record this output for your lab questions.
 
-   <Aside type="caution">
+   <Aside type="caution" title="Base64 Is Not Encryption">
    Base64 is encoding, not encryption. It is trivially reversible by anyone with access to the cluster. Kubernetes Secrets protect against credentials appearing in your YAML files and Git history, but they do not protect against a user or process that has permission to read Secrets in the cluster. In a production environment, restrict Secret access with Role-Based Access Control (RBAC) and consider encrypting Secrets at rest using a Key Management Service (KMS) provider.
    </Aside>
 
@@ -167,7 +167,7 @@ MariaDB needs a password. Hardcoding it in a manifest is bad practice; it ends u
 
 MariaDB needs a stable DNS name so WordPress can reach it. You will create a Deployment and a ClusterIP Service (internal-only, with no NodePort) for MariaDB.
 
-<Aside type="caution">
+<Aside type="caution" title="Ephemeral Database Storage">
 This deployment uses ephemeral (in-container) storage. If the MariaDB Pod is deleted, all database data is lost. In production, you would attach a **PersistentVolumeClaim** to give the database durable storage that outlives any individual Pod. For this lab, ephemeral storage is intentional: we are demonstrating orchestration, not data durability.
 </Aside>
 
@@ -175,11 +175,11 @@ This deployment uses ephemeral (in-container) storage. If the MariaDB Pod is del
 
 1. **Write the MariaDB Deployment**
 
-   ```bash
+   ```bash title="Edit mariadb-deployment.yaml"
    vim mariadb-deployment.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: apps/v1
    kind: Deployment
    metadata:
@@ -222,11 +222,11 @@ This deployment uses ephemeral (in-container) storage. If the MariaDB Pod is del
 
 2. **Write the MariaDB Service**
 
-   ```bash
+   ```bash title="Edit mariadb-service.yaml"
    vim mariadb-service.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: Service
    metadata:
@@ -244,13 +244,13 @@ This deployment uses ephemeral (in-container) storage. If the MariaDB Pod is del
 
 3. **Apply both manifests**
 
-   ```bash
+   ```bash title="Apply Both Manifests"
    kubectl apply -f mariadb-deployment.yaml -f mariadb-service.yaml
    ```
 
 4. **Wait for MariaDB to be ready**
 
-   ```bash
+   ```bash title="Wait for MariaDB to Be Ready"
    kubectl get pods -l app=mariadb
    ```
 
@@ -266,11 +266,11 @@ WordPress connects to MariaDB using the Service DNS name `mariadb-service`, whic
 
 1. **Write the WordPress Deployment**
 
-   ```bash
+   ```bash title="Edit wordpress-deployment.yaml"
    vim wordpress-deployment.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: apps/v1
    kind: Deployment
    metadata:
@@ -312,11 +312,11 @@ WordPress connects to MariaDB using the Service DNS name `mariadb-service`, whic
 
    WordPress will not be exposed directly to the internet (nginx will sit in front of it), so a ClusterIP Service is sufficient.
 
-   ```bash
+   ```bash title="Edit wordpress-service.yaml"
    vim wordpress-service.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: Service
    metadata:
@@ -332,13 +332,13 @@ WordPress connects to MariaDB using the Service DNS name `mariadb-service`, whic
 
 3. **Apply both manifests**
 
-   ```bash
+   ```bash title="Apply Both Manifests"
    kubectl apply -f wordpress-deployment.yaml -f wordpress-service.yaml
    ```
 
 4. **Verify the WordPress Pods**
 
-   ```bash
+   ```bash title="Verify the WordPress Pods"
    kubectl get pods -o wide
    ```
 
@@ -352,7 +352,7 @@ Traefik is k3s's built-in **ingress controller** and is the component actually l
 
 The WordPress image used in this lab (`wordpress:6.5.5-php8.3-apache`) runs **Apache** internally as the PHP application server. nginx's role here is purely as a **reverse proxy**: it accepts the request from Traefik, forwards it to WordPress over the cluster network, and returns the response. The request flow is:
 
-```mermaid
+```mermaid title="Deploying Nginx as a Reverse Proxy Diagram"
 flowchart TB
   browser[Browser]
 
@@ -393,11 +393,11 @@ This separation is common in production: the ingress controller handles cluster 
 
 1. **Create the nginx ConfigMap**
 
-   ```bash
+   ```bash title="Edit nginx-configmap.yaml"
    vim nginx-configmap.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: ConfigMap
    metadata:
@@ -423,11 +423,11 @@ This separation is common in production: the ingress controller handles cluster 
 
 2. **Write the nginx Deployment**
 
-   ```bash
+   ```bash title="Edit nginx-deployment.yaml"
    vim nginx-deployment.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: apps/v1
    kind: Deployment
    metadata:
@@ -462,11 +462,11 @@ This separation is common in production: the ingress controller handles cluster 
 
 3. **Write the nginx Service**
 
-   ```bash
+   ```bash title="Edit /etc/nginx/conf.d/default.conf"
    vim nginx-service.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: Service
    metadata:
@@ -482,7 +482,7 @@ This separation is common in production: the ingress controller handles cluster 
 
    nginx is a ClusterIP Service: it is reachable only from inside the cluster. External traffic reaches it through the Ingress you will create next, not directly.
 
-   <Aside type="note">
+   <Aside type="note" title="Prefer Ingress Over NodePort">
    Kubernetes also supports NodePort services (range 30000-32767), which expose a port directly on the host. NodePorts are useful for debugging but awkward for real web apps: the non-standard port appears in every URL, and applications like WordPress that generate absolute URLs break when redirected to a port they don't expect. The Ingress approach used here is the standard production pattern: Traefik (or another ingress controller) owns port 80 and routes to internal ClusterIP services by hostname or path.
    </Aside>
 
@@ -490,11 +490,11 @@ This separation is common in production: the ingress controller handles cluster 
 
    k3s ships with Traefik as the default ingress controller. It is already running and bound to port 80 on the host. An Ingress resource tells Traefik which Service to route traffic to.
 
-   ```bash
+   ```bash title="Edit wordpress-ingress.yaml"
    vim wordpress-ingress.yaml
    ```
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: networking.k8s.io/v1
    kind: Ingress
    metadata:
@@ -516,13 +516,13 @@ This separation is common in production: the ingress controller handles cluster 
 
 5. **Apply all four manifests**
 
-   ```bash
+   ```bash title="Apply All Four Manifests"
    kubectl apply -f nginx-configmap.yaml -f nginx-deployment.yaml -f nginx-service.yaml -f wordpress-ingress.yaml
    ```
 
 6. **Test the proxy**
 
-   ```bash
+   ```bash title="Test the Proxy"
    curl -L http://localhost
    ```
 
@@ -562,7 +562,7 @@ The WordPress Docker image generates a random set of authentication keys (`AUTH_
 
 1. **Confirm both Pods are running**
 
-   ```bash
+   ```bash title="Confirm Both Pods Are Running"
    kubectl get pods -l app=wordpress
    ```
 
@@ -570,7 +570,7 @@ The WordPress Docker image generates a random set of authentication keys (`AUTH_
 
 2. **Check logs from both Pods simultaneously**
 
-   ```bash
+   ```bash title="Check Logs from Both Pods Simultaneously"
    kubectl logs -l app=wordpress --prefix
    ```
 
@@ -578,7 +578,7 @@ The WordPress Docker image generates a random set of authentication keys (`AUTH_
 
 3. **Confirm no auth keys are set**
 
-   ```bash
+   ```bash title="Confirm No Auth Keys Are Set"
    kubectl exec $(kubectl get pods -l app=wordpress -o jsonpath='{.items[0].metadata.name}') -- env | grep WORDPRESS_AUTH
    ```
 
@@ -594,7 +594,7 @@ The fix is to generate a consistent set of auth keys once, store them in the Sec
 
 1. **Generate the eight auth keys**
 
-   ```bash
+   ```bash title="Generate the Eight Auth Keys"
    for key in AUTH_KEY SECURE_AUTH_KEY LOGGED_IN_KEY NONCE_KEY AUTH_SALT SECURE_AUTH_SALT LOGGED_IN_SALT NONCE_SALT; do
      echo "$key: $(openssl rand -base64 48)"
    done
@@ -606,7 +606,7 @@ The fix is to generate a consistent set of auth keys once, store them in the Sec
 
    Edit `db-secret.yaml` to add the eight keys. Replace each placeholder with the actual generated value:
 
-   ```yaml
+   ```yaml title="Kubernetes Manifest"
    apiVersion: v1
    kind: Secret
    metadata:
@@ -629,7 +629,7 @@ The fix is to generate a consistent set of auth keys once, store them in the Sec
 
    Edit `wordpress-deployment.yaml` and add these entries to the `env` section of the WordPress container, after the existing environment variables:
 
-   ```yaml
+   ```yaml title="wordpress-deployment.yaml"
                - name: WORDPRESS_AUTH_KEY
                  valueFrom:
                    secretKeyRef:
@@ -674,7 +674,7 @@ The fix is to generate a consistent set of auth keys once, store them in the Sec
 
 4. **Apply the changes**
 
-   ```bash
+   ```bash title="Apply the Changes"
    kubectl apply -f db-secret.yaml -f wordpress-deployment.yaml
    kubectl rollout status deployment/wordpress
    ```
@@ -683,7 +683,7 @@ The fix is to generate a consistent set of auth keys once, store them in the Sec
 
 5. **Verify the fix**
 
-   ```bash
+   ```bash title="Verify the Fix"
    kubectl get pods -l app=wordpress
    ```
 
@@ -701,7 +701,7 @@ One of Kubernetes' most important features is that it automatically replaces fai
 
 1. **List the running WordPress Pods**
 
-   ```bash
+   ```bash title="List the Running WordPress Pods"
    kubectl get pods -l app=wordpress
    ```
 
@@ -709,7 +709,7 @@ One of Kubernetes' most important features is that it automatically replaces fai
 
 2. **Delete one WordPress Pod**
 
-   ```bash
+   ```bash title="Delete One WordPress Pod"
    kubectl delete pod <pod-name>
    ```
 
@@ -719,7 +719,7 @@ One of Kubernetes' most important features is that it automatically replaces fai
 
    Immediately run:
 
-   ```bash
+   ```bash title="Watch the Replacement"
    kubectl get pods -l app=wordpress
    ```
 
@@ -727,7 +727,7 @@ One of Kubernetes' most important features is that it automatically replaces fai
 
 4. **Describe the WordPress Service endpoints**
 
-   ```bash
+   ```bash title="Describe the WordPress Service Endpoints"
    kubectl describe service wordpress-service
    ```
 
@@ -743,7 +743,7 @@ To pause your work, simply end your AWS Academy Learner Lab session. Your EC2 in
 
 If you have completed all three labs and are permanently done, you can tear everything down:
 
-```bash
+```bash title="Kubectl Delete"
 kubectl delete \
   -f wordpress-ingress.yaml \
   -f nginx-deployment.yaml -f nginx-service.yaml -f nginx-configmap.yaml \

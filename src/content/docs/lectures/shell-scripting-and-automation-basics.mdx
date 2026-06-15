@@ -27,7 +27,7 @@ Shell scripts solve all three problems. A script encodes the exact sequence of c
 
 A shell script is simply a text file containing commands that the shell can execute, processed top to bottom by the interpreter. What separates a robust script from a fragile one is rarely the commands themselves; it is the structure around them: declaring the right interpreter so the script runs correctly on any machine, controlling execution permissions so the kernel knows the file is meant to be run, and understanding the difference between invoking a script directly and sourcing its contents into the current shell. The following script copies a web directory to a backup location, and the first line is already doing significant work:
 
-```bash
+```bash title="backup.sh"
 #!/usr/bin/env bash
 cp -r /var/www/html /backups/html-backup
 ```
@@ -46,7 +46,7 @@ The first widely-used Unix shell was written by Stephen Bourne at Bell Labs in 1
 
 Hardcoding paths like `/var/www/html` makes a script fragile. Variables let you change a value in one place and have it take effect everywhere. Assigning a variable uses the bare name; reading it back requires a `$` prefix, which tells the shell to expand the variable to its current value before passing the result to a command:
 
-```bash
+```bash title="Set Source and Destination Variables"
 #!/usr/bin/env bash
 SOURCE="/var/www/html"
 DEST="/backups/html-backup"
@@ -59,7 +59,7 @@ Notice the double quotes around `$SOURCE` and `$DEST`. Quoting is one of the mos
 
 **Command substitution** lets you capture the output of a command into a variable. This is invaluable for timestamps, hostnames, and dynamic paths:
 
-```bash
+```bash title="Timestamped Backup Name"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 DEST="/backups/html-backup-$TIMESTAMP"
 cp -r "$SOURCE" "$DEST"
@@ -69,7 +69,7 @@ Now every run creates a uniquely named backup directory. The `$(...)` syntax is 
 
 A related construct, the **here document** (heredoc), feeds a block of inline text to a command as standard input. It is not a quote type in the same sense as single or double quotes; it is an input-redirection form whose body may either expand shell syntax or preserve it literally depending on how you write the delimiter. The `<<` operator introduces the block, followed immediately by a delimiter word of your choosing; the block ends when that word appears alone on a line. `EOF` is only a conventional delimiter name, short for "end of file"; you could use `END`, `REPORT`, or any other word that does not appear by itself inside the body. The important part is that Bash looks at the delimiter word on the opening line to decide how to treat the entire heredoc body. That is why the quotes, if any, appear around `EOF` rather than around the block itself. If the delimiter is quoted, Bash does not perform parameter expansion, command substitution, or arithmetic expansion inside the body. If the delimiter is unquoted, Bash performs those expansions before passing the text to the command:
 
-```bash
+```bash title="Set Environment Variable"
 SOURCE="/var/www/html"
 
 cat > /tmp/literal-report.txt << 'EOF'
@@ -89,7 +89,7 @@ The first block writes the characters `$SOURCE`, `$(date)`, and `$(( 2 + 2 ))` l
 
 For example, if `date` returned `Tue Apr 21 15:30:00 UTC 2026`, inspecting the two files would show:
 
-```text
+```text title="Variables and Quoting Output"
 $ cat /tmp/literal-report.txt
 Source: $SOURCE
 Generated: $(date)
@@ -113,7 +113,7 @@ A script that hardcodes its inputs is a one-off command, not a reusable tool. Ac
 
 The positional parameters are `$1`, `$2`, `$3`, and so on, in the order the arguments were passed. `$0` holds the name of the script itself. `$#` holds the total count of arguments passed. `$@` expands to all arguments as separate quoted words, which is the correct form to use when passing them to another command:
 
-```bash
+```bash title="Argument Validation Script"
 #!/usr/bin/env bash
 if [[ "$#" -lt 2 ]]; then
     echo "Usage: $(basename "$0") <source> <destination>" >&2
@@ -131,7 +131,7 @@ Checking `$#` before doing any work is a good habit. If the count is wrong, the 
 
 Shell variables live only within the running script. When a script calls another program, that program gets a copy of the **environment**: a set of key-value pairs passed from parent to child every time a new process starts. This is a property of the Unix process model: every process inherits its parent's environment automatically. Variables are added to the environment only when you mark them with the `export` keyword:
 
-```bash
+```bash title="Set Environment Variable"
 SCRIPT_NAME="backup"
 
 export BACKUP_ROOT="/backups"
@@ -150,14 +150,14 @@ The mechanics of pipes, redirection, and streams are covered in the [Terminal an
 
 Unix programs communicate through three standard streams: stdin for input, stdout for normal output, and stderr for error messages. The reason these are separate is composability. A program that sends errors to stdout corrupts any pipeline it sits in, because the downstream program now receives a mix of data and error messages it was not designed to handle. A program that sends errors to stderr keeps the pipe clean: stdout carries the data, stderr carries the diagnostics, and a caller can route each to the right place independently. A script should follow the same convention, sending all error messages to stderr:
 
-```bash
+```bash title="Sourcing Versus Executing"
 echo "Error: source directory does not exist" >&2
 exit 1
 ```
 
 **Exit codes are the contract.** Every command finishes with an exit code: 0 for success, any non-zero value for failure. This is how pipeline stages and calling scripts detect whether a command worked. You can test a command's success directly in an `if` statement:
 
-```bash
+```bash title="Exit Codes Are the Contract"
 if ! cp -r /var/www/html /backups/html-latest; then
     echo "Backup failed" >&2
     exit 1
@@ -170,7 +170,7 @@ A script that exits with 0 when it fails is lying to whoever called it. Cron, sy
 
 Scripts that run on a schedule or in the background cannot rely on a human to notice when something goes wrong. The source directory might have been moved, the target disk might be full, or a required tool might be missing. Conditionals let a script interrogate the state of the system before acting, either proceeding with confidence or halting with a specific, actionable error rather than producing partial, silent, or misleading output. This is the difference between a script that fails mysteriously at step seven and one that tells you at step one why it cannot proceed. Bash's `[[ ]]` test construct and `if` statement are the primary tools for this.
 
-```bash
+```bash title="Validate Script Preconditions"
 #!/usr/bin/env bash
 SOURCE="/var/www/html"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -198,7 +198,7 @@ The `[[ ... ]]` construct is Bash's extended test command. It is preferred over 
 
 String comparisons use `==` and `!=` inside `[[ ]]`, while numeric comparisons use `-eq`, `-ne`, `-lt`, `-gt`, `-le`, and `-ge`. You can chain conditions with `elif`:
 
-```bash
+```bash title="Root and Source Preconditions"
 if [[ "$EUID" -ne 0 ]]; then
     echo "This script must be run as root" >&2
     exit 1
@@ -218,7 +218,7 @@ A common mistake is writing `if [ $VAR == "yes" ]` without quotes. If `$VAR` is 
 
 A script that operates on a single, hardcoded target is useful; one that operates on a list of targets is a tool. Loops are what make the difference: the same logic applies to every item in a collection without duplicating the code, the collection can grow or shrink without touching the script's structure, and new items are handled automatically. This composability is central to how professional automation is written. Bash provides several loop constructs suited to different iteration patterns. The `for` loop is the most common, iterating over a list of values:
 
-```bash
+```bash title="Loop Over Source Directories"
 #!/usr/bin/env bash
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 DIRS=("/var/www/html" "/etc/nginx" "/etc/ssh")
@@ -238,7 +238,7 @@ The `"${DIRS[@]}"` syntax expands the array so that each element is treated as a
 
 **While loops** are useful when you need to read input line by line, such as processing a configuration file:
 
-```bash
+```bash title="While Loops"
 while IFS= read -r dir; do
     [[ -z "$dir" || "$dir" == \#* ]] && continue
     echo "Processing: $dir"
@@ -249,7 +249,7 @@ done < /etc/backup-dirs.conf
 
 **Arithmetic loops.** Bash's `(( ... ))` construct evaluates integer arithmetic and supports C-style operators. It returns exit code 0 when the arithmetic result is non-zero, and exit code 1 when the result is zero, making it a natural fit for loop conditions and counters:
 
-```bash
+```bash title="Arithmetic Counter Loop"
 #!/usr/bin/env bash
 i=0
 while (( i < 5 )); do
@@ -264,7 +264,7 @@ The same construct handles all integer arithmetic: `(( count += 1 ))`, `(( total
 
 As a script grows, the same pattern tends to recur: validate that something exists, perform an operation on it, log the outcome. Without functions, that pattern gets copied and pasted wherever it is needed, and a bug fix or improvement has to be applied everywhere the copy appears. Functions solve this by naming a block of logic so it can be called like any other command. They accept arguments, communicate success or failure through an exit code, and can use local variables so internal names do not accidentally overwrite global state. A Bash function does not run in a separate process, so it shares the shell's working directory and most shell state with the caller. A well-factored Bash script reads much like a program in any other language: a main block that drives the logic, and named functions that handle the reusable parts.
 
-```bash
+```bash title="Reusable Logging Function"
 #!/usr/bin/env bash
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
@@ -297,7 +297,7 @@ Bash functions do not return values the way functions in Python or JavaScript do
 
 By default, Bash does not stop when a command fails. If a `cp` returns a non-zero exit code, the script silently continues to the next line. If you mistype a variable name, Bash substitutes an empty string rather than flagging the mistake. If the first command in a pipeline fails, the pipeline still reports success as long as the last command succeeds. Each of these defaults has a historical justification rooted in interactive shell use, but each one is also a common source of bugs in scripts, producing failures that cascade far from their origin and are difficult to diagnose. Bash provides a set of options, conventionally set at the top of every production script, that override these defaults:
 
-```bash
+```bash title="Safe Bash Defaults"
 #!/usr/bin/env bash
 set -euo pipefail
 ```
@@ -308,7 +308,7 @@ Together, these three options catch the vast majority of scripting bugs at the p
 
 **Cleanup with `trap`.** Sometimes a script creates temporary files or acquires locks that must be released even if the script fails partway through. The `trap` builtin registers a command to run when the script receives a signal or exits:
 
-```bash
+```bash title="Trap Cleanup Pattern"
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -325,7 +325,7 @@ The `trap ... EXIT` fires regardless of whether the script succeeds or fails, so
 
 The following script brings all the concepts together: safe defaults, a logging function, per-directory backup with error counting, and rotation:
 
-```bash
+```bash title="Defensive Backup Script"
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -435,14 +435,14 @@ Curly braces specify how many times the preceding element must appear. In ERE sy
 
 Parentheses serve two purposes in a regular expression: they group sub-expressions for repetition or alternation, and they capture the matched text for reuse as a backreference. The `|` operator matches either of two alternatives. In ERE syntax (`grep -E`), parentheses and `|` work directly; in BRE syntax (plain `grep`), they must be backslash-escaped:
 
-```bash
+```bash title="Search Text"
 grep -E "cat|dog" file
 grep -E "i like (cat|dog)" file
 ```
 
 A backreference (`\1`, `\2`, etc.) refers back to the text matched by the first or second captured group. In BRE syntax, this matches any line where the word "dogs" appears twice in a row:
 
-```bash
+```bash title="Search Text"
 grep "\(dogs\) \1" file
 ```
 
@@ -450,7 +450,7 @@ grep "\(dogs\) \1" file
 
 `grep` (Global Regular Expression Print) is the primary tool for searching files and command output with regular expressions. It is most often used to filter lines from logs, command output, or configuration files. `grep -E` activates ERE syntax, avoiding backslash-escaping for `|`, `+`, and `{n}`. `grep -i` performs case-insensitive matching. `grep -v` inverts the match, printing only lines that do not contain the pattern. `grep -rn` searches recursively through a directory and prints line numbers alongside matches. `grep -c` counts matching lines instead of printing them.
 
-```bash
+```bash title="Search Text"
 grep -E "([0-9]{1,3}\.){3}[0-9]{1,3}" access.log
 ```
 
@@ -464,7 +464,7 @@ Use `grep -E` for extended regular expressions. ERE allows `+`, `?`, `|`, and `{
 
 [`sed`](https://www.grymoire.com/Unix/Sed.html) (stream editor) applies regex-based substitutions to text one line at a time. Its core operation is the substitution command `s/pattern/replacement/`, with an optional `g` flag to replace all occurrences on a line rather than just the first:
 
-```bash
+```bash title="Sed 'S/foo/bar/' Input.txt"
 sed 's/foo/bar/' input.txt
 sed 's/foo/bar/g' input.txt
 sed '/^#/d' config.txt
@@ -479,7 +479,7 @@ The third command deletes all comment lines from a config file (lines starting w
 
 This makes `awk` the natural tool for tabular output: command output from `ps`, `df`, or `ls -l`, log files with fixed column positions, or any delimiter-separated data. The following examples cover the most common operational patterns:
 
-```bash
+```bash title="Filesystem Usage with awk"
 df -h | awk 'NR > 1 {print $6, $5}'
 awk '$3 > 80 {print $1, $3}' cpu-log.txt
 awk '{sum += $5} END {print "Total:", sum, "bytes"}' sizes.txt
@@ -493,7 +493,7 @@ The conceptual distinction between `sed` and `awk` is this: reach for `sed` when
 
 A backup script is only useful if it runs on a schedule. Cron is the traditional Unix job scheduler and is installed on most general-purpose Linux systems, though some minimal containers and cloud images omit the daemon entirely. Each user has a crontab (cron table) that lists commands and their schedules. Edit yours with `crontab -e`. If that command is missing or cron is not running, the system may not have cron installed. The format is five fields followed by the command:
 
-```
+```text title="Cron Field Layout"
 0    2     *    *      *         /usr/local/bin/backup.sh
 ```
 

@@ -77,7 +77,7 @@ One specific candidate for trimming: network-services-and-application-delivery.m
 
 ### `ip` — interface and routing state
 
-```bash
+```bash title="Show IP Addresses"
 # Show IP addresses on all interfaces
 ip addr show
 
@@ -98,7 +98,7 @@ sudo ip route add 10.0.2.0/24 via 10.0.1.1
 
 ### `dig` — DNS queries
 
-```bash
+```bash title="Query DNS Records"
 # Query default resolver for an A record
 dig example.com
 
@@ -123,7 +123,7 @@ dig +ttlunits example.com
 
 ### `traceroute` — path tracing
 
-```bash
+```bash title="Traceroute Example.com"
 # Default (UDP probes; often blocked by firewalls)
 traceroute example.com
 
@@ -138,7 +138,7 @@ A `* * *` at a hop means that router is not sending ICMP TTL-exceeded replies. I
 
 ### `ss` — socket statistics
 
-```bash
+```bash title="List Listening Sockets"
 # Show all listening TCP sockets with process name and PID
 sudo ss -tlnp
 
@@ -156,7 +156,7 @@ sudo ss -ulnp
 
 ### `tcpdump` — packet capture
 
-```bash
+```bash title="Capture Packets with tcpdump"
 # Capture all traffic on an interface (very noisy; always filter)
 sudo tcpdump -i eth0
 
@@ -192,7 +192,7 @@ If you see incoming `[S]` packets but no `[S.]` responses, the server is receivi
 
 ### `openssl s_client` — TLS diagnostics
 
-```bash
+```bash title="Inspect TLS Certificate"
 # Test a TLS connection and print the certificate chain
 openssl s_client -connect example.com:443
 
@@ -278,7 +278,7 @@ A specific thing to add here that the lecture does not: a recommended VLAN numbe
 
 The **native VLAN** on a trunk port is the VLAN that carries untagged traffic. On Cisco equipment the default is VLAN 1. A mismatch between the native VLAN on two ends of a trunk causes untagged traffic to be silently dropped or placed in the wrong VLAN. Always configure native VLAN explicitly and avoid using VLAN 1 for production traffic.
 
-```
+```text title="Configure Native VLAN"
 switchport trunk native vlan 99
 ```
 

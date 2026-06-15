@@ -30,13 +30,13 @@ This activity puts into practice the concepts from the [Configuration Management
 
 <Aside type="note" title="Ansible on WSL2">
 If you plan to use WSL2 on Windows, you might hit some version compaibility issues between ansible-core and ansible-lint. The recommended approach for Ubuntu on WSL2 is the following:
-```bash
+```bash title="Update Package Lists"
 sudo apt update
 sudo apt install -y pipx python3-pip python3-venv
 pipx ensurepath
 ```
 Restart your terminal, then install Ansible and ansible-lint with pipx:
-```bash
+```bash title="Pipx Install Ansible"
 pipx install ansible 
 pipx install ansible-lint
 ```
@@ -78,7 +78,7 @@ You will create a fresh EC2 instance for this activity. The instance will serve 
 
    Expand "Advanced details." Scroll to the "User data" field at the bottom and paste:
 
-   ```bash
+   ```bash title="EC2 User Data Bootstrap"
    #!/bin/bash
    # cloud-init runs this script once at first boot.
    # The standard Ansible modules used in this activity need Python 3.
@@ -97,7 +97,7 @@ You will create a fresh EC2 instance for this activity. The instance will serve 
 
    Replace `<YOUR-EC2-PUBLIC-IP>` with the value you just copied, then run:
 
-   ```bash
+   ```bash title="Wait for Cloud-init to Finish Before Using Ansible"
    ssh -i ~/.ssh/cs312-key.pem ubuntu@<YOUR-EC2-PUBLIC-IP> \
      'cloud-init status --wait && python3 --version'
    ```
@@ -124,7 +124,7 @@ The **control node** is your local machine: the place where you write and run An
 
 1. **Verify your Ansible installation:**
 
-   ```bash
+   ```bash title="Verify Your Ansible Installation"
    ansible --version
    ```
 
@@ -132,7 +132,7 @@ The **control node** is your local machine: the place where you write and run An
 
 2. **Create your working directory:**
 
-   ```bash
+   ```bash title="Create Your Working Directory"
    mkdir -p ~/cs312-ansible
    cd ~/cs312-ansible
    ```
@@ -149,7 +149,7 @@ An **inventory** tells Ansible which machines to manage and how to reach them. Y
 
 Create a file named `hosts.ini` in your working directory with the following content. Replace `<YOUR-EC2-PUBLIC-IP>` with your instance's actual public IP from the EC2 console:
 
-```ini
+```ini title="hosts.ini"
 [managed]
 ec2 ansible_host=<YOUR-EC2-PUBLIC-IP> ansible_user=ubuntu
 
@@ -162,13 +162,13 @@ The `[managed]` block defines a group named `managed` with one host aliased `ec2
 
 Now test connectivity using the `ping` module:
 
-```bash
+```bash title="Run Ansible Command"
 ansible -i hosts.ini managed -m ansible.builtin.ping
 ```
 
 A successful result looks like this:
 
-```
+```text title="Build Your Inventory Output"
 ec2 | SUCCESS => {
     "changed": false,
     "ping": "pong"
@@ -192,32 +192,32 @@ With connectivity confirmed, you can run ad-hoc commands to inspect the server. 
 <Steps>
 
 1. **Gather system facts.** The `setup` module collects information about the managed node: OS version, memory, CPU, network interfaces, and more. The `filter` argument narrows the output:
-   ```bash
+   ```bash title="Gather System Facts"
    ansible -i hosts.ini managed -m ansible.builtin.setup -a "filter=ansible_distribution*"
    ```
    Note the OS name and version. These values are available as variables in playbooks by default because Ansible gathers facts automatically unless you disable it.
 
 2. **Check disk usage:**
-   ```bash
+   ```bash title="Check Disk Usage"
    ansible -i hosts.ini managed -m ansible.builtin.command -a "df -h /"
    ```
    Notice that the output begins with `"changed": true` even though `df` reads disk usage and changes nothing at all. In this ad-hoc form, the `command` module runs a shell-free command without inspecting remote state first, so Ansible reports it as changed by default.
 
 3. **Create a file with your name.** Replace `YOUR NAME` with your actual name:
-   ```bash
+   ```bash title="Create a File with Your Name"
    ansible -i hosts.ini managed -m ansible.builtin.copy \
      -a "content='Deployed by: YOUR NAME\n' dest=/tmp/cs312.txt"
    ```
    The output shows `"changed": true` and a green `changed` label.
 
 4. **Read the file back to confirm it was created:**
-   ```bash
+   ```bash title="Read the File Back to Confirm It Was Created"
    ansible -i hosts.ini managed -m ansible.builtin.command -a "cat /tmp/cs312.txt"
    ```
    Your name appears in the `stdout` field.
 
 5. **Run the copy command again, identical to step 3:**
-   ```bash
+   ```bash title="Run the Copy Command Again, Identical to Step 3"
    ansible -i hosts.ini managed -m ansible.builtin.copy \
      -a "content='Deployed by: YOUR NAME\n' dest=/tmp/cs312.txt"
    ```
@@ -238,26 +238,26 @@ The `apt` module manages packages on Debian-based systems. Package management re
 <Steps>
 
 1. **Install the `tree` package:**
-   ```bash
+   ```bash title="Install the Tree Package"
    ansible -i hosts.ini managed -m ansible.builtin.apt \
      -a "name=tree state=present update_cache=yes cache_valid_time=3600" --become
    ```
    The output shows `"changed": true`.
 
 2. **Verify the installation:**
-   ```bash
+   ```bash title="Verify the Installation"
    ansible -i hosts.ini managed -m ansible.builtin.command -a "tree --version"
    ```
 
 3. **Run the same install command again:**
-   ```bash
+   ```bash title="Run the Same Install Command Again"
    ansible -i hosts.ini managed -m ansible.builtin.apt \
      -a "name=tree state=present update_cache=yes cache_valid_time=3600" --become
    ```
    Because you just refreshed the package cache and installed the package, this immediate second run should show `"changed": false`. The `apt` module found `tree` already installed at the requested state and the cache still fresh, so it did nothing.
 
 4. **Remove the package:**
-   ```bash
+   ```bash title="Remove the Package"
    ansible -i hosts.ini managed -m ansible.builtin.apt \
      -a "name=tree state=absent" --become
    ```
@@ -284,7 +284,7 @@ Begin with the smallest useful playbook. This first version only installs the pa
 <Steps>
 
 1. **Create the first version of `site.yml`:**
-    ```yaml
+    ```yaml title="site.yml"
     ---
     - name: Configure web server
       hosts: managed
@@ -310,31 +310,31 @@ Begin with the smallest useful playbook. This first version only installs the pa
     Save the file in `~/cs312-ansible/site.yml`.
 
 2. **Run the linter against this first version:**
-    ```bash
+    ```bash title="~/cs312-ansible/site.yml"
     ansible-lint site.yml
     ```
     A clean playbook produces no output. If you see warnings, fix them before continuing. One of the conventions ansible-lint enforces is fully qualified collection names: `ansible.builtin.apt` instead of the short form `apt`. Every module in this playbook uses that convention, which makes the source collection unambiguous as playbooks grow to include modules from multiple collections. You can run `ansible-lint site.yml --fix` to automatically apply some fixes.
 
 3. **Preview what this version will do:**
-    ```bash
+    ```bash title="Preview What This Version Will Do"
     ansible-playbook -i hosts.ini site.yml --check --diff
     ```
     This preview should predict package and service changes. It should tell you nginx will be installed and fail on the service call because nginx is not yet installed on the system.
 
 4. **Run the playbook:**
-    ```bash
+    ```bash title="Run the Playbook"
     ansible-playbook -i hosts.ini site.yml
     ```
     On the first run, the package task should show `changed`, and the service task may also show `changed` if nginx was not already started.
 
 5. **Run the same playbook a second time right away:**
-    ```bash
+    ```bash title="Run the Same Playbook a Second Time Right Away"
     ansible-playbook -i hosts.ini site.yml
     ```
     On this immediate second run, both tasks should now show `ok`. Look at the PLAY RECAP printed at the bottom of the output: it shows one line per host with counters for `ok` (found the system already correct), `changed` (took an action), `failed`, and `skipped`. On this second run, `changed` should be zero. The server is already in the declared state, so Ansible had nothing to do. A PLAY RECAP with `changed=0` on a re-run is idempotency made visible.
 
 6. **Verify that nginx is serving its default page:**
-    ```bash
+    ```bash title="Verify That Nginx Is Serving Its Default Page"
     ansible -i hosts.ini managed -m ansible.builtin.command -a "/usr/bin/curl -s http://localhost/"
     ```
     You should see HTML containing `Welcome to nginx!`. That is your first proof that the playbook is doing useful work.
@@ -348,7 +348,7 @@ Now that the base web server is working, replace nginx's default page with your 
 <Steps>
 
 1. **Replace `site.yml` with this second version.** Replace `Your Name` with your actual name before saving:
-    ```diff lang="yaml"
+    ```diff lang="yaml" title="site.yml"
       ---
       - name: Configure web server
         hosts: managed
@@ -390,34 +390,34 @@ Now that the base web server is working, replace nginx's default page with your 
     ```
 
 2. **Lint the updated playbook:**
-    ```bash
+    ```bash title="Lint the Updated Playbook"
     ansible-lint site.yml
     ```
 
 3. **Preview the file change before applying it:**
-    ```bash
+    ```bash title="Preview the File Change Before Applying It"
     ansible-playbook -i hosts.ini site.yml --check --diff
     ```
     You should see a diff for `/var/www/html/index.html` showing the default page being replaced with your custom heading.
 
 4. **Run the updated playbook:**
-    ```bash
+    ```bash title="Run the Updated Playbook"
     ansible-playbook -i hosts.ini site.yml
     ```
     This time the page task should show `changed`, and the `Reload nginx` handler should appear once near the end of the play.
 
 5. **Run the updated playbook a second time:**
-    ```bash
+    ```bash title="Run the Updated Playbook a Second Time"
     ansible-playbook -i hosts.ini site.yml
     ```
     Now every task should show `ok`, and the handler should not appear. Nothing about the page changed, so Ansible has no reason to reload nginx.
 
 6. **Verify the deployed page:**
-    ```bash
+    ```bash title="Verify the Deployed Page"
     ansible -i hosts.ini managed -m ansible.builtin.command -a "/usr/bin/curl -s http://localhost/"
     ```
     You should see:
-    ```
+    ```text title="Add the Custom Page and Handler Output"
     <h1>Deployed by Your Name on ip-X-X-X-X</h1>
     ```
     Your name and the EC2 hostname appear in the response.
@@ -435,7 +435,7 @@ The last pass adds the cron-based health check from the scripting activity. This
 <Steps>
 
 1. **Replace `site.yml` with the final version:**
-    ```diff lang="yaml"
+    ```diff lang="yaml" title="site.yml"
       ---
       - name: Configure web server
         hosts: managed
@@ -500,34 +500,34 @@ The last pass adds the cron-based health check from the scripting activity. This
     The `cron_file` parameter writes the job to `/etc/cron.d/nginx-health` as a system cron file rather than a user crontab. The `name` field (`nginx health check`) is how Ansible identifies this specific entry across runs: it is written as a comment in the cron file so a re-run can find and update it rather than adding a duplicate.
 
 2. **Lint the final playbook:**
-    ```bash
+    ```bash title="Lint the Final Playbook"
     ansible-lint site.yml
     ```
 
 3. **Preview the final additions:**
-    ```bash
+    ```bash title="Preview the Final Additions"
     ansible-playbook -i hosts.ini site.yml --check --diff
     ```
     You should see `changed` predictions for the health-check script and the cron entry. The page task should usually remain `ok` because you already applied that change in the previous pass.
 
 4. **Run the final playbook:**
-    ```bash
+    ```bash title="Run the Final Playbook"
     ansible-playbook -i hosts.ini site.yml
     ```
     The health-check script and cron task should show `changed` on this first final run.
 
 5. **Run the final playbook a second time right away:**
-    ```bash
+    ```bash title="Run the Final Playbook a Second Time Right Away"
     ansible-playbook -i hosts.ini site.yml
     ```
     If you rerun it immediately, every task should now show `ok`. The package cache is still fresh, the page already matches, and the cron job already exists with the desired content.
 
 6. **Wait for the next cron run and then check the health log:**
-    ```bash
+    ```bash title="Wait for the Next Cron Run and Then Check the Health Log"
     ansible -i hosts.ini managed -m ansible.builtin.command -a "cat /tmp/nginx-health.log"
     ```
     Wait until the next minute boundary, then run the command. You should see one or more lines like:
-    ```
+    ```text title="Add the Health Check Output"
     [2026-04-22 10:25:01] nginx: 200
     ```
     Status `200` means nginx is responding correctly. If the file is still empty, wait one more minute and run the command again.
@@ -544,7 +544,7 @@ Ansible Vault encrypts values so they can live safely in version control. Right 
 
 1. **Create the group_vars directory for the `managed` group:**
 
-   ```bash
+   ```bash title="Create the Groupvars Directory for the Managed Group"
    mkdir -p group_vars/managed
    ```
 
@@ -552,7 +552,7 @@ Ansible Vault encrypts values so they can live safely in version control. Right 
 
 2. **Write the variable as plain text, then encrypt the file.** Replace `Your Name` with your actual name before running:
 
-   ```bash
+   ```bash title="Write the Variable as Plain Text, Then Encrypt the File"
    echo 'student_name: "Your Name"' > group_vars/managed/secrets.yml
    ansible-vault encrypt group_vars/managed/secrets.yml
    ```
@@ -561,13 +561,13 @@ Ansible Vault encrypts values so they can live safely in version control. Right 
 
 3. **Inspect the encrypted file:**
 
-   ```bash
+   ```bash title="Inspect the Encrypted File"
    cat group_vars/managed/secrets.yml
    ```
 
    Instead of your name, you will see something like:
 
-   ```
+   ```text title="Store a Secret with Ansible Vault Output"
    $ANSIBLE_VAULT;1.1;AES256
    62303862363832653831623366383064316135613164393836383432393437363366623763373832
    ...
@@ -577,7 +577,7 @@ Ansible Vault encrypts values so they can live safely in version control. Right 
 
 4. **Remove the `vars` block from `site.yml`.** Delete these three lines:
 
-   ```diff lang="yaml"
+   ```diff lang="yaml" title="site.yml"
    -     vars:
    -       student_name: "Your Name"
    -
@@ -587,7 +587,7 @@ Ansible Vault encrypts values so they can live safely in version control. Right 
 
 5. **Run the playbook with the vault password:**
 
-   ```bash
+   ```bash title="Run the Playbook with the Vault Password"
    ansible-playbook -i hosts.ini site.yml --ask-vault-pass
    ```
 
@@ -595,13 +595,13 @@ Ansible Vault encrypts values so they can live safely in version control. Right 
 
 6. **Verify the page still shows your name:**
 
-   ```bash
+   ```bash title="Verify the Page Still Shows Your Name"
    ansible -i hosts.ini managed -m ansible.builtin.command -a "/usr/bin/curl -s http://localhost/"
    ```
 
    The output should be identical to before:
 
-   ```
+   ```text title="Store a Secret with Ansible Vault Output"
    <h1>Deployed by Your Name on ip-X-X-X-X</h1>
    ```
 

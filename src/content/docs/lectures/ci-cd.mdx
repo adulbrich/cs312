@@ -157,7 +157,7 @@ An **action** is a reusable unit of work packaged for reuse across workflows. Ac
 
 Workflows are easier to read than to describe. Consider a minimal workflow for a Node.js web application with `package.json` scripts for linting and testing:
 
-```yaml
+```yaml title="CI Pipeline Workflow"
 name: CI Pipeline
 
 on:
@@ -203,7 +203,7 @@ GitHub Actions supports a wide variety of events. The ones you will use most oft
 
 `push` fires when commits are pushed to a branch. Filtering by branch name is how you ensure that expensive workflows (image builds, deploys) run only on your main branch, and filtering by file path is how you avoid rebuilding the world for a README change:
 
-```yaml
+```yaml title="Push Trigger"
 on:
   push:
     branches: [main, develop]
@@ -220,7 +220,7 @@ With `pull_request`, fork PRs run without access to repository secrets and with 
 
 `schedule` uses cron syntax to run workflows on a timer. Nightly dependency audits, weekly security scans, and garbage collection jobs fit naturally here:
 
-```yaml
+```yaml title="Scheduled Workflow Trigger"
 on:
   schedule:
     - cron: '0 6 * * 1'  # Every Monday at 06:00 UTC
@@ -228,7 +228,7 @@ on:
 
 `workflow_dispatch` adds a "Run workflow" button in the GitHub UI, allowing you to trigger the workflow manually with optional input parameters. GitHub exposes that UI only when the workflow file exists on the default branch, though the actual run can target another branch from the branch selector. This is essential for deploy workflows where you want a human to pick the target environment or the version to ship:
 
-```yaml
+```yaml title="Manual Workflow Trigger"
 on:
   workflow_dispatch:
     inputs:
@@ -261,7 +261,7 @@ One of the most powerful features of GitHub Actions is its marketplace of reusab
 
 Extending the earlier pipeline to build and push a Docker image once tests pass looks like this:
 
-```yaml
+```yaml title="CI/CD Pipeline Workflow"
 name: CI/CD Pipeline
 
 on:
@@ -331,7 +331,7 @@ Among open-source scanners, **Trivy** has become one of the most common tools to
 
 The mechanics are straightforward: build the image locally on the runner, scan it, and only push it if the scan passes the policy threshold. The inserted steps look like this:
 
-```yaml
+```yaml title="Build Image for Local Scan Step"
       - name: Build image for local scan
         uses: docker/build-push-action@v6
         with:
@@ -376,7 +376,7 @@ Pipelines frequently need credentials: registry passwords, API keys, deployment 
 
 **Encrypted secrets** are the workhorse. You define them at the repository, environment, or organization level in the GitHub settings UI. The workflow references them with `${{ secrets.SECRET_NAME }}`, and GitHub injects them at runtime. Secret values are write-only through the UI; once saved, they cannot be read back, and the logs automatically mask known secret values:
 
-```yaml
+```yaml title="Deploy to Server Step"
 - name: Deploy to server
   env:
     DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -396,7 +396,7 @@ There is also a special secret called `GITHUB_TOKEN` that GitHub automatically g
 
 **OpenID Connect (OIDC)** is the modern alternative to long-lived cloud credentials. Instead of storing an AWS access key and secret in GitHub, you configure AWS to trust GitHub's OIDC provider and assume a role scoped to the workflow. The workflow exchanges a short-lived GitHub-issued token for temporary AWS credentials that exist only for the job's duration. OIDC is strictly better than static keys wherever it is supported (AWS, Azure, Google Cloud, HashiCorp Vault, and a growing list of others): there are no credentials to rotate, no secrets to leak, and the cloud-side IAM policy can be scoped to the specific repository and branch.
 
-```yaml
+```yaml title="Workflow Permissions"
 permissions:
   id-token: write
   contents: read
@@ -418,7 +418,7 @@ GitHub masks known secrets in log output, but careless string manipulation can s
 
 You can also set non-secret environment variables at the workflow, job, or step level using the `env` key. Variables defined at a broader scope are inherited by narrower scopes, and a narrower definition overrides a broader one:
 
-```yaml
+```yaml title="Workflow Environment Variables"
 env:
   NODE_ENV: production
 
@@ -438,7 +438,7 @@ jobs:
 
 Sometimes you need to test your application across multiple environments: different operating systems, different language versions, or different database backends. Rather than duplicating jobs, GitHub Actions supports **matrix strategies** that generate a job for every combination of parameters.
 
-```yaml
+```yaml title="Matrix Workflow Job"
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -469,7 +469,7 @@ A matrix generates a maximum of 256 jobs per workflow run. By default, GitHub ma
 
 Some jobs need a running service (a database, a cache, a message broker) available during the test steps. Rather than installing and starting services manually in shell commands, GitHub Actions supports **service containers**: Docker containers that run alongside your job. If the job itself runs in a container, you reach those services by hostname on the shared Docker network; if the job runs directly on the runner, you reach them through mapped `localhost` ports.
 
-```yaml
+```yaml title="Workflow Job"
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -504,7 +504,7 @@ Caching and artifacts are related but different. A **cache** is a shortcut: a me
 
 Caching is what makes pipelines fast enough to be worth waiting for. The first run of a workflow might download three hundred megabytes of dependencies; the second run can reuse package-manager download caches so it does not have to fetch everything again from the network. The `actions/setup-*` family of actions handles language-specific caching automatically through their `cache` parameter. For everything else, `actions/cache` lets you declare a cache key (usually derived from a hash of a lockfile) and the directories to save:
 
-```yaml
+```yaml title="Cache Cargo Registry Step"
 - name: Cache Cargo registry
   uses: actions/cache@v4
   with:
@@ -523,7 +523,7 @@ Docker layer caching deserves its own note. Hosted runners do not preserve the l
 
 Artifacts are for outputs you want to keep. Use `actions/upload-artifact` to preserve test reports, coverage data, build outputs, or generated binaries, and `actions/download-artifact` to consume them in a later job:
 
-```yaml
+```yaml title="Upload Workflow Artifact"
 - uses: actions/upload-artifact@v4
   with:
     name: coverage-report
@@ -539,7 +539,7 @@ Pipelines duplicate themselves naturally. Every service in a monorepo needs the 
 
 GitHub Actions offers two mechanisms for factoring. **Reusable workflows** are full workflows called from other workflows. The caller passes inputs and secrets, and the callee runs its own jobs on its own runners. They are the right tool when you want to share an entire pipeline skeleton across repositories:
 
-```yaml
+```yaml title="Workflow Job"
 # In .github/workflows/ci.yml (the caller)
 jobs:
   standard-ci:
@@ -558,7 +558,7 @@ By default, every push creates a new workflow run, and runs proceed in parallel.
 
 The `concurrency` keyword solves this. A workflow or job can declare a concurrency group, and GitHub ensures that only one run in that group is active at a time:
 
-```yaml
+```yaml title="Composite Actions"
 concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -578,7 +578,7 @@ The tradeoffs are the same ones you weigh anywhere self-hosting is an option. Yo
 
 Iterating on a workflow by pushing commits, waiting for a run, reading the log, and pushing again is a slow and frustrating loop. Several tools exist to execute workflows locally, and the most widely used is [`act`](https://github.com/nektos/act), which runs jobs inside Docker containers that mimic the hosted runner environment.
 
-```bash
+```bash title="Install and Run act"
 # Install
 brew install act   # or see https://nektosact.com/ for other platforms
 
@@ -607,7 +607,7 @@ When a workflow fails, the first instinct is to reach for the log viewer. That i
 
 **Artifact uploads on failure** are the durable alternative. Adding `if: failure()` to an `actions/upload-artifact` step captures logs, core dumps, database snapshots, or anything else you would want to inspect after the fact. The idiom is particularly valuable for end-to-end test failures where a screenshot or a trace file tells a story the log cannot:
 
-```yaml
+```yaml title="Upload Playwright Report Step"
 - name: Upload Playwright report
   if: failure()
   uses: actions/upload-artifact@v4
@@ -625,7 +625,7 @@ A pipeline that only runs tests is valuable, but the full power of CI/CD emerges
 
 A popular pattern is to deploy only when a Git tag matching a version pattern is pushed. This gives the team explicit control over releases while keeping the process automated, and it pairs naturally with semantic versioning:
 
-```yaml
+```yaml title="Push Trigger"
 on:
   push:
     tags:
@@ -662,7 +662,7 @@ A deploy step that pulls from `latest` introduces a subtle race: if two pushes l
 
 GitHub supports **environments** (such as "staging" and "production") with configurable protection rules. You can require manual approval, restrict which branches may deploy, or add a wait timer. In your workflow, you reference an environment with the `environment` key:
 
-```yaml
+```yaml title="Dependent Workflow Job"
 jobs:
   deploy-staging:
     runs-on: ubuntu-latest
@@ -698,7 +698,7 @@ The previous sections described *when* and *how* a pipeline triggers a deploymen
 
 **Blue-green deployment** runs two identical environments side by side: the "blue" environment currently serves production traffic; the "green" environment receives the new version. Once the green environment passes health checks, a load balancer or DNS switch instantly redirects all traffic from blue to green. Because the switch is atomic, there is no period where old and new versions coexist. Rollback is equally instant: flip the switch back to blue. The cost is infrastructure: you need two full production environments running simultaneously, even if only one is serving users at any given time.
 
-```bash
+```bash title="Blue-green Deployment"
 # Switch production traffic to the new (green) target group
 aws elbv2 modify-listener \
   --listener-arn $LISTENER_ARN \
@@ -742,7 +742,7 @@ The failure mode is called a **semantic merge conflict**: two pull requests pass
 
 Without a queue, approved changes can still break the shared branch because the branch may move between the moment CI passed and the moment a human clicks merge:
 
-```mermaid
+```mermaid title="Merge Queues Diagram"
 flowchart LR
   A[PR 1 green] --> B[Human merges PR 1]
   C[PR 2 green on older main] --> D[Human merges PR 2]
@@ -753,7 +753,7 @@ flowchart LR
 
 A merge queue changes the question. Instead of asking "did this PR pass on its own?" the queue asks "does the exact next state of the protected branch pass the required checks?" Approved pull requests enter the queue. The queue composes the next merge candidate from the current protected branch plus whichever queued changes would land before it, runs CI on that candidate state, and only advances the branch when that candidate passes. If checks fail, the queue removes or regroups the offending entry and rebuilds the candidate. The important idea is not serialization for its own sake. The important idea is that the automation tests the branch state that would actually land, at the pace the team is really merging.
 
-```mermaid
+```mermaid title="Merge Queues Diagram"
 flowchart TD
   P[Approved pull requests] --> Q[Merge queue]
   B[Current protected branch] --> C[Compose next merge candidate]
@@ -769,7 +769,7 @@ The pattern predates GitHub's built-in support. The Rust project's **bors** bot 
 
 GitHub's implementation makes the abstraction concrete with temporary **merge groups**. A queued pull request is tested not only as an isolated PR branch, but as a temporary branch representing the queued candidate state. That detail matters if GitHub Actions is providing required checks: the workflow that reports those checks must trigger on `merge_group` as well as `pull_request`, or the queue will wait for a required status that never reports.
 
-```yaml
+```yaml title="Pull Request Trigger"
 on:
   pull_request:
     branches: [main]

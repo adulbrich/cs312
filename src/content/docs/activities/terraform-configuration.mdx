@@ -39,7 +39,7 @@ Terraform's AWS provider reads credentials from the same sources as the AWS CLI:
 
 1. **Verify the AWS CLI is installed:**
 
-   ```bash
+   ```bash title="Verify the AWS CLI Is Installed"
    aws --version
    ```
 
@@ -54,14 +54,14 @@ Terraform's AWS provider reads credentials from the same sources as the AWS CLI:
    <Tabs syncKey="credentials">
    <TabItem label="Credentials file">
 
-   ```bash
+   ```bash title="Credentials File"
    mkdir -p ~/.aws
    vim ~/.aws/credentials
    ```
 
    Paste the current Learner Lab credentials under the `default` profile:
 
-   ```ini
+   ```ini title="AWS Credentials Profile"
    [default]
    aws_access_key_id=ASIA...
    aws_secret_access_key=...
@@ -75,7 +75,7 @@ Terraform's AWS provider reads credentials from the same sources as the AWS CLI:
 
    Copy each value from the AWS Details panel and export it in your terminal:
 
-   ```bash
+   ```bash title="Environment Variables"
    export AWS_ACCESS_KEY_ID="ASIA..."
    export AWS_SECRET_ACCESS_KEY="..."
    export AWS_SESSION_TOKEN="..."
@@ -88,7 +88,7 @@ Terraform's AWS provider reads credentials from the same sources as the AWS CLI:
 
 5. **Verify the credentials work** before Terraform touches anything:
 
-   ```bash
+   ```bash title="Verify the Credentials Work"
    aws sts get-caller-identity
    ```
 
@@ -106,13 +106,13 @@ Before adding any resources, set up the working directory, introduce two data so
 
 1. **Create a project directory:**
 
-   ```bash
+   ```bash title="Create a Project Directory"
    mkdir ~/tf-activity && cd ~/tf-activity
    ```
 
 2. **Write `main.tf`:**
 
-   ```hcl
+   ```hcl title="main.tf"
    terraform {
      required_version = ">= 1.6"
      required_providers {
@@ -154,7 +154,7 @@ Before adding any resources, set up the working directory, introduce two data so
 
 3. **Write `variables.tf`:**
 
-   ```hcl
+   ```hcl title="variables.tf"
    variable "onid" {
      description = "Your ONID, used to name and tag resources"
      type        = string
@@ -165,7 +165,7 @@ Before adding any resources, set up the working directory, introduce two data so
 
 4. **Write `terraform.tfvars`:**
 
-   ```hcl
+   ```hcl title="terraform.tfvars"
    onid = "ulbrical"
    ```
 
@@ -173,7 +173,7 @@ Before adding any resources, set up the working directory, introduce two data so
 
 5. **Initialize the working directory:**
 
-   ```bash
+   ```bash title="variables.tf"
    terraform init
    ```
 
@@ -181,19 +181,19 @@ Before adding any resources, set up the working directory, introduce two data so
 
 6. **Validate the configuration:**
 
-   ```bash
+   ```bash title="Validate the Configuration"
    terraform validate
    ```
 
    Expected output:
 
-   ```text
+   ```text title="Initialize the Project Output"
    Success! The configuration is valid.
    ```
 
 7. **Read the first plan:**
 
-   ```bash
+   ```bash title="Read the First Plan"
    terraform plan
    ```
 
@@ -211,7 +211,7 @@ With the data sources and variables in place, add the first managed resource. Th
 
 1. **Add an `aws_instance` resource** below the data sources in `main.tf`:
 
-   ```hcl
+   ```hcl title="main.tf"
    resource "aws_instance" "web" {
      ami           = data.aws_ami.ubuntu.id
      instance_type = "t3.micro"
@@ -225,7 +225,7 @@ With the data sources and variables in place, add the first managed resource. Th
 
 2. **Read the plan:**
 
-   ```bash
+   ```bash title="Read the Plan"
    terraform plan
    ```
 
@@ -245,7 +245,7 @@ An instance with no explicit security group uses the VPC default, which gives yo
 
 1. **Add a security group** below the instance resource in `main.tf`:
 
-   ```hcl
+   ```hcl title="main.tf"
    resource "aws_security_group" "web" {
      name        = "tf-activity-web-sg-${var.onid}"
      description = "Activity web security group"
@@ -285,13 +285,13 @@ An instance with no explicit security group uses the VPC default, which gives yo
 
 2. **Wire the security group to the instance** by adding this line inside `resource "aws_instance" "web"`:
 
-   ```hcl
+   ```hcl title="Wire the Security Group to the Instance"
    vpc_security_group_ids = [aws_security_group.web.id]
    ```
 
 3. **Read the plan:**
 
-   ```bash
+   ```bash title="Read the Plan"
    terraform plan
    ```
 
@@ -299,7 +299,7 @@ An instance with no explicit security group uses the VPC default, which gives yo
 
 4. **Find the `vpc_security_group_ids` line** in the instance section of the plan:
 
-   ```
+   ```text title="Find the Vpcsecuritygroupids Line Output"
    + vpc_security_group_ids = [
        + (known after apply),
      ]
@@ -323,7 +323,7 @@ The configuration now describes two resources. Before applying, add an outputs f
 
 1. **Create `outputs.tf`:**
 
-   ```hcl
+   ```hcl title="outputs.tf"
    output "instance_id" {
      description = "EC2 instance ID"
      value       = aws_instance.web.id
@@ -347,7 +347,7 @@ The configuration now describes two resources. Before applying, add an outputs f
 
 2. **Apply the configuration:**
 
-   ```bash
+   ```bash title="Apply the Configuration"
    terraform apply
    ```
 
@@ -355,7 +355,7 @@ The configuration now describes two resources. Before applying, add an outputs f
 
 3. **Read the outputs:**
 
-   ```bash
+   ```bash title="Read the Outputs"
    terraform output
    ```
 
@@ -363,7 +363,7 @@ The configuration now describes two resources. Before applying, add an outputs f
 
 4. **Read one output by name:**
 
-   ```bash
+   ```bash title="Read Terraform Output Value"
    terraform output -raw public_ip
    ```
 
@@ -391,7 +391,7 @@ The `onid` variable is already in use, but two things are still hardcoded: the i
 
 1. **Add `instance_type` to `variables.tf`:**
 
-   ```hcl
+   ```hcl title="variables.tf"
    variable "onid" {
      description = "Your ONID, used to name and tag resources"
      type        = string
@@ -406,7 +406,7 @@ The `onid` variable is already in use, but two things are still hardcoded: the i
 
 2. **Add a `locals` block** to `main.tf`, below the AMI data source:
 
-   ```hcl
+   ```hcl title="main.tf"
    locals {
      common_tags = {
        Owner = var.onid
@@ -418,7 +418,7 @@ The `onid` variable is already in use, but two things are still hardcoded: the i
 
 3. **Update both resource blocks** to use `var.instance_type` and `local.common_tags`:
 
-   ```hcl
+   ```hcl title="Update Both Resource Blocks"
    resource "aws_security_group" "web" {
      name        = "tf-activity-web-sg-${var.onid}"
      description = "Activity web security group"
@@ -465,7 +465,7 @@ The `onid` variable is already in use, but two things are still hardcoded: the i
 
 4. **Format and validate:**
 
-   ```bash
+   ```bash title="Format and Validate"
    terraform fmt
    terraform validate
    ```
@@ -474,7 +474,7 @@ The `onid` variable is already in use, but two things are still hardcoded: the i
 
 5. **Run the plan:**
 
-   ```bash
+   ```bash title="Run the Plan"
    terraform plan
    ```
 
@@ -498,7 +498,7 @@ In this section you will write a small child module for a database-tier security
 
 1. **Create the module directory:**
 
-   ```bash
+   ```bash title="Create the Module Directory"
    mkdir -p modules/db_sg
    ```
 
@@ -506,7 +506,7 @@ In this section you will write a small child module for a database-tier security
 
 2. **Write `modules/db_sg/variables.tf`:**
 
-   ```hcl
+   ```hcl title="modules/db_sg/variables.tf"
    variable "onid" {
      description = "ONID, used for naming and tagging"
      type        = string
@@ -520,7 +520,7 @@ In this section you will write a small child module for a database-tier security
 
 3. **Write `modules/db_sg/main.tf`:**
 
-   ```hcl
+   ```hcl title="modules/db_sg/main.tf"
    data "aws_vpc" "default" {
      default = true
    }
@@ -556,7 +556,7 @@ In this section you will write a small child module for a database-tier security
 
 4. **Write `modules/db_sg/outputs.tf`:**
 
-   ```hcl
+   ```hcl title="modules/db_sg/outputs.tf"
    output "security_group_id" {
      description = "Database security group ID"
      value       = aws_security_group.db.id
@@ -565,7 +565,7 @@ In this section you will write a small child module for a database-tier security
 
 5. **Call the module from root `main.tf`** by adding this block below the `locals` block:
 
-   ```hcl
+   ```hcl title="Call the Module from Root Main.tf"
    module "db_sg" {
      source    = "./modules/db_sg"
      onid      = var.onid
@@ -577,7 +577,7 @@ In this section you will write a small child module for a database-tier security
 
 6. **Add an output** for the module's result by appending to `outputs.tf`:
 
-   ```hcl
+   ```hcl title="outputs.tf"
    output "db_sg_id" {
      description = "Database security group ID"
      value       = module.db_sg.security_group_id
@@ -588,13 +588,13 @@ In this section you will write a small child module for a database-tier security
 
 7. **Re-initialize to register the new module:**
 
-   ```bash
+   ```bash title="Re-initialize to Register the New Module"
    terraform init
    ```
 
    You should see:
 
-   ```
+   ```text title="Create a Reusable Module Output"
    Initializing modules...
    - db_sg in modules/db_sg
    ```
@@ -603,7 +603,7 @@ In this section you will write a small child module for a database-tier security
 
 8. **Read the plan:**
 
-   ```bash
+   ```bash title="Read the Plan"
    terraform plan
    ```
 
@@ -611,13 +611,13 @@ In this section you will write a small child module for a database-tier security
 
 9. **Apply and inspect:**
 
-   ```bash
+   ```bash title="Apply and Inspect"
    terraform apply
    ```
 
    After applying, run:
 
-   ```bash
+   ```bash title="Inspect Terraform State"
    terraform state list
    terraform output db_sg_id
    ```
@@ -640,7 +640,7 @@ The lecture describes a common real-world situation: inheriting infrastructure c
 
 1. **Find the `cs312-vpc` ID:**
 
-   ```bash
+   ```bash title="Find the Cs312-vpc ID"
    aws ec2 describe-vpcs \
      --filters "Name=tag:Name,Values=cs312-vpc" \
      --query "Vpcs[0].VpcId" \
@@ -652,7 +652,7 @@ The lecture describes a common real-world situation: inheriting infrastructure c
 
 2. **Add a resource block** for the VPC at the bottom of `main.tf`:
 
-   ```hcl
+   ```hcl title="main.tf"
    resource "aws_vpc" "cs312" {
      cidr_block = "10.0.0.0/16"
 
@@ -664,13 +664,13 @@ The lecture describes a common real-world situation: inheriting infrastructure c
 
 3. **Import the existing VPC into Terraform state:**
 
-   ```bash
+   ```bash title="Import the Existing VPC into Terraform State"
    terraform import aws_vpc.cs312 <VPC_ID>
    ```
 
    Replace `<VPC_ID>` with the value from step 1. You should see:
 
-   ```text
+   ```text title="Import an Existing Resource Output"
    Import successful!
    The resources that were imported are shown above. These resources are now in
    your Terraform state and will henceforth be managed by Terraform.
@@ -678,7 +678,7 @@ The lecture describes a common real-world situation: inheriting infrastructure c
 
 4. **Run the plan:**
 
-   ```bash
+   ```bash title="Run the Plan"
    terraform plan
    ```
 
@@ -686,7 +686,7 @@ The lecture describes a common real-world situation: inheriting infrastructure c
 
 5. **Inspect the recorded state** to see the full attribute set:
 
-   ```bash
+   ```bash title="Inspect the Recorded State"
    terraform state show aws_vpc.cs312
    ```
 
@@ -696,7 +696,7 @@ The lecture describes a common real-world situation: inheriting infrastructure c
 
 7. **Remove the imported VPC from this configuration** before proceeding to the destroy step:
 
-   ```bash
+   ```bash title="Remove Imported VPC from State"
    terraform state rm aws_vpc.cs312
    ```
 
@@ -724,7 +724,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
 
 1. **Add an instance type override** to `terraform.tfvars`:
 
-   ```hcl
+   ```hcl title="terraform.tfvars"
    onid          = "ulbrical"
    instance_type = "t3.small"
    ```
@@ -733,19 +733,19 @@ Terraform becomes most useful when the configuration and the live infrastructure
 
 2. **Run the plan:**
 
-   ```bash
+   ```bash title="Run the Plan"
    terraform plan
    ```
 
    Find `aws_instance.web` in the output. The `~` symbol means an in-place modification is planned. For `aws_instance`, changing `instance_type` triggers a stop/start rather than a replacement. The `instance_type` line will show:
 
-   ```
+   ```text title="Plan a Real Change, Inspect State, and Clean Up Output"
    ~ instance_type = "t3.micro" -> "t3.small"
    ```
 
 3. **Compare the plan with the current state:**
 
-   ```bash
+   ```bash title="Compare the Plan with the Current State"
    terraform state show aws_instance.web
    ```
 
@@ -753,7 +753,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
 
 4. **List all managed resources:**
 
-   ```bash
+   ```bash title="List All Managed Resources"
    terraform state list
    ```
 
@@ -761,7 +761,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
 
 5. **Destroy everything:**
 
-   ```bash
+   ```bash title="Destroy Everything"
    terraform destroy
    ```
 
@@ -769,7 +769,7 @@ Terraform becomes most useful when the configuration and the live infrastructure
 
 6. **Confirm the state is empty:**
 
-   ```bash
+   ```bash title="Confirm the State Is Empty"
    terraform state list
    ```
 
@@ -786,7 +786,7 @@ After changing `instance_type` in `terraform.tfvars`, `terraform plan` showed `t
 <Aside type="tip" title="Protecting Stateful Resources">
 The `prevent_destroy = true` lifecycle rule causes Terraform to reject plans that would destroy a resource while that rule is still present in the configuration. It is the right safeguard for stateful resources: the RDS instance holding production data, the VPC every subnet depends on. Add it to any resource where accidental destruction would be catastrophic:
 
-```hcl
+```hcl title="Terraform Lifecycle Block"
 lifecycle {
   prevent_destroy = true
 }

@@ -99,7 +99,7 @@ The system has four main components:
 
 The diagram below shows how these components relate. Every `docker` command flows from the CLI through the daemon to containerd, which delegates the actual kernel work to runc. The daemon reaches outward to a registry only when an image needs to be pulled or pushed.
 
-```mermaid
+```mermaid title="Docker Architecture Diagram"
 flowchart TB
   CLI["docker\nCLI client"]
   daemon["dockerd\nDocker daemon"]
@@ -132,7 +132,7 @@ The power of this design is **layer caching**. If you rebuild the image and only
 
 The diagram below shows the layer stack for a Python web application. The image layers (read-only) are shared across all containers started from this image. Each container adds its own writable layer on top for any changes it makes at runtime; that layer is discarded when the container is removed.
 
-```mermaid
+```mermaid title="Images and Layers Diagram"
 flowchart TB
   W("Writable layer\ncontainer runtime only, ephemeral")
   L4["COPY . . \napplication source code"]
@@ -149,7 +149,7 @@ Docker invalidates the cache for a layer and all layers after it when something 
 
 You can inspect the layers of any image with:
 
-```bash
+```bash title="Docker History Nginx:alpine"
 docker history nginx:alpine
 ```
 
@@ -163,7 +163,7 @@ A **Dockerfile** is a text file containing instructions that Docker executes in 
 
 A typical web application Dockerfile follows a predictable structure:
 
-```dockerfile
+```dockerfile title="Dockerfile"
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -192,7 +192,7 @@ Each instruction serves a specific purpose:
 
 For compiled languages, the toolchain required to build an application (compiler, linker, development headers) is much larger than what is needed to run the resulting binary. Multi-stage builds let you use one image for compilation and a different, smaller image for the final artifact.
 
-```dockerfile
+```dockerfile title="Dockerfile"
 # Build stage: compile the application
 FROM golang:1.22 AS build
 WORKDIR /src
@@ -215,7 +215,7 @@ Multi-stage builds are useful for any language that produces distributable artif
 
 With an image available, `docker run` creates a container from it and starts the application process:
 
-```bash
+```bash title="Run Container"
 docker run -d -p 8080:80 --name webserver nginx:alpine
 ```
 
@@ -237,7 +237,7 @@ Containers move through a simple lifecycle: created, running, stopped, removed. 
 
 Stopping is not just a Docker concept; it is a Unix process-control concept. A **signal** is a small message the kernel delivers to a process to tell it that something has happened or that it should take an action. **`SIGTERM`** is the polite request to shut down: it gives the application a chance to finish in-flight work, close files, flush buffers, and exit cleanly. **`SIGKILL`** is the forced stop: the kernel terminates the process immediately, and the process cannot catch it, ignore it, or do cleanup after receiving it. Docker uses both in sequence because a clean shutdown is better for application correctness, but a container that refuses to exit still has to be stopped eventually.
 
-```bash
+```bash title="Restart Unless-stopped"
 # View running containers
 docker ps
 
@@ -290,7 +290,7 @@ The default network mode is **bridge**. On a typical Linux Docker installation, 
 
 The diagram below shows two containers both listening on their internal port 80. Docker's NAT maps distinct host ports to each one. From the host, the two services are distinguishable by port; from inside each container, there is no port conflict because each has its own network namespace.
 
-```mermaid
+```mermaid title="Bridge Networks Diagram"
 flowchart LR
   subgraph host["Host"]
     h1[":8080"]
@@ -309,7 +309,7 @@ flowchart LR
 
 The default bridge network has one significant limitation: containers on it cannot reach each other by name, only by IP. When you create a **user-defined bridge network**, Docker adds an embedded DNS resolver. Containers attached to the same user-defined network can reach each other by container name or service name, without knowing IP addresses.
 
-```bash
+```bash title="Docker Network Create Myapp"
 # Create a named network
 docker network create myapp
 
@@ -341,7 +341,7 @@ Docker provides two mechanisms for data that must outlive a container: **volumes
 
 **Volumes** are managed by Docker and stored in a Docker-controlled area of the host filesystem (`/var/lib/docker/volumes/` on Linux). Docker handles their permissions and lifecycle. They are the preferred mechanism for application data that must persist across container replacements.
 
-```bash
+```bash title="Volumes"
 # Create a named volume
 docker volume create db-data
 
@@ -385,7 +385,7 @@ Real applications rarely consist of a single container. A web application typica
 
 Consider a web application that needs a database. The `compose.yml` file describes both services and their relationship:
 
-```yaml
+```yaml title="Service Container Configuration"
 services:
   web:
     build: .
@@ -432,7 +432,7 @@ Several things to notice:
 
 The workflow is:
 
-```bash
+```bash title="Dependson"
 # Build images and start all services in the background
 docker compose up --build -d
 
@@ -468,7 +468,7 @@ An image built locally is only useful if it can be shared and deployed. **Regist
 
 Before pushing, an image must be tagged with the destination repository path. The format is `registry/repository:tag`. If no registry is specified, Docker assumes Docker Hub.
 
-```bash
+```bash title="Tag and Push Container Images"
 # Tag for Docker Hub
 docker tag my-app myusername/my-app:1.0.0
 docker tag my-app myusername/my-app:latest
@@ -495,7 +495,7 @@ The reason tagging and registries matter operationally is that they make version
 
 With Docker Compose, this workflow is straightforward:
 
-```bash
+```bash title="Docker Compose Pull"
 # Pull all updated images declared in compose.yml
 docker compose pull
 
@@ -507,7 +507,7 @@ Compose detects which services have a newer image than what is currently running
 
 The same principle applies to rollbacks. Because each image version is a separate, immutable artifact, rolling back to an older version means pulling the previous tag and recreating the container. There is no in-place state to unwind because the state never lived in the container:
 
-```bash
+```bash title="Docker Compose Pull Web"
 # Roll back after changing the service's image tag to 1.2.3 in compose.yml
 docker compose pull web
 docker compose up -d
@@ -584,7 +584,7 @@ The `python:3.12` image is over 900 MB; `python:3.12-slim` is around 150 MB. Alp
 
 Just as `.gitignore` prevents unnecessary files from entering version control, `.dockerignore` prevents unnecessary files from entering the build context. Without it, `docker build` sends everything in the current directory to the daemon, including `.git/`, virtual environments, `node_modules/`, and other large directories. This slows builds and risks including sensitive files in the image.
 
-```
+```text title="Docker Swarm Output"
 .git
 .venv
 __pycache__
@@ -597,7 +597,7 @@ node_modules
 
 By default, processes inside a container run as root. If an attacker exploits a vulnerability in your application, they gain root access inside the container, which may translate to host access through misconfigurations. Create a dedicated user in your Dockerfile and switch to it before the runtime command:
 
-```dockerfile
+```dockerfile title="Dockerfile"
 FROM python:3.12-slim
 
 RUN useradd --create-home appuser
@@ -622,7 +622,7 @@ This hardening step does not solve mounted-storage permissions by itself. If `/d
 
 A container can be "running" (the process has not exited) without being "healthy" (the application is actually responding). Docker supports a `HEALTHCHECK` instruction that periodically runs a command to verify the application's state:
 
-```dockerfile
+```dockerfile title="Dockerfile"
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD curl -f http://localhost:8080/ || exit 1
 ```

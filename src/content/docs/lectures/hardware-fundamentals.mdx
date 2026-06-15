@@ -77,7 +77,7 @@ The memory QVL is a list published by the motherboard (MB) manufacturer that sho
 Suppose you want fast single- and multi-threaded performance, a quiet system at idle, one graphics card, and two NVMe drives. Start by picking a recent AMD Ryzen 7 (AM5 socket) or Intel Core i7 (LGA1700 socket). For an AM5 build, a B650 motherboard (MB) gives you PCIe Gen 4 NVMe support and plenty of USB ports without the extra cost of X670. Check that the MB has two M.2 slots, both wired for x4 PCIe lanes, and read the manual to see if using both disables any SATA ports you need. Make sure your case supports ATX if you want more expansion slots, or choose micro-ATX (mATX) for a smaller footprint. Always confirm the MB's CPU support list and memory QVL before buying to avoid compatibility surprises.
 </Aside>
 
-<Aside type="caution">
+<Aside type="caution" title="Check BIOS Support Before Buying">
 Some CPUs require a BIOS update that can only be applied with an older, already-supported CPU. Check the board's CPU support list and confirm whether a BIOS flash is needed before purchasing.
 </Aside>
 
@@ -185,7 +185,7 @@ If you plan to run a Linux virtual machine while browsing and editing, 32 GB (2Ã
 Memory testing is important because even new kits can have subtle errors that cause crashes or data loss. Tools like [MemTest86](https://www.memtest86.com/) (bootable USB) or Windows Memory Diagnostic can check for errors by writing and reading patterns in every part of your RAM. A quick confidence check is one clean pass with zero errors, but for a machine you plan to rely on, run multiple passes or a longer overnight test. If you see any errors, reseat the DIMMs, check BIOS settings, or try running at a lower speed before assuming the kit is bad.
 </Aside>
 
-<Aside type="caution">
+<Aside type="caution" title="Seat DIMMs Fully">
 Seating a DIMM incompletely (one unlatched side) can cause a no-POST condition that is easy to mistake for a component failure. Always press firmly until both retention clips snap closed.
 </Aside>
 
@@ -354,7 +354,7 @@ import D80PlusImage from './hardware-components/80PLUS.png';
 
 </Aside>
 
-<Aside type="caution">
+<Aside type="caution" title="Connect CPU Power">
 Forgetting to connect the 8-pin (or 8+4-pin) EPS CPU power cable is a common cause of no-POST that is easy to overlook; the 24-pin ATX connector alone is not enough.
 </Aside>
 
@@ -421,11 +421,11 @@ Building a computer is a process where careful planning and methodical steps pay
 
 </Steps>
 
-<Aside type="tip" icon="star" title="Example">
+<Aside type="tip" icon="star" title="Example: DRAM POST Troubleshooting">
 You build on an mATX board and get no video. The board's "DRAM" LED is lit. Remove the GPU, move a single DIMM to the A2 slot, and clear CMOS. The system now POSTs to UEFI. You update to a stable BIOS revision listed as improving memory compatibility, then reinstall the second DIMM and the GPU. The system boots; you run a short memory test before enabling EXPO.
 </Aside>
 
-<Aside type="caution">
+<Aside type="caution" title="Install Only Needed Standoffs">
 Misplaced standoffs can short traces on the underside of the motherboard; install standoffs only where the board has mounting holes.
 </Aside>
 

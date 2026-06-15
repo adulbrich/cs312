@@ -22,7 +22,7 @@ This activity puts into practice the concepts from the [Networking Fundamentals]
 
 The exercises work best from inside the Arch Linux VM you built in the previous activity, connected from your laptop using the NAT port-forwarding and SSH setup you configured there. Running commands over SSH replicates exactly what you will do on EC2.
 
-<Aside type="tip">
+<Aside type="tip" title="Compare Host and VM Views">
 Open two terminal windows: one connected to your Arch VM via SSH (`ssh -p 2222 archuser@127.0.0.1`), and one on your laptop. Don't forget the `-i` flag if you have a custom key name. Running the same commands on both gives you a concrete comparison between "inside the VM" and "on the host machine."
 </Aside>
 
@@ -50,20 +50,20 @@ Before starting, verify required tools are installed where you will run commands
 
 - On the Arch VM:
 
-   ```bash
+   ```bash title="On the Arch VM"
    sudo pacman -S --needed iproute2 iputils curl traceroute bind nmap openssl
    ```
 
 - On host machine (only needed for host-side `nmap` steps):
    - macOS:
 
-      ```bash
+      ```bash title="Brew Install Nmap"
       brew install nmap
       ```
 
    - Ubuntu/Debian (or WSL Ubuntu):
 
-      ```bash
+      ```bash title="Update Package Lists"
       sudo apt update && sudo apt install -y nmap traceroute dnsutils
       ```
 
@@ -80,7 +80,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
 <Steps>
 1. Check whether the network interface has a link:
 
-   ```bash
+   ```bash title="IP Link Show"
    ip link show
    ```
 
@@ -88,7 +88,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
 
 2. Show all network interfaces and their IP addresses:
 
-   ```bash
+   ```bash title="Show IP Addresses"
    ip addr show
    ```
 
@@ -119,7 +119,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
 
 5. Inspect the layer-2 neighbor (ARP) table:
 
-   ```bash
+   ```bash title="Broadcast Address"
    ip neighbor show
    ```
 
@@ -127,7 +127,7 @@ Before diagnosing anything else, establish that the machine has a physical link,
 
    A typical entry looks like:
 
-   ```
+   ```text title="Layer 1-3: Link, Address, and Neighbors Output"
    10.0.2.2 dev enp0s3 lladdr 52:54:00:12:35:02 REACHABLE
    ```
 
@@ -153,7 +153,7 @@ You have an IP address because `systemd-networkd` requested one from the hypervi
 <Steps>
 1. Check which network interfaces `systemd-networkd` is managing:
 
-   ```bash
+   ```bash title="Networkctl"
    networkctl
    ```
 
@@ -161,7 +161,7 @@ You have an IP address because `systemd-networkd` requested one from the hypervi
 
 2. Inspect the DHCP lease details for your interface:
 
-   ```bash
+   ```bash title="Inspect DHCP Lease State"
    networkctl status enp0s3 # substitute your interface name if different
    ```
 
@@ -172,7 +172,7 @@ You have an IP address because `systemd-networkd` requested one from the hypervi
 
 3. Now compare that DNS server to what your system actually uses for name resolution:
 
-   ```bash
+   ```bash title="Inspect Resolver Configuration"
    cat /etc/resolv.conf
    ```
 
@@ -186,7 +186,7 @@ You have an IP address because `systemd-networkd` requested one from the hypervi
 
 4. Look at the persistent network configuration file you created:
 
-   ```bash
+   ```bash title="Display File Contents"
    cat /etc/systemd/network/20-wired.network
    ```
 
@@ -206,7 +206,7 @@ Knowing your IP address tells you where you are. The routing table tells you whe
 <Steps>
 1. Display the routing table:
 
-   ```bash
+   ```bash title="Show Routes"
    ip route show
    ```
 
@@ -231,7 +231,7 @@ Knowing your IP address tells you where you are. The routing table tells you whe
 
 2. Can you reach the gateway?
 
-   ```bash
+   ```bash title="Interface Used for the Default Route"
    ping -c 4 <your-gateway-address>
    ```
 
@@ -239,7 +239,7 @@ Knowing your IP address tells you where you are. The routing table tells you whe
 
 3. Can you reach the public internet by IP address, bypassing DNS?
 
-   ```bash
+   ```bash title="Ping -c 4 8.8.8.8"
    ping -c 4 8.8.8.8
    ```
 
@@ -247,7 +247,7 @@ Knowing your IP address tells you where you are. The routing table tells you whe
 
 4. Does DNS work?
 
-   ```bash
+   ```bash title="Ping -c 4 Google.com"
    ping -c 4 google.com
    ```
 
@@ -267,7 +267,7 @@ Running `traceroute` from inside the VM is a useful way to understand how hyperv
 <Steps>
 1. Run the default UDP traceroute from inside the VM:
 
-   ```bash
+   ```bash title="Traceroute 8.8.8.8"
    traceroute 8.8.8.8
    ```
 
@@ -275,7 +275,7 @@ Running `traceroute` from inside the VM is a useful way to understand how hyperv
 
 2. Try TCP traceroute:
 
-   ```bash
+   ```bash title="Trace TCP Path to the Internet"
    sudo traceroute -T -p 443 8.8.8.8
    ```
 
@@ -285,7 +285,7 @@ Running `traceroute` from inside the VM is a useful way to understand how hyperv
 
    On your host terminal (not inside the VM):
 
-   ```bash
+   ```bash title="On Your Host Terminal (Not Inside the VM)"
    traceroute 8.8.8.8 # tracert on Windows
    ```
 
@@ -301,7 +301,7 @@ Running `traceroute` from inside the VM is a useful way to understand how hyperv
 
 4. Compare a nearby host to a distant one, from the host machine:
 
-   ```bash
+   ```bash title="Traceroute Oregonstate.edu"
    traceroute oregonstate.edu
    traceroute sydney.edu.au
    ```
@@ -316,7 +316,7 @@ Running `traceroute` from inside the VM is a useful way to understand how hyperv
 
 5. Find your own public IP address. Ask a public server to reflect it back, from inside the VM:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -s https://ifconfig.me
    ```
 
@@ -326,7 +326,7 @@ Running `traceroute` from inside the VM is a useful way to understand how hyperv
 
    Note that `ifconfig.me` prefers IPv6 when available, and IPv6 addresses are globally routable without NAT, so the VM's local IPv6 address and its public address may be identical. To observe IPv4 NAT specifically, force IPv4:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -s -4 https://ifconfig.me
    ```
 
@@ -347,7 +347,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 <Steps>
 1. Show all listening TCP sockets with process names:
 
-   ```bash
+   ```bash title="List Listening Sockets"
    sudo ss -tlnp
    ```
 
@@ -357,7 +357,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 
 2. Check UDP listening sockets:
 
-   ```bash
+   ```bash title="List Listening Sockets"
    sudo ss -ulnp
    ```
 
@@ -367,7 +367,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 
 3. Find sshd. You should see:
 
-   ```
+   ```text title="What Is Running on This Machine? Output"
    LISTEN  0  128  0.0.0.0:22  0.0.0.0:*  users:(("sshd",pid=...,fd=...))
    ```
 
@@ -375,7 +375,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 
 4. Now scan this machine from the outside. On your **host machine** (not inside the VM), open a terminal and run:
 
-   ```bash
+   ```bash title="Nmap -sv -pn -p T:2222 127.0.0.1"
    nmap -sV -Pn -p T:2222 127.0.0.1
    ```
 
@@ -387,7 +387,7 @@ A server exposes services through TCP and UDP ports. `ss` shows you which ports 
 
 5. Scan the VM's localhost from inside:
 
-   ```bash
+   ```bash title="Nmap -sv -pn -p T:1-1024 127.0.0.1"
    sudo nmap -sV -Pn -p T:1-1024 127.0.0.1
    ```
 
@@ -411,7 +411,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 <Steps>
 1. Confirm which resolver your machine sends queries to:
 
-   ```bash
+   ```bash title="Display File Contents"
    cat /etc/resolv.conf
    ```
 
@@ -419,7 +419,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 2. Perform a full DNS lookup and read the output:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig google.com
    ```
 
@@ -430,7 +430,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 3. Ask two different resolvers the same question:
 
-   ```bash
+   ```bash title="Query Time"
    dig +short google.com @8.8.8.8
    dig +short google.com @1.1.1.1
    ```
@@ -439,14 +439,14 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 4. Explore CNAME (alias) records:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig www.oregonstate.edu
    dig oregonstate.edu
    ```
 
    Look at the ANSWER SECTION. If the response contains a `CNAME` record, the name is an alias pointing to another name, which is then resolved to an A record. For example:
 
-   ```
+   ```text title="DNS Investigation Output"
    www.oregonstate.edu.    300  IN  CNAME  oregonstate.edu.
    oregonstate.edu.        60   IN  A      128.193.4.130
    ```
@@ -457,7 +457,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 5. Look up a mail server record:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig MX oregonstate.edu
    ```
 
@@ -465,7 +465,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 6. Do a reverse lookup on your public IP address:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig -x $(curl -s -4 https://ifconfig.me)
    ```
 
@@ -477,13 +477,13 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 7. Simulate broken DNS. Ask for a hostname that does not exist:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig nonexistent.example.invalid
    ```
 
    Note the response code (`NXDOMAIN`). Now ask a real domain but point at a non-existent resolver:
 
-   ```bash
+   ```bash title="Query DNS Records"
    dig google.com @10.255.255.1
    ```
 
@@ -503,7 +503,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 <Steps>
 1. Fetch just the HTTP headers from a web server:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -I https://oregonstate.edu
    ```
 
@@ -514,7 +514,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 2. Measure request timing broken down by layer:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -o /dev/null -s -w \
      "DNS:     %{time_namelookup}s\nConnect: %{time_connect}s\nTLS:     %{time_appconnect}s\nTotal:   %{time_total}s\nHTTP:    %{http_code}\n" \
      https://oregonstate.edu
@@ -530,19 +530,19 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 3. See what happens when you bypass DNS entirely and connect to the IP directly:
 
-   ```bash
+   ```bash title="Total"
    curl -I https://$(dig +short oregonstate.edu A | head -n 1)
    ```
 
    This will fail with a TLS error. The certificate was issued for `oregonstate.edu`, not for a bare IP address, so the hostname validation fails. To bypass the validation check:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -kI https://$(dig +short oregonstate.edu A | head -n 1)
    ```
 
    The `-k` flag disables certificate verification. The server responds, but you are no longer verifying the identity of who you are talking to. `--resolve` solves this properly: it routes the request to a specific IP while still sending the correct `Host` header and validating TLS against the real hostname:
 
-   ```bash
+   ```bash title="Test HTTP Response"
    curl -I --resolve oregonstate.edu:443:$(dig +short oregonstate.edu A | head -n 1) https://oregonstate.edu
    ```
 
@@ -550,7 +550,7 @@ DNS translates names to addresses. Understanding how your machine resolves names
 
 4. Inspect the TLS handshake directly with `openssl s_client`:
 
-   ```bash
+   ```bash title="Inspect TLS Certificate"
    openssl s_client -connect oregonstate.edu:443 -servername oregonstate.edu
    ```
 
@@ -573,7 +573,7 @@ A user reports "I can reach `8.8.8.8` but I cannot open any website." Based on w
 
 You have used the full diagnostic toolkit from layer 1 through layer 7. Produce a clean terminal snapshot that captures your machine's identity and services in one place:
 
-```bash
+```bash title="Summarize Network Timings"
 printf "Hostname: %s\nLocal IP: %s\nGateway:  %s\nPublic IP: %s\nDNS:      %s\n\n" \
   "$(cat /etc/hostname)" \
   "$(ip -4 addr show scope global | awk '/inet /{print $2}' | head -1)" \
