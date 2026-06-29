@@ -19,6 +19,7 @@ This repository contains the source code for the CS312 website.
 - [ ] Update assignment rubrics so a working system is necessary but not sufficient. Weight rollback plans, runbooks, alert quality, blast radius control, capacity and cost reasoning, and written justification more heavily.
 - [ ] Include a few intentionally flawed or risky requirements so students practice pushing back and proposing safer alternatives.
 - [ ] Test everything on Windows and Ubuntu in addition to macOS
+- [ ] Discuss best practices and taking time to weigh different approaches and when one is better
 
 ### Course Design Backlog
 
@@ -29,6 +30,11 @@ This repository contains the source code for the CS312 website.
 - [ ] At term end, review slugs and titles for consistency across assignments, labs, activities, lectures, and practicalities. After renaming files, update Canvas and rely on filenames rather than duplicated slug values where possible.
 - [ ] Check with TAs whether labs need more step-by-step depth relative to activities. Labs should stay more how-to focused and go slightly further operationally.
 - [ ] Improve the project rubric.
+- [ ] **Add a proctored, in-person multiple-choice concept exam.** Assess understanding of the concepts taught in the lecture notes and reinforced across activities, labs, and assignments. The purpose is twofold: a direct measure of conceptual understanding that the project artifacts assess only indirectly, and an integrity backstop, since a proctored exam is the one assessment an LLM cannot complete for the student.
+  - Coverage: core concepts from the lecture notes, for example stateless vs stateful packet filtering, least privilege, idempotence and desired-state convergence, image immutability and digests, liveness vs readiness probes, Service DNS vs Pod IPs, monitoring vs observability, alert thresholds and signal vs noise, and backup/restore with RPO. Include a few legal and ethical scenario items: software and image licensing, data handling and privacy, acceptable use, and academic integrity in the use of AI.
+  - Item style: scenario- and diagnosis-based questions (for example, "given this `kubectl describe` or log output, what is the cause?") rather than recall or definition items, so the exam reaches the analyze level rather than memorization. Shuffle and version the paper to limit copying in a 70+ student section. Keep the grade weight modest so the course stays hands-on.
+  - Provide a practice exam beforehand in the same format with different items, so students can calibrate.
+  - Timing: prefer a regular class session rather than finals week. If run in class, it may be open-notes (all notes allowed); note the tradeoff, since open-notes makes recall items pointless and pushes the whole exam toward higher-order scenario and analysis items, which is desirable. A closed-book finals-week version is the fallback.
 - [ ] Draft an "AI-tolerant, not AI-proof" assessment pattern for the course: short structured judgment memo, tied to real system evidence, plus a cheap audit path.
 - [ ] Build 4 to 5 async decision studios tied to existing labs and assignments, each with a short prompt, a compact deliverable, and a TA-friendly rubric.
 - [ ] Create a reusable rubric for judgment quality: problem framing, constraint discovery, trade-off quality, safety and operability, evidence and verification, and clarity of recommendation.
