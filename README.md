@@ -56,6 +56,7 @@ This repository contains the source code for the CS312 website.
 - [ ] Investigate [Angie](https://en.angie.software/).
 - [ ] Create per lecture TL;DRs for the instructor to use as a quick reference in class.
 - [ ] Discuss [Resilient Network Graphs (RNGs)](https://www.tomshardware.com/tech-industry/big-tech/amazon-unveils-resilient-network-graphs-data-center-network-that-cuts-hardware-by-69-percent-and-boosts-throughput-by-33-percent-now-the-default-for-most-aws-workloads) that AWS uses now for networking in data centers
+- [ ] [BMC Security Risks](https://arstechnica.com/security/2026/08/thousands-of-servers-can-be-backdoored-by-exploiting-buggy-motherboard-controllers/)
 
 ### Research Queue
 
