@@ -162,3 +162,9 @@ All commands are run from the root of the project, from a terminal:
 - [How to create an Astro LaTeX component](https://danidiaztech.com/create-astro-latex-component/) -- LaTeX component
 - [KaTeX: The fastest math typesetting library for the web.](https://katex.org/) -- LaTeX component
 - [Mermaid User Guide](https://mermaid.js.org/intro/getting-started.html) -- Mermaid component
+
+## License
+
+Licensed under [Creative Commons Attribution-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-sa/4.0/) (CC BY-SA 4.0). See [`LICENSE`](LICENSE).
+
+You may share and adapt this material, including commercially, provided you give appropriate credit and license your adaptations under the same terms.
