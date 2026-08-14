@@ -11,6 +11,4 @@ Every term:
 - [ ] Add TAs to AWS Academy
 - [ ] Add students to AWS Academy
 - [ ] Add TAs to Canvas
-- [ ] Create **GitHub Classroom** class and add TAs (optional for students)
-- [ ] Update GitHub Classroom link in Canvas
 - [ ] Bump the version in `package.json` (format: `YYYY.TT.N`, e.g. `2026.SP.0`)
